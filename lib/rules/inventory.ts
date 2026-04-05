@@ -36,7 +36,9 @@ export interface WeaponProperties {
   damageBonus: number;
   /** "slashing" | "piercing" | "bludgeoning" | "fire" | … */
   damageType: string;
-  /** Weapon range in feet for ranged weapons; undefined for melee */
+  /** Whether the weapon is melee or ranged. Defaults to "melee" when absent. */
+  range?: "melee" | "ranged";
+  /** Range in feet for ranged weapons */
   rangeNormal?: number;
   rangeLong?: number;
   /** D&D 5e weapon properties, e.g. ["finesse", "light", "thrown"] */

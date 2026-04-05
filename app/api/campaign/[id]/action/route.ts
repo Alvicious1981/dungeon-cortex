@@ -2,6 +2,9 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { ensureDevUser } from "@/lib/db/dev-user";
 import { roll } from "@/lib/rules/dice";
+import { validateAttackRange } from "@/lib/rules/combat";
+import type { WeaponRange } from "@/lib/rules/combat";
+import type { Zone } from "@/lib/rules/spatial";
 import { generateNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatSystemPrompt } from "@/lib/memory/formatter";
@@ -209,6 +212,39 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         { error: "Weapon item has invalid properties." },
         { status: 400 }
       );
+    }
+
+    // "Code is Law" — range gate: resolve spatial validity BEFORE dice roll or narration.
+    // Zones are stored as Zone[] JSON on the Encounter; combatants carry currentZoneId.
+    // If either zone is null (encounter has no zone graph), the check is skipped.
+    const weaponRange: WeaponRange =
+      weaponProps.range === "ranged" ? "ranged" : "melee";
+
+    const encounterZones = (context.activeEncounter.zones ?? []) as Zone[];
+
+    if (encounterZones.length > 0) {
+      // Find the player combatant row (isPlayer === true) within the active encounter.
+      const playerCombatant = context.activeEncounter.combatants.find(
+        (c) => c.isPlayer
+      );
+
+      const attackerZoneId = playerCombatant?.currentZoneId ?? null;
+      const targetZoneId   = targetCombatant.currentZoneId ?? null;
+
+      const attackerZone = attackerZoneId
+        ? (encounterZones.find((z) => z.id === attackerZoneId) ?? null)
+        : null;
+      const targetZone = targetZoneId
+        ? (encounterZones.find((z) => z.id === targetZoneId) ?? null)
+        : null;
+
+      const rangeResult = validateAttackRange(attackerZone, targetZone, weaponRange);
+      if (!rangeResult.valid) {
+        return NextResponse.json(
+          { error: rangeResult.reason },
+          { status: 400 }
+        );
+      }
     }
 
     const damage = roll(weaponProps.damageDice).total + (weaponProps.damageBonus ?? 0);

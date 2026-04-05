@@ -8,6 +8,7 @@
 
 import { roll } from "./dice";
 import type { RollResult } from "./dice";
+import type { Zone } from "./spatial";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +36,67 @@ export interface InitiativeEntry extends CombatantInput {
 export interface InitiativeOrder {
   /** Combatants sorted highest initiative first. Ties broken by dexModifier, then natural roll. */
   order: InitiativeEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Range validation
+// ---------------------------------------------------------------------------
+
+/** The reach category of a weapon, derived from its item properties. */
+export type WeaponRange = "melee" | "ranged";
+
+/**
+ * The result of a range validation check.
+ * `reason` is only present when `valid` is false.
+ */
+export interface RangeValidationResult {
+  valid: boolean;
+  reason?: string;
+}
+
+/**
+ * Validates whether an attack can reach its target given the attacker's and
+ * target's current zones.
+ *
+ * Rules:
+ *   - If either zone is null (spatial tracking disabled or combatant not yet
+ *     placed), all attacks are permitted — backwards compatibility with
+ *     encounters that predate the spatial system.
+ *   - Melee: attacker and target must occupy the **same zone**.
+ *   - Ranged: valid from any zone to any zone (point-blank included).
+ *     Disadvantage mechanics for firing while engaged are out of scope here.
+ *
+ * This is a pure function: no I/O, no side effects.
+ *
+ * @example
+ * validateAttackRange(zoneA, zoneA, "melee")  // { valid: true }
+ * validateAttackRange(zoneA, zoneB, "melee")  // { valid: false, reason: "…" }
+ * validateAttackRange(zoneA, zoneB, "ranged") // { valid: true }
+ */
+export function validateAttackRange(
+  attackerZone: Zone | null,
+  targetZone: Zone | null,
+  weaponRange: WeaponRange
+): RangeValidationResult {
+  // Null guard — spatial tracking disabled; permit unconditionally.
+  if (attackerZone === null || targetZone === null) {
+    return { valid: true };
+  }
+
+  if (weaponRange === "melee") {
+    if (attackerZone.id === targetZone.id) {
+      return { valid: true };
+    }
+    return {
+      valid: false,
+      reason: `Melee weapons require being in the same zone. ` +
+              `You are in "${attackerZone.name}" but the target is in "${targetZone.name}". ` +
+              `Move to their zone first.`,
+    };
+  }
+
+  // Ranged weapons reach any zone.
+  return { valid: true };
 }
 
 // ---------------------------------------------------------------------------

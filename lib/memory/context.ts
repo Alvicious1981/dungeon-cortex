@@ -49,6 +49,9 @@ export interface ContextEncounter {
   currentTurnIndex: number;
   /** Ordered by initiativeTotal DESC — index 0 acts first. */
   combatants: ContextCombatant[];
+  /** Spatial zone graph for this encounter — Zone[] serialised as JSON.
+   *  Empty array means spatial tracking is disabled; all range checks pass. */
+  zones: Prisma.JsonValue;
 }
 
 export interface ContextCombatant {
@@ -60,6 +63,8 @@ export interface ContextCombatant {
   initiativeTotal: number;
   /** Raw JSON string[] of active condition names. */
   conditions: Prisma.JsonValue;
+  /** Zone.id within the encounter's zone graph, or null if unplaced. */
+  currentZoneId: string | null;
 }
 
 export interface ContextLog {
@@ -127,6 +132,7 @@ export async function buildCampaignContext(
         id: true,
         round: true,
         currentTurnIndex: true,
+        zones: true,
         combatants: {
           select: {
             id: true,
@@ -136,6 +142,7 @@ export async function buildCampaignContext(
             maxHp: true,
             initiativeTotal: true,
             conditions: true,
+            currentZoneId: true,
           },
           orderBy: { initiativeTotal: "desc" },
         },

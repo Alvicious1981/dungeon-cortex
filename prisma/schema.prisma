@@ -75,6 +75,11 @@ model Encounter {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  /// Spatial graph for this encounter. Serialised Zone[] JSON:
+  ///   [{ id, name, type: "Engaged"|"Near"|"Far", connectedZoneIds: string[] }]
+  /// Empty array = spatial tracking disabled; all range checks pass (backwards compat).
+  zones Json @default("[]")
+
   campaign   Campaign    @relation(fields: [campaignId], references: [id])
   combatants Combatant[]
 }
@@ -89,6 +94,10 @@ model Combatant {
   initiativeTotal Int
   conditions      Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
+  /// References a Zone.id within the parent Encounter.zones JSON graph.
+  /// Null = combatant not yet placed, or encounter has no zone graph.
+  /// When null, range checks are skipped (graceful degradation).
+  currentZoneId   String?
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
 }
