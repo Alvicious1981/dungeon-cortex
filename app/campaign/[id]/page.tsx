@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
+import GameEventHandler from "@/components/combat/GameEventHandler";
 import type { InitiativeEntry } from "@/lib/rules/combat";
 import type {
   WeaponProperties,
@@ -651,6 +652,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             Return to Hall of Records
           </Link>
         </nav>
+
+        {/* GameEventHandler renders nothing — wires up Web Audio + visual FX */}
+        <GameEventHandler />
 
       </main>
     </div>
