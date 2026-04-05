@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm exec:*)",
+      "Bash(for skill:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/Alvicious/AppData/Local/Temp/awesome-skills/skills/**)",
+      "Bash(done)",
+      "Bash(node -e \"const p = require\\(''''D:/dungeon-cortex/node_modules/ai/package.json''''\\); console.log\\(''''ai version:'''', p.version\\); console.log\\(''''peerDeps:'''', JSON.stringify\\(p.peerDependencies, null, 2\\)\\)\")",
+      "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"dark fantasy RPG dungeon game dashboard\" --domain style)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/master/src/Spells.json\" -o D:/dungeon-cortex/data/srd-es/spells.json)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/master/src/Equipment.json\" -o D:/dungeon-cortex/data/srd-es/equipment.json)",
+      "Bash(curl -v \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/master/src/Spells.json\")",
+      "Bash(curl --ssl-no-revoke -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/master/src/Spells.json\" -o D:/dungeon-cortex/data/srd-es/spells.json)",
+      "Bash(curl --ssl-no-revoke -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/master/src/Equipment.json\" -o D:/dungeon-cortex/data/srd-es/equipment.json)",
+      "Bash(curl --ssl-no-revoke -sI \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/master/src/Spells.json\")",
+      "Bash(curl --ssl-no-revoke -sL \"https://api.github.com/repos/Magical20-ai/5e-database-spanish/git/trees/master?recursive=1\")",
+      "Bash(curl --ssl-no-revoke -sL \"https://api.github.com/repos/Magical20-ai/5e-database-spanish\")",
+      "Bash(curl --ssl-no-revoke -sL \"https://api.github.com/repos/Magical20-ai/5e-database-spanish/contents/src\")",
+      "Bash(curl --ssl-no-revoke -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/main/src/5e-SRD-Spells.json\" -o D:/dungeon-cortex/data/srd-es/spells.json)",
+      "Bash(curl --ssl-no-revoke -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/main/src/5e-SRD-Equipment.json\" -o D:/dungeon-cortex/data/srd-es/equipment.json)",
+      "Bash(node -e \":*)"
+    ]
+  }
+}

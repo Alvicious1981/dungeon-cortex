@@ -1,0 +1,88 @@
+/**
+ * lib/ai/intent.ts
+ *
+ * Structured intent parsing for "Code is Law" enforcement.
+ *
+ * Converts free-text player input into a typed, validated Intent object.
+ * The rules engine uses the returned type to gate mechanics deterministically:
+ *   - "cast_spell"  → validate spell slots via lib/rules/magic
+ *   - "attack"      → resolve attack roll via lib/rules/combat
+ *   - "use_item"    → validate inventory via lib/rules/inventory
+ *   - "general"     → no mechanical gate; pass straight to narration
+ *
+ * Architecture contract:
+ *   - This module ONLY classifies intent. It never validates rules or mutates state.
+ *   - The caller is responsible for acting on the returned type.
+ */
+
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// Schema
+// ---------------------------------------------------------------------------
+
+/**
+ * Strict schema for a player's classified action intent.
+ * Used both as the LLM output contract and as the TypeScript type source.
+ */
+export const IntentSchema = z.object({
+  /**
+   * Canonical action classification:
+   * - "cast_spell" — player is attempting to cast a spell
+   * - "attack"     — player is attempting a weapon/unarmed attack
+   * - "use_item"   — player is attempting to use an inventory item
+   * - "general"    — roleplay, movement, dialogue, or anything non-mechanical
+   */
+  actionType: z.enum(["cast_spell", "attack", "use_item", "general"]),
+
+  /**
+   * Name of the target (creature, NPC, object) if one is present in the input.
+   * Omitted for untargeted or general actions.
+   */
+  targetName: z.string().optional(),
+
+  /**
+   * Spell slot level the player intends to use (1–9).
+   * Only relevant when actionType is "cast_spell".
+   * Omitted for cantrips (slot-free) and all other action types.
+   */
+  spellLevel: z.number().int().min(1).max(9).optional(),
+});
+
+export type Intent = z.infer<typeof IntentSchema>;
+
+// ---------------------------------------------------------------------------
+// Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a player's free-text action into a structured Intent.
+ *
+ * @param playerInput   - Raw text the player typed (e.g. "I cast Fireball at level 3 on the orc").
+ * @param systemContext - Formatted game-state context from formatSystemPrompt —
+ *                        gives the model awareness of active encounter, inventory, etc.
+ * @returns             A validated Intent object ready for rules-engine gating.
+ */
+export async function parseIntent(
+  playerInput: string,
+  systemContext: string
+): Promise<Intent> {
+  const { object } = await generateObject({
+    model: openai("gpt-4o-mini"),
+    schema: IntentSchema,
+    system: [
+      "You are a D&D 5e rules classifier. Your only job is to extract structured intent from a player's action.",
+      "Classify the actionType as precisely as possible based on the player's words and the game state below.",
+      "For 'cast_spell': include spellLevel only if the player specifies a slot level; omit it for cantrips.",
+      "For 'attack' or 'use_item': include targetName if a target is named.",
+      "When in doubt, classify as 'general'.",
+      "",
+      systemContext,
+    ].join("\n"),
+    prompt: playerInput,
+  });
+
+  return object;
+}

@@ -1,0 +1,124 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  characters Character[]
+  campaigns  Campaign[]
+}
+
+model Character {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String
+  race       String
+  class      String
+  level      Int      @default(1)
+  hp         Int
+  maxHp      Int
+  stats      Json
+  spellSlots Json?
+  createdAt  DateTime @default(now())
+
+  user      User            @relation(fields: [userId], references: [id])
+  campaigns Campaign[]
+  inventory InventoryItem[]
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  userId      String
+  characterId String
+  title       String
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user       User          @relation(fields: [userId], references: [id])
+  character  Character     @relation(fields: [characterId], references: [id])
+  logs       GameLog[]
+  encounters Encounter[]
+  memories   MemoryEntry[]
+}
+
+model GameLog {
+  id         String   @id @default(cuid())
+  campaignId String
+  role       String
+  content    String
+  createdAt  DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+}
+
+model Encounter {
+  id               String   @id @default(cuid())
+  campaignId       String
+  status           String   @default("active")
+  // "active" | "resolved" | "fled"
+  round            Int      @default(1)
+  currentTurnIndex Int      @default(0)
+  // Zero-based index into combatants ordered by initiativeTotal DESC.
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  campaign   Campaign    @relation(fields: [campaignId], references: [id])
+  combatants Combatant[]
+}
+
+model Combatant {
+  id              String  @id @default(cuid())
+  encounterId     String
+  name            String
+  isPlayer        Boolean @default(false)
+  hp              Int
+  maxHp           Int
+  initiativeTotal Int
+  conditions      Json    @default("[]")
+  // String[] of active condition names, e.g. ["Prone", "Poisoned"].
+
+  encounter Encounter @relation(fields: [encounterId], references: [id])
+}
+
+model InventoryItem {
+  id          String @id @default(cuid())
+  characterId String
+  name        String
+  type        String
+  // "weapon" | "armor" | "consumable" | "spell" | "misc"
+  quantity    Int    @default(1)
+  properties  Json
+
+  character Character @relation(fields: [characterId], references: [id])
+}
+
+model MemoryEntry {
+  id         String                      @id @default(cuid())
+  campaignId String
+  /// Human-readable memory text injected into prompts. Max ~400 chars.
+  content    String
+  /// 1536-dimensional embedding from text-embedding-3-small.
+  /// Stored as Unsupported until Prisma ships a native Vector scalar.
+  embedding  Unsupported("vector(1536)")
+  /// Relative importance weight; higher values surface this memory first.
+  importance Float                       @default(1.0)
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
