@@ -4,6 +4,7 @@ import { ensureDevUser } from "@/lib/db/dev-user";
 import { roll } from "@/lib/rules/dice";
 import { validateAttackRange } from "@/lib/rules/combat";
 import type { WeaponRange } from "@/lib/rules/combat";
+import { canMove } from "@/lib/rules/spatial";
 import type { Zone } from "@/lib/rules/spatial";
 import { generateNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
@@ -95,8 +96,66 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ ok: true }, { status: 202 });
   }
 
-  // Milestone D: Build context and parse structured intent
+  // Milestone D: Build context (required for all subsequent gates)
   const context = await buildCampaignContext(campaignId);
+
+  // "Code is Law" — move gate: detect structured "Move to <zone>" commands
+  // before the intent parser so no LLM call is needed for a deterministic action.
+  const MOVE_PREFIX = "move to ";
+  if (trimmedAction.toLowerCase().startsWith(MOVE_PREFIX)) {
+    const targetZoneName = trimmedAction.slice(MOVE_PREFIX.length).trim();
+
+    if (!context.activeEncounter) {
+      return NextResponse.json(
+        { error: "No active encounter. You cannot move between zones outside of combat." },
+        { status: 400 }
+      );
+    }
+
+    const encounterZones = (context.activeEncounter.zones ?? []) as Zone[];
+
+    const targetZone = encounterZones.find(
+      (z) => z.name.toLowerCase() === targetZoneName.toLowerCase()
+    );
+    if (!targetZone) {
+      return NextResponse.json(
+        { error: `Zone "${targetZoneName}" does not exist in this encounter.` },
+        { status: 400 }
+      );
+    }
+
+    const playerCombatant = context.activeEncounter.combatants.find((c) => c.isPlayer);
+    const attackerZoneId = playerCombatant?.currentZoneId ?? null;
+    const attackerZone = attackerZoneId
+      ? (encounterZones.find((z) => z.id === attackerZoneId) ?? null)
+      : null;
+
+    // canMove null-guard: if attacker zone is unknown, allow movement (graceful degradation).
+    if (attackerZone !== null && !canMove(attackerZone, targetZone.id)) {
+      return NextResponse.json(
+        {
+          error: `Cannot move to "${targetZone.name}" — it is not adjacent to your current zone ("${attackerZone.name}").`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validation passed — persist the new zone position.
+    if (playerCombatant) {
+      await prisma.combatant.update({
+        where: { id: playerCombatant.id },
+        data: { currentZoneId: targetZone.id },
+      });
+    }
+
+    // Let the narrator describe the movement (no further mechanical gate needed).
+    const narrative = await generateNarrative(campaignId, trimmedAction);
+    const assistantLog = await prisma.gameLog.create({
+      data: { campaignId, role: "assistant", content: narrative },
+    });
+    return NextResponse.json(assistantLog, { status: 200 });
+  }
+
   const systemContext = formatSystemPrompt(context);
   const intent = await parseIntent(trimmedAction, systemContext);
 

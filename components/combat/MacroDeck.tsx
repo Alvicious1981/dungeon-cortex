@@ -2,12 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import type { Zone } from "@/lib/rules/spatial";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Props {
   campaignId: string;
   inCombat: boolean;
+  /** Zone graph for the active encounter. Empty/absent = no spatial tracking. */
+  zones?: Zone[];
+  /** The player combatant's current zone id, or null if unplaced. */
+  playerZoneId?: string | null;
 }
 
 // ─── Action definitions ───────────────────────────────────────────────────────
@@ -146,13 +151,54 @@ const ACTION_META: Record<string, ActionMeta> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function MacroDeck({ campaignId, inCombat }: Props) {
+// ─── Zone type badge style ────────────────────────────────────────────────────
+
+const ZONE_BADGE: Record<Zone["type"], { color: string; bg: string }> = {
+  Engaged: { color: "#FCA5A5", bg: "rgba(239,68,68,0.15)"  },
+  Near:    { color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
+  Far:     { color: "#818CF8", bg: "rgba(99,102,241,0.12)" },
+};
+
+// ─── Foot / move icon ────────────────────────────────────────────────────────
+
+function MoveIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4 shrink-0"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {/* Arrow right with tail — "move" glyph */}
+      <path d="M2 8h10M9 5l3 3-3 3" />
+    </svg>
+  );
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function MacroDeck({ campaignId, inCombat, zones, playerZoneId }: Props) {
   const router = useRouter();
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const actions = inCombat ? COMBAT_ACTIONS : EXPLORATION_ACTIONS;
   const isAnyLoading = loadingAction !== null;
+
+  // Derive connected zones for the inline picker (only during combat).
+  const hasSpatial = inCombat && zones && zones.length > 0;
+  const currentZone = hasSpatial && playerZoneId
+    ? zones.find((z) => z.id === playerZoneId) ?? null
+    : null;
+  const connectedZones: Zone[] = currentZone
+    ? zones!.filter((z) => currentZone.connectedZoneIds.includes(z.id))
+    : [];
 
   async function handleAction(actionText: string) {
     if (isAnyLoading) return;
@@ -287,6 +333,141 @@ export default function MacroDeck({ campaignId, inCombat }: Props) {
           );
         })}
       </div>
+
+      {/* ── Move button (combat + spatial only) ── */}
+      {hasSpatial && (
+        <div className="mt-2 space-y-2">
+          <button
+            type="button"
+            disabled={isAnyLoading}
+            onClick={() => { setMoveOpen((o) => !o); setError(null); }}
+            aria-expanded={moveOpen}
+            aria-controls="zone-picker"
+            className="flex min-h-[44px] w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2.5 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+            style={{
+              background: moveOpen ? "rgba(20,16,30,0.95)" : "rgba(12,12,22,0.88)",
+              border: `1px solid ${moveOpen ? "rgba(245,158,11,0.45)" : "rgba(245,158,11,0.2)"}`,
+              color: "#F59E0B",
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <MoveIcon />
+              <span
+                className="text-[10px] uppercase tracking-[0.03em]"
+                style={{ fontFamily: "var(--font-cinzel, serif)" }}
+              >
+                Move Zone
+              </span>
+            </span>
+            {/* Chevron */}
+            <svg
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`h-3 w-3 shrink-0 motion-safe:transition-transform motion-safe:duration-200 ${moveOpen ? "rotate-180" : ""}`}
+              aria-hidden="true"
+            >
+              <path d="M2 4l4 4 4-4" />
+            </svg>
+          </button>
+
+          {/* ── Inline zone picker ── */}
+          {moveOpen && (
+            <div
+              id="zone-picker"
+              role="group"
+              aria-label="Choose a zone to move to"
+              className="rounded-lg p-3 space-y-2"
+              style={{
+                background: "rgba(8,8,16,0.96)",
+                border: "1px solid rgba(245,158,11,0.18)",
+              }}
+            >
+              <p
+                className="text-[9px] uppercase tracking-widest"
+                style={{ fontFamily: "var(--font-cinzel, serif)", color: "#4A3F28" }}
+              >
+                Where to move?
+              </p>
+
+              {connectedZones.length === 0 ? (
+                <p
+                  className="text-xs"
+                  style={{ color: "#4A3F28", fontStyle: "italic" }}
+                >
+                  {playerZoneId
+                    ? "No connected zones reachable."
+                    : "You are not placed in a zone yet."}
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {connectedZones.map((z) => {
+                    const badge = ZONE_BADGE[z.type];
+                    const isLoading = loadingAction === `Move to ${z.name}`;
+                    return (
+                      <button
+                        key={z.id}
+                        type="button"
+                        disabled={isAnyLoading}
+                        aria-label={`Move to ${z.name} (${z.type})`}
+                        aria-busy={isLoading}
+                        onClick={() => void handleAction(`Move to ${z.name}`)}
+                        className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded px-3 py-2 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+                        style={{
+                          background: isLoading ? "rgba(20,16,30,0.95)" : "rgba(255,255,255,0.035)",
+                          border: `1px solid ${badge.color}30`,
+                          color: "#C8B898",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isAnyLoading) {
+                            e.currentTarget.style.borderColor = badge.color + "66";
+                            e.currentTarget.style.boxShadow = `0 0 10px ${badge.color}18`;
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = badge.color + "30";
+                          e.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
+                        {isLoading ? (
+                          <svg className="h-3 w-3 animate-spin" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="10" strokeLinecap="round" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0" aria-hidden="true" style={{ color: "#4A3F28" }}>
+                            <path d="M2 6h8M7 3l3 3-3 3" />
+                          </svg>
+                        )}
+                        <span className="text-xs" style={{ fontFamily: "var(--font-crimson, serif)" }}>
+                          {z.name}
+                        </span>
+                        <span
+                          className="shrink-0 rounded-sm px-1 py-0.5 text-[7px] font-bold uppercase leading-none tracking-wider"
+                          style={{ color: badge.color, background: badge.bg }}
+                        >
+                          {z.type}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setMoveOpen(false)}
+                className="cursor-pointer text-[10px] transition-colors duration-150 hover:underline focus-visible:outline-none"
+                style={{ color: "#4A3F28" }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Error feedback */}
       {error !== null && (

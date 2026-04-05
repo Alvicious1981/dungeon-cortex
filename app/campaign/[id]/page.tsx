@@ -5,7 +5,9 @@ import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
+import ZoneTracker from "@/components/combat/ZoneTracker";
 import type { InitiativeEntry } from "@/lib/rules/combat";
+import type { Zone } from "@/lib/rules/spatial";
 import type {
   WeaponProperties,
   ArmorProperties,
@@ -52,6 +54,20 @@ function parseSpellSlots(raw: unknown): SpellSlotData | null {
       typeof (v as { total: unknown }).total === "number"
   );
   return hasValidSlot ? (obj as SpellSlotData) : null;
+}
+
+/** Safely casts the Encounter.zones Json value to Zone[]. Returns [] on failure. */
+function parseZones(raw: unknown): Zone[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (z): z is Zone =>
+      z !== null &&
+      typeof z === "object" &&
+      typeof (z as Zone).id === "string" &&
+      typeof (z as Zone).name === "string" &&
+      Array.isArray((z as Zone).connectedZoneIds) &&
+      ["Engaged", "Near", "Far"].includes((z as Zone).type)
+  );
 }
 
 function hpBarColor(hp: number, maxHp: number): string {
@@ -161,6 +177,11 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   const { character, logs } = campaign;
   const activeEncounter = campaign.encounters[0] ?? null;
+
+  // Spatial zone data — safe-cast from JSON; empty when no zone graph is set.
+  const encounterZones = parseZones(activeEncounter?.zones ?? []);
+  const playerCombatant = activeEncounter?.combatants.find((c) => c.isPlayer) ?? null;
+  const playerZoneId = playerCombatant?.currentZoneId ?? null;
 
   const spellSlots = parseSpellSlots(character.spellSlots);
   const hpPercent = character.maxHp > 0
@@ -607,7 +628,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               )}
             </section>
 
-            <MacroDeck campaignId={campaign.id} inCombat={!!activeEncounter} />
+            <MacroDeck
+              campaignId={campaign.id}
+              inCombat={!!activeEncounter}
+              zones={encounterZones}
+              playerZoneId={playerZoneId}
+            />
             <ActionInput campaignId={campaign.id} />
 
           </div>
@@ -616,6 +642,19 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               RIGHT COLUMN — Combat Sidebar
           ════════════════════════════════════ */}
           <aside aria-label="Combat tracker" className="space-y-4">
+            {/* Zone position — only rendered when encounter has a zone graph */}
+            <ZoneTracker
+              zones={encounterZones}
+              playerZoneId={playerZoneId}
+              combatants={
+                activeEncounter?.combatants.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  isPlayer: c.isPlayer,
+                  currentZoneId: c.currentZoneId,
+                })) ?? []
+              }
+            />
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}
