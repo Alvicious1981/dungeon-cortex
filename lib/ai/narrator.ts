@@ -21,6 +21,7 @@ import { z } from "zod";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatSystemPrompt } from "@/lib/memory/formatter";
 import { generateTavernName, generateMundaneLoot } from "@/lib/rules/generators";
+import { canMove } from "@/lib/rules/spatial";
 import { generateNPC } from "@/lib/rules/npc";
 import { searchMemories } from "@/lib/memory/search";
 
@@ -67,13 +68,40 @@ export async function generateNarrative(
       }),
       getMundaneLoot: tool({
         description:
-          "Get the deterministic mundane loot found on an entity or in a container.",
+          "Get the deterministic mundane loot found on an entity or in a container. " +
+          "Supply a stable integer seed derived from the entity's database ID or encounter index.",
         inputSchema: z.object({
-          entityId: z.string().min(1).max(100),
+          seed: z.number().int().describe(
+            "A stable integer seed for this entity, e.g. derived from a combatant index or numeric ID."
+          ),
         }).strict(),
-        execute: async ({ entityId }) => {
+        execute: async ({ seed }) => {
           try {
-            return generateMundaneLoot(entityId);
+            return generateMundaneLoot(seed);
+          } catch {
+            return JSON.stringify({ error: "Action failed mechanically. Narrate a brief failure or silence." });
+          }
+        },
+      }),
+      checkMovement: tool({
+        description:
+          "Check whether a player or creature can move from their current zone to a target zone. " +
+          "Returns true if the move is legal (target is adjacent), false otherwise. " +
+          "Always call this before narrating any movement action.",
+        inputSchema: z.object({
+          currentZone: z.object({
+            id: z.string().min(1).max(100),
+            name: z.string().min(1).max(100),
+            connectedZoneIds: z.array(z.string().min(1).max(100)),
+            type: z.enum(["Engaged", "Near", "Far"]),
+          }).strict().describe("The zone the actor is currently in."),
+          targetZoneId: z.string().min(1).max(100).describe(
+            "The ID of the zone the actor wishes to move into."
+          ),
+        }).strict(),
+        execute: async ({ currentZone, targetZoneId }) => {
+          try {
+            return canMove(currentZone, targetZoneId);
           } catch {
             return JSON.stringify({ error: "Action failed mechanically. Narrate a brief failure or silence." });
           }
