@@ -2,13 +2,14 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { ensureDevUser } from "@/lib/db/dev-user";
 import { roll } from "@/lib/rules/dice";
-import { generateNarrative } from "@/lib/ai/narrator";
+import { streamNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatSystemPrompt } from "@/lib/memory/formatter";
 import { parseIntent } from "@/lib/ai/intent";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
 import { isSpellSlots, hasAvailableSlot, consumeSlot } from "@/lib/rules/magic";
 import { getItemProperties } from "@/lib/rules/inventory";
+import type { GameEvent, ActionStreamFrame } from "@/lib/events/game-events";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 interface ActionBody {
@@ -18,6 +19,16 @@ interface ActionBody {
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const encoder = new TextEncoder();
+
+function sseFrame(frame: ActionStreamFrame): Uint8Array {
+  return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
+}
+
+// ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: campaignId } = await params;
@@ -63,7 +74,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     },
   });
 
-  // Step 2 (Milestone B): Detect and resolve /roll commands
+  // Step 2: Detect and resolve /roll commands (non-streaming, quick response)
   const ROLL_PREFIX = "/roll ";
   if (trimmedAction.toLowerCase().startsWith(ROLL_PREFIX)) {
     const notation = trimmedAction.slice(ROLL_PREFIX.length).trim();
@@ -92,12 +103,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ ok: true }, { status: 202 });
   }
 
+  // ── "Code is Law" resolution gates ──────────────────────────────────────────
+  // Each gate validates, mutates state, and appends a GameEvent describing the
+  // outcome.  Events are flushed to the client BEFORE the AI narrator starts,
+  // so the UI can react to dice results immediately.
+
+  const gameEvents: GameEvent[] = [];
+
   // Milestone D: Build context and parse structured intent
   const context = await buildCampaignContext(campaignId);
   const systemContext = formatSystemPrompt(context);
   const intent = await parseIntent(trimmedAction, systemContext);
 
-  // "Code is Law" — spell gate: validate and deduct slot before narration
+  // ── Gate: cast_spell ────────────────────────────────────────────────────────
   if (intent.actionType === "cast_spell" && intent.spellLevel !== undefined) {
     const rawSlots = context.character.spellSlots;
 
@@ -121,9 +139,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       where: { id: context.character.id },
       data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
     });
+
+    gameEvents.push({
+      type: "SPELL_CAST",
+      payload: { spellLevel: intent.spellLevel, spellName: intent.targetName ?? null },
+    });
   }
 
-  // "Code is Law" — item gate: validate inventory and apply consumable effects before narration
+  // ── Gate: use_item ──────────────────────────────────────────────────────────
   if (intent.actionType === "use_item" && intent.targetName) {
     const normalizedTarget = intent.targetName.toLowerCase();
     const foundItem = context.character.inventory.find(
@@ -164,10 +187,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         where: { id: context.character.id },
         data: { hp: newHp },
       });
+
+      gameEvents.push({
+        type: "HEALING_RECEIVED",
+        payload: { amount: healed, newHp, itemName: foundItem.name },
+      });
+
+      if (newHp <= 0) {
+        gameEvents.push({ type: "PLAYER_DOWNED", payload: {} });
+      }
     }
   }
 
-  // "Code is Law" — attack gate: validate encounter, target, and weapon before narration
+  // ── Gate: attack ────────────────────────────────────────────────────────────
   if (intent.actionType === "attack" && intent.targetName) {
     if (!context.activeEncounter) {
       return NextResponse.json(
@@ -211,6 +243,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // Roll 1d20 to determine the attack outcome for event generation.
+    // The to-hit check is not yet fully implemented (combatant AC is not stored),
+    // but the natural roll drives critical hit / fumble detection.
+    const attackD20 = roll("1d20");
+    const naturalRoll = attackD20.dice[0].result;
+
     const damage = roll(weaponProps.damageDice).total + (weaponProps.damageBonus ?? 0);
     const newHp = Math.max(0, targetCombatant.hp - damage);
 
@@ -218,32 +256,56 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       where: { id: targetCombatant.id },
       data: { hp: newHp },
     });
+
+    if (naturalRoll === 20) {
+      gameEvents.push({
+        type: "CRITICAL_HIT",
+        payload: { naturalRoll, damage, targetName: targetCombatant.name },
+      });
+    } else if (naturalRoll === 1) {
+      gameEvents.push({
+        type: "CRITICAL_MISS",
+        payload: { naturalRoll, targetName: targetCombatant.name },
+      });
+    } else {
+      gameEvents.push({
+        type: "DAMAGE_DEALT",
+        payload: { damage, naturalRoll, targetName: targetCombatant.name },
+      });
+    }
+
+    if (newHp <= 0) {
+      gameEvents.push({
+        type: "ENEMY_DEFEATED",
+        payload: { name: targetCombatant.name },
+      });
+    }
   }
 
-  // State is now safely mutated. Generate and persist the narrative.
-  const narrative = await generateNarrative(campaignId, trimmedAction);
+  // ── State is now safely mutated.  Start the narrative stream. ────────────────
 
-  const assistantLog = await prisma.gameLog.create({
-    data: {
-      campaignId,
-      role: "assistant",
-      content: narrative,
-    },
-  });
+  const { textStream, textPromise } = await streamNarrative(campaignId, trimmedAction);
 
-  // Background memory consolidation — every 5 complete turns (assistant logs).
-  // Runs entirely inside after() so the embedding + LLM work never delays the
-  // HTTP response. The count check and log fetch are also deferred: even a
-  // fast indexed query should not add latency to the player's action loop.
+  // After the stream body is fully read by the client, persist the full
+  // narrative text and run memory consolidation.
   after(async () => {
     try {
+      const narrative = await textPromise;
+
+      await prisma.gameLog.create({
+        data: {
+          campaignId,
+          role: "assistant",
+          content: narrative,
+        },
+      });
+
+      // Memory consolidation — every 5 complete assistant turns.
       const turnCount = await prisma.gameLog.count({
         where: { campaignId, role: "assistant" },
       });
 
       if (turnCount % 5 === 0) {
-        // Fetch the 10 most recent logs and reverse to chronological order
-        // so the consolidator receives them oldest-first.
         const logsDesc = await prisma.gameLog.findMany({
           where: { campaignId },
           orderBy: { createdAt: "desc" },
@@ -252,9 +314,41 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         await summarizeAndStore(campaignId, logsDesc.reverse());
       }
     } catch (err) {
-      console.error("[action] Background memory consolidation failed:", err);
+      console.error("[action] Post-stream persistence failed:", err);
     }
   });
 
-  return NextResponse.json(assistantLog, { status: 200 });
+  // Build the SSE response:
+  //   Phase 1 — all deterministic game events (instant, before any LLM latency)
+  //   Phase 2 — AI narrator tokens, streamed as they arrive
+  //   Phase 3 — done sentinel so the client knows to call router.refresh()
+  const sseStream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        // Phase 1: flush game events immediately
+        for (const ev of gameEvents) {
+          controller.enqueue(sseFrame({ t: "evt", e: ev }));
+        }
+
+        // Phase 2: stream narrative tokens
+        for await (const delta of textStream) {
+          controller.enqueue(sseFrame({ t: "txt", d: delta }));
+        }
+
+        // Phase 3: signal completion
+        controller.enqueue(sseFrame({ t: "done" }));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(sseStream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
