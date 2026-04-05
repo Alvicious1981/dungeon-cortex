@@ -88,17 +88,33 @@ export const TAVERN_NOUNS: readonly string[] = [
 
 /** Mundane loot found on defeated enemies or in forgotten corners. */
 export const MUNDANE_LOOT: readonly string[] = [
-  "a tarnished copper coin stamped with an unknown monarch",
-  "a strip of dried meat of indeterminate origin",
-  "a folded piece of parchment containing an illegible address",
-  "a wooden button carved to resemble a skull",
-  "three iron nails bent at odd angles",
-  "a stub of tallow candle, half-melted",
-  "a cracked leather belt with a broken buckle",
-  "a small river stone worn smooth on one side",
-  "a rusted fishhook with no line",
-  "a handful of coarse grey salt wrapped in cloth",
+  "A flattened gold piece, as if struck by a giant's boot",
+  "A moving toy knight — it crawls in slow circles when wound",
+  "A glass eye that faintly reflects a room you are not standing in",
+  "A letter sealed with black wax, addressed only to 'the one who finds this'",
+  "A child's wooden sword, notched with real blade-marks",
+  "A compass needle that points toward the nearest door, not north",
+  "A vial of ink that writes in one colour and dries in another",
+  "A coin stamped with a monarch no historian recognises",
+  "A folded paper crane that slowly unfolds itself overnight",
+  "A small mirror that shows your reflection one second behind",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Numeric PRNG — mulberry32
+// ---------------------------------------------------------------------------
+
+/**
+ * mulberry32: a fast 32-bit PRNG by Tommy Ettinger.
+ * Returns a float in [0, 1) from a 32-bit integer seed.
+ * Used when the caller supplies a numeric seed rather than a string key.
+ */
+function mulberry32(seed: number): number {
+  let t = (seed + 0x6d2b79f5) | 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
 
 // ---------------------------------------------------------------------------
 // Generic picker
@@ -141,12 +157,26 @@ export function generateTavernName(locationId: string): string {
 }
 
 /**
- * Returns a single mundane loot item description seeded by an entity ID
- * (e.g. a defeated combatant's database ID).
+ * Returns a single mundane loot item description.
+ *
+ * Two signatures are supported:
+ *   - `generateMundaneLoot(seed: number)` — resolves a d100 roll via
+ *     mulberry32 against the MUNDANE_LOOT table. The numeric seed maps
+ *     deterministically: same seed always returns the same item.
+ *   - `generateMundaneLoot(entityId: string)` — legacy string-key variant
+ *     used by the narrator pipeline (cyrb53-based).
  *
  * @example
- * generateMundaneLoot("cmb_abc123") // "a stub of tallow candle, half-melted"
+ * generateMundaneLoot(42)          // "A compass needle that points toward…"
+ * generateMundaneLoot("cmb_abc123") // "A letter sealed with black wax…"
  */
-export function generateMundaneLoot(entityId: string): string {
-  return pickSeeded(entityId, MUNDANE_LOOT);
+export function generateMundaneLoot(seed: number): string;
+export function generateMundaneLoot(entityId: string): string;
+export function generateMundaneLoot(seedOrEntityId: number | string): string {
+  if (typeof seedOrEntityId === "number") {
+    // Resolve a d100 roll: mulberry32 gives [0,1); multiply by table length.
+    const index = Math.floor(mulberry32(seedOrEntityId) * MUNDANE_LOOT.length);
+    return MUNDANE_LOOT[index] as string;
+  }
+  return pickSeeded(seedOrEntityId, MUNDANE_LOOT);
 }
