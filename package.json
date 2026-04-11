@@ -7,7 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed": "tsx prisma/seed-srd.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed-srd.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.50",
@@ -29,6 +34,9 @@
     "eslint-config-next": "15.3.9",
     "prisma": "6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.3"
   }
 }

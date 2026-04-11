@@ -19,7 +19,11 @@
       "Bash(curl --ssl-no-revoke -sL \"https://api.github.com/repos/Magical20-ai/5e-database-spanish/contents/src\")",
       "Bash(curl --ssl-no-revoke -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/main/src/5e-SRD-Spells.json\" -o D:/dungeon-cortex/data/srd-es/spells.json)",
       "Bash(curl --ssl-no-revoke -sL \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/main/src/5e-SRD-Equipment.json\" -o D:/dungeon-cortex/data/srd-es/equipment.json)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(curl -L --insecure \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/main/src/5e-SRD-Monsters.json\" -o data/srd-es/monsters.json)",
+      "Bash(node -e \"const d=require\\(''./data/srd-es/monsters.json''\\); console.log\\(''entries:'', d.length\\); const m=d[0]; console.log\\(''keys:'', Object.keys\\(m\\).join\\('', ''\\)\\); console.log\\(''first:'', m.index, ''|'', m.name, ''| hp:'', m.hit_points\\);\")",
+      "Bash(node:*)",
+      "Bash(pnpm test:*)"
     ]
   }
 }

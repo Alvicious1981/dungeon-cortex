@@ -7,7 +7,8 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [vector]
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector, pg_graphql, pg_stat_statements, pgcrypto, supabase_vault, uuid_ossp(map: "uuid-ossp")]
 }
 
 model User {
@@ -52,6 +53,7 @@ model Campaign {
   logs       GameLog[]
   encounters Encounter[]
   memories   MemoryEntry[]
+  quests     Quest[]
 }
 
 model GameLog {
@@ -86,6 +88,7 @@ model Combatant {
   isPlayer        Boolean @default(false)
   hp              Int
   maxHp           Int
+  ac              Int     @default(10)
   initiativeTotal Int
   conditions      Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
@@ -121,4 +124,35 @@ model MemoryEntry {
   campaign Campaign @relation(fields: [campaignId], references: [id])
 
   @@index([campaignId])
+}
+
+model Quest {
+  id          String   @id @default(cuid())
+  campaignId  String
+  title       String
+  description String
+  status      String   @default("active")
+  // "active" | "completed" | "failed"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+}
+
+model SrdMonster {
+  id   String @id
+  name String
+  data Json
+}
+
+model SrdSpell {
+  id   String @id
+  name String
+  data Json
+}
+
+model SrdItem {
+  id   String @id
+  name String
+  data Json
 }

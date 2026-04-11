@@ -67,6 +67,8 @@ function formatIronLaws(): string {
     "Only narrate the exact mathematical and state changes provided in the context below.",
     "Never invent miraculous saves, never fudge dice, and never protect the players",
     "from the consequences of the rules. If the rules kill the character, the character dies.",
+    "",
+    "**Lookup Mandate:** Before describing the effects of a spell, the properties of a magic item, or the abilities and stats of a monster, YOU MUST use the lookup tools (`getSpellInfo` / `getItemInfo` / `getMonsterInfo`) to ensure mechanical accuracy. Never invent mechanical stats. Code is Law.",
   ].join("\n");
 }
 
@@ -127,6 +129,21 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
   return lines.join("\n");
 }
 
+/**
+ * Returns a "## Long-Term Memory" section populated with past consolidated
+ * memories relevant to the current player action.
+ *
+ * Empty-array guard: returns an empty string (not a header) when `memories`
+ * has no entries, so the section is completely absent from the prompt and
+ * wastes no context tokens.
+ *
+ * @pure — no side effects, deterministic output for the same input.
+ */
+function formatMemories(memories: CampaignContext["relevantMemories"]): string {
+  if (memories.length === 0) return "";
+  return "## Long-Term Memory\n" + memories.join("\n---\n");
+}
+
 function formatRecentLogs(logs: CampaignContext["recentLogs"]): string {
   if (logs.length === 0) {
     return "## Recent Events\n*(No events recorded yet.)*";
@@ -136,6 +153,45 @@ function formatRecentLogs(logs: CampaignContext["recentLogs"]): string {
   lines.push("## Recent Events");
   for (const log of logs) {
     lines.push(`**${roleLabel(log.role)}:** ${truncate(log.content)}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Returns a "## Active Quests" section listing every non-completed/non-failed
+ * quest, followed by a "## Completed / Failed Quests" section for resolved ones.
+ *
+ * The AI DM must treat quest status as canonical. It may ONLY update quest
+ * status by calling the `updateQuestStatus` tool — never by narrating a
+ * completion without the corresponding state mutation.
+ *
+ * Empty-section guard: returns an empty string when there are no quests at all,
+ * so the section is absent and wastes no context tokens.
+ *
+ * @pure — no side effects, deterministic output for the same input.
+ */
+function formatQuests(quests: CampaignContext["quests"]): string {
+  if (quests.length === 0) return "";
+
+  const active = quests.filter((q) => q.status === "active");
+  const resolved = quests.filter((q) => q.status !== "active");
+
+  const lines: string[] = [];
+
+  if (active.length > 0) {
+    lines.push("## Active Quests");
+    for (const q of active) {
+      lines.push(`- **[${q.id}]** ${q.title}: ${q.description}`);
+    }
+  }
+
+  if (resolved.length > 0) {
+    lines.push("## Completed / Failed Quests");
+    for (const q of resolved) {
+      const label = q.status === "completed" ? "✓ Completed" : "✗ Failed";
+      lines.push(`- **${label}** ${q.title}`);
+    }
   }
 
   return lines.join("\n");
@@ -153,11 +209,21 @@ function formatRecentLogs(logs: CampaignContext["recentLogs"]): string {
  * @pure — no side effects, deterministic output for the same input.
  */
 export function formatSystemPrompt(context: CampaignContext): string {
+  const memorySection = formatMemories(context.relevantMemories);
+  const questSection = formatQuests(context.quests);
+
   const sections = [
     formatIronLaws(),
+    // Long-Term Memory inserted here so the model reads historical context
+    // before live game state. The empty-string guard means this slot is a
+    // no-op (filtered out below) when no memories were retrieved.
+    ...(memorySection ? [memorySection] : []),
     "# Current Game State",
     formatCharacter(context.character),
     formatEncounter(context.activeEncounter),
+    // Quest state injected after encounter so the model sees live combat first.
+    // Empty-string guard: absent from prompt when no quests exist.
+    ...(questSection ? [questSection] : []),
     formatRecentLogs(context.recentLogs),
   ];
 

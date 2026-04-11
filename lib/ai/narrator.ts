@@ -25,6 +25,8 @@ import { generateTavernName, generateMundaneLoot } from "@/lib/rules/generators"
 import { generateNPC } from "@/lib/rules/npc";
 import { searchMemories } from "@/lib/memory/search";
 import type { AsyncIterableStream } from "ai";
+import { getSpellInfo, getItemInfo, getMonsterInfo } from "@/lib/ai/tools/srd-lookup";
+import { prisma } from "@/lib/db/prisma";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,6 +97,69 @@ function buildTools(campaignId: string) {
           return generateNPC(seed, role);
         } catch {
           return JSON.stringify({ error: "Action failed mechanically. Narrate a brief failure or silence." });
+        }
+      },
+    }),
+    getSpellInfo: tool({
+      description:
+        "Fetch exact mechanical JSON data for a spell by name or ID. MUST be used before narrating spell effects.",
+      inputSchema: z.object({
+        query: z.string().min(1).max(100),
+      }).strict(),
+      execute: async ({ query }) => {
+        try {
+          const data = await getSpellInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Spell not found mechanically." });
+        } catch {
+          return JSON.stringify({ error: "Action failed mechanically." });
+        }
+      },
+    }),
+    getItemInfo: tool({
+      description:
+        "Fetch exact mechanical JSON data for an item or piece of equipment by name or ID. MUST be used before narrating the properties of magical or mundane items.",
+      inputSchema: z.object({
+        query: z.string().min(1).max(100),
+      }).strict(),
+      execute: async ({ query }) => {
+        try {
+          const data = await getItemInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Item not found mechanically." });
+        } catch {
+          return JSON.stringify({ error: "Action failed mechanically." });
+        }
+      },
+    }),
+    getMonsterInfo: tool({
+      description:
+        "Fetch exact mechanical JSON data for a monster by name or ID. MUST be used before narrating combat encounters, describing enemy abilities, or resolving monster actions. Never invent AC, HP, or attack stats.",
+      inputSchema: z.object({
+        query: z.string().min(1).max(100),
+      }).strict(),
+      execute: async ({ query }) => {
+        try {
+          const data = await getMonsterInfo(query);
+          return data
+            ? JSON.stringify(data)
+            : JSON.stringify({ error: "Monster not found mechanically." });
+        } catch {
+          return JSON.stringify({ error: "Action failed mechanically." });
+        }
+      },
+    }),
+    updateQuestStatus: tool({
+      description:
+        "Mark a quest as 'completed' or 'failed' when the narrative outcome definitively resolves it. The quest ID is provided in the system prompt under ## Active Quests. ONLY call this when the player has unambiguously succeeded or failed an objective — never speculatively.",
+      inputSchema: z.object({
+        questId: z.string().min(1).describe("The quest ID from the ## Active Quests section of the system prompt."),
+        status: z.enum(["completed", "failed"]),
+      }).strict(),
+      execute: async ({ questId, status }) => {
+        try {
+          await prisma.quest.update({ where: { id: questId }, data: { status } });
+          return JSON.stringify({ ok: true, questId, status });
+        } catch {
+          return JSON.stringify({ error: "Quest update failed mechanically." });
         }
       },
     }),

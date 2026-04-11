@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh auth:*)",
+      "mcp__supabase__get_advisors"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd D:/dungeon-cortex && pnpm exec tsc --noEmit 2>&1 | tail -20"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,json,os; inp=sys.stdin.read(); p=json.loads(inp).get('file_path','') if inp.strip() else ''; blocked='.env' in os.path.basename(p) and not p.endswith('.example'); sys.exit(1) if blocked else sys.exit(0)\" <<< \"$CLAUDE_TOOL_INPUT\""
+          }
+        ]
+      }
+    ]
+  }
+}

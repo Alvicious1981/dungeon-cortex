@@ -44,6 +44,12 @@ export const IntentSchema = z.object({
   targetName: z.string().optional(),
 
   /**
+   * Canonical name of the spell being cast (e.g. "Fireball", "Cure Wounds").
+   * Only present when actionType is "cast_spell". Used for SRD lookup.
+   */
+  spellName: z.string().optional(),
+
+  /**
    * Spell slot level the player intends to use (1–9).
    * Only relevant when actionType is "cast_spell".
    * Omitted for cantrips (slot-free) and all other action types.

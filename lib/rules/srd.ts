@@ -106,6 +106,34 @@ export const ArmorSchema = z.object({
 
 export type Armor = z.infer<typeof ArmorSchema>;
 
+// ─── Monster schema ───────────────────────────────────────────────────────────
+
+export const MonsterSchema = z.object({
+  index: z.string(),
+  name: z.string(),
+  size: z.string().optional(),
+  type: z.string().optional(),
+  alignment: z.string().optional(),
+  // armor_class may be an array of objects (Open5e) or a flat number (older sources)
+  armor_class: z
+    .array(z.object({ type: z.string().optional(), value: z.number() }))
+    .optional(),
+  hit_points: z.number(),
+  hit_dice: z.string().optional(),
+  speed: z.record(z.string(), z.unknown()).optional(),
+  strength: z.number().optional(),
+  dexterity: z.number().optional(),
+  constitution: z.number().optional(),
+  intelligence: z.number().optional(),
+  wisdom: z.number().optional(),
+  charisma: z.number().optional(),
+  challenge_rating: z.number().optional(),
+  xp: z.number().optional(),
+  url: z.string().optional(),
+});
+
+export type Monster = z.infer<typeof MonsterSchema>;
+
 // ─── Parse and index ──────────────────────────────────────────────────────────
 //
 // Splitting by equipment_category.index before schema validation prevents
@@ -133,6 +161,22 @@ const weapons: Weapon[] = (rawEquipment as unknown[]).flatMap((entry) => {
 const armors: Armor[] = (rawEquipment as unknown[]).flatMap((entry) => {
   if (categoryIndex(entry) !== "armor") return [];
   const r = ArmorSchema.safeParse(entry);
+  return r.success ? [r.data] : [];
+});
+
+// monsters.json is fetched at runtime because it may not exist at build time
+// (it requires a manual data-acquisition step). Once committed, this can be
+// converted to a static import matching rawSpells / rawEquipment above.
+let rawMonsters: unknown[] = [];
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  rawMonsters = require("@/data/srd-es/monsters.json") as unknown[];
+} catch {
+  // monsters.json not yet present — getMonster() returns null for all queries
+}
+
+const monsters: Monster[] = rawMonsters.flatMap((entry) => {
+  const r = MonsterSchema.safeParse(entry);
   return r.success ? [r.data] : [];
 });
 
@@ -186,6 +230,22 @@ export function getArmor(name: string): Armor | null {
   );
 }
 
+/**
+ * Case-insensitive lookup for a monster by name or index.
+ *
+ * Match priority: exact name → exact index → substring of name.
+ * Returns null when monsters.json has not yet been seeded.
+ */
+export function getMonster(name: string): Monster | null {
+  const q = name.toLowerCase().trim();
+  return (
+    monsters.find((m) => m.name.toLowerCase() === q) ??
+    monsters.find((m) => m.index.toLowerCase() === q) ??
+    monsters.find((m) => m.name.toLowerCase().includes(q)) ??
+    null
+  );
+}
+
 /** Number of valid spells parsed from the SRD. */
 export const SPELL_COUNT = spells.length;
 
@@ -194,3 +254,6 @@ export const WEAPON_COUNT = weapons.length;
 
 /** Number of valid armor pieces parsed from the SRD. */
 export const ARMOR_COUNT = armors.length;
+
+/** Number of valid monsters parsed from the SRD (0 until monsters.json is present). */
+export const MONSTER_COUNT = monsters.length;

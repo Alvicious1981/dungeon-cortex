@@ -49,11 +49,16 @@ export async function searchMemories(
   // Build the vector literal from API-returned numbers only — no user input.
   const vectorLiteral = "[" + embedding.join(",") + "]";
 
+  // Composite ranking: semantic similarity × importance weight.
+  // (1 - cosine_distance) converts pgvector's distance [0,2] → similarity [1,-1].
+  // Multiplying by importance means higher-importance memories surface ahead of
+  // equal-similarity ones. At importance=1.0 (the default) the order is identical
+  // to pure cosine distance, so existing entries behave as before.
   const rows = await prisma.$queryRaw<Array<{ content: string }>>`
     SELECT content
     FROM   "MemoryEntry"
     WHERE  "campaignId" = ${campaignId}
-    ORDER  BY embedding <=> ${vectorLiteral}::vector
+    ORDER  BY (1 - (embedding <=> ${vectorLiteral}::vector)) * importance DESC
     LIMIT  ${limit}
   `;
 

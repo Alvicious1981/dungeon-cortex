@@ -105,3 +105,114 @@ export function restoreAllSlots(slots: SpellSlots): SpellSlots {
     Object.entries(slots).map(([key, entry]) => [key, { ...entry, current: entry.max }])
   );
 }
+
+// ---------------------------------------------------------------------------
+// Spell effect resolution
+// ---------------------------------------------------------------------------
+
+export type SpellEffectType = "damage" | "healing" | "utility";
+
+export interface SpellEffect {
+  type: SpellEffectType;
+  /**
+   * Dice expression ready to pass to roll(), e.g. "8d6" or "1d8+3".
+   * Null for utility spells or when no mechanical dice are present.
+   */
+  dice: string | null;
+  /** Damage type index (e.g. "fire", "cold"). Null for non-damage effects. */
+  damageType: string | null;
+  /** True when the spell grants a saving throw (damage may be halved on success). */
+  hasSavingThrow: boolean;
+  /** Ability score index for the saving throw, e.g. "dex". Null if none. */
+  saveAbility: string | null;
+}
+
+/**
+ * Returns the canonical spellcasting ability ("INT" | "WIS" | "CHA") for a
+ * given D&D 5e 2014 class. Used to substitute "APT" in Spanish SRD formulas.
+ *
+ * "APT" is the Spanish SRD abbreviation for the caster's spellcasting ability
+ * modifier (English "spellcasting ability modifier").
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CHA" {
+  switch (characterClass.toLowerCase()) {
+    case "wizard":
+    case "artificer":
+      return "INT";
+    case "cleric":
+    case "druid":
+    case "ranger":
+      return "WIS";
+    default:
+      // bard, sorcerer, warlock, paladin
+      return "CHA";
+  }
+}
+
+/**
+ * Extracts the mechanical effect of a spell cast at the given slot level from
+ * a raw SrdSpell data blob (Spanish 5e SRD format).
+ *
+ * Data fields read:
+ *   - `damage.damage_at_slot_level[slotLevel]`  → leveled damage dice
+ *   - `heal_at_slot_level[slotLevel]`            → leveled healing dice (may contain "APT")
+ *   - `dc.dc_type.index`                         → saving throw ability
+ *   - `dc.dc_success`                            → "mitad" = half damage on save
+ *
+ * "APT" in healing formulas is replaced with the numeric `spellcastingMod`
+ * so the result is a valid dice expression (e.g. "1d8+3").
+ *
+ * @pure — no side effects, deterministic for the same inputs.
+ */
+export function resolveSpellEffect(
+  spellData: Record<string, unknown>,
+  slotLevel: number,
+  spellcastingMod: number
+): SpellEffect {
+  // --- Damage spell ---
+  const dmg = spellData.damage as Record<string, unknown> | undefined;
+  if (dmg) {
+    const bySlot = dmg.damage_at_slot_level as Record<string, string> | undefined;
+    if (bySlot) {
+      const key = String(slotLevel);
+      // Fall back to the lowest available tier if exact slot level is missing
+      const keys = Object.keys(bySlot).map(Number).sort((a, b) => a - b);
+      const bestKey = keys.includes(slotLevel) ? slotLevel : (keys[0] ?? slotLevel);
+      const dice = bySlot[String(bestKey)] ?? null;
+
+      const dmgType = (dmg.damage_type as Record<string, unknown> | undefined)?.index as string ?? null;
+      const dc = spellData.dc as Record<string, unknown> | undefined;
+      const dcType = dc ? ((dc.dc_type as Record<string, unknown> | undefined)?.index as string ?? null) : null;
+
+      return {
+        type: "damage",
+        dice,
+        damageType: dmgType,
+        hasSavingThrow: !!dc,
+        saveAbility: dcType,
+      };
+    }
+  }
+
+  // --- Healing spell ---
+  const healBySlot = spellData.heal_at_slot_level as Record<string, string> | undefined;
+  if (healBySlot) {
+    const raw = healBySlot[String(slotLevel)] ?? null;
+    if (raw) {
+      // Replace "APT" (Spanish spellcasting modifier abbreviation) with the
+      // numeric modifier so the string is a valid dice expression.
+      const modStr = spellcastingMod >= 0 ? `+${spellcastingMod}` : String(spellcastingMod);
+      // Handles " + APT", "+APT", and bare "APT"
+      const dice = raw
+        .replace(/\s*\+\s*APT\b/gi, modStr)
+        .replace(/\bAPT\b/gi, String(spellcastingMod))
+        .replace(/\s+/g, ""); // strip remaining whitespace for dice parser
+      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null };
+    }
+  }
+
+  // --- Utility spell ---
+  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null };
+}

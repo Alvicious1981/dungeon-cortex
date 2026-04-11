@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { ensureDevUser } from "@/lib/db/dev-user";
-import { rollInitiative } from "@/lib/rules/combat";
+import { rollInitiative, acFromMonsterData, acFromInventory } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
 
 interface EnemyInput {
@@ -9,6 +9,9 @@ interface EnemyInput {
   hp: number;
   maxHp: number;
   dexModifier: number;
+  /** Optional SRD monster slug (e.g. "goblin"). When provided, real HP and DEX
+   *  modifier from the SrdMonster table override the caller-supplied values. */
+  monsterIndex?: string;
 }
 
 interface RequestBody {
@@ -57,10 +60,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const user = await ensureDevUser();
 
-  // Fetch campaign with character — validates existence and ownership in one query
+  // Fetch campaign with character + inventory — validates existence and ownership,
+  // and provides the inventory needed to derive player AC.
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    include: { character: true },
+    include: { character: { include: { inventory: true } } },
   });
 
   if (!campaign) {
@@ -87,9 +91,33 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     );
   }
 
-  // Derive player DEX modifier from the character's stats JSON
+  // Resolve optional monsterIndex fields: fetch real HP, DEX, and AC from SrdMonster.
+  // Callers without monsterIndex are unaffected (backward compatible).
+  const resolvedEnemies = await Promise.all(
+    enemies.map(async (e) => {
+      if (!e.monsterIndex) return { ...e, ac: 10 };
+      const srdMonster = await prisma.srdMonster.findUnique({
+        where: { id: e.monsterIndex },
+      });
+      if (!srdMonster) return { ...e, ac: 10 };
+      const data = srdMonster.data as Record<string, unknown>;
+      return {
+        ...e,
+        hp: typeof data.hit_points === "number" ? data.hit_points : e.hp,
+        maxHp: typeof data.hit_points === "number" ? data.hit_points : e.maxHp,
+        dexModifier:
+          typeof data.dexterity === "number"
+            ? abilityModifier(data.dexterity)
+            : e.dexModifier,
+        ac: acFromMonsterData(data),
+      };
+    })
+  );
+
+  // Derive player DEX modifier and AC from the character's stats and inventory
   const stats = campaign.character.stats as Record<string, number>;
   const playerDexMod = abilityModifier(stats.DEX ?? 10);
+  const playerAC = acFromInventory(campaign.character.inventory, playerDexMod);
 
   // Build CombatantInput list: player first, then enemies
   // rollInitiative accepts any order — it sorts internally
@@ -99,7 +127,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       name: campaign.character.name,
       dexModifier: playerDexMod,
     },
-    ...enemies.map((e, i) => ({
+    ...resolvedEnemies.map((e, i) => ({
       id: `enemy-${i}`,
       name: e.name,
       dexModifier: e.dexModifier,
@@ -119,17 +147,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         isPlayer: true,
         hp: campaign.character.hp,
         maxHp: campaign.character.maxHp,
+        ac: playerAC,
         initiativeTotal: entry.initiative,
       };
     }
     // Recover original enemy input by stripping the "enemy-{i}" prefix
     const idx = parseInt(entry.id.replace("enemy-", ""), 10);
-    const enemy = enemies[idx];
+    const enemy = resolvedEnemies[idx];
     return {
       name: enemy.name,
       isPlayer: false,
       hp: enemy.hp,
       maxHp: enemy.maxHp,
+      ac: enemy.ac,
       initiativeTotal: entry.initiative,
     };
   });

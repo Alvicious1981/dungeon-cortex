@@ -6,6 +6,7 @@ import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
 import GameEventHandler from "@/components/combat/GameEventHandler";
+import MemoryJournal from "@/components/MemoryJournal";
 import type { InitiativeEntry } from "@/lib/rules/combat";
 import type {
   WeaponProperties,
@@ -136,25 +137,34 @@ export async function generateMetadata({ params }: CampaignPageProps) {
 export default async function CampaignPage({ params }: CampaignPageProps) {
   const { id } = await params;
 
-  const campaign = await prisma.campaign.findUnique({
-    where: { id },
-    include: {
-      character: {
-        include: {
-          inventory: {
-            orderBy: [{ type: "asc" }, { name: "asc" }],
+  const [campaign, memories] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id },
+      include: {
+        character: {
+          include: {
+            inventory: {
+              orderBy: [{ type: "asc" }, { name: "asc" }],
+            },
+          },
+        },
+        logs: { orderBy: { createdAt: "asc" } },
+        encounters: {
+          where: { status: "active" },
+          include: {
+            combatants: { orderBy: { initiativeTotal: "desc" } },
           },
         },
       },
-      logs: { orderBy: { createdAt: "asc" } },
-      encounters: {
-        where: { status: "active" },
-        include: {
-          combatants: { orderBy: { initiativeTotal: "desc" } },
-        },
-      },
-    },
-  });
+    }),
+    // Fetch recent consolidated memories for the journal (newest first, no vector column)
+    prisma.memoryEntry.findMany({
+      where: { campaignId: id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { id: true, content: true, importance: true, createdAt: true },
+    }),
+  ]);
 
   if (!campaign) {
     notFound();
@@ -614,14 +624,15 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           </div>
 
           {/* ════════════════════════════════════
-              RIGHT COLUMN — Combat Sidebar
+              RIGHT COLUMN — Combat + Memory
           ════════════════════════════════════ */}
-          <aside aria-label="Combat tracker" className="space-y-4">
+          <aside aria-label="Combat tracker and memory journal" className="space-y-4">
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}
               campaignId={campaign.id}
             />
+            <MemoryJournal memories={memories} />
           </aside>
 
         </div>

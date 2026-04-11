@@ -62,6 +62,10 @@ A campaign belongs to one user and one active character. Combat state must be re
 
 **Stubbed / TODO:** AI narration pipeline (`lib/ai/narrator.ts`), intent parsing, spell slots, condition tracking, inventory mechanics, memory/recall system (`lib/memory/`), full turn resolution
 
+## Mechanical Rules Authority (Code is Law)
+
+When planning or making modifications to any file in `lib/rules/` or `lib/db/` related to game mechanics, you MUST first read `docs/reference/Dungeon_Cortex_Rule_Pack_Complete_v2.md` to ensure strict compliance with D&D 5e 2014 SRD rules. Never invent mechanics, hybridize with 5.5e/2024, or use AI narration to resolve rule outcomes.
+
 ## Non-negotiable Design Rules
 
 1. **Never fake game state** — do not narrate a spell slot spent without actually decrementing it; do not mark a quest complete without a state mutation.

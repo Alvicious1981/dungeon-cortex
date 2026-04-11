@@ -15,6 +15,7 @@
 
 import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@/app/generated/prisma/client";
+import { searchMemories } from "@/lib/memory/search";
 
 // ---------------------------------------------------------------------------
 // Return types
@@ -57,6 +58,8 @@ export interface ContextCombatant {
   isPlayer: boolean;
   hp: number;
   maxHp: number;
+  /** Armor Class — used for attack roll resolution. */
+  ac: number;
   initiativeTotal: number;
   /** Raw JSON string[] of active condition names. */
   conditions: Prisma.JsonValue;
@@ -70,12 +73,29 @@ export interface ContextLog {
   createdAt: Date;
 }
 
+export interface ContextQuest {
+  id: string;
+  title: string;
+  description: string;
+  /** "active" | "completed" | "failed" */
+  status: string;
+  createdAt: Date;
+}
+
 export interface CampaignContext {
   character: ContextCharacter;
   /** The current active encounter, or null if no combat is in progress. */
   activeEncounter: ContextEncounter | null;
   /** Up to 5 most recent log entries, oldest-first. */
   recentLogs: ContextLog[];
+  /**
+   * Top-2 semantically relevant MemoryEntry summaries for the current player
+   * action. Empty array when no playerInput was provided or no memories exist.
+   * Advisory context only — canonical state tables always take precedence.
+   */
+  relevantMemories: string[];
+  /** All quests for this campaign, newest-first. Canonical state — never advisory. */
+  quests: ContextQuest[];
 }
 
 // ---------------------------------------------------------------------------
@@ -85,12 +105,18 @@ export interface CampaignContext {
 /**
  * Assembles the full context snapshot for a campaign in parallel.
  *
+ * @param campaignId  - The campaign to build context for.
+ * @param playerInput - Optional: the current player action text. When provided,
+ *                      the top-2 semantically relevant MemoryEntry summaries are
+ *                      fetched and included in `relevantMemories`. When omitted
+ *                      (e.g. non-action callers), `relevantMemories` is [].
  * @throws {Error} if the campaign does not exist.
  */
 export async function buildCampaignContext(
-  campaignId: string
+  campaignId: string,
+  playerInput?: string
 ): Promise<CampaignContext> {
-  const [campaign, activeEncounter, recentLogsDesc] = await Promise.all([
+  const [campaign, activeEncounter, recentLogsDesc, relevantMemories, quests] = await Promise.all([
     // Pillar 1: character with inventory
     prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -134,6 +160,7 @@ export async function buildCampaignContext(
             isPlayer: true,
             hp: true,
             maxHp: true,
+            ac: true,
             initiativeTotal: true,
             conditions: true,
           },
@@ -154,6 +181,24 @@ export async function buildCampaignContext(
         createdAt: true,
       },
     }),
+
+    // Pillar 4: semantic memory recall — top-2 entries relevant to this turn.
+    // Only runs when a playerInput is provided. Failures are silently swallowed
+    // so a memory retrieval error never blocks the action pipeline.
+    playerInput
+      ? searchMemories(campaignId, playerInput, 2)
+          .then((raw) =>
+            raw === "No relevant memories found." ? [] : raw.split("\n---\n")
+          )
+          .catch(() => [] as string[])
+      : Promise.resolve([] as string[]),
+
+    // Pillar 5: all quests for the campaign (canonical state, not advisory)
+    prisma.quest.findMany({
+      where: { campaignId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, title: true, description: true, status: true, createdAt: true },
+    }),
   ]);
 
   if (!campaign) {
@@ -165,5 +210,7 @@ export async function buildCampaignContext(
     activeEncounter: activeEncounter ?? null,
     // Reverse so logs are oldest-first (natural reading order for AI context)
     recentLogs: recentLogsDesc.reverse(),
+    quests,
+    relevantMemories,
   };
 }
