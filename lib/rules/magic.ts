@@ -107,6 +107,190 @@ export function restoreAllSlots(slots: SpellSlots): SpellSlots {
 }
 
 // ---------------------------------------------------------------------------
+// Spell slot tables — 5e 2014 SRD
+// ---------------------------------------------------------------------------
+
+/**
+ * Full-caster spell slot table (Bard, Cleric, Druid, Sorcerer, Wizard).
+ * Each row is indexed by character level (1-based). Each row contains 9
+ * values representing available slots at spell levels 1–9.
+ *
+ * Source: Player's Handbook 2014, class spell-slot tables.
+ */
+const FULL_CASTER_SLOTS: readonly (readonly number[])[] = [
+  //  1   2   3   4   5   6   7   8   9
+  [2, 0, 0, 0, 0, 0, 0, 0, 0], // level 1
+  [3, 0, 0, 0, 0, 0, 0, 0, 0], // level 2
+  [4, 2, 0, 0, 0, 0, 0, 0, 0], // level 3
+  [4, 3, 0, 0, 0, 0, 0, 0, 0], // level 4
+  [4, 3, 2, 0, 0, 0, 0, 0, 0], // level 5
+  [4, 3, 3, 0, 0, 0, 0, 0, 0], // level 6
+  [4, 3, 3, 1, 0, 0, 0, 0, 0], // level 7
+  [4, 3, 3, 2, 0, 0, 0, 0, 0], // level 8
+  [4, 3, 3, 3, 1, 0, 0, 0, 0], // level 9
+  [4, 3, 3, 3, 2, 0, 0, 0, 0], // level 10
+  [4, 3, 3, 3, 2, 1, 0, 0, 0], // level 11
+  [4, 3, 3, 3, 2, 1, 0, 0, 0], // level 12
+  [4, 3, 3, 3, 2, 1, 1, 0, 0], // level 13
+  [4, 3, 3, 3, 2, 1, 1, 0, 0], // level 14
+  [4, 3, 3, 3, 2, 1, 1, 1, 0], // level 15
+  [4, 3, 3, 3, 2, 1, 1, 1, 0], // level 16
+  [4, 3, 3, 3, 2, 1, 1, 1, 1], // level 17
+  [4, 3, 3, 3, 3, 1, 1, 1, 1], // level 18
+  [4, 3, 3, 3, 3, 2, 1, 1, 1], // level 19
+  [4, 3, 3, 3, 3, 2, 2, 1, 1], // level 20
+] as const;
+
+/**
+ * Half-caster spell slot table (Paladin, Ranger).
+ * Spellcasting begins at level 2. Slots cap at spell level 5.
+ */
+const HALF_CASTER_SLOTS: readonly (readonly number[])[] = [
+  //  1   2   3   4   5   6   7   8   9
+  [0, 0, 0, 0, 0, 0, 0, 0, 0], // level 1
+  [2, 0, 0, 0, 0, 0, 0, 0, 0], // level 2
+  [3, 0, 0, 0, 0, 0, 0, 0, 0], // level 3
+  [3, 0, 0, 0, 0, 0, 0, 0, 0], // level 4
+  [4, 2, 0, 0, 0, 0, 0, 0, 0], // level 5
+  [4, 2, 0, 0, 0, 0, 0, 0, 0], // level 6
+  [4, 3, 0, 0, 0, 0, 0, 0, 0], // level 7
+  [4, 3, 0, 0, 0, 0, 0, 0, 0], // level 8
+  [4, 3, 2, 0, 0, 0, 0, 0, 0], // level 9
+  [4, 3, 2, 0, 0, 0, 0, 0, 0], // level 10
+  [4, 3, 3, 0, 0, 0, 0, 0, 0], // level 11
+  [4, 3, 3, 0, 0, 0, 0, 0, 0], // level 12
+  [4, 3, 3, 1, 0, 0, 0, 0, 0], // level 13
+  [4, 3, 3, 1, 0, 0, 0, 0, 0], // level 14
+  [4, 3, 3, 2, 0, 0, 0, 0, 0], // level 15
+  [4, 3, 3, 2, 0, 0, 0, 0, 0], // level 16
+  [4, 3, 3, 3, 1, 0, 0, 0, 0], // level 17
+  [4, 3, 3, 3, 1, 0, 0, 0, 0], // level 18
+  [4, 3, 3, 3, 2, 0, 0, 0, 0], // level 19
+  [4, 3, 3, 3, 2, 0, 0, 0, 0], // level 20
+] as const;
+
+/**
+ * Warlock Pact Magic table. All slots are the same level (pact slot level),
+ * mapped into the 9-element array at the correct index (slot_level - 1).
+ * Short-rest recovery is a concern for the rest API, not this table.
+ *
+ * Format: [slotCount, pactSlotLevel] per character level.
+ */
+const WARLOCK_PACT: readonly [number, number][] = [
+  [1, 1], // level 1
+  [2, 1], // level 2
+  [2, 2], // level 3
+  [2, 2], // level 4
+  [2, 3], // level 5
+  [2, 3], // level 6
+  [2, 4], // level 7
+  [2, 4], // level 8
+  [2, 5], // level 9
+  [2, 5], // level 10
+  [3, 5], // level 11
+  [3, 5], // level 12
+  [3, 5], // level 13
+  [3, 5], // level 14
+  [3, 5], // level 15
+  [3, 5], // level 16
+  [4, 5], // level 17
+  [4, 5], // level 18
+  [4, 5], // level 19
+  [4, 5], // level 20
+] as const;
+
+const ZERO_SLOTS: readonly number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0] as const;
+
+/**
+ * Returns the 5e SRD spell slot array (9 elements, indices 0–8 = spell levels 1–9)
+ * for the given class and character level.
+ *
+ * Non-casters (barbarian, fighter, monk, rogue) return all zeros.
+ * Unknown classes are treated as non-casters.
+ *
+ * @throws {RangeError} if `level` is outside [1, 20].
+ * @pure — deterministic, no side effects.
+ */
+export function spellSlotsForLevel(
+  characterClass: string,
+  level: number
+): number[] {
+  if (level < 1 || level > 20) {
+    throw new RangeError(
+      `Character level must be between 1 and 20; got ${level}.`
+    );
+  }
+
+  const idx = level - 1; // 0-based table index
+
+  switch (characterClass.toLowerCase()) {
+    // --- Full casters ---
+    case "bard":
+    case "cleric":
+    case "druid":
+    case "sorcerer":
+    case "wizard":
+      return [...FULL_CASTER_SLOTS[idx]];
+
+    // --- Half casters ---
+    case "paladin":
+    case "ranger":
+      return [...HALF_CASTER_SLOTS[idx]];
+
+    // --- Warlock (Pact Magic) ---
+    case "warlock": {
+      const [count, slotLevel] = WARLOCK_PACT[idx];
+      const row = [...ZERO_SLOTS] as number[];
+      row[slotLevel - 1] = count;
+      return row;
+    }
+
+    // --- Non-casters and unrecognised classes ---
+    default:
+      return [...ZERO_SLOTS];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Concentration
+// ---------------------------------------------------------------------------
+
+/** Minimal character shape required to manage concentration state. */
+export interface ConcentrationTarget {
+  concentrationSpellId: string | null;
+}
+
+/**
+ * Returns a new character-like object with `concentrationSpellId` cleared.
+ * Call this whenever concentration is broken (damage, new concentration spell,
+ * rest, or explicit dispel).
+ *
+ * The original object is never mutated.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function breakConcentration<T extends ConcentrationTarget>(
+  character: T
+): T {
+  return { ...character, concentrationSpellId: null };
+}
+
+/**
+ * Returns a new character-like object with `concentrationSpellId` set to
+ * `spellId`, replacing any prior concentration.
+ *
+ * Callers must ensure `spellId` is a valid spell identifier before calling.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function beginConcentration<T extends ConcentrationTarget>(
+  character: T,
+  spellId: string
+): T {
+  return { ...character, concentrationSpellId: spellId };
+}
+
+// ---------------------------------------------------------------------------
 // Spell effect resolution
 // ---------------------------------------------------------------------------
 

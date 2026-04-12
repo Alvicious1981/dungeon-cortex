@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 
 interface CreateCampaignBody {
   characterId: string;
@@ -24,7 +24,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "title is required." }, { status: 400 });
   }
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
 
   // Validate character exists and belongs to this user
   const character = await prisma.character.findUnique({

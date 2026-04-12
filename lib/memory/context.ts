@@ -29,10 +29,14 @@ export interface ContextCharacter {
   level: number;
   hp: number;
   maxHp: number;
+  /** Total accumulated XP. */
+  xp: number;
   /** Raw JSON — { STR, DEX, CON, INT, WIS, CHA } */
   stats: Prisma.JsonValue;
   /** Raw JSON spell slot map, or null if the character has no spellcasting. */
   spellSlots: Prisma.JsonValue | null;
+  /** ID of the currently concentrated-on spell, or null. */
+  concentrationSpellId: string | null;
   inventory: ContextInventoryItem[];
 }
 
@@ -130,8 +134,10 @@ export async function buildCampaignContext(
             level: true,
             hp: true,
             maxHp: true,
+            xp: true,
             stats: true,
             spellSlots: true,
+            concentrationSpellId: true,
             inventory: {
               select: {
                 id: true,

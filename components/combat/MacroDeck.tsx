@@ -184,7 +184,7 @@ export default function MacroDeck({ campaignId, inCombat }: Props) {
   const modeBorderColor = inCombat
     ? "rgba(239,68,68,0.25)"
     : "rgba(228,168,50,0.18)";
-  const modeLabelColor = inCombat ? "#FCA5A5" : "#8A6B1A";
+  const modeLabelColor = inCombat ? "#FCA5A5" : "#C49A2A";
 
   return (
     <section aria-label={sectionLabel}>
@@ -224,7 +224,7 @@ export default function MacroDeck({ campaignId, inCombat }: Props) {
               onClick={() => void handleAction(actionText)}
               aria-label={actionText}
               aria-busy={isThisLoading}
-              className="group relative flex min-h-[44px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-3 text-center transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group relative flex min-h-[44px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-3 text-center motion-safe:transition-all motion-safe:duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
               style={{
                 background: isThisLoading
                   ? "rgba(20,16,30,0.95)"
@@ -254,7 +254,7 @@ export default function MacroDeck({ campaignId, inCombat }: Props) {
               {/* Icon or spinner */}
               {isThisLoading ? (
                 <svg
-                  className="h-4 w-4 shrink-0 animate-spin"
+                  className="h-4 w-4 shrink-0 motion-safe:animate-spin"
                   viewBox="0 0 16 16"
                   fill="none"
                   aria-hidden="true"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { CLASS_HIT_DICE, ABILITY_SCORES, type AbilityScore } from "@/lib/dnd-api/constants";
 
 interface CreateCharacterBody {
@@ -55,7 +55,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
   const maxHp = calcMaxHp(characterClass, stats.CON);
 
   const SPELLCASTING_CLASSES = ["wizard", "cleric", "sorcerer"];

@@ -80,3 +80,65 @@ export async function getItemInfo(query: string) {
 
   return item ? item.data : null;
 }
+
+// ─── Monster querying via typed columns ───────────────────────────────────────
+
+export interface MonsterQueryOptions {
+  /** Substring match against monster name (case-insensitive). */
+  nameQuery?: string;
+  /** Exact creature type, e.g. "dragon", "undead" (case-insensitive). */
+  type?: string;
+  /** Exact size category, e.g. "Large", "Tiny" (case-insensitive). */
+  size?: string;
+  /** Minimum CR (inclusive). */
+  minCR?: number;
+  /** Maximum CR (inclusive). Useful for encounter budget filtering. */
+  maxCR?: number;
+  /** Maximum number of results to return (default 10, max 50). */
+  limit?: number;
+}
+
+/**
+ * Queries the SrdMonster table using the explicit typed columns for efficient
+ * server-side filtering. Returns an array of raw JSON data blobs.
+ *
+ * This function is designed for the AI encounter-builder tool — it lets the
+ * narrator request "all CR 1–3 undead" without loading all 334 monsters.
+ */
+export async function queryMonsters(opts: MonsterQueryOptions): Promise<unknown[]> {
+  const { nameQuery, type, size, minCR, maxCR, limit = 10 } = opts;
+  const safeLimit = Math.min(limit, 50);
+
+  const monsters = await prisma.srdMonster.findMany({
+    where: {
+      ...(nameQuery && {
+        name: { contains: nameQuery, mode: "insensitive" },
+      }),
+      ...(type && {
+        type: { equals: type, mode: "insensitive" },
+      }),
+      ...(size && {
+        size: { equals: size, mode: "insensitive" },
+      }),
+      ...((minCR !== undefined || maxCR !== undefined) && {
+        cr: {
+          ...(minCR !== undefined && { gte: minCR }),
+          ...(maxCR !== undefined && { lte: maxCR }),
+        },
+      }),
+    },
+    orderBy: [{ cr: "asc" }, { name: "asc" }],
+    take: safeLimit,
+    select: { id: true, name: true, cr: true, type: true, size: true, alignment: true, data: true },
+  });
+
+  return monsters.map((m) => ({
+    ...(m.data as object),
+    // Surface the typed columns at the top level so the AI can read them directly
+    // without navigating the raw blob. The data blob remains for full stat access.
+    _cr: m.cr,
+    _type: m.type,
+    _size: m.size,
+    _alignment: m.alignment,
+  }));
+}

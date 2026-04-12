@@ -11,6 +11,9 @@ export default defineConfig({
   },
   engine: "classic",
   datasource: {
-    url: env("DATABASE_URL"),
+    // Migrations require a direct (non-pooled) connection.
+    // DIRECT_URL bypasses PgBouncer (port 6543) which rejects DDL via
+    // prepared statements; direct connections (port 5432) support full DDL.
+    url: env("DIRECT_URL"),
   },
 });

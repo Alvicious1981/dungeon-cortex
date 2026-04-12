@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { InitiativeEntry } from "@/lib/rules/combat";
 
@@ -16,6 +16,21 @@ export default function InitiativeTracker({ entries, activeId, campaignId }: Pro
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Fire ENCOUNTER_START exactly once when the component first mounts with combatants.
+  // The ref persists across router.refresh() re-renders (component stays mounted).
+  const encounterStartFired = useRef(false);
+
+  useEffect(() => {
+    if (entries.length > 0 && !encounterStartFired.current) {
+      encounterStartFired.current = true;
+      window.dispatchEvent(
+        new CustomEvent("dungeon-game-event", {
+          detail: { event: { type: "ENCOUNTER_START", payload: {} } },
+        }),
+      );
+    }
+  }, [entries]);
+
   async function handleNextTurn() {
     setError(null);
     setAdvancing(true);
@@ -25,9 +40,23 @@ export default function InitiativeTracker({ entries, activeId, campaignId }: Pro
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "Failed to advance turn.");
+        setError((data as { error?: string }).error ?? "Failed to advance turn.");
         return;
       }
+
+      // Dispatch ROUND_ADVANCE or TURN_ADVANCE based on API response before refreshing.
+      const data = await res.json() as { isNewRound: boolean };
+      window.dispatchEvent(
+        new CustomEvent("dungeon-game-event", {
+          detail: {
+            event: {
+              type: data.isNewRound ? "ROUND_ADVANCE" : "TURN_ADVANCE",
+              payload: {},
+            },
+          },
+        }),
+      );
+
       router.refresh();
     } catch {
       setError("Network error. Please try again.");
@@ -59,7 +88,7 @@ export default function InitiativeTracker({ entries, activeId, campaignId }: Pro
               key={entry.id}
               aria-current={isActive ? "true" : undefined}
               className={[
-                "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors",
+                "flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2.5 text-sm motion-safe:transition-colors",
                 isActive
                   ? "bg-amber-900/40 border border-amber-700/60 text-amber-100"
                   : "bg-neutral-900 border border-neutral-800 text-neutral-300",
@@ -114,7 +143,7 @@ export default function InitiativeTracker({ entries, activeId, campaignId }: Pro
           type="button"
           onClick={handleNextTurn}
           disabled={advancing}
-          className="w-full rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full min-h-[44px] rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {advancing ? "Advancing…" : "Next Turn"}
         </button>

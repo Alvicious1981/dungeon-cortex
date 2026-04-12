@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { rollInitiative, acFromMonsterData, acFromInventory } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
 
@@ -58,7 +58,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     );
   }
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
 
   // Fetch campaign with character + inventory — validates existence and ownership,
   // and provides the inventory needed to derive player AC.

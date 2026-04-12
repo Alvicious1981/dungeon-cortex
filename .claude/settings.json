@@ -1,8 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh auth:*)",
-      "mcp__supabase__get_advisors"
+      "Bash(gh auth:*)"
     ]
   },
   "hooks": {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -22,7 +22,15 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
   const rawLimit = req.nextUrl.searchParams.get("limit");
   const limit = Math.min(50, Math.max(1, rawLimit ? parseInt(rawLimit, 10) || 20 : 20));
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
 
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },

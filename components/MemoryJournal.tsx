@@ -48,16 +48,16 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
     >
       {/* Header */}
       <div className="flex items-baseline justify-between">
-        <p
+        <h2
           className="text-[10px] uppercase tracking-[0.3em]"
-          style={{ fontFamily: "var(--font-cinzel)", color: "#6B63C0" }}
+          style={{ fontFamily: "var(--font-cinzel)", color: "#9B93E0" }}
         >
           Cortex Memory
-        </p>
+        </h2>
         {memories.length > 0 && (
           <span
             className="text-[9px] tabular-nums"
-            style={{ color: "#3A3860" }}
+            style={{ color: "#756EB0" }}
           >
             {memories.length} {memories.length === 1 ? "record" : "records"}
           </span>
@@ -97,7 +97,7 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
                 {/* Timestamp */}
                 <p
                   className="text-[9px] uppercase tracking-widest"
-                  style={{ color: isHighImportance ? "#6B4F14" : "#3A3860" }}
+                  style={{ color: isHighImportance ? "#B8921E" : "#756EB0" }}
                 >
                   {formatRelative(entry.createdAt)}
                 </p>
@@ -107,7 +107,7 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
                   className="text-xs leading-relaxed"
                   style={{
                     fontFamily: "var(--font-crimson)",
-                    color: isHighImportance ? "#C8A870" : "#7872A8",
+                    color: isHighImportance ? "#C8A870" : "#ABA7CF",
                     lineHeight: "1.65",
                   }}
                 >

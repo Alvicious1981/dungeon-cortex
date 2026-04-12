@@ -131,9 +131,9 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       </div>
 
       {/* Ability Scores */}
-      <div>
+      <fieldset className="m-0 border-0 p-0">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">Ability Scores</span>
+          <legend className="text-sm font-medium">Ability Scores</legend>
           <button
             type="button"
             onClick={resetToStandardArray}
@@ -142,7 +142,7 @@ export default function CharacterCreationForm({ races, classes }: Props) {
             Reset to standard array
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
           {ABILITY_SCORES.map((ab) => (
             <div key={ab} className="flex flex-col items-center gap-1">
               <label className="text-xs text-neutral-400 font-mono">{ab}</label>
@@ -157,7 +157,7 @@ export default function CharacterCreationForm({ races, classes }: Props) {
             </div>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       {/* Error */}
       {error && (

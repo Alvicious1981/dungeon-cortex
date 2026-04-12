@@ -14,13 +14,31 @@
 // ─── Event catalogue ────────────────────────────────────────────────────────
 
 export type GameEventType =
-  | "CRITICAL_HIT"      // Natural 20 on an attack roll
-  | "CRITICAL_MISS"     // Natural 1 on an attack roll
-  | "DAMAGE_DEALT"      // Normal hit — target HP reduced
-  | "ENEMY_DEFEATED"    // Target HP reaches 0
-  | "SPELL_CAST"        // Spell slot successfully consumed
-  | "HEALING_RECEIVED"  // Consumable heals the player
-  | "PLAYER_DOWNED";    // Player HP reaches 0
+  | "CRITICAL_HIT"         // Natural 20 on an attack roll
+  | "CRITICAL_MISS"        // Natural 1 on an attack roll
+  | "DAMAGE_DEALT"         // Normal hit — target HP reduced
+  | "ENEMY_DEFEATED"       // Target HP reaches 0
+  | "SPELL_CAST"           // Spell slot successfully consumed
+  | "HEALING_RECEIVED"     // Consumable heals the player
+  | "PLAYER_DOWNED"        // Player HP reaches 0
+  | "ENCOUNTER_START"      // Combat encounter begins; InitiativeTracker dispatches on mount
+  | "TURN_ADVANCE"         // A combatant's turn begins (non-round-boundary)
+  | "ROUND_ADVANCE"        // Turn index wrapped; a new combat round begins
+  | "COMBAT_CONSEQUENCE";  // Full Consequences Engine payload from a resolved attack
+
+/** Rich payload emitted when the Consequences Engine resolves an attack. */
+export interface CombatConsequencePayload {
+  attackerName: string;
+  targetName: string;
+  damage: number;
+  naturalRoll: number;
+  isCrit: boolean;
+  hitLocation: string;
+  narrativeTags: string[];
+  hpAfter: number;
+  targetMaxHp: number;
+  isKill: boolean;
+}
 
 export interface GameEvent {
   type: GameEventType;

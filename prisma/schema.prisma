@@ -31,8 +31,11 @@ model Character {
   hp         Int
   maxHp      Int
   stats      Json
-  spellSlots Json?
-  createdAt  DateTime @default(now())
+  spellSlots            Json?
+  xp                    Int     @default(0)
+  /// The ID of the spell currently being concentrated on. Null = no active concentration.
+  concentrationSpellId  String?
+  createdAt             DateTime @default(now())
 
   user      User            @relation(fields: [userId], references: [id])
   campaigns Campaign[]
@@ -54,6 +57,7 @@ model Campaign {
   encounters Encounter[]
   memories   MemoryEntry[]
   quests     Quest[]
+  npcs       NPC[]
 }
 
 model GameLog {
@@ -79,6 +83,7 @@ model Encounter {
 
   campaign   Campaign    @relation(fields: [campaignId], references: [id])
   combatants Combatant[]
+  zones      Zone[]
 }
 
 model Combatant {
@@ -92,18 +97,38 @@ model Combatant {
   initiativeTotal Int
   conditions      Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
+  /// Zone the combatant currently occupies. Null = zone system not active for this encounter.
+  zoneId          String?
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
+  zone      Zone?     @relation(fields: [zoneId], references: [id])
+}
+
+/// Ephemeral combat zone — scoped to a single Encounter, deleted on Cascade.
+model Zone {
+  id          String @id @default(cuid())
+  encounterId String
+  name        String
+  /// Grid column (0-based, left → right).
+  x           Int
+  /// Grid row (0-based, top → bottom).
+  y           Int
+
+  encounter  Encounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  combatants Combatant[]
 }
 
 model InventoryItem {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   characterId String
   name        String
   type        String
   // "weapon" | "armor" | "consumable" | "spell" | "misc"
-  quantity    Int    @default(1)
+  quantity    Int     @default(1)
   properties  Json
+  /// Equipped slot name, e.g. 'MAIN_HAND' | 'OFF_HAND' | 'ARMOR' | 'ACCESSORY'.
+  /// Null means the item is in the bag but not equipped.
+  equippedSlot String?
 
   character Character @relation(fields: [characterId], references: [id])
 }
@@ -133,16 +158,75 @@ model Quest {
   description String
   status      String   @default("active")
   // "active" | "completed" | "failed"
+  /// Seed of the NPC who issued this quest. Null for quests without a named giver.
+  giverId     String?
+  /// Primary location the quest takes place in or leads to.
+  location    String?
+  /// Narrative hook — the inciting detail that draws the party in.
+  hook        String?
+  /// The specific objective the party must accomplish.
+  objective   String?
+  /// What the party stands to gain on completion.
+  reward      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
 }
 
+model NPC {
+  id         String   @id @default(cuid())
+  campaignId String
+  /// Stable generator seed — deterministically reproduces the full statblock
+  /// via generateNPC(seed, role). Never changes after creation.
+  seed       String
+  /// Archetype used for statblock generation: "guard" | "bandit" | "commoner"
+  role       String
+  /// Denormalized from generateNPC — stored for fast display and HP-bar rendering.
+  name       String
+  maxHp      Int
+  /// Mutable. Callers decrement this when damage is applied.
+  hp         Int
+  /// Armor class — denormalized from the deterministic statblock.
+  ac         Int
+  /// Free-form DM notes: story beats, attitudes, plot ties, last seen location.
+  notes      String   @default("")
+  /// Creature race, e.g. "human", "elf", "dwarf". Null for legacy records.
+  race        String?
+  /// Mundane profession, e.g. "blacksmith", "soldier". Null for legacy records.
+  profession  String?
+  /// Moral alignment, e.g. "lawful good", "chaotic neutral". Null for legacy records.
+  alignment   String?
+  /// Six ability scores: { STR, DEX, CON, INT, WIS, CHA }. Null for legacy records.
+  abilityScores Json?
+  /// Personality traits { personality, ideal, bond, flaw }. Null for legacy records.
+  traits      Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  /// One NPC seed is unique per campaign — UPSERT key.
+  @@unique([campaignId, seed])
+  @@index([campaignId])
+}
+
 model SrdMonster {
-  id   String @id
-  name String
-  data Json
+  id        String  @id
+  name      String
+  /// Challenge Rating as a float (0.125, 0.25, 0.5, 1–30). Null for legacy records.
+  cr        Float?
+  /// Creature type, e.g. "dragon", "undead", "humanoid", "beast".
+  type      String?
+  /// Size category: "Tiny" | "Small" | "Medium" | "Large" | "Huge" | "Gargantuan".
+  size      String?
+  /// Alignment string, e.g. "lawful evil", "any alignment", "unaligned".
+  alignment String?
+  /// Full raw JSON blob from the SRD dataset.
+  data      Json
+
+  @@index([cr])
+  @@index([type])
 }
 
 model SrdSpell {

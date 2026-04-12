@@ -246,6 +246,47 @@ export function getMonster(name: string): Monster | null {
   );
 }
 
+// ─── Monster filtering ────────────────────────────────────────────────────────
+
+export interface MonsterFilter {
+  /** Creature type, e.g. "dragon", "undead", "humanoid" (case-insensitive). */
+  type?: string;
+  /** Size category, e.g. "Large", "Medium" (case-insensitive). */
+  size?: string;
+  /** Minimum Challenge Rating (inclusive). */
+  minCR?: number;
+  /** Maximum Challenge Rating (inclusive). */
+  maxCR?: number;
+  /** Alignment substring, e.g. "evil", "lawful" (case-insensitive contains). */
+  alignment?: string;
+}
+
+/**
+ * Returns all in-memory monsters that satisfy every provided filter criterion.
+ * Omitted criteria are ignored (no-op filter).
+ *
+ * Results are sorted by challenge_rating ascending, then name ascending.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function filterMonsters(filter: MonsterFilter): Monster[] {
+  const { type, size, minCR, maxCR, alignment } = filter;
+
+  return monsters
+    .filter((m) => {
+      if (type !== undefined && m.type?.toLowerCase() !== type.toLowerCase()) return false;
+      if (size !== undefined && m.size?.toLowerCase() !== size.toLowerCase()) return false;
+      if (alignment !== undefined && !m.alignment?.toLowerCase().includes(alignment.toLowerCase())) return false;
+      if (minCR !== undefined && (m.challenge_rating ?? 0) < minCR) return false;
+      if (maxCR !== undefined && (m.challenge_rating ?? 0) > maxCR) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const crDiff = (a.challenge_rating ?? 0) - (b.challenge_rating ?? 0);
+      return crDiff !== 0 ? crDiff : a.name.localeCompare(b.name);
+    });
+}
+
 /** Number of valid spells parsed from the SRD. */
 export const SPELL_COUNT = spells.length;
 

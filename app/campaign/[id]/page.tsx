@@ -5,8 +5,11 @@ import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
+import CombatVTT from "@/components/combat/CombatVTT";
 import GameEventHandler from "@/components/combat/GameEventHandler";
 import MemoryJournal from "@/components/MemoryJournal";
+import QuestTracker from "@/components/QuestTracker";
+import NPCRoster from "@/components/NPCRoster";
 import type { InitiativeEntry } from "@/lib/rules/combat";
 import type {
   WeaponProperties,
@@ -15,6 +18,7 @@ import type {
   SpellProperties,
   ItemType,
 } from "@/lib/rules/inventory";
+import { xpForLevel, MAX_LEVEL } from "@/lib/rules/progression";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +66,14 @@ function hpBarColor(hp: number, maxHp: number): string {
   if (pct <= 0.5) return "#F59E0B";
   return "#22C55E";
 }
+
+/** Human-readable labels for each equipped gear slot. */
+const SLOT_LABELS: Record<string, { label: string; glyph: string }> = {
+  MAIN_HAND:  { label: "Main Hand",  glyph: "⚔" },
+  OFF_HAND:   { label: "Off Hand",   glyph: "🛡" },
+  ARMOR:      { label: "Armor",      glyph: "⛨" },
+  ACCESSORY:  { label: "Accessory",  glyph: "◈" },
+};
 
 const ITEM_TYPE_STYLE: Record<
   ItemType,
@@ -137,7 +149,7 @@ export async function generateMetadata({ params }: CampaignPageProps) {
 export default async function CampaignPage({ params }: CampaignPageProps) {
   const { id } = await params;
 
-  const [campaign, memories] = await Promise.all([
+  const [campaign, memories, quests, npcs] = await Promise.all([
     prisma.campaign.findUnique({
       where: { id },
       include: {
@@ -153,6 +165,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           where: { status: "active" },
           include: {
             combatants: { orderBy: { initiativeTotal: "desc" } },
+            zones: true,
           },
         },
       },
@@ -163,6 +176,41 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       orderBy: { createdAt: "desc" },
       take: 20,
       select: { id: true, content: true, importance: true, createdAt: true },
+    }),
+    // Fetch all quests for this campaign — active first, then completed/failed
+    prisma.quest.findMany({
+      where: { campaignId: id },
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        createdAt: true,
+        location: true,
+        hook: true,
+        objective: true,
+        reward: true,
+      },
+    }),
+    // Fetch all known NPCs for this campaign — newest first
+    prisma.nPC.findMany({
+      where: { campaignId: id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        race: true,
+        profession: true,
+        alignment: true,
+        hp: true,
+        maxHp: true,
+        ac: true,
+        notes: true,
+        abilityScores: true,
+        traits: true,
+      },
     }),
   ]);
 
@@ -177,6 +225,18 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   const hpPercent = character.maxHp > 0
     ? Math.max(0, Math.min(100, Math.round((character.hp / character.maxHp) * 100)))
     : 0;
+
+  // XP progress within the current level.
+  const isMaxLevel = character.level >= MAX_LEVEL;
+  const currentLevelFloor = xpForLevel(character.level);
+  const nextLevelThreshold = isMaxLevel ? null : xpForLevel(character.level + 1);
+  const xpPercent = isMaxLevel
+    ? 100
+    : nextLevelThreshold !== null && nextLevelThreshold > currentLevelFloor
+      ? Math.min(100, Math.round(
+          ((character.xp - currentLevelFloor) / (nextLevelThreshold - currentLevelFloor)) * 100
+        ))
+      : 0;
 
   const initiativeEntries: InitiativeEntry[] = activeEncounter
     ? activeEncounter.combatants.map((c) => ({
@@ -250,7 +310,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           <div>
             <p
               className="mb-1 text-[10px] uppercase tracking-[0.3em]"
-              style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
+              style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
             >
               Active Campaign
             </p>
@@ -300,7 +360,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               <div>
                 <p
                   className="mb-0.5 text-[10px] uppercase tracking-[0.3em]"
-                  style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
+                  style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
                 >
                   Adventurer
                 </p>
@@ -312,10 +372,47 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 </h2>
                 <p
                   className="mt-0.5 text-sm"
-                  style={{ fontFamily: "var(--font-crimson)", color: "#9A8860", fontStyle: "italic" }}
+                  style={{ fontFamily: "var(--font-crimson)", color: "#C8B898", fontStyle: "italic" }}
                 >
                   Level {character.level} {character.race} {character.class}
                 </p>
+
+                {/* ── Concentration badge ── */}
+                {character.concentrationSpellId && (
+                  <div
+                    role="status"
+                    aria-label="Concentration active"
+                    className="mt-2.5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
+                    style={{
+                      background: "rgba(76,29,149,0.25)",
+                      border: "1px solid rgba(167,139,250,0.45)",
+                      boxShadow: "0 0 12px rgba(139,92,246,0.2), inset 0 1px 0 rgba(196,181,253,0.06)",
+                    }}
+                  >
+                    {/* Pulsing rune dot */}
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-1.5 w-1.5 rounded-full motion-safe:animate-pulse"
+                      style={{
+                        background: "#A78BFA",
+                        boxShadow: "0 0 6px #7C3AED",
+                      }}
+                    />
+                    <span
+                      className="text-[9px] font-semibold uppercase tracking-[0.2em]"
+                      style={{ fontFamily: "var(--font-cinzel)", color: "#C4B5FD" }}
+                    >
+                      Concentrating
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="text-[10px]"
+                      style={{ color: "#7C3AED" }}
+                    >
+                      ◈
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* ── HP bar ── */}
@@ -323,13 +420,13 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 <div className="flex items-baseline justify-between mb-2">
                   <span
                     className="text-[10px] uppercase tracking-widest font-semibold"
-                    style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
+                    style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
                   >
                     Hit Points
                   </span>
                   <span className="text-sm font-semibold tabular-nums">
                     <span style={{ color: barColor }}>{character.hp}</span>
-                    <span style={{ color: "#4A3F28" }}> / {character.maxHp}</span>
+                    <span style={{ color: "#7A6A50" }}> / {character.maxHp}</span>
                   </span>
                 </div>
 
@@ -362,6 +459,66 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 >
                   {hpPercent}%
                 </p>
+              </div>
+
+              {/* ── XP progress bar ── */}
+              <div>
+                <div className="flex items-baseline justify-between mb-2">
+                  <span
+                    className="text-[10px] uppercase tracking-widest font-semibold"
+                    style={{ fontFamily: "var(--font-cinzel)", color: "#7A5C1E" }}
+                  >
+                    Experience
+                  </span>
+                  {isMaxLevel ? (
+                    <span
+                      className="text-[10px] font-semibold uppercase tracking-wider"
+                      style={{ fontFamily: "var(--font-cinzel)", color: "#B38B2D" }}
+                    >
+                      Ascended
+                    </span>
+                  ) : (
+                    <span className="text-xs tabular-nums" style={{ color: "#7A5C1E" }}>
+                      <span style={{ color: "#B38B2D" }}>{character.xp.toLocaleString()}</span>
+                      <span style={{ color: "#3A2E14" }}> / {nextLevelThreshold?.toLocaleString()} xp</span>
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  role="meter"
+                  aria-valuenow={character.xp}
+                  aria-valuemin={currentLevelFloor}
+                  aria-valuemax={nextLevelThreshold ?? character.xp}
+                  aria-label={
+                    isMaxLevel
+                      ? "Maximum level reached"
+                      : `Experience: ${character.xp} of ${nextLevelThreshold} XP`
+                  }
+                  className="relative h-2 overflow-hidden rounded-full"
+                  style={{
+                    background: "rgba(14,10,2,0.9)",
+                    border: "1px solid rgba(60,40,8,0.5)",
+                  }}
+                >
+                  <div
+                    className="h-full rounded-full motion-safe:transition-all motion-safe:duration-700"
+                    style={{
+                      width: `${xpPercent}%`,
+                      background: "linear-gradient(90deg, #5C3D0A, #B38B2D)",
+                      boxShadow: "0 0 8px rgba(179,139,45,0.4)",
+                    }}
+                  />
+                </div>
+
+                {!isMaxLevel && (
+                  <p
+                    className="mt-1 text-right text-[10px] tabular-nums"
+                    style={{ color: "#2A2010" }}
+                  >
+                    {xpPercent}% to Lv {character.level + 1}
+                  </p>
+                )}
               </div>
             </section>
 
@@ -451,7 +608,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             >
               <p
                 className="text-[10px] uppercase tracking-[0.3em]"
-                style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
+                style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
               >
                 Carried Items
               </p>
@@ -459,7 +616,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               {!hasInventory ? (
                 <p
                   className="text-xs"
-                  style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#4A3F28" }}
+                  style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50" }}
                 >
                   Nothing carried.
                 </p>
@@ -494,7 +651,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                                   {ts.label}
                                 </span>
 
-                                {/* Name + stat */}
+                                {/* Name + stat + equipped slot */}
                                 <div className="min-w-0 flex-1">
                                   <span
                                     className="block truncate text-sm font-medium"
@@ -508,6 +665,28 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                                       style={{ color: "#5A5040", fontFamily: "var(--font-crimson)", fontStyle: "italic" }}
                                     >
                                       {statLine}
+                                    </span>
+                                  )}
+                                  {/* Equipped slot tag */}
+                                  {item.equippedSlot && SLOT_LABELS[item.equippedSlot] && (
+                                    <span
+                                      className="mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5"
+                                      style={{
+                                        background: "rgba(179,139,45,0.12)",
+                                        border: "1px solid rgba(179,139,45,0.35)",
+                                        boxShadow: "0 0 6px rgba(179,139,45,0.1)",
+                                      }}
+                                      aria-label={`Equipped: ${SLOT_LABELS[item.equippedSlot].label}`}
+                                    >
+                                      <span aria-hidden="true" className="text-[8px]" style={{ color: "#B38B2D" }}>
+                                        {SLOT_LABELS[item.equippedSlot].glyph}
+                                      </span>
+                                      <span
+                                        className="text-[8px] font-semibold uppercase tracking-wider"
+                                        style={{ fontFamily: "var(--font-cinzel)", color: "#B38B2D" }}
+                                      >
+                                        {SLOT_LABELS[item.equippedSlot].label}
+                                      </span>
                                     </span>
                                   )}
                                 </div>
@@ -539,10 +718,37 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           ════════════════════════════════════ */}
           <div className="min-w-0 space-y-5">
 
+            {/* ── VTT battle map — only visible during active encounters ── */}
+            {activeEncounter && (
+              <CombatVTT
+                encounter={{
+                  id:               activeEncounter.id,
+                  round:            activeEncounter.round,
+                  currentTurnIndex: activeEncounter.currentTurnIndex,
+                  combatants:       activeEncounter.combatants.map((c) => ({
+                    id:              c.id,
+                    name:            c.name,
+                    isPlayer:        c.isPlayer,
+                    hp:              c.hp,
+                    maxHp:           c.maxHp,
+                    ac:              c.ac,
+                    initiativeTotal: c.initiativeTotal,
+                    zoneId:          c.zoneId ?? null,
+                  })),
+                  zones: activeEncounter.zones.map((z) => ({
+                    id:   z.id,
+                    name: z.name,
+                    x:    z.x,
+                    y:    z.y,
+                  })),
+                }}
+              />
+            )}
+
             <section aria-label="Adventure chronicle" id="chronicle">
               <p
                 className="mb-3 text-[10px] uppercase tracking-[0.3em]"
-                style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
+                style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
               >
                 The Chronicle
               </p>
@@ -557,7 +763,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 >
                   <p
                     className="text-sm"
-                    style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#4A3F28", lineHeight: "1.75" }}
+                    style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50", lineHeight: "1.75" }}
                   >
                     The parchment is blank. The Dungeon Master awaits
                     your first declaration. Speak, and let your legend begin.
@@ -596,7 +802,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                           className="mb-1.5 block text-[9px] font-semibold uppercase tracking-[0.2em]"
                           style={{
                             fontFamily: "var(--font-cinzel)",
-                            color: isDM ? "#8A6B1A" : isPlayer ? "#F59E0B" : "#5B56A0",
+                            color: isDM ? "#C49A2A" : isPlayer ? "#F59E0B" : "#5B56A0",
                           }}
                         >
                           {isDM ? "Dungeon Master" : isPlayer ? "You" : "System"}
@@ -626,12 +832,14 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           {/* ════════════════════════════════════
               RIGHT COLUMN — Combat + Memory
           ════════════════════════════════════ */}
-          <aside aria-label="Combat tracker and memory journal" className="space-y-4">
+          <aside aria-label="Combat tracker, quest log and memory journal" className="space-y-4">
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}
               campaignId={campaign.id}
             />
+            <QuestTracker quests={quests} />
+            <NPCRoster npcs={npcs} />
             <MemoryJournal memories={memories} />
           </aside>
 
@@ -642,7 +850,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 rounded text-xs transition-colors duration-200 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
-            style={{ color: "#4A3F28" }}
+            style={{ color: "#7A6A50" }}
           >
             <svg
               width="12"
@@ -664,8 +872,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           </Link>
         </nav>
 
-        {/* GameEventHandler renders nothing — wires up Web Audio + visual FX */}
-        <GameEventHandler />
+        {/* GameEventHandler renders the mute toggle + wires Web Audio + visual FX */}
+        <GameEventHandler inCombat={!!activeEncounter} />
 
       </main>
     </div>

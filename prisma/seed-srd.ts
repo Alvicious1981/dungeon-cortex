@@ -65,11 +65,23 @@ async function main() {
     for (const monster of monstersData) {
       if (!monster) continue;
       const mid = String(monster.id || monster.slug || monster.index || monster.name);
+
+      // Extract strongly-typed searchable columns from the raw JSON blob.
+      // challenge_rating is a float in the SRD (0.125, 0.25, 0.5, 1–30).
+      const cr: number | null =
+        typeof monster.challenge_rating === 'number' ? monster.challenge_rating : null;
+      const monsterType: string | null =
+        typeof monster.type === 'string' ? monster.type : null;
+      const size: string | null =
+        typeof monster.size === 'string' ? monster.size : null;
+      const alignment: string | null =
+        typeof monster.alignment === 'string' ? monster.alignment : null;
+
       try {
         await prisma.srdMonster.upsert({
           where: { id: mid },
-          update: { name: monster.name, data: monster },
-          create: { id: mid, name: monster.name, data: monster },
+          update: { name: monster.name, cr, type: monsterType, size, alignment, data: monster },
+          create: { id: mid, name: monster.name, cr, type: monsterType, size, alignment, data: monster },
         });
         count++;
       } catch(e) {

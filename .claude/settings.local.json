@@ -23,7 +23,13 @@
       "Bash(curl -L --insecure \"https://raw.githubusercontent.com/Magical20-ai/5e-database-spanish/main/src/5e-SRD-Monsters.json\" -o data/srd-es/monsters.json)",
       "Bash(node -e \"const d=require\\(''./data/srd-es/monsters.json''\\); console.log\\(''entries:'', d.length\\); const m=d[0]; console.log\\(''keys:'', Object.keys\\(m\\).join\\('', ''\\)\\); console.log\\(''first:'', m.index, ''|'', m.name, ''| hp:'', m.hit_points\\);\")",
       "Bash(node:*)",
-      "Bash(pnpm test:*)"
+      "Bash(pnpm test:*)",
+      "Skill(update-config)",
+      "Bash(grep -r \"audio\\\\|Audio\\\\|sound\\\\|Sound\" /d/dungeon-cortex --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"ActionStreamFrame\\\\|GameEvent\" /d/dungeon-cortex/lib --include=*.ts --include=*.tsx)",
+      "Bash(pnpm vitest:*)",
+      "Bash(npx prisma:*)",
+      "Bash(python -c \":*)"
     ]
   }
 }

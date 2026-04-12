@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -39,7 +39,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "description is required (non-empty string)." }, { status: 400 });
   }
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
   const err = await validateCampaignOwnership(campaignId, user.id);
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 
@@ -63,7 +71,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 export async function GET(req: NextRequest, { params }: RouteContext) {
   const { id: campaignId } = await params;
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
   const err = await validateCampaignOwnership(campaignId, user.id);
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 

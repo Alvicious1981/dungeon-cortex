@@ -149,7 +149,7 @@ export default function InventoryPanel({ campaignId }: Props) {
           {[1, 2, 3].map((n) => (
             <div
               key={n}
-              className="h-9 animate-pulse rounded-md bg-neutral-800/60"
+              className="h-9 rounded-md bg-neutral-800/60 motion-safe:animate-pulse motion-reduce:opacity-60"
               aria-hidden="true"
             />
           ))}

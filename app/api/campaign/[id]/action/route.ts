@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { roll } from "@/lib/rules/dice";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
@@ -9,10 +9,14 @@ import { parseIntent } from "@/lib/ai/intent";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
 import { isSpellSlots, hasAvailableSlot, consumeSlot, spellcastingAbility, resolveSpellEffect } from "@/lib/rules/magic";
 import { getSpellInfo } from "@/lib/ai/tools/srd-lookup";
-import { advanceTurn, resolveEncounterEnd, resolveAttackRoll } from "@/lib/rules/combat";
+import {
+  advanceTurn, resolveEncounterEnd, resolveAttackRoll,
+  rollHitLocation, computeOverkill, deriveNarrativeTags,
+  type CombatFacts, type DamageType,
+} from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties } from "@/lib/rules/inventory";
-import type { GameEvent, ActionStreamFrame } from "@/lib/events/game-events";
+import type { GameEvent, ActionStreamFrame, CombatConsequencePayload } from "@/lib/events/game-events";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 interface ActionBody {
@@ -49,7 +53,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "action is required." }, { status: 400 });
   }
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
 
   // Validate campaign exists and belongs to this user
   const campaign = await prisma.campaign.findUnique({
@@ -408,6 +420,41 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           payload: { name: targetCombatant.name },
         });
       }
+
+      // Enrich the attack event with Consequences Engine data (hit location + narrative tags).
+      // These are display-only — state has already been mutated above.
+      const hitLocation = rollHitLocation();
+      const consequenceFacts: CombatFacts = {
+        attacker: context.character.name,
+        defender: targetCombatant.name,
+        weapon: foundWeapon.name,
+        damage,
+        damage_type: (weaponProps.damageType ?? "slashing") as DamageType,
+        hp_before: targetCombatant.hp,
+        hp_after: newHp,
+        maxHp: targetCombatant.maxHp ?? damage * 3,
+        is_crit: attackResult.critical,
+        is_fumble: false,
+        hit_location: hitLocation,
+        status_applied: [],
+        overkill: computeOverkill(damage, targetCombatant.hp),
+      };
+      const consequencePayload: CombatConsequencePayload = {
+        attackerName:  context.character.name,
+        targetName:    targetCombatant.name,
+        damage,
+        naturalRoll,
+        isCrit:        attackResult.critical,
+        hitLocation,
+        narrativeTags: deriveNarrativeTags(consequenceFacts),
+        hpAfter:       newHp,
+        targetMaxHp:   targetCombatant.maxHp,
+        isKill:        newHp <= 0,
+      };
+      gameEvents.push({
+        type: "COMBAT_CONSEQUENCE",
+        payload: consequencePayload as unknown as Record<string, unknown>,
+      });
 
       // Re-fetch the full roster with updated HP to evaluate encounter end state
       const updatedCombatants = await prisma.combatant.findMany({

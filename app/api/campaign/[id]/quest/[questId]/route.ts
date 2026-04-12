@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { ensureDevUser } from "@/lib/db/dev-user";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 
 interface RouteContext {
   params: Promise<{ id: string; questId: string }>;
@@ -36,7 +36,15 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     );
   }
 
-  const user = await ensureDevUser();
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
 
   // Verify campaign ownership and that the quest belongs to this campaign
   const quest = await prisma.quest.findUnique({

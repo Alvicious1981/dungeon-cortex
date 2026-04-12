@@ -22,6 +22,8 @@ export interface InventoryItem {
   type: string;
   quantity: number;
   properties: unknown;
+  /** Equipped slot name, e.g. 'MAIN_HAND' | 'OFF_HAND' | 'ARMOR' | 'ACCESSORY'. Null = in bag. */
+  equippedSlot?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,86 @@ type ItemProperties = {
   spell: SpellProperties;
   misc: MiscProperties;
 };
+
+// ---------------------------------------------------------------------------
+// Equip / unequip
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a new inventory array with `itemId` equipped into `targetSlot`.
+ *
+ * Rules enforced:
+ * - Each slot may hold at most one item — the previous occupant is unequipped.
+ * - An item moving to a new slot is removed from its old slot automatically.
+ * - Operation is idempotent if the item already occupies the target slot.
+ * - Original array and items are never mutated.
+ *
+ * @throws {RangeError} if `itemId` is not found in `inventory`.
+ */
+export function equipItem(
+  itemId: string,
+  targetSlot: string,
+  inventory: InventoryItem[]
+): InventoryItem[] {
+  const target = inventory.find((i) => i.id === itemId);
+  if (!target) {
+    throw new RangeError(`Item "${itemId}" not found in inventory.`);
+  }
+
+  return inventory.map((item) => {
+    if (item.id === itemId) {
+      // Move target item into the slot.
+      return { ...item, equippedSlot: targetSlot };
+    }
+    if (item.equippedSlot === targetSlot) {
+      // Evict the prior occupant of this slot.
+      return { ...item, equippedSlot: null };
+    }
+    return item;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Consumable use
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a new item with one use consumed (charges decremented, or quantity
+ * decremented when no `charges` field is present).
+ *
+ * Rules enforced:
+ * - Charges take priority over quantity when the `charges` field is present.
+ * - Neither charges nor quantity will go below zero.
+ * - Original item is never mutated.
+ *
+ * @throws {TypeError}  if `item.type` is not "consumable".
+ * @throws {RangeError} if the item is already depleted (charges === 0 or quantity === 0).
+ */
+export function useConsumable(item: InventoryItem): InventoryItem {
+  if (item.type !== "consumable") {
+    throw new TypeError(
+      `useConsumable expects type "consumable", got "${item.type}".`
+    );
+  }
+
+  const props = item.properties as ConsumableProperties;
+
+  if (typeof props.charges === "number") {
+    if (props.charges === 0) {
+      throw new RangeError(`"${item.name}" has no charges remaining.`);
+    }
+    return {
+      ...item,
+      properties: { ...props, charges: props.charges - 1 },
+    };
+  }
+
+  if (item.quantity === 0) {
+    throw new RangeError(`"${item.name}" is depleted (quantity 0).`);
+  }
+
+  return { ...item, quantity: item.quantity - 1 };
+}
 
 /** Narrows `item.properties` to the correct typed shape for the given type. */
 export function getItemProperties<T extends ItemType>(

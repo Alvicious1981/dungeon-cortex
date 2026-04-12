@@ -35,6 +35,7 @@ export default function ActionInput({ campaignId }: Props) {
   /** null  = idle; ""    = events received, waiting for first token;
    *  string = partial or complete optimistic narrative text           */
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +44,7 @@ export default function ActionInput({ campaignId }: Props) {
     setError(null);
     setSubmitting(true);
     setStreamingText("");
+    setStreamError(null);
 
     // ── User-gesture chain: warm up AudioContext in GameEventHandler ──────────
     // This fires synchronously before any await, so it counts as a user gesture.
@@ -121,8 +123,8 @@ export default function ActionInput({ campaignId }: Props) {
       setStreamingText(null);
       router.refresh();
     } catch {
-      setError("Network error. Please try again.");
-      setStreamingText(null);
+      // Network failure or stream interrupted
+      setStreamError("The connection to the Dungeon Master was severed. Please refresh or try your action again.");
     } finally {
       setSubmitting(false);
     }
@@ -153,7 +155,7 @@ export default function ActionInput({ campaignId }: Props) {
             Dungeon Master
           </span>
 
-          {streamingText === "" ? (
+          {streamingText === "" && !streamError ? (
             /* Skeleton: DM is generating — show pulsing placeholder lines */
             <div className="space-y-2 animate-pulse" aria-label="Dungeon Master is narrating…" role="status">
               <div
@@ -170,23 +172,47 @@ export default function ActionInput({ campaignId }: Props) {
               />
             </div>
           ) : (
-            <p
-              className="text-sm leading-relaxed"
-              style={{
-                fontFamily: "var(--font-crimson)",
-                fontSize: "0.9375rem",
-                lineHeight: "1.75",
-                color: "#C8BEA0",
-              }}
-            >
-              {streamingText}
-              {/* Blinking cursor while stream is active */}
-              <span
-                aria-hidden="true"
-                className="inline-block w-0.5 h-4 ml-0.5 align-middle motion-safe:animate-pulse"
-                style={{ background: "#8A6B1A", verticalAlign: "middle" }}
-              />
-            </p>
+            <>
+              {streamingText !== "" && (
+                <p
+                  className="text-sm leading-relaxed"
+                  style={{
+                    fontFamily: "var(--font-crimson)",
+                    fontSize: "0.9375rem",
+                    lineHeight: "1.75",
+                    color: "#C8BEA0",
+                    marginBottom: streamError ? "0.75rem" : "0"
+                  }}
+                >
+                  {streamingText}
+                  {/* Blinking cursor while stream is active */}
+                  {!streamError && (
+                    <span
+                      aria-hidden="true"
+                      className="inline-block w-0.5 h-4 ml-0.5 align-middle motion-safe:animate-pulse"
+                      style={{ background: "#8A6B1A", verticalAlign: "middle" }}
+                    />
+                  )}
+                </p>
+              )}
+              {streamError && (
+                <div className="mt-3 rounded border border-red-900/50 bg-red-950/20 p-3">
+                  <p className="text-sm text-red-400 mb-2">{streamError}</p>
+                  <button 
+                    onClick={() => {
+                      setStreamError(null);
+                      setStreamingText(null);
+                      router.refresh();
+                    }}
+                    type="button"
+                    className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider"
+                    style={{ fontFamily: "var(--font-cinzel), serif" }}
+                  >
+                    Clear & Sync
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -205,12 +231,12 @@ export default function ActionInput({ campaignId }: Props) {
             disabled={submitting}
             maxLength={500}
             placeholder="What do you do?"
-            className="flex-1 rounded-md bg-neutral-800 border border-neutral-700 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+            className="flex-1 min-h-[44px] rounded-md bg-neutral-800 border border-neutral-700 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={submitting || !action.trim()}
-            className="rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white transition-colors cursor-pointer"
+            className="rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors cursor-pointer"
           >
             {submitting ? "…" : "Act"}
           </button>

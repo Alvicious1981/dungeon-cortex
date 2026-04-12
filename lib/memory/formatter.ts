@@ -15,6 +15,7 @@
 
 import type { CampaignContext } from "@/lib/memory/context";
 import { isSpellSlots } from "@/lib/rules/magic";
+import { xpForLevel, MAX_LEVEL } from "@/lib/rules/progression";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,6 +70,39 @@ function formatIronLaws(): string {
     "from the consequences of the rules. If the rules kill the character, the character dies.",
     "",
     "**Lookup Mandate:** Before describing the effects of a spell, the properties of a magic item, or the abilities and stats of a monster, YOU MUST use the lookup tools (`getSpellInfo` / `getItemInfo` / `getMonsterInfo`) to ensure mechanical accuracy. Never invent mechanical stats. Code is Law.",
+    "",
+    "**XP Authority:** You have full authority to award XP for narrative achievements. " +
+    "Call `awardXP` whenever a meaningful achievement occurs — do not wait for the player to ask. " +
+    "Suggested amounts: minor (10–50 XP), moderate (100–300 XP), major (300–1000 XP). " +
+    "When `leveledUp` is true in the tool response, narrate the level-up as a significant moment before continuing.",
+    "",
+    "**Equipment Mandate:** When a player equips, wields, dons, or switches gear, " +
+    "you MUST call `manageEquipment` before narrating the item as equipped. " +
+    "Never describe an item as equipped without the corresponding state mutation. " +
+    "Slot exclusivity is enforced by the tool — the prior occupant is automatically unequipped.",
+    "",
+    "**Quest Generation Mandate:** When the player looks for work, inspects a bounty board, " +
+    "asks an NPC for rumors or quests, or seeks any new objective, " +
+    "you MUST call `generateAndTrackQuest` BEFORE describing the quest. " +
+    "Use the returned title, hook, location, objective, and reward verbatim — do not invent details. " +
+    "Pass `giverId` when the quest comes from a tracked NPC so the giver is recorded.",
+    "",
+    "**NPC Generation Mandate:** When introducing ANY new named character — innkeeper, guard, " +
+    "shopkeeper, bystander — call `generateAndTrackNPC` BEFORE narrating them. " +
+    "The tool returns the NPC's race, profession, alignment, and personality traits; " +
+    "use these details to ground your narration in consistent characterization. " +
+    "The same seed always produces the same person, so recurring characters are stable across sessions. " +
+    "Use `trackNPC` instead when updating state for an NPC already in the database.",
+    "",
+    "**Visceral Combat Mandate:** Every attack — player or enemy — MUST begin with a `resolveAttack` call. " +
+    "NEVER invent damage numbers, hit locations, overkill values, or narrative intensity. " +
+    "Ground all combat prose in the returned fields: " +
+    "`combat_facts` (damage, hit_location, is_crit, overkill), " +
+    "`narrative_tags` (curated sensory labels to weave into prose), " +
+    "`combat_beat` (opening / first_blood / turning_point / climax / aftermath — drives paragraph structure), " +
+    "`narrative_intensity` (0.0–1.0 — calibrate prose density: ≥0.8 = visceral full paragraph; 0.4–0.8 = purposeful two sentences; <0.4 = clinical one sentence), " +
+    "`style_dsl` (voice=active, verbs=hard, adverbs=low — obey strictly). " +
+    "Do not describe any attack as hitting or missing until `resolveAttack` returns. Code is Law.",
   ].join("\n");
 }
 
@@ -80,6 +114,14 @@ function formatCharacter(character: CampaignContext["character"]): string {
     `**${character.name}** — ${character.race} ${character.class}, Level ${character.level}`
   );
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
+
+  // XP progress — show next threshold so the AI knows how close a level-up is.
+  if (character.level < MAX_LEVEL) {
+    const nextThreshold = xpForLevel(character.level + 1);
+    lines.push(`**XP:** ${character.xp} / ${nextThreshold} (next level)`);
+  } else {
+    lines.push(`**XP:** ${character.xp} (Level 20 — max)`);
+  }
 
   // Spell slots — only shown for characters with spellcasting ability
   const slots = character.spellSlots;

@@ -1,0 +1,340 @@
+{
+  "slashing": {
+    "crit": {
+      "head":     ["decapitation_arc", "scalp_flap", "skull_glimpse", "gore_crown"],
+      "neck":     ["jugular_spray", "throat_gape", "windpipe_tear", "crimson_fountain"],
+      "shoulder": ["desgarro", "armor_screech", "sinew_snap", "pauldron_split"],
+      "chest":    ["sternum_crack", "rib_spread", "lung_gasp", "chestplate_cleave"],
+      "abdomen":  ["gut_open", "viscera_spill", "belt_sever", "torso_gape"],
+      "arm":      ["forearm_split", "tendon_sever", "bone_white", "limb_drop"],
+      "hand":     ["finger_scatter", "palm_gash", "knuckle_rend", "grip_fail"],
+      "leg":      ["thigh_rend", "muscle_part", "shin_splinter", "hamstring_cut"],
+      "knee":     ["kneecap_shatter", "ligament_snap", "collapse_shriek", "cartilage_spray"],
+      "foot":     ["arch_cleave", "toe_scatter", "boot_split", "ankle_sever"]
+    },
+    "hit": {
+      "head":     ["gash", "blood_veil", "stagger", "scalp_bloom"],
+      "neck":     ["neck_slice", "collar_cut", "pulse_wound", "craning_flinch"],
+      "shoulder": ["armor_dent", "shoulder_slash", "buckle_cut", "recoil_stumble"],
+      "chest":    ["chest_gash", "plate_scratch", "wince_step", "breath_catch"],
+      "abdomen":  ["belly_cut", "sash_rip", "doubling_wince", "side_slash"],
+      "arm":      ["arm_slash", "sleeve_rip", "forearm_cut", "guard_break"],
+      "hand":     ["hand_nick", "glove_slash", "knuckle_graze", "grip_loosen"],
+      "leg":      ["thigh_cut", "pant_rip", "limping_step", "leg_slash"],
+      "knee":     ["knee_nick", "stumble_cut", "joint_graze", "crouch_flinch"],
+      "foot":     ["boot_slash", "toe_nick", "trip_stumble", "ankle_graze"]
+    }
+  },
+  "piercing": {
+    "crit": {
+      "head":     ["eye_impale", "skull_bore", "brain_pierce", "helmet_punch"],
+      "neck":     ["artery_lance", "neck_skewer", "carotid_burst", "spine_graze"],
+      "shoulder": ["socket_bore", "deltoid_impale", "spaulder_punch", "deep_lance"],
+      "chest":    ["lung_puncture", "heart_skewer", "rib_lance", "breastplate_bore"],
+      "abdomen":  ["gut_skewer", "intestine_lance", "deep_thrust", "organ_pierce"],
+      "arm":      ["radius_lance", "bicep_bore", "arm_skewer", "vein_burst"],
+      "hand":     ["palm_pierce", "knuckle_bore", "hand_impale", "finger_skewer"],
+      "leg":      ["femur_lance", "quad_impale", "calf_bore", "leg_skewer"],
+      "knee":     ["patella_pierce", "knee_bore", "joint_impale", "deep_knee"],
+      "foot":     ["foot_impale", "arch_bore", "heel_lance", "instep_pierce"]
+    },
+    "hit": {
+      "head":     ["helm_dent", "skull_tap", "cheek_poke", "temple_graze"],
+      "neck":     ["neck_nick", "collar_jab", "throat_poke", "nape_graze"],
+      "shoulder": ["shoulder_jab", "pauldron_ding", "deltoid_poke", "trap_nick"],
+      "chest":    ["chest_stab", "plate_ding", "ribs_poke", "lung_tap"],
+      "abdomen":  ["side_jab", "belly_poke", "flank_stab", "gut_nick"],
+      "arm":      ["arm_poke", "bicep_jab", "forearm_nick", "wrist_stab"],
+      "hand":     ["hand_jab", "palm_nick", "finger_poke", "glove_pierce"],
+      "leg":      ["thigh_jab", "leg_poke", "shin_nick", "calf_stab"],
+      "knee":     ["knee_jab", "joint_poke", "kneecap_nick", "patella_ding"],
+      "foot":     ["boot_poke", "toe_jab", "arch_nick", "ankle_stab"]
+    }
+  },
+  "bludgeoning": {
+    "crit": {
+      "head":     ["skull_crush", "orbital_collapse", "jaw_shatter", "concussive_spray"],
+      "neck":     ["trachea_crush", "cervical_snap", "neck_pulp", "vertebra_crack"],
+      "shoulder": ["clavicle_snap", "shoulder_cave", "socket_crush", "pauldron_dent"],
+      "chest":    ["sternum_cave", "rib_cage_crush", "chest_concave", "breastbone_shatter"],
+      "abdomen":  ["organ_burst", "viscera_compress", "gut_cave", "bile_surge"],
+      "arm":      ["ulna_snap", "arm_cave", "radius_shatter", "elbow_crush"],
+      "hand":     ["knuckle_shatter", "hand_pulp", "finger_crack_chain", "metacarpal_crush"],
+      "leg":      ["femur_snap", "leg_cave", "tibia_crack", "thigh_crush"],
+      "knee":     ["kneecap_shatter", "meniscus_burst", "joint_cave", "knee_pulp"],
+      "foot":     ["heel_shatter", "arch_crush", "metatarsal_snap", "foot_cave"]
+    },
+    "hit": {
+      "head":     ["skull_thud", "helm_ring", "concussive_ring", "ear_rattle"],
+      "neck":     ["neck_thud", "throat_press", "collar_blow", "nape_jar"],
+      "shoulder": ["shoulder_thud", "recoil_stagger", "pauldron_ring", "arm_knock"],
+      "chest":    ["chest_thud", "breath_knock", "plate_boom", "winded_stagger"],
+      "abdomen":  ["belly_thud", "gut_punch", "hunch_wince", "side_jar"],
+      "arm":      ["arm_thud", "forearm_knock", "numb_tingle", "block_bruise"],
+      "hand":     ["hand_thud", "knuckle_jar", "grip_numb", "palm_bruise"],
+      "leg":      ["shin_knock", "thigh_thud", "muscle_bruise", "leg_numb"],
+      "knee":     ["knee_ring", "joint_knock", "buckle_stagger", "cartilage_press"],
+      "foot":     ["foot_thud", "arch_press", "toe_crunch", "boot_jar"]
+    }
+  },
+  "fire": {
+    "crit": {
+      "head":     ["flash_blind", "hair_immolate", "face_char", "scalp_blaze"],
+      "neck":     ["throat_sear", "neck_blister_burst", "collar_inferno", "jugular_heat"],
+      "shoulder": ["shoulder_char", "pauldron_melt", "sinew_sear", "blaze_shoulder"],
+      "chest":    ["chest_inferno", "plate_glow", "lung_scorch", "rib_brand"],
+      "abdomen":  ["gut_immolate", "belt_ignite", "torso_blaze", "organ_scorch"],
+      "arm":      ["arm_immolate", "sleeve_inferno", "skin_peel", "forearm_blaze"],
+      "hand":     ["hand_char", "finger_blaze", "glove_inferno", "palm_sear"],
+      "leg":      ["thigh_immolate", "pant_ignite", "leg_scorch", "shin_blaze"],
+      "knee":     ["knee_blister_burst", "joint_scorch", "ligament_sear", "knee_blaze"],
+      "foot":     ["boot_ignite", "sole_char", "foot_immolate", "ankle_blaze"]
+    },
+    "hit": {
+      "head":     ["cheek_singe", "brow_scorch", "hair_smoke", "flash_heat"],
+      "neck":     ["neck_singe", "collar_char", "throat_heat", "nape_scorch"],
+      "shoulder": ["shoulder_singe", "pauldron_heat", "sleeve_smoke", "arm_sear"],
+      "chest":    ["chest_singe", "plate_heat", "rib_warm", "breastplate_smoke"],
+      "abdomen":  ["belly_singe", "sash_scorch", "side_heat", "gut_sear"],
+      "arm":      ["arm_singe", "forearm_heat", "sleeve_scorch", "skin_smoke"],
+      "hand":     ["hand_singe", "glove_char", "finger_heat", "palm_scorch"],
+      "leg":      ["thigh_singe", "pant_scorch", "shin_heat", "leg_smoke"],
+      "knee":     ["knee_singe", "joint_heat", "kneecap_scorch", "cartilage_smoke"],
+      "foot":     ["boot_singe", "sole_heat", "toe_scorch", "ankle_sear"]
+    }
+  },
+  "cold": {
+    "crit": {
+      "head":     ["frost_skull", "ice_mask", "frozen_shriek", "frost_bite_face"],
+      "neck":     ["neck_freeze", "frozen_throat", "ice_collar", "jugular_frost"],
+      "shoulder": ["shoulder_freeze", "frozen_pauldron", "ice_shoulder", "frost_socket"],
+      "chest":    ["chest_freeze", "lung_frost", "ice_plate", "rib_freeze"],
+      "abdomen":  ["gut_freeze", "frozen_torso", "ice_belly", "organ_frost"],
+      "arm":      ["arm_freeze", "forearm_frost", "ice_sleeve", "frozen_bicep"],
+      "hand":     ["hand_freeze", "finger_frost_crack", "ice_glove", "frozen_grip"],
+      "leg":      ["leg_freeze", "thigh_frost", "ice_thigh", "frozen_shin"],
+      "knee":     ["knee_freeze", "frozen_joint", "ice_kneecap", "frost_lock"],
+      "foot":     ["foot_freeze", "frozen_arch", "ice_boot", "frost_toe"]
+    },
+    "hit": {
+      "head":     ["frost_sting", "cold_wash", "icy_brow", "chill_rattle"],
+      "neck":     ["neck_chill", "cold_collar", "frost_nape", "ice_throat"],
+      "shoulder": ["shoulder_chill", "cold_pauldron", "frost_arm", "icy_shrug"],
+      "chest":    ["chest_chill", "cold_plate", "frost_rib", "icy_breath_catch"],
+      "abdomen":  ["belly_chill", "cold_belly", "frost_side", "icy_hunch"],
+      "arm":      ["arm_chill", "cold_forearm", "frost_sleeve", "icy_numb"],
+      "hand":     ["hand_chill", "cold_glove", "frost_knuckle", "icy_grip"],
+      "leg":      ["leg_chill", "cold_thigh", "frost_shin", "icy_numb_leg"],
+      "knee":     ["knee_chill", "cold_joint", "frost_patella", "icy_knee"],
+      "foot":     ["foot_chill", "cold_boot", "frost_toe", "icy_arch"]
+    }
+  },
+  "lightning": {
+    "crit": {
+      "head":     ["skull_arc", "eye_flash", "hair_smoke_crown", "cerebral_jolt"],
+      "neck":     ["neck_arc", "spine_flash", "throat_jolt", "vertebra_shock"],
+      "shoulder": ["shoulder_arc", "muscle_spasm", "pauldron_melt_spark", "arm_lock"],
+      "chest":    ["heart_stutter", "rib_arc", "chest_flash", "lung_seizure"],
+      "abdomen":  ["gut_arc", "organ_spasm", "belly_flash", "torso_seizure"],
+      "arm":      ["arm_arc", "forearm_flash", "muscle_lock", "vein_glow"],
+      "hand":     ["hand_arc", "finger_lock", "palm_flash", "grip_spasm"],
+      "leg":      ["leg_arc", "thigh_flash", "muscle_lock_leg", "shin_glow"],
+      "knee":     ["knee_arc", "joint_flash", "kneecap_glow", "leg_lock"],
+      "foot":     ["foot_arc", "sole_flash", "toe_glow", "arch_lock"]
+    },
+    "hit": {
+      "head":     ["static_rattle", "hair_rise", "brow_sting", "skull_tingle"],
+      "neck":     ["neck_tingle", "collar_spark", "throat_buzz", "nape_jolt"],
+      "shoulder": ["shoulder_spark", "pauldron_buzz", "arm_tingle", "static_shrug"],
+      "chest":    ["chest_buzz", "plate_spark", "rib_tingle", "static_breath"],
+      "abdomen":  ["belly_buzz", "side_spark", "gut_tingle", "torso_static"],
+      "arm":      ["arm_buzz", "forearm_spark", "sleeve_tingle", "static_arm"],
+      "hand":     ["hand_buzz", "finger_spark", "glove_tingle", "static_grip"],
+      "leg":      ["leg_buzz", "thigh_spark", "shin_tingle", "static_leg"],
+      "knee":     ["knee_buzz", "joint_spark", "kneecap_tingle", "static_knee"],
+      "foot":     ["foot_buzz", "sole_spark", "toe_tingle", "static_arch"]
+    }
+  },
+  "acid": {
+    "crit": {
+      "head":     ["face_dissolve", "eye_acid", "skull_hiss", "cheek_melt"],
+      "neck":     ["neck_dissolve", "throat_acid", "collar_melt", "jugular_hiss"],
+      "shoulder": ["shoulder_dissolve", "pauldron_acid_eat", "sinew_hiss", "armor_melt"],
+      "chest":    ["chest_dissolve", "rib_acid", "plate_melt", "lung_hiss"],
+      "abdomen":  ["gut_dissolve", "organ_acid", "torso_melt", "belly_hiss"],
+      "arm":      ["arm_dissolve", "forearm_acid", "sleeve_melt", "bone_expose"],
+      "hand":     ["hand_dissolve", "finger_acid", "glove_melt", "palm_hiss"],
+      "leg":      ["leg_dissolve", "thigh_acid", "pant_melt", "shin_hiss"],
+      "knee":     ["knee_dissolve", "joint_acid", "kneecap_melt", "cartilage_hiss"],
+      "foot":     ["foot_dissolve", "boot_acid", "sole_melt", "toe_hiss"]
+    },
+    "hit": {
+      "head":     ["cheek_hiss", "brow_sting", "face_spit", "neck_drip"],
+      "neck":     ["collar_hiss", "throat_sting", "neck_drip", "nape_sting"],
+      "shoulder": ["shoulder_hiss", "pauldron_sting", "sleeve_drip", "arm_sting"],
+      "chest":    ["chest_hiss", "plate_sting", "rib_drip", "lung_sting"],
+      "abdomen":  ["belly_hiss", "side_sting", "gut_drip", "torso_sting"],
+      "arm":      ["arm_hiss", "forearm_sting", "sleeve_drip_arm", "vein_sting"],
+      "hand":     ["hand_hiss", "glove_sting", "finger_drip", "palm_sting"],
+      "leg":      ["leg_hiss", "thigh_sting", "pant_drip", "shin_sting"],
+      "knee":     ["knee_hiss", "joint_sting", "kneecap_drip", "cartilage_sting"],
+      "foot":     ["foot_hiss", "boot_sting", "sole_drip", "toe_sting"]
+    }
+  },
+  "poison": {
+    "crit": {
+      "head":     ["venom_flood_brain", "seizure_snap", "foam_burst", "toxin_crown"],
+      "neck":     ["jugular_venom", "neck_toxin_burst", "carotid_poison", "throat_venom"],
+      "shoulder": ["shoulder_venom_surge", "toxin_shoulder", "poison_deltoid", "venom_socket"],
+      "chest":    ["lung_toxin", "heart_venom", "chest_poison_surge", "rib_toxin"],
+      "abdomen":  ["organ_venom", "gut_toxin_surge", "belly_poison", "viscera_venom"],
+      "arm":      ["arm_venom_surge", "forearm_toxin", "vein_poison", "bicep_venom"],
+      "hand":     ["hand_venom", "finger_toxin", "palm_poison_surge", "grip_venom"],
+      "leg":      ["thigh_venom", "leg_toxin_surge", "calf_poison", "shin_venom"],
+      "knee":     ["knee_venom", "joint_toxin", "kneecap_poison", "cartilage_venom"],
+      "foot":     ["foot_venom", "arch_toxin", "toe_poison", "sole_venom"]
+    },
+    "hit": {
+      "head":     ["brow_sting_toxin", "nausea_rush", "toxin_haze", "head_poison_drip"],
+      "neck":     ["neck_sting_toxin", "collar_drip", "throat_toxin", "nape_poison"],
+      "shoulder": ["shoulder_sting_toxin", "arm_drip", "pauldron_toxin", "deltoid_poison"],
+      "chest":    ["chest_sting_toxin", "plate_drip", "rib_toxin", "lung_poison"],
+      "abdomen":  ["belly_sting_toxin", "side_drip", "gut_toxin", "organ_poison"],
+      "arm":      ["arm_sting_toxin", "forearm_drip", "vein_toxin", "bicep_poison"],
+      "hand":     ["hand_sting_toxin", "glove_drip", "finger_toxin", "palm_poison"],
+      "leg":      ["leg_sting_toxin", "thigh_drip", "shin_toxin", "calf_poison"],
+      "knee":     ["knee_sting_toxin", "joint_drip", "kneecap_toxin", "cartilage_poison"],
+      "foot":     ["foot_sting_toxin", "boot_drip", "toe_toxin", "arch_poison"]
+    }
+  },
+  "necrotic": {
+    "crit": {
+      "head":     ["skull_blacken", "eye_wither", "flesh_rot_head", "necrosis_crown"],
+      "neck":     ["neck_wither", "throat_rot", "collar_blacken", "necrosis_neck"],
+      "shoulder": ["shoulder_rot", "flesh_wither_shoulder", "pauldron_decay", "necrosis_arm"],
+      "chest":    ["chest_rot", "lung_wither", "rib_blacken", "necrosis_chest"],
+      "abdomen":  ["gut_rot", "organ_wither", "belly_blacken", "necrosis_torso"],
+      "arm":      ["arm_rot", "forearm_wither", "skin_blacken_arm", "necrosis_limb"],
+      "hand":     ["hand_rot", "finger_wither", "palm_blacken", "necrosis_hand"],
+      "leg":      ["leg_rot", "thigh_wither", "shin_blacken", "necrosis_leg"],
+      "knee":     ["knee_rot", "joint_wither", "kneecap_blacken", "necrosis_knee"],
+      "foot":     ["foot_rot", "arch_wither", "toe_blacken", "necrosis_foot"]
+    },
+    "hit": {
+      "head":     ["skull_ash", "cheek_dull", "flesh_pale", "death_chill_face"],
+      "neck":     ["neck_ash", "collar_pale", "throat_chill", "nape_wither"],
+      "shoulder": ["shoulder_ash", "pauldron_dull", "arm_pale", "death_chill_shoulder"],
+      "chest":    ["chest_ash", "plate_dull", "rib_pale", "death_chill_chest"],
+      "abdomen":  ["belly_ash", "side_pale", "gut_chill", "death_chill_torso"],
+      "arm":      ["arm_ash", "forearm_pale", "skin_dull_arm", "death_chill_arm"],
+      "hand":     ["hand_ash", "glove_pale", "finger_dull", "death_chill_hand"],
+      "leg":      ["leg_ash", "thigh_pale", "shin_dull", "death_chill_leg"],
+      "knee":     ["knee_ash", "joint_pale", "kneecap_dull", "death_chill_knee"],
+      "foot":     ["foot_ash", "arch_pale", "toe_dull", "death_chill_foot"]
+    }
+  },
+  "radiant": {
+    "crit": {
+      "head":     ["divine_flash_skull", "eye_blaze", "halo_sear", "sacred_obliterate"],
+      "neck":     ["neck_divine_burn", "throat_radiance", "collar_blaze", "sacred_neck"],
+      "shoulder": ["shoulder_divine_burn", "pauldron_blaze", "sacred_sear_arm", "radiance_socket"],
+      "chest":    ["chest_divine_burn", "rib_blaze", "sacred_chest", "lung_radiance"],
+      "abdomen":  ["gut_divine_burn", "organ_blaze", "sacred_torso", "belly_radiance"],
+      "arm":      ["arm_divine_burn", "forearm_blaze", "sacred_arm", "radiance_limb"],
+      "hand":     ["hand_divine_burn", "finger_blaze", "sacred_hand", "palm_radiance"],
+      "leg":      ["leg_divine_burn", "thigh_blaze", "sacred_leg", "radiance_limb_leg"],
+      "knee":     ["knee_divine_burn", "joint_blaze", "sacred_knee", "radiance_joint"],
+      "foot":     ["foot_divine_burn", "arch_blaze", "sacred_foot", "radiance_sole"]
+    },
+    "hit": {
+      "head":     ["halo_sting", "divine_tap", "sacred_flash", "radiance_brow"],
+      "neck":     ["neck_divine_sting", "collar_glow", "throat_radiance_sting", "nape_sacred"],
+      "shoulder": ["shoulder_glow", "pauldron_sacred", "arm_divine_sting", "radiance_shoulder"],
+      "chest":    ["chest_glow", "plate_sacred", "rib_divine_sting", "lung_radiance_sting"],
+      "abdomen":  ["belly_glow", "side_sacred", "gut_divine_sting", "torso_radiance"],
+      "arm":      ["arm_glow", "forearm_sacred", "skin_divine_sting", "radiance_arm_sting"],
+      "hand":     ["hand_glow", "glove_sacred", "finger_divine_sting", "palm_radiance_sting"],
+      "leg":      ["leg_glow", "thigh_sacred", "shin_divine_sting", "radiance_leg_sting"],
+      "knee":     ["knee_glow", "joint_sacred", "kneecap_divine_sting", "radiance_knee_sting"],
+      "foot":     ["foot_glow", "arch_sacred", "toe_divine_sting", "sole_radiance"]
+    }
+  },
+  "psychic": {
+    "crit": {
+      "head":     ["mind_shatter", "psyche_blast", "thought_rupture", "sanity_crack"],
+      "neck":     ["nerve_blast", "cervical_psyche", "spinal_mind_burst", "neck_psyche"],
+      "shoulder": ["shoulder_psyche_burst", "motor_nerve_shock", "psychic_deltoid", "arm_mind_burst"],
+      "chest":    ["heart_psyche_burst", "lung_mind_rupture", "chest_psyche", "rib_mind_burst"],
+      "abdomen":  ["gut_psyche_burst", "organ_mind_rupture", "belly_psyche", "torso_mind_burst"],
+      "arm":      ["arm_psyche_burst", "forearm_mind_rupture", "nerve_arm_shock", "limb_psyche"],
+      "hand":     ["hand_psyche_burst", "finger_mind_rupture", "nerve_hand_shock", "palm_psyche"],
+      "leg":      ["leg_psyche_burst", "thigh_mind_rupture", "nerve_leg_shock", "limb_mind_burst"],
+      "knee":     ["knee_psyche_burst", "joint_mind_rupture", "nerve_knee_shock", "kneecap_psyche"],
+      "foot":     ["foot_psyche_burst", "arch_mind_rupture", "nerve_foot_shock", "sole_psyche"]
+    },
+    "hit": {
+      "head":     ["mind_sting", "thought_blur", "focus_crack", "psyche_static"],
+      "neck":     ["nerve_sting", "nape_psyche", "collar_mind_blur", "throat_psyche_static"],
+      "shoulder": ["shoulder_psyche_sting", "motor_blur", "arm_mind_static", "psychic_shoulder_sting"],
+      "chest":    ["chest_psyche_sting", "heart_blur", "rib_mind_static", "lung_psyche_sting"],
+      "abdomen":  ["gut_psyche_sting", "organ_blur", "belly_mind_static", "torso_psyche_sting"],
+      "arm":      ["arm_psyche_sting", "forearm_blur", "nerve_arm_static", "limb_psyche_sting"],
+      "hand":     ["hand_psyche_sting", "finger_blur", "palm_mind_static", "grip_psyche_sting"],
+      "leg":      ["leg_psyche_sting", "thigh_blur", "shin_mind_static", "limb_psyche_sting_leg"],
+      "knee":     ["knee_psyche_sting", "joint_blur", "kneecap_mind_static", "cartilage_psyche_sting"],
+      "foot":     ["foot_psyche_sting", "arch_blur", "toe_mind_static", "sole_psyche_sting"]
+    }
+  },
+  "thunder": {
+    "crit": {
+      "head":     ["skull_shockwave", "eardrum_burst", "jaw_concuss", "sonic_skull"],
+      "neck":     ["neck_shockwave", "vertebra_concuss", "throat_blast", "sonic_neck"],
+      "shoulder": ["shoulder_shockwave", "joint_concuss", "pauldron_blast", "sonic_shoulder"],
+      "chest":    ["chest_shockwave", "lung_concuss", "rib_blast", "sonic_chest"],
+      "abdomen":  ["gut_shockwave", "organ_concuss", "belly_blast", "sonic_torso"],
+      "arm":      ["arm_shockwave", "forearm_concuss", "sleeve_blast", "sonic_arm"],
+      "hand":     ["hand_shockwave", "knuckle_concuss", "palm_blast", "sonic_hand"],
+      "leg":      ["leg_shockwave", "thigh_concuss", "shin_blast", "sonic_leg"],
+      "knee":     ["knee_shockwave", "joint_concuss_knee", "kneecap_blast", "sonic_knee"],
+      "foot":     ["foot_shockwave", "arch_concuss", "toe_blast", "sonic_foot"]
+    },
+    "hit": {
+      "head":     ["skull_ring", "ear_ring", "jaw_rattle", "sonic_tap"],
+      "neck":     ["neck_ring", "collar_rattle", "throat_boom", "nape_rattle"],
+      "shoulder": ["shoulder_ring", "pauldron_rattle", "arm_ring", "sonic_shoulder_tap"],
+      "chest":    ["chest_ring", "plate_rattle", "rib_ring", "lung_rattle"],
+      "abdomen":  ["belly_ring", "side_rattle", "gut_boom", "torso_ring"],
+      "arm":      ["arm_ring", "forearm_rattle", "sleeve_ring", "sonic_arm_tap"],
+      "hand":     ["hand_ring", "glove_rattle", "finger_ring", "palm_boom"],
+      "leg":      ["leg_ring", "thigh_rattle", "shin_ring", "sonic_leg_tap"],
+      "knee":     ["knee_ring", "joint_rattle_knee", "kneecap_ring", "sonic_knee_tap"],
+      "foot":     ["foot_ring", "arch_rattle", "toe_ring", "boot_boom"]
+    }
+  },
+  "force": {
+    "crit": {
+      "head":     ["skull_crush_force", "mind_blow", "arcane_skull", "force_head_burst"],
+      "neck":     ["neck_force_crush", "spine_force", "arcane_neck", "force_throat_burst"],
+      "shoulder": ["shoulder_force_crush", "joint_force", "arcane_shoulder", "force_arm_burst"],
+      "chest":    ["chest_force_crush", "rib_force", "arcane_chest", "force_lung_burst"],
+      "abdomen":  ["gut_force_crush", "organ_force", "arcane_torso", "force_belly_burst"],
+      "arm":      ["arm_force_crush", "bone_force", "arcane_arm", "force_limb_burst"],
+      "hand":     ["hand_force_crush", "knuckle_force", "arcane_hand", "force_palm_burst"],
+      "leg":      ["leg_force_crush", "femur_force", "arcane_leg", "force_limb_burst_leg"],
+      "knee":     ["knee_force_crush", "joint_force_knee", "arcane_knee", "force_kneecap_burst"],
+      "foot":     ["foot_force_crush", "arch_force", "arcane_foot", "force_sole_burst"]
+    },
+    "hit": {
+      "head":     ["skull_press", "arcane_tap", "force_tap_head", "mind_press"],
+      "neck":     ["neck_press", "arcane_tap_neck", "force_tap_neck", "spine_press"],
+      "shoulder": ["shoulder_press", "arcane_tap_shoulder", "force_tap_shoulder", "joint_press"],
+      "chest":    ["chest_press", "arcane_tap_chest", "force_tap_chest", "rib_press"],
+      "abdomen":  ["belly_press", "arcane_tap_torso", "force_tap_belly", "organ_press"],
+      "arm":      ["arm_press", "arcane_tap_arm", "force_tap_arm", "bone_press"],
+      "hand":     ["hand_press", "arcane_tap_hand", "force_tap_hand", "knuckle_press"],
+      "leg":      ["leg_press", "arcane_tap_leg", "force_tap_leg", "femur_press"],
+      "knee":     ["knee_press", "arcane_tap_knee", "force_tap_knee", "joint_press_knee"],
+      "foot":     ["foot_press", "arcane_tap_foot", "force_tap_foot", "arch_press_force"]
+    }
+  }
+}
