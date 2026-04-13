@@ -14,7 +14,7 @@
  *   - All external I/O modules (Prisma, OpenAI, memory) are fully mocked
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CampaignContext } from "@/lib/memory/context";
 
 // ---------------------------------------------------------------------------
@@ -77,16 +77,29 @@ vi.mock("@/lib/db/prisma", () => ({
     },
     encounter: {
       findFirst: vi.fn(),
+      update: vi.fn(),
     },
     combatant: {
       update: vi.fn(),
     },
+    $transaction: vi.fn((p) => Promise.all(p)),
   },
 }));
 
 vi.mock("@/lib/rules/quests", () => ({
   generateQuest: vi.fn(),
 }));
+
+// Spread the real combat module but replace the two dice-rolling functions
+// so resolveAttack tests are deterministic (no random misses).
+vi.mock("@/lib/rules/combat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rules/combat")>();
+  return {
+    ...actual,
+    computeConsequences: vi.fn(),
+    deriveCombatBeat: vi.fn(),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Imports — after mocks are set up
@@ -99,6 +112,7 @@ import { streamNarrative } from "@/lib/ai/narrator";
 import { prisma } from "@/lib/db/prisma";
 import { generateNPC } from "@/lib/rules/npc";
 import { generateQuest } from "@/lib/rules/quests";
+import { computeConsequences, deriveCombatBeat } from "@/lib/rules/combat";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -138,6 +152,33 @@ const mockGetItemInfo = vi.mocked(getItemInfo);
 const mockPrisma = vi.mocked(prisma, true);
 const mockGenerateNPC = vi.mocked(generateNPC);
 const mockGenerateQuest = vi.mocked(generateQuest);
+const mockComputeConsequences = vi.mocked(computeConsequences);
+const mockDeriveCombatBeat = vi.mocked(deriveCombatBeat);
+
+/** Deterministic consequence fixture — always a hit, 5 slashing to chest. */
+const MOCK_CONSEQUENCES = {
+  combat_facts: {
+    attacker:       "Thalindra",
+    defender:       "Goblin",
+    weapon:         "1d8",
+    damage:         5,
+    damage_type:    "slashing" as const,
+    hp_before:      7,
+    hp_after:       2,
+    maxHp:          7,
+    is_crit:        false,
+    is_fumble:      false,
+    hit_location:   "chest" as const,
+    status_applied: [],
+    overkill:       0,
+  },
+  narrative_tags:       ["gash", "blood_veil", "stagger"],
+  narrative_intensity:  0.6,
+  combat_beat:          "first_blood" as const,
+  style_dsl:            { voice: "active", verbs: "hard", adverbs: "low", gore_level: "PG13" as const },
+  suggested_senses:     ["sight", "sound"],
+  suggested_actions:    [],
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -753,6 +794,7 @@ describe("generateAndTrackQuest tool", () => {
 describe("resolveAttack tool", () => {
   /** Shared encounter fixture — player vs. one goblin enemy. */
   const mockEncounter = {
+
     id: "enc-001",
     campaignId: CAMPAIGN_ID,
     status: "active",
@@ -784,7 +826,11 @@ describe("resolveAttack tool", () => {
 
   beforeEach(() => {
     mockPrisma.encounter.findFirst.mockResolvedValue(mockEncounter as any);
+    mockPrisma.encounter.update.mockResolvedValue({} as any);
     mockPrisma.combatant.update.mockResolvedValue({} as any);
+    // Deterministic Consequences Engine — no dice, always a 5-damage hit to chest.
+    mockComputeConsequences.mockReturnValue(MOCK_CONSEQUENCES as any);
+    mockDeriveCombatBeat.mockReturnValue("first_blood");
   });
 
   it("fetches the active encounter for the campaign", async () => {

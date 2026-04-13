@@ -78,6 +78,7 @@ model Encounter {
   round            Int      @default(1)
   currentTurnIndex Int      @default(0)
   // Zero-based index into combatants ordered by initiativeTotal DESC.
+  totalDamageDealt Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

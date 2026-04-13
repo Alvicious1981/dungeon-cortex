@@ -608,7 +608,7 @@ function buildTools(campaignId: string) {
             encounter.status === "active" ? "active" : "resolved";
           const snapshot: EncounterSnapshot = {
             round: encounter.round,
-            totalDamageDealt: (encounter as any).totalDamageDealt ?? 0,
+            totalDamageDealt: encounter.totalDamageDealt,
             status: encStatus,
             currentBeat: "opening",
             defenderId: targetId,
@@ -649,13 +649,20 @@ function buildTools(campaignId: string) {
           );
           const finalConsequences = { ...consequences, combat_beat: finalBeat };
 
-          // Persist HP change only when damage was dealt
+          // Persist HP change and encounter-wide damage total only when damage was dealt.
+          // This ensures the "Code is Law" pillar: state must be persisted before narration.
           const { hp_after, damage } = consequences.combat_facts;
           if (damage > 0) {
-            await prisma.combatant.update({
-              where: { id: targetId },
-              data: { hp: hp_after },
-            });
+            await prisma.$transaction([
+              prisma.combatant.update({
+                where: { id: targetId },
+                data: { hp: hp_after },
+              }),
+              prisma.encounter.update({
+                where: { id: encounter.id },
+                data: { totalDamageDealt: { increment: damage } },
+              }),
+            ]);
           }
 
           return JSON.stringify({ ok: true, ...finalConsequences });

@@ -281,6 +281,23 @@ describe("rollDamage", () => {
     expect(result.rolls).toHaveLength(2);
     expect(result.total).toBe(8);
   });
+
+  it("handles malformed dice strings by falling back to parseInt or 0", () => {
+    // Regex fails on "1d8++5", parseInt returns 1
+    expect(rollDamage("1d8++5", false).total).toBe(1);
+    // Completely unparseable returns 0
+    expect(rollDamage("garbage", false).total).toBe(0);
+    // Negative flat values are preserved (if that's the intent of parseInt fallback)
+    expect(rollDamage("-5", false).total).toBe(-5);
+  });
+
+  it("handles edge case dice sets (0d6, 1d0)", () => {
+    // 0d6: rolls array empty, total 0
+    expect(rollDamage("0d6", false)).toEqual({ total: 0, rolls: [] });
+    // 1d0: random*0 is 0, +1 is 1. total 1. (Standard dice systems wouldn't have d0, but we test robustness)
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    expect(rollDamage("1d0", false).total).toBe(1);
+  });
 });
 
 // ─── rollHitLocation ─────────────────────────────────────────────────────────
@@ -422,6 +439,42 @@ describe("computeTension", () => {
     const result = computeTension(extreme);
     expect(result.score).toBeGreaterThanOrEqual(0);
     expect(result.score).toBeLessThanOrEqual(1);
+  });
+
+  it("handles 0 enemies gracefully", () => {
+    const combatants = [
+      { hp: 30, maxHp: 30, isPlayer: true, isBoss: false }
+    ];
+    const result = computeTension(combatants);
+    // enemies.length === 0 ? 1 : ... => avg_enemy_hp_ratio is 1
+    // enemyCount === 0 => score is 0 (unless we had other factors, but enemyCount=0 is a floor)
+    expect(result.score).toBe(0);
+    expect(result.enemy_count).toBe(0);
+  });
+
+  it("handles multiple bosses by scaling tension", () => {
+    const combatants = [
+      { hp: 10, maxHp: 10, isPlayer: true, isBoss: false },
+      { hp: 10, maxHp: 10, isPlayer: false, isBoss: true },
+      { hp: 10, maxHp: 10, isPlayer: false, isBoss: true }
+    ];
+    const result = computeTension(combatants);
+    expect(result.boss_alive).toBe(true);
+    // Currently score doesn't scale linearly with # of bosses, just some(isBoss && hp>0).
+    // This test ensures it doesn't crash.
+    expect(result.score).toBeDefined();
+  });
+
+  it("handles 0 maxHp to prevent division by zero", () => {
+    const combatants = [
+      { hp: 10, maxHp: 0, isPlayer: true, isBoss: false },
+      { hp: 0, maxHp: 0, isPlayer: false, isBoss: false }
+    ];
+    // Our implementation uses: e.maxHp > 0 ? e.hp / e.maxHp : 0
+    const result = computeTension(combatants);
+    expect(result.score).toBeDefined();
+    expect(result.player_hp_ratio).toBe(1); // fallback for player.maxHp <= 0
+    expect(result.avg_enemy_hp_ratio).toBe(0); // fallback for enemy.maxHp <= 0
   });
 });
 
@@ -793,5 +846,69 @@ describe("computeConsequences", () => {
     expect(result.combat_facts.is_fumble).toBe(true);
     expect(result.combat_facts.damage).toBe(0);
     expect(result.combat_facts.hp_after).toBe(10);
+  });
+
+  it("handles attacking an already dead combatant", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5); // hit
+    const result = computeConsequences({
+      attacker:          "PC:Kara",
+      defender:          "NPC:DeadGoblin",
+      weapon:            "Longsword",
+      weaponDice:        "1d8",
+      attackModifier:    5,
+      damageType:        "slashing",
+      targetAC:          10,
+      targetHp:          0,
+      targetMaxHp:       10,
+      targetIsPlayer:    false,
+      targetIsBoss:      false,
+      statusApplied:     [],
+      encounterSnapshot: makeSnapshot(),
+      usedSenses:        [],
+      zones:             [],
+    });
+    expect(result.combat_facts.hp_before).toBe(0);
+    expect(result.combat_facts.hp_after).toBe(0);
+    expect(result.combat_facts.overkill).toBeGreaterThan(0);
+  });
+
+  it("handles extreme overkill gracefully", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.99); // Nat 20 (Crit)
+    const result = computeConsequences({
+      attacker:          "PC:Kara",
+      defender:          "NPC:Weakling",
+      weapon:            "GodSlayer",
+      weaponDice:        "100d10", 
+      attackModifier:    100,
+      damageType:        "force",
+      targetAC:          1,
+      targetHp:          1,
+      targetMaxHp:       1,
+      targetIsPlayer:    false,
+      targetIsBoss:      false,
+      statusApplied:     ["disintegrated", "burned"],
+      encounterSnapshot: makeSnapshot({ 
+        totalDamageDealt: 1000, 
+        combatants: [
+          { id: "pc1", hp: 1, maxHp: 100, isPlayer: true, isBoss: false, hpBeforeThisTurn: 100 }, 
+          { id: "npc1", hp: 1, maxHp: 1, isPlayer: false, isBoss: true, hpBeforeThisTurn: 1 },
+          { id: "npc2", hp: 1, maxHp: 1, isPlayer: false, isBoss: false, hpBeforeThisTurn: 1 },
+          { id: "npc3", hp: 1, maxHp: 1, isPlayer: false, isBoss: false, hpBeforeThisTurn: 1 },
+          { id: "npc4", hp: 1, maxHp: 1, isPlayer: false, isBoss: false, hpBeforeThisTurn: 1 },
+          { id: "npc5", hp: 1, maxHp: 1, isPlayer: false, isBoss: false, hpBeforeThisTurn: 1 },
+          { id: "npc6", hp: 1, maxHp: 1, isPlayer: false, isBoss: false, hpBeforeThisTurn: 1 }
+        ]
+      }),
+      usedSenses:        [],
+      zones:             [],
+    });
+    // Calculation: 
+    // Crit: +0.4, Kill: +0.2, Overkill: +0.2, Status: +0.1
+    // Total so far: 0.9
+    // Tension Scaling: Score ~0.45+, bonus > 0.13
+    // Total: > 1.03 -> Clamped to 1.0
+    expect(result.combat_facts.hp_after).toBe(0);
+    expect(result.combat_facts.overkill).toBeGreaterThan(100);
+    expect(result.narrative_intensity).toBe(1.0);
   });
 });

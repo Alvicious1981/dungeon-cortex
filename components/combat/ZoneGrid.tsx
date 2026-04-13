@@ -237,6 +237,7 @@ export const ZoneGrid = memo(function ZoneGrid({
 
   return (
     <div
+      data-testid="zone-grid"
       className="overflow-auto rounded-lg p-1"
       style={{
         background: "rgba(6,6,14,0.85)",
