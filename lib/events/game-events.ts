@@ -24,7 +24,37 @@ export type GameEventType =
   | "ENCOUNTER_START"      // Combat encounter begins; InitiativeTracker dispatches on mount
   | "TURN_ADVANCE"         // A combatant's turn begins (non-round-boundary)
   | "ROUND_ADVANCE"        // Turn index wrapped; a new combat round begins
-  | "COMBAT_CONSEQUENCE";  // Full Consequences Engine payload from a resolved attack
+  | "COMBAT_CONSEQUENCE"   // Full Consequences Engine payload from a resolved attack
+  | "LOOT_GENERATED";      // generateLoot tool completed; LootPayload ready for display
+
+/**
+ * Payload emitted when the `generateLoot` AI tool completes.
+ * Carries the full LootPayload so the VTT can show the Spoils of War overlay.
+ * Shape mirrors LootPayload from lib/rules/loot.ts (duplicated to avoid
+ * importing business-logic types into the event transport layer).
+ */
+export interface LootGeneratedPayload {
+  gold: number;
+  mundaneItems: Array<{
+    name: string;
+    type: string;
+    rarity: string;
+    description: string;
+    properties: Record<string, unknown>;
+    valueGP: number;
+  }>;
+  magicItems: Array<{
+    name: string;
+    type: string;
+    rarity: string;
+    description: string;
+    properties: Record<string, unknown>;
+    valueGP: number;
+  }>;
+  totalValue: number;
+  rarityBracket: string;
+  flavorText: string;
+}
 
 /** Rich payload emitted when the Consequences Engine resolves an attack. */
 export interface CombatConsequencePayload {

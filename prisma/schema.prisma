@@ -48,6 +48,9 @@ model Campaign {
   characterId String
   title       String
   status      String   @default("active")
+  /// Party gold pieces. Integer — no fractional currency.
+  /// Mutations ONLY via Prisma transactions from tool execution, never from AI narration.
+  gold        Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

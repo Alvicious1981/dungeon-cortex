@@ -38,6 +38,10 @@ import {
   type DamageType, type EncounterSnapshot,
 } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
+import {
+  GenerateLootInputSchema,
+  generateLootPayload,
+} from "@/lib/rules/loot";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -668,6 +672,67 @@ function buildTools(campaignId: string) {
           return JSON.stringify({ ok: true, ...finalConsequences });
         } catch {
           return JSON.stringify({ error: "Attack resolution failed mechanically." });
+        }
+      },
+    }),
+
+    generateLoot: tool({
+      description:
+        "Generate the loot reward for a resolved combat encounter. " +
+        "MUST be called IMMEDIATELY after an encounter ends with all enemies dead. " +
+        "The Tension Score from the encounter determines rarity and value. " +
+        "Returns gold, mundane items, magic items, and flavor text. " +
+        "You MUST narrate the loot using ONLY the returned item names, descriptions, " +
+        "and gold amount — NEVER invent treasure or modify values.",
+      inputSchema: GenerateLootInputSchema,
+      execute: async ({ encounterId, tensionScore }) => {
+        try {
+          const encounter = await prisma.encounter.findUnique({
+            where: { id: encounterId },
+            include: { combatants: true },
+          });
+          if (!encounter) {
+            return JSON.stringify({ error: "Encounter not found." });
+          }
+
+          const campaign = await prisma.campaign.findUnique({
+            where: { id: campaignId },
+            select: { characterId: true },
+          });
+          if (!campaign) {
+            return JSON.stringify({ error: "Campaign not found." });
+          }
+
+          const enemies = encounter.combatants.filter((c) => !c.isPlayer);
+          const payload = generateLootPayload({
+            tensionScore,
+            enemyCount: enemies.length,
+            avgCR: 1, // simplified — no CR on Combatant; future: SrdMonster lookup by name
+            seed: encounterId,
+          });
+
+          const allItems = [...payload.mundaneItems, ...payload.magicItems];
+          await prisma.$transaction([
+            prisma.campaign.update({
+              where: { id: campaignId },
+              data: { gold: { increment: payload.gold } },
+            }),
+            ...allItems.map((item) =>
+              prisma.inventoryItem.create({
+                data: {
+                  characterId: campaign.characterId,
+                  name: item.name,
+                  type: item.type,
+                  quantity: 1,
+                  properties: item.properties as object,
+                },
+              })
+            ),
+          ]);
+
+          return JSON.stringify({ ok: true, ...payload });
+        } catch {
+          return JSON.stringify({ error: "Loot generation failed mechanically." });
         }
       },
     }),

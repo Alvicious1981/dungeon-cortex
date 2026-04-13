@@ -54,6 +54,16 @@ export interface ContextEncounter {
   currentTurnIndex: number;
   /** Ordered by initiativeTotal DESC — index 0 acts first. */
   combatants: ContextCombatant[];
+  /** Encounter lifecycle status. "active" | "resolved" | "fled". */
+  status?: string;
+  /**
+   * Final Tension Score [0..1] at encounter end.
+   * Populated when the encounter transitions to "resolved".
+   * Used by the formatter to inject the Victory trigger section.
+   */
+  tensionScore?: number | null;
+  /** Resolution reason — "all_enemies_dead" | "fled" | etc. Populated on resolution. */
+  reason?: string;
 }
 
 export interface ContextCombatant {

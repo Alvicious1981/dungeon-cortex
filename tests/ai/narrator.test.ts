@@ -64,9 +64,14 @@ vi.mock("@/lib/db/prisma", () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    campaign: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
     inventoryItem: {
       findMany: vi.fn(),
       update: vi.fn(),
+      create: vi.fn(),
     },
     quest: {
       update: vi.fn(),
@@ -77,6 +82,7 @@ vi.mock("@/lib/db/prisma", () => ({
     },
     encounter: {
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
     combatant: {
@@ -85,6 +91,13 @@ vi.mock("@/lib/db/prisma", () => ({
     $transaction: vi.fn((p) => Promise.all(p)),
   },
 }));
+
+// Keep all loot schemas real but replace the orchestrator so generateLoot
+// tool tests are deterministic without re-testing pure-function math.
+vi.mock("@/lib/rules/loot", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rules/loot")>();
+  return { ...actual, generateLootPayload: vi.fn() };
+});
 
 vi.mock("@/lib/rules/quests", () => ({
   generateQuest: vi.fn(),
@@ -113,6 +126,7 @@ import { prisma } from "@/lib/db/prisma";
 import { generateNPC } from "@/lib/rules/npc";
 import { generateQuest } from "@/lib/rules/quests";
 import { computeConsequences, deriveCombatBeat } from "@/lib/rules/combat";
+import { generateLootPayload } from "@/lib/rules/loot";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -154,6 +168,7 @@ const mockGenerateNPC = vi.mocked(generateNPC);
 const mockGenerateQuest = vi.mocked(generateQuest);
 const mockComputeConsequences = vi.mocked(computeConsequences);
 const mockDeriveCombatBeat = vi.mocked(deriveCombatBeat);
+const mockGenerateLootPayload = vi.mocked(generateLootPayload);
 
 /** Deterministic consequence fixture — always a hit, 5 slashing to chest. */
 const MOCK_CONSEQUENCES = {
@@ -1034,5 +1049,189 @@ describe("resolveAttack tool", () => {
       const updateData = mockPrisma.combatant.update.mock.calls[0][0] as any;
       expect(updateData.data.hp).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateLoot tool
+// ---------------------------------------------------------------------------
+
+describe("generateLoot tool", () => {
+  // Shared encounter fixture: one player, two defeated enemies
+  const mockEncounterForLoot = {
+    id: "enc-loot-01",
+    campaignId: CAMPAIGN_ID,
+    status: "resolved",
+    round: 4,
+    currentTurnIndex: 0,
+    totalDamageDealt: 45,
+    combatants: [
+      {
+        id: "cbt-player",
+        encounterId: "enc-loot-01",
+        name: "Thalindra",
+        isPlayer: true,
+        hp: 20,
+        maxHp: 32,
+        ac: 14,
+        initiativeTotal: 18,
+        conditions: [],
+        zoneId: null,
+      },
+      {
+        id: "cbt-goblin-1",
+        encounterId: "enc-loot-01",
+        name: "Goblin",
+        isPlayer: false,
+        hp: 0,
+        maxHp: 7,
+        ac: 15,
+        initiativeTotal: 12,
+        conditions: [],
+        zoneId: null,
+      },
+      {
+        id: "cbt-goblin-2",
+        encounterId: "enc-loot-01",
+        name: "Goblin",
+        isPlayer: false,
+        hp: 0,
+        maxHp: 7,
+        ac: 15,
+        initiativeTotal: 8,
+        conditions: [],
+        zoneId: null,
+      },
+    ],
+  };
+
+  const mockCampaignForLoot = {
+    id: CAMPAIGN_ID,
+    characterId: "char-1",
+  };
+
+  /** Deterministic loot payload fixture */
+  const MOCK_LOOT_PAYLOAD = {
+    gold: 42,
+    mundaneItems: [
+      {
+        name: "Tarnished copper bracelet",
+        type: "misc" as const,
+        rarity: "mundane" as const,
+        description: "A thin band of hammered copper.",
+        properties: {},
+        valueGP: 1,
+      },
+    ],
+    magicItems: [
+      {
+        name: "Glowstone Pendant",
+        type: "misc" as const,
+        rarity: "uncommon" as const,
+        description: "A pale opal set in iron wire.",
+        properties: { effect: "dim_light_10ft" },
+        valueGP: 50,
+      },
+    ],
+    totalValue: 93,
+    rarityBracket: "uncommon" as const,
+    flavorText: "Something glints beneath the bloodstain.",
+  };
+
+  beforeEach(() => {
+    mockGenerateLootPayload.mockReturnValue(MOCK_LOOT_PAYLOAD);
+    mockPrisma.encounter.findUnique.mockResolvedValue(mockEncounterForLoot as any);
+    mockPrisma.campaign.findUnique.mockResolvedValue(mockCampaignForLoot as any);
+    mockPrisma.campaign.update.mockResolvedValue({} as any);
+    mockPrisma.inventoryItem.create.mockResolvedValue({} as any);
+    mockPrisma.$transaction.mockImplementation((p: any) => Promise.all(p));
+  });
+
+  function invokeLootTool(params: { encounterId: string; tensionScore: number }) {
+    return mockStreamText.mockImplementationOnce(((toolParams: any) => {
+      const execP = toolParams.tools.generateLoot.execute(
+        params,
+        { messages: [], toolCallId: "tc-loot-01", toolName: "generateLoot" }
+      );
+      return {
+        textStream: (async function* () {})(),
+        text: execP.then((r: any) => r),
+      } as any;
+    }) as any);
+  }
+
+  it("returns an error when the encounter is not found", async () => {
+    mockPrisma.encounter.findUnique.mockResolvedValueOnce(null);
+
+    invokeLootTool({ encounterId: "no-such-enc", tensionScore: 0.5 });
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
+    const result = JSON.parse(await textPromise);
+
+    expect(result.error).toBeDefined();
+  });
+
+  it("returns an error when the campaign is not found", async () => {
+    mockPrisma.campaign.findUnique.mockResolvedValueOnce(null);
+
+    invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.5 });
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
+    const result = JSON.parse(await textPromise);
+
+    expect(result.error).toBeDefined();
+  });
+
+  it("calls generateLootPayload with the correct tensionScore and enemy count", async () => {
+    invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.65 });
+    await streamNarrative(CAMPAIGN_ID, "");
+    await new Promise((r) => setTimeout(r, 0)); // flush microtasks
+
+    expect(mockGenerateLootPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tensionScore: 0.65,
+        enemyCount: 2, // two non-player combatants in fixture
+        seed: "enc-loot-01",
+      })
+    );
+  });
+
+  it("increments Campaign.gold via Prisma transaction with the correct amount", async () => {
+    invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.6 });
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
+    await textPromise;
+
+    expect(mockPrisma.$transaction).toHaveBeenCalled();
+    // Verify campaign.update was called with gold increment
+    expect(mockPrisma.campaign.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: CAMPAIGN_ID },
+        data: { gold: { increment: MOCK_LOOT_PAYLOAD.gold } },
+      })
+    );
+  });
+
+  it("creates InventoryItem records for each mundane and magic item", async () => {
+    invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.6 });
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
+    await textPromise;
+
+    const totalItems =
+      MOCK_LOOT_PAYLOAD.mundaneItems.length + MOCK_LOOT_PAYLOAD.magicItems.length;
+    expect(mockPrisma.inventoryItem.create).toHaveBeenCalledTimes(totalItems);
+
+    // Each item should be linked to the campaign's character
+    for (const call of mockPrisma.inventoryItem.create.mock.calls) {
+      expect((call[0] as any).data.characterId).toBe("char-1");
+    }
+  });
+
+  it("returns a valid LootPayload JSON on success", async () => {
+    invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.6 });
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
+    const result = JSON.parse(await textPromise);
+
+    expect(result.ok).toBe(true);
+    expect(result.gold).toBe(MOCK_LOOT_PAYLOAD.gold);
+    expect(result.rarityBracket).toBe(MOCK_LOOT_PAYLOAD.rarityBracket);
+    expect(result.flavorText).toBe(MOCK_LOOT_PAYLOAD.flavorText);
   });
 });

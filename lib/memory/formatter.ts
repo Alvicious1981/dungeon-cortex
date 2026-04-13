@@ -103,6 +103,14 @@ function formatIronLaws(): string {
     "`narrative_intensity` (0.0–1.0 — calibrate prose density: ≥0.8 = visceral full paragraph; 0.4–0.8 = purposeful two sentences; <0.4 = clinical one sentence), " +
     "`style_dsl` (voice=active, verbs=hard, adverbs=low — obey strictly). " +
     "Do not describe any attack as hitting or missing until `resolveAttack` returns. Code is Law.",
+    "",
+    "**Loot Generation Mandate:** When an encounter ends with all enemies dead, " +
+    "you MUST immediately call `generateLoot` with the encounter's encounterId and Tension Score. " +
+    "NEVER invent gold amounts, item names, rarity levels, or magical properties. " +
+    "Narrate the discovered treasure using ONLY the `gold`, `mundaneItems`, and `magicItems` " +
+    "from the tool response. Use the `flavorText` as atmospheric framing. " +
+    "Item names and descriptions must appear verbatim — do not embellish or rename them. " +
+    "Code is Law.",
   ].join("\n");
 }
 
@@ -150,6 +158,20 @@ function formatCharacter(character: CampaignContext["character"]): string {
 function formatEncounter(encounter: CampaignContext["activeEncounter"]): string {
   if (!encounter) {
     return "## Combat\nNo active encounter.";
+  }
+
+  // Victory trigger — injected when encounter resolves with all enemies dead.
+  // The AI MUST call `generateLoot` before narrating any treasure.
+  if (encounter.status === "resolved" && encounter.reason === "all_enemies_dead") {
+    const tensionDisplay =
+      encounter.tensionScore != null ? encounter.tensionScore.toFixed(2) : "unknown";
+    return [
+      "## ⚔️ VICTORY — Encounter Resolved",
+      `All enemies have been defeated. Tension Score at encounter end: **${tensionDisplay}**`,
+      "",
+      `**MANDATORY:** Call \`generateLoot\` with encounterId \`${encounter.id}\` and tensionScore \`${tensionDisplay}\` NOW.`,
+      "Do NOT narrate any loot or treasure until you have the tool response.",
+    ].join("\n");
   }
 
   const lines: string[] = [];

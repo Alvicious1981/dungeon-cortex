@@ -19,21 +19,23 @@
  *   • Never performs state mutations — display only.
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { CombatConsequencePayload } from "@/lib/events/game-events";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CombatConsequencePayload, LootGeneratedPayload } from "@/lib/events/game-events";
+import type { LootPayload } from "@/lib/rules/loot";
 
 // Extracted Components & Logic
-import { 
-  ZoneGrid, 
-  AbstractArena, 
-  CombatantData, 
-  ZoneData 
+import {
+  ZoneGrid,
+  AbstractArena,
+  CombatantData,
+  ZoneData
 } from "./ZoneGrid";
-import { 
-  ConsequenceEntry, 
-  deriveBeat, 
-  BEAT_META 
+import {
+  ConsequenceEntry,
+  deriveBeat,
+  BEAT_META
 } from "./ConsequenceLog";
+import SpoilsOfWar from "./SpoilsOfWar";
 
 
 interface EncounterData {
@@ -60,6 +62,7 @@ interface LoggedConsequence {
 
 export default function CombatVTT({ encounter }: Props) {
   const [consequences, setConsequences] = useState<LoggedConsequence[]>([]);
+  const [lootPayload, setLootPayload] = useState<LootPayload | null>(null);
   const nextConsequenceKey = useRef(1);
 
   // Sorted by initiative descending (server already sorts this way)
@@ -71,6 +74,8 @@ export default function CombatVTT({ encounter }: Props) {
   const beat = deriveBeat(consequencePayloads, encounter.round);
   const beatMeta = BEAT_META[beat];
 
+  const handleClaim = useCallback(() => setLootPayload(null), []);
+
   useEffect(() => {
     function onGameEvent(e: Event) {
       const ev = (e as CustomEvent<{ event: { type: string; payload: unknown } }>).detail.event;
@@ -81,6 +86,10 @@ export default function CombatVTT({ encounter }: Props) {
             ...prev,
           ].slice(0, 8)
         );
+      }
+      if (ev.type === "LOOT_GENERATED") {
+        // Cast LootGeneratedPayload → LootPayload (shapes are identical)
+        setLootPayload(ev.payload as unknown as LootPayload);
       }
     }
 
@@ -98,6 +107,7 @@ export default function CombatVTT({ encounter }: Props) {
         overflow: "hidden",
         boxShadow:
           "0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,220,80,0.04)",
+        position: "relative",
       }}
     >
       {/* ── Header ── */}
@@ -307,6 +317,11 @@ export default function CombatVTT({ encounter }: Props) {
         </div>
 
       </div>
+
+      {/* Spoils of War overlay — mounts when generateLoot tool fires LOOT_GENERATED */}
+      {lootPayload && (
+        <SpoilsOfWar payload={lootPayload} onClaim={handleClaim} />
+      )}
     </section>
   );
 }
