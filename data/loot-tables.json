@@ -149,6 +149,18 @@
       "description": "Half-used. Still soft. Someone cared about their footwear.",
       "type": "misc",
       "valueGP": 1
+    },
+    {
+      "name": "Bottle of Cheap Ink",
+      "description": "Watery and smells of squid. Good enough for writing tallies.",
+      "type": "misc",
+      "valueGP": 2
+    },
+    {
+      "name": "Bandage Roll",
+      "description": "Clean linen strips for binding wounds.",
+      "type": "consumable",
+      "valueGP": 2
     }
   ],
   "uncommon": [
@@ -156,106 +168,171 @@
       "name": "Glowstone Pendant",
       "description": "A pale opal set in iron wire that emits a faint, steady light in darkness.",
       "type": "misc",
-      "properties": { "effect": "dim_light_10ft" },
+      "properties": {
+        "effect": "dim_light_10ft"
+      },
       "valueGP": 50
     },
     {
       "name": "Flask of Everburn Oil",
       "description": "A brass flask whose contents ignite on contact with air but never fully empty.",
       "type": "consumable",
-      "properties": { "effect": "ignite_on_contact", "refills": true },
+      "properties": {
+        "effect": "ignite_on_contact",
+        "refills": true
+      },
       "valueGP": 75
     },
     {
       "name": "Thornweave Gloves",
       "description": "Thin leather gloves stitched with iron wire. The wearer can grip any surface, wet or dry.",
       "type": "armor",
-      "properties": { "effect": "advantage_climb_checks" },
+      "properties": {
+        "effect": "advantage_climb_checks"
+      },
       "valueGP": 60
     },
     {
       "name": "Resonance Stone",
       "description": "A flat grey river stone that hums softly when another creature is within thirty feet.",
       "type": "misc",
-      "properties": { "effect": "sense_presence_30ft" },
+      "properties": {
+        "effect": "sense_presence_30ft"
+      },
       "valueGP": 80
     },
     {
       "name": "Smoked Glass Lens",
       "description": "A small circular lens ground from dark glass. Looking through it reveals heat as a dull red glow.",
       "type": "misc",
-      "properties": { "effect": "see_heat_signatures" },
+      "properties": {
+        "effect": "see_heat_signatures"
+      },
       "valueGP": 90
     },
     {
       "name": "Whisper Wax Earplugs",
       "description": "Small plugs of milky wax that dampen all sound. The wearer becomes immune to loud noise.",
       "type": "misc",
-      "properties": { "effect": "immunity_thunder_damage_deafened" },
+      "properties": {
+        "effect": "immunity_thunder_damage_deafened"
+      },
       "valueGP": 55
     },
     {
       "name": "Healer's Compressed Poultice",
       "description": "A tightly wrapped bandage soaked in alchemical brine. Stabilises a dying creature instantly.",
       "type": "consumable",
-      "properties": { "effect": "stabilise_creature", "uses": 1 },
+      "properties": {
+        "effect": "stabilise_creature",
+        "uses": 1
+      },
       "valueGP": 50
     },
     {
       "name": "Cartographer's Compass",
       "description": "A brass compass that, once calibrated to a destination, points true regardless of obstacles.",
       "type": "misc",
-      "properties": { "effect": "direction_to_known_location" },
+      "properties": {
+        "effect": "direction_to_known_location"
+      },
       "valueGP": 100
     },
     {
       "name": "Shadowstep Slippers",
       "description": "Soft-soled shoes woven with grey silk. The wearer makes no sound while walking.",
       "type": "armor",
-      "properties": { "effect": "silent_movement" },
+      "properties": {
+        "effect": "silent_movement"
+      },
       "valueGP": 120
     },
     {
       "name": "Ironwood Shield Fragment",
       "description": "A small round buckler carved from a single ironwood knot. It turns aside blades without a mark.",
       "type": "armor",
-      "properties": { "ac_bonus": 1 },
+      "properties": {
+        "ac_bonus": 1
+      },
       "valueGP": 150
     },
     {
       "name": "Venom Extractor Kit",
       "description": "A set of glass vials and a hollow needle for drawing poison from wounds or harvesting it from creatures.",
       "type": "misc",
-      "properties": { "effect": "harvest_poison", "uses": 3 },
+      "properties": {
+        "effect": "harvest_poison",
+        "uses": 3
+      },
       "valueGP": 60
     },
     {
       "name": "Sealing Salt Pouch",
       "description": "A leather pouch of coarse grey salt that, when poured across a threshold, prevents undead from crossing.",
       "type": "consumable",
-      "properties": { "effect": "ward_threshold_undead", "uses": 1 },
+      "properties": {
+        "effect": "ward_threshold_undead",
+        "uses": 1
+      },
       "valueGP": 55
     },
     {
       "name": "Iron Bloodhound Tag",
       "description": "A small stamped disc that, when pressed to a blood trail, leads the bearer toward its source for an hour.",
       "type": "misc",
-      "properties": { "effect": "track_blood_trail_1hr" },
+      "properties": {
+        "effect": "track_blood_trail_1hr"
+      },
       "valueGP": 70
     },
     {
       "name": "Condensed Smoke Vial",
       "description": "A sealed glass vial of black smoke. Shattering it fills the area with a ten-foot cloud of dense grey fog.",
       "type": "consumable",
-      "properties": { "effect": "smoke_cloud_10ft", "uses": 1 },
+      "properties": {
+        "effect": "smoke_cloud_10ft",
+        "uses": 1
+      },
       "valueGP": 50
     },
     {
       "name": "Featherweight Chalk",
       "description": "A stick of chalk that marks surfaces invisible to the naked eye but obvious to the person who made them.",
       "type": "misc",
-      "properties": { "effect": "invisible_marks_to_owner" },
+      "properties": {
+        "effect": "invisible_marks_to_owner"
+      },
       "valueGP": 45
+    },
+    {
+      "name": "Scroll of Minor Healing",
+      "description": "A parchment bearing the word of mending. Crumbles to dust when read.",
+      "type": "spell",
+      "properties": {
+        "effect": "heal_1d8_plus_2",
+        "uses": 1
+      },
+      "valueGP": 40
+    },
+    {
+      "name": "Scroll of Sparks",
+      "description": "Smells like ozone. Unleashes a small burst of electrical energy.",
+      "type": "spell",
+      "properties": {
+        "effect": "lightning_damage_1d6",
+        "uses": 1
+      },
+      "valueGP": 50
+    },
+    {
+      "name": "Draught of Giant's Strength",
+      "description": "A viscous blue fluid that briefly empowers the muscles.",
+      "type": "consumable",
+      "properties": {
+        "effect": "strength_advantage_10m",
+        "uses": 1
+      },
+      "valueGP": 100
     }
   ],
   "rare": [
@@ -263,71 +340,123 @@
       "name": "Blade of Bitter Resolve",
       "description": "A single-edged sword whose blade darkens when drawn in anger.",
       "type": "weapon",
-      "properties": { "damageDice": "1d8", "damageBonus": 1, "damageType": "slashing" },
+      "properties": {
+        "damageDice": "1d8",
+        "damageBonus": 1,
+        "damageType": "slashing"
+      },
       "valueGP": 500
     },
     {
       "name": "Ashwalker Boots",
       "description": "Black leather boots that leave no tracks and allow the wearer to cross hot coals without harm.",
       "type": "armor",
-      "properties": { "effect": "fire_resistance", "no_tracks": true },
+      "properties": {
+        "effect": "fire_resistance",
+        "no_tracks": true
+      },
       "valueGP": 600
     },
     {
       "name": "Warden's Eye",
       "description": "A small carved eye of polished obsidian. Once placed, it transmits everything it sees to the holder.",
       "type": "misc",
-      "properties": { "effect": "remote_sight_sensor", "range_ft": 500 },
+      "properties": {
+        "effect": "remote_sight_sensor",
+        "range_ft": 500
+      },
       "valueGP": 450
     },
     {
       "name": "Stormcaller Javelin",
       "description": "A javelin wrapped in copper wire. It crackles when thrown, trailing sparks.",
       "type": "weapon",
-      "properties": { "damageDice": "1d6", "damageBonus": 1, "damageType": "lightning", "thrown_range": "30/120" },
+      "properties": {
+        "damageDice": "1d6",
+        "damageBonus": 1,
+        "damageType": "lightning",
+        "thrown_range": "30/120"
+      },
       "valueGP": 550
     },
     {
       "name": "Cloak of Diminished Silhouette",
       "description": "A grey-green cloak that flattens the wearer's shape, making them harder to perceive at distance.",
       "type": "armor",
-      "properties": { "effect": "disadvantage_perception_vs_wearer_beyond_30ft" },
+      "properties": {
+        "effect": "disadvantage_perception_vs_wearer_beyond_30ft"
+      },
       "valueGP": 480
     },
     {
       "name": "Shard of the Shattered Bell",
       "description": "A curved sliver of cracked iron from a legendary bell. When struck, it emits a tone that stuns creatures of fey origin.",
       "type": "misc",
-      "properties": { "effect": "stun_fey_on_strike", "uses": 3 },
+      "properties": {
+        "effect": "stun_fey_on_strike",
+        "uses": 3
+      },
       "valueGP": 420
     },
     {
       "name": "Flask of Drowned Embers",
       "description": "A sealed iron flask containing liquid fire. Poured on a surface, it burns at freezing temperatures.",
       "type": "consumable",
-      "properties": { "effect": "cold_fire_damage_2d6", "uses": 1 },
+      "properties": {
+        "effect": "cold_fire_damage_2d6",
+        "uses": 1
+      },
       "valueGP": 380
     },
     {
       "name": "Bonecage Helm",
       "description": "A helm fashioned from layered bone shards and black iron. The wearer cannot be surprised.",
       "type": "armor",
-      "properties": { "effect": "immunity_surprised_condition", "ac_bonus": 1 },
+      "properties": {
+        "effect": "immunity_surprised_condition",
+        "ac_bonus": 1
+      },
       "valueGP": 700
     },
     {
       "name": "Dirge Dagger",
       "description": "A narrow black-iron blade that whispers when drawn. Strikes cause targets to lose concentration.",
       "type": "weapon",
-      "properties": { "damageDice": "1d4", "damageBonus": 1, "damageType": "piercing", "effect": "concentration_break_on_hit" },
+      "properties": {
+        "damageDice": "1d4",
+        "damageBonus": 1,
+        "damageType": "piercing",
+        "effect": "concentration_break_on_hit"
+      },
       "valueGP": 650
     },
     {
       "name": "Mossgrown Amulet",
       "description": "An amulet of living moss and iron wire. The wearer regenerates 1 HP per minute when resting outdoors.",
       "type": "misc",
-      "properties": { "effect": "regenerate_1hp_per_minute_outdoors" },
+      "properties": {
+        "effect": "regenerate_1hp_per_minute_outdoors"
+      },
       "valueGP": 500
+    },
+    {
+      "name": "Tome of the Unseen Step",
+      "description": "A small booklet wrapped in velvet. Teaches a short-range teleportation incantation.",
+      "type": "spell",
+      "properties": {
+        "effect": "teleport_30ft"
+      },
+      "valueGP": 400
+    },
+    {
+      "name": "Alchemist's Fire (Batch)",
+      "description": "Three vials of volatile orange liquid stored securely.",
+      "type": "consumable",
+      "properties": {
+        "effect": "fire_damage_1d4_continuous",
+        "uses": 3
+      },
+      "valueGP": 150
     }
   ],
   "very_rare": [
@@ -335,57 +464,91 @@
       "name": "Voidclasp Gauntlet",
       "description": "Black iron gauntlet that absorbs ambient light. Strikes leave trails of shadow.",
       "type": "armor",
-      "properties": { "baseAC": 1, "addDexModifier": false, "effect": "shadow_trail" },
+      "properties": {
+        "baseAC": 1,
+        "addDexModifier": false,
+        "effect": "shadow_trail"
+      },
       "valueGP": 2000
     },
     {
       "name": "Greatsword of the Sunken Keep",
       "description": "A two-handed blade recovered from beneath a drowned fortress. It hums with suppressed violence.",
       "type": "weapon",
-      "properties": { "damageDice": "2d6", "damageBonus": 2, "damageType": "slashing" },
+      "properties": {
+        "damageDice": "2d6",
+        "damageBonus": 2,
+        "damageType": "slashing"
+      },
       "valueGP": 2500
     },
     {
       "name": "Shroud of Still Water",
       "description": "A cloak woven from waterlogged thread. The wearer cannot drown and moves freely in any liquid.",
       "type": "armor",
-      "properties": { "effect": "immunity_drowning", "free_movement_liquid": true },
+      "properties": {
+        "effect": "immunity_drowning",
+        "free_movement_liquid": true
+      },
       "valueGP": 1800
     },
     {
       "name": "Eye of Binding Sight",
       "description": "A glass orb that, when gazed into, shows the last moments of any creature whose blood has touched it.",
       "type": "misc",
-      "properties": { "effect": "read_death_memory_from_blood" },
+      "properties": {
+        "effect": "read_death_memory_from_blood"
+      },
       "valueGP": 2200
     },
     {
       "name": "Veilbreaker Crossbow",
       "description": "A compact repeating crossbow whose bolts ignore mundane concealment and soft cover.",
       "type": "weapon",
-      "properties": { "damageDice": "1d8", "damageBonus": 2, "damageType": "piercing", "effect": "ignore_cover_concealment" },
+      "properties": {
+        "damageDice": "1d8",
+        "damageBonus": 2,
+        "damageType": "piercing",
+        "effect": "ignore_cover_concealment"
+      },
       "valueGP": 3000
     },
     {
       "name": "Tomb Warden's Cuirass",
       "description": "A breastplate carved with runes of warding. The wearer cannot be flanked or attacked by opportunity.",
       "type": "armor",
-      "properties": { "ac_bonus": 2, "effect": "no_opportunity_attacks_vs_wearer" },
+      "properties": {
+        "ac_bonus": 2,
+        "effect": "no_opportunity_attacks_vs_wearer"
+      },
       "valueGP": 2800
     },
     {
       "name": "Whisper Chain",
       "description": "A fine silver chain that, worn around the throat, lets the wearer project their voice as a whisper to any one known person within a mile.",
       "type": "misc",
-      "properties": { "effect": "whisper_communication_1mile" },
+      "properties": {
+        "effect": "whisper_communication_1mile"
+      },
       "valueGP": 1600
     },
     {
       "name": "Soulbrand Brand",
       "description": "A short iron rod that, pressed to flesh, marks the target with a sigil visible only to the brander.",
       "type": "misc",
-      "properties": { "effect": "invisible_mark_track_indefinitely" },
+      "properties": {
+        "effect": "invisible_mark_track_indefinitely"
+      },
       "valueGP": 1900
+    },
+    {
+      "name": "Grimoire of the Black Sun",
+      "description": "Heavy iron-bound tome containing devastating solar eclipse evocations.",
+      "type": "spell",
+      "properties": {
+        "effect": "necrotic_radiant_blast_4d6"
+      },
+      "valueGP": 1500
     }
   ],
   "legendary": [
@@ -393,35 +556,54 @@
       "name": "The Hollow Crown",
       "description": "A circlet of bone-white metal. The wearer hears whispers of every monarch who wore it before.",
       "type": "misc",
-      "properties": { "effect": "wisdom_advantage", "curse": "whispers" },
+      "properties": {
+        "effect": "wisdom_advantage",
+        "curse": "whispers"
+      },
       "valueGP": 10000
     },
     {
       "name": "Gravewalker's Mantle",
       "description": "A tattered black mantle sewn from burial shrouds. The wearer is invisible to undead and can pass through solid stone once per day.",
       "type": "armor",
-      "properties": { "effect": "invisible_to_undead", "phase_through_stone_1_per_day": true },
+      "properties": {
+        "effect": "invisible_to_undead",
+        "phase_through_stone_1_per_day": true
+      },
       "valueGP": 15000
     },
     {
       "name": "Edgebreaker",
       "description": "A massive black axe whose blade shatters any non-magical weapon it strikes and cleaves through magical barriers.",
       "type": "weapon",
-      "properties": { "damageDice": "2d12", "damageBonus": 3, "damageType": "slashing", "effect": "sunder_weapons_break_barriers" },
+      "properties": {
+        "damageDice": "2d12",
+        "damageBonus": 3,
+        "damageType": "slashing",
+        "effect": "sunder_weapons_break_barriers"
+      },
       "valueGP": 12000
     },
     {
       "name": "Lifedebt Coin",
       "description": "A gold coin stamped on both sides with the same face. When flipped with intent, the coin decides who lives and who dies.",
       "type": "misc",
-      "properties": { "effect": "fated_death_determination", "curse": "binds_fate" },
+      "properties": {
+        "effect": "fated_death_determination",
+        "curse": "binds_fate"
+      },
       "valueGP": 20000
     },
     {
       "name": "Veilborn Blade",
       "description": "A slender obsidian sword that exists partially outside the material plane. It strikes incorporeal creatures as if they were solid.",
       "type": "weapon",
-      "properties": { "damageDice": "1d10", "damageBonus": 3, "damageType": "force", "effect": "hit_incorporeal_creatures" },
+      "properties": {
+        "damageDice": "1d10",
+        "damageBonus": 3,
+        "damageType": "force",
+        "effect": "hit_incorporeal_creatures"
+      },
       "valueGP": 18000
     }
   ],

@@ -132,6 +132,16 @@ function formatIronLaws(): string {
     "muscles hardening, reflexes quickening, divine favor enveloping the character. " +
     "Never say 'you leveled up' — describe the *feeling* of ascending. " +
     "Code is Law.",
+    "",
+    "**Trade Generation Mandate:** When the player is at a 'shop' node and " +
+    "initiates trade or conversation with a merchant, you MUST call `generateMerchant` " +
+    "with the node's npcSeed and an appropriate archetype. " +
+    "NEVER invent merchant names, item prices, or inventory. " +
+    "When the player wants to buy or sell, call `executeTrade` with the precise " +
+    "item index, quantity, and action. " +
+    "NEVER grant items or modify gold without the trade tool confirming success. " +
+    "If a trade fails (insufficient gold, item not found), narrate the failure — " +
+    "do NOT override the system. Code is Law.",
   ].join("\n");
 }
 
@@ -292,6 +302,38 @@ function formatQuests(quests: CampaignContext["quests"]): string {
 }
 
 /**
+ * Returns a "## Merchant" section detailing the currently active merchant's wares.
+ *
+ * @pure
+ */
+export function formatShopNode(merchantPayload: any, partyGold: number): string {
+  if (!merchantPayload) return "";
+
+  const label = "label" in merchantPayload ? merchantPayload.label : merchantPayload.archetype;
+
+  const lines: string[] = [];
+  lines.push(`## 🏪 Merchant: ${merchantPayload.name} — ${label}`);
+  lines.push(`${merchantPayload.greeting}`);
+  lines.push("");
+  lines.push("**Available Wares:**");
+  lines.push("| # | Item | Type | Rarity | Buy Price |");
+  lines.push("|---|------|------|--------|-----------|");
+
+  for (const item of merchantPayload.inventory) {
+    lines.push(`| ${item.index} | ${item.name} | ${item.type} | ${item.rarity} | ${item.buyPriceGP} GP |`);
+  }
+
+  lines.push("");
+  lines.push(`**Sell Modifier:** ${Math.round(merchantPayload.sellModifier * 100)}% of item value`);
+  lines.push(`**Party Gold:** ${partyGold} GP`);
+  lines.push("");
+  lines.push("To BUY: call `executeTrade` with action \"buy\", itemIndex, quantity.");
+  lines.push("To SELL: call `executeTrade` with action \"sell\", inventoryItemId, quantity.");
+
+  return lines.join("\n");
+}
+
+/**
  * Returns a "## Exploration" section for the AI system prompt.
  *
  * When an exploration is active, injects the current location, room, feature,
@@ -300,7 +342,7 @@ function formatQuests(quests: CampaignContext["quests"]): string {
  *
  * @pure — no side effects, deterministic output for the same input.
  */
-function formatExploration(exploration: ContextExploration | null): string {
+function formatExploration(exploration: ContextExploration | null, partyGold: number = 0): string {
   if (!exploration?.location) {
     return "## Exploration\nNo active location.";
   }
@@ -339,6 +381,11 @@ function formatExploration(exploration: ContextExploration | null): string {
     lines.push(`## Visited Rooms: ${visitedNames}`);
   }
 
+  if (currentNode?.feature === "shop" && (currentNode as any).merchantPayload) {
+    lines.push("");
+    lines.push(formatShopNode((currentNode as any).merchantPayload, partyGold));
+  }
+
   return lines.join("\n");
 }
 
@@ -353,11 +400,14 @@ function formatExploration(exploration: ContextExploration | null): string {
  *
  * @pure — no side effects, deterministic output for the same input.
  */
-export function formatSystemPrompt(context: CampaignContext): string {
+export function formatSystemPrompt(context: CampaignContext & { gold?: number }): string {
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
 
-  const explorationSection = formatExploration(context.currentExploration);
+  // We pass context.gold to formatExploration if available, or 0. (The real gold is in context.character? no, the gold is in campaign object but CampaignContext currently doesn't have it explicitly at the root level).
+  // I will add gold to CampaignContext.
+  const partyGold = context.gold ?? 0;
+  const explorationSection = formatExploration(context.currentExploration, partyGold);
 
   const sections = [
     formatIronLaws(),

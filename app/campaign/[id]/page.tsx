@@ -21,6 +21,7 @@ import type {
 } from "@/lib/rules/inventory";
 import AscensionOverlayController from "@/components/character/AscensionOverlay";
 import XPProgressBar from "@/components/character/XPProgressBar";
+import TradeOverlayController from "@/components/trade/TradeOverlayController";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -310,6 +311,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     >
       {/* Ascension Overlay — self-wiring, listens for dungeon-level-up events */}
       <AscensionOverlayController />
+      {/* Trade Overlay — self-wiring, listens for dungeon-merchant events */}
+      <TradeOverlayController campaignId={campaign.id} initialGold={campaign.gold} playerInventory={character.inventory} />
       {/* Ambient glow — purely decorative */}
       <div
         aria-hidden="true"

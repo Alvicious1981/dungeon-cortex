@@ -485,7 +485,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   // ── State is now safely mutated.  Start the narrative stream. ────────────────
 
-  const { textStream, textPromise, levelUpPayload } = await streamNarrative(campaignId, trimmedAction);
+  const { textStream, textPromise, levelUpPayload, merchantPayload } = await streamNarrative(campaignId, trimmedAction);
 
   // After the stream body is fully read by the client, persist the full
   // narrative text and run memory consolidation.
@@ -541,6 +541,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         const luPayload = await levelUpPayload;
         if (luPayload) {
           controller.enqueue(sseFrame({ t: "level_up", payload: luPayload }));
+        }
+
+        const mPayload = await merchantPayload;
+        if (mPayload) {
+          controller.enqueue(sseFrame({ t: "merchant", payload: mPayload }));
         }
 
         // Phase 3: signal completion

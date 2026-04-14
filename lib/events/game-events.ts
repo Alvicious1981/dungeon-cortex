@@ -12,6 +12,7 @@
  */
 
 // ─── Event catalogue ────────────────────────────────────────────────────────
+import type { MerchantPayload } from "@/lib/rules/trade";
 
 export type GameEventType =
   | "CRITICAL_HIT"         // Natural 20 on an attack roll
@@ -109,4 +110,5 @@ export type ActionStreamFrame =
   | { t: "evt"; e: GameEvent }
   | { t: "txt"; d: string }
   | { t: "level_up"; payload: LevelUpResolvedPayload }
+  | { t: "merchant"; payload: MerchantPayload }
   | { t: "done" };

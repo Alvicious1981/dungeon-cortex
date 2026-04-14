@@ -116,6 +116,11 @@ export default function ActionInput({ campaignId }: Props) {
             window.dispatchEvent(
               new CustomEvent("dungeon-level-up", { detail: parsed.payload })
             );
+          } else if (parsed.t === "merchant") {
+            // Phase 2.5: trade initiated — forward payload to TradeOverlayController
+            window.dispatchEvent(
+              new CustomEvent("dungeon-merchant", { detail: parsed.payload })
+            );
           } else if (parsed.t === "done") {
             // Phase 3: stream complete
             done = true;

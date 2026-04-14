@@ -59,6 +59,12 @@ import {
   type EdgePayload,
   type PassageType,
 } from "@/lib/rules/exploration";
+import {
+  GenerateMerchantInputSchema,
+  TradeActionSchema,
+  buildMerchantPayload,
+  type MerchantPayload,
+} from "@/lib/rules/trade";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,13 +80,21 @@ export interface NarrativeStream {
    * stream ends without a level-up tool call.
    */
   levelUpPayload: Promise<LevelUpPayload | null>;
+  /**
+   * Resolves to the MerchantPayload if `generateMerchant` was called during this
+   * narrative turn, or null if no merchant was generated.
+   */
+  merchantPayload: Promise<MerchantPayload | null>;
 }
 
 // ─── Tool definitions (shared) ────────────────────────────────────────────────
 
 function buildTools(
   campaignId: string,
-  callbacks?: { onLevelUp?: (payload: LevelUpPayload) => void },
+  callbacks?: { 
+    onLevelUp?: (payload: LevelUpPayload) => void;
+    onMerchantGenerated?: (payload: MerchantPayload) => void;
+  },
 ) {
   return {
     getTavernName: tool({
@@ -1171,6 +1185,131 @@ function buildTools(
         }
       },
     }),
+
+    generateMerchant: tool({
+      description:
+        "Generate a deterministic merchant inventory and statblock when players encounter a merchant NPC. " +
+        "MUST be called immediately when players initiate trade. " +
+        "Prices are dynamic based on archetype. The UI will automatically display the generated inventory. " +
+        "Code is Law.",
+      inputSchema: GenerateMerchantInputSchema,
+      execute: async ({ archetype, npcSeed }) => {
+        try {
+          const block = generateNPC(npcSeed, "commoner");
+          const payload = buildMerchantPayload(archetype, npcSeed);
+          callbacks?.onMerchantGenerated?.(payload);
+          return JSON.stringify({ ok: true, archetype, npcName: block.name, itemCount: payload.inventory.length });
+        } catch {
+          return JSON.stringify({ error: "Merchant generation failed mechanically." });
+        }
+      },
+    }),
+
+    executeTrade: tool({
+      description:
+        "Execute a single trade transaction (buy or sell) after the player commits to it. " +
+        "MUST be used to deduct/add gold and add/remove items from inventory. " +
+        "Never invent gold or items. Code is Law. " +
+        "The current transaction must only involve ONE item.",
+      inputSchema: TradeActionSchema,
+      execute: async ({ action, itemIndex, inventoryItemId, quantity, npcSeed, archetype }) => {
+        try {
+          const result = await prisma.$transaction(async (tx) => {
+            const campaign = await tx.campaign.findUnique({
+              where: { id: campaignId },
+              include: { character: { include: { inventory: true } } },
+            });
+            if (!campaign) throw new Error("Campaign not found.");
+
+            const merchantPayload = buildMerchantPayload(archetype, npcSeed);
+
+            if (action === "buy") {
+              if (itemIndex === undefined) throw new Error("Missing itemIndex for buy.");
+              const mItem = merchantPayload.inventory[itemIndex];
+              if (!mItem) throw new Error("Item not found in merchant inventory.");
+              
+              const totalCost = mItem.buyPriceGP * quantity;
+              if (campaign.gold < totalCost) {
+                throw new Error(`Insufficient gold. Needs ${totalCost}, has ${campaign.gold}.`);
+              }
+
+              const newCampaign = await tx.campaign.update({
+                where: { id: campaignId },
+                data: { gold: { decrement: totalCost } },
+              });
+
+              // Add to inventory with stacking
+              const existing = campaign.character.inventory.find(i => i.name === mItem.name && i.type === mItem.type);
+              if (existing) {
+                await tx.inventoryItem.update({
+                  where: { id: existing.id },
+                  data: { quantity: { increment: quantity } }
+                });
+              } else {
+                await tx.inventoryItem.create({
+                  data: {
+                    characterId: campaign.characterId,
+                    name: mItem.name,
+                    type: mItem.type,
+                    quantity,
+                    properties: mItem.properties as object,
+                  },
+                });
+              }
+
+              // Add a game log entry
+              await tx.gameLog.create({
+                data: {
+                  campaignId: campaignId,
+                  role: "system",
+                  content: `💰 Trade: Purchased ${quantity}x ${mItem.name} for ${totalCost} GP from ${merchantPayload.name}.`,
+                }
+              });
+
+              return { ok: true, action: "buy", itemName: mItem.name, totalCost, newGoldBalance: newCampaign.gold };
+            } else {
+              if (!inventoryItemId) throw new Error("Missing inventoryItemId for sell.");
+              const pItem = campaign.character.inventory.find(i => i.id === inventoryItemId);
+              if (!pItem) throw new Error("Item not found in character inventory.");
+              if (pItem.quantity < quantity) throw new Error("Insufficient quantity to sell.");
+
+              const properties = pItem.properties as Record<string, unknown>;
+              const baseValueGP = typeof properties.valueGP === "number" ? properties.valueGP : 0;
+              const sellPriceGP = Math.max(1, Math.floor(baseValueGP * merchantPayload.sellModifier));
+              const totalRevenue = sellPriceGP * quantity;
+
+              const newCampaign = await tx.campaign.update({
+                where: { id: campaignId },
+                data: { gold: { increment: totalRevenue } },
+              });
+
+              if (pItem.quantity === quantity) {
+                await tx.inventoryItem.delete({ where: { id: pItem.id } });
+              } else {
+                await tx.inventoryItem.update({
+                  where: { id: pItem.id },
+                  data: { quantity: { decrement: quantity } },
+                });
+              }
+
+              // Add a game log entry
+              await tx.gameLog.create({
+                data: {
+                  campaignId: campaignId,
+                  role: "system",
+                  content: `💰 Trade: Sold ${quantity}x ${pItem.name} to ${merchantPayload.name} for ${totalRevenue} GP.`,
+                }
+              });
+
+              return { ok: true, action: "sell", itemName: pItem.name, totalRevenue, newGoldBalance: newCampaign.gold };
+            }
+          });
+          return JSON.stringify(result);
+        } catch (error: any) {
+          return JSON.stringify({ error: error.message || "Trade execution failed mechanically." });
+        }
+      },
+    }),
   };
 }
 
@@ -1198,6 +1337,11 @@ export async function streamNarrative(
     resolveLevelUp = resolve;
   });
 
+  let resolveMerchant!: (p: MerchantPayload | null) => void;
+  const merchantPayload = new Promise<MerchantPayload | null>((resolve) => {
+    resolveMerchant = resolve;
+  });
+
   const context = await buildCampaignContext(campaignId);
   const system = formatSystemPrompt(context);
 
@@ -1208,17 +1352,25 @@ export async function streamNarrative(
     stopWhen: stepCountIs(5),
     tools: buildTools(campaignId, {
       onLevelUp: (payload) => resolveLevelUp(payload),
+      onMerchantGenerated: (payload) => resolveMerchant(payload),
     }),
   });
 
   // Fallback: if the text stream ends without a level-up tool call, resolve null.
   // Promise.resolve wraps the PromiseLike so we can chain .catch().
   // A second resolveLevelUp call after onLevelUp fires is a no-op (Promises resolve once).
-  Promise.resolve(result.text).then(() => resolveLevelUp(null)).catch(() => resolveLevelUp(null));
+  Promise.resolve(result.text).then(() => {
+    resolveLevelUp(null);
+    resolveMerchant(null);
+  }).catch(() => {
+    resolveLevelUp(null);
+    resolveMerchant(null);
+  });
 
   return {
     textStream: result.textStream,
     textPromise: result.text,
     levelUpPayload,
+    merchantPayload,
   };
 }
