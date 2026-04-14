@@ -153,6 +153,7 @@ const minimalContext: CampaignContext = {
   recentLogs: [],
   relevantMemories: [],
   quests: [],
+  currentExploration: null,
 };
 
 // ---------------------------------------------------------------------------

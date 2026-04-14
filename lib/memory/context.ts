@@ -96,6 +96,32 @@ export interface ContextQuest {
   createdAt: Date;
 }
 
+export interface ContextExplorationNode {
+  index: number;
+  name: string;
+  description: string;
+  feature: string;
+  npcSeed: string | null;
+  x: number;
+  y: number;
+}
+
+export interface ContextExplorationEdge {
+  fromIndex: number;
+  toIndex: number;
+  passageType: string;
+}
+
+export interface ContextExploration {
+  location: { id: string; name: string; type: string; description: string } | null;
+  currentNode: ContextExplorationNode | null;
+  adjacentNodes: Array<{ node: ContextExplorationNode; passageType: string }>;
+  /** Indices of nodes the party has visited (starts with current node index). */
+  visitedNodeIndices: number[];
+  allNodes: ContextExplorationNode[];
+  allEdges: ContextExplorationEdge[];
+}
+
 export interface CampaignContext {
   character: ContextCharacter;
   /** The current active encounter, or null if no combat is in progress. */
@@ -110,11 +136,107 @@ export interface CampaignContext {
   relevantMemories: string[];
   /** All quests for this campaign, newest-first. Canonical state — never advisory. */
   quests: ContextQuest[];
+  /** Active exploration location and navigation state, or null if not exploring. */
+  currentExploration: ContextExploration | null;
 }
 
 // ---------------------------------------------------------------------------
 // Assembly function
 // ---------------------------------------------------------------------------
+
+/**
+ * Fetches the current exploration state for a campaign.
+ * Returns null if the campaign has no active location.
+ */
+async function fetchExplorationContext(
+  campaignId: string
+): Promise<ContextExploration | null> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { currentLocationId: true, currentNodeId: true },
+  });
+
+  if (!campaign?.currentLocationId) return null;
+
+  const location = await prisma.location.findUnique({
+    where: { id: campaign.currentLocationId },
+    include: {
+      nodes: { orderBy: { index: "asc" } },
+      edges: true,
+    },
+  });
+
+  if (!location) return null;
+
+  const nodeById = new Map(location.nodes.map((n) => [n.id, n]));
+
+  const allEdges: ContextExplorationEdge[] = location.edges.map((e) => ({
+    fromIndex: nodeById.get(e.fromNodeId)?.index ?? 0,
+    toIndex: nodeById.get(e.toNodeId)?.index ?? 0,
+    passageType: e.passageType,
+  }));
+
+  const allNodes: ContextExplorationNode[] = location.nodes.map((n) => ({
+    index: n.index,
+    name: n.name,
+    description: n.description,
+    feature: n.feature,
+    npcSeed: n.npcSeed,
+    x: n.x,
+    y: n.y,
+  }));
+
+  const currentDbNode = campaign.currentNodeId
+    ? nodeById.get(campaign.currentNodeId)
+    : null;
+
+  const currentNode: ContextExplorationNode | null = currentDbNode
+    ? {
+        index: currentDbNode.index,
+        name: currentDbNode.name,
+        description: currentDbNode.description,
+        feature: currentDbNode.feature,
+        npcSeed: currentDbNode.npcSeed,
+        x: currentDbNode.x,
+        y: currentDbNode.y,
+      }
+    : null;
+
+  const adjacentNodes: Array<{ node: ContextExplorationNode; passageType: string }> =
+    currentNode
+      ? allEdges
+          .filter(
+            (e) =>
+              e.fromIndex === currentNode.index ||
+              e.toIndex === currentNode.index
+          )
+          .map((e) => {
+            const adjIndex =
+              e.fromIndex === currentNode.index ? e.toIndex : e.fromIndex;
+            const adjNode = allNodes.find((n) => n.index === adjIndex);
+            return adjNode
+              ? { node: adjNode, passageType: e.passageType }
+              : null;
+          })
+          .filter((entry): entry is { node: ContextExplorationNode; passageType: string } =>
+            entry !== null
+          )
+      : [];
+
+  return {
+    location: {
+      id: location.id,
+      name: location.name,
+      type: location.type,
+      description: location.description,
+    },
+    currentNode,
+    adjacentNodes,
+    visitedNodeIndices: currentNode ? [currentNode.index] : [],
+    allNodes,
+    allEdges,
+  };
+}
 
 /**
  * Assembles the full context snapshot for a campaign in parallel.
@@ -130,7 +252,7 @@ export async function buildCampaignContext(
   campaignId: string,
   playerInput?: string
 ): Promise<CampaignContext> {
-  const [campaign, activeEncounter, recentLogsDesc, relevantMemories, quests] = await Promise.all([
+  const [campaign, activeEncounter, recentLogsDesc, relevantMemories, quests, currentExploration] = await Promise.all([
     // Pillar 1: character with inventory
     prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -215,6 +337,10 @@ export async function buildCampaignContext(
       orderBy: { createdAt: "desc" },
       select: { id: true, title: true, description: true, status: true, createdAt: true },
     }),
+
+    // Pillar 6: active exploration state — location, current node, adjacent nodes.
+    // Failures are silently swallowed so exploration never blocks the action pipeline.
+    fetchExplorationContext(campaignId).catch(() => null),
   ]);
 
   if (!campaign) {
@@ -228,5 +354,6 @@ export async function buildCampaignContext(
     recentLogs: recentLogsDesc.reverse(),
     quests,
     relevantMemories,
+    currentExploration: currentExploration ?? null,
   };
 }

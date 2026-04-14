@@ -7,6 +7,7 @@ import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
 import CombatVTT from "@/components/combat/CombatVTT";
 import GameEventHandler from "@/components/combat/GameEventHandler";
+import ExplorationPanel from "@/components/exploration/ExplorationPanel";
 import MemoryJournal from "@/components/MemoryJournal";
 import QuestTracker from "@/components/QuestTracker";
 import NPCRoster from "@/components/NPCRoster";
@@ -216,6 +217,48 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   if (!campaign) {
     notFound();
+  }
+
+  // ── Exploration data (conditional — only when campaign has an active location) ──
+  type ExplorationData = {
+    campaignId: string;
+    location: { id: string; name: string; type: string; description: string };
+    nodes: Array<{ index: number; name: string; description: string; feature: string; npcSeed: string | null; x: number; y: number }>;
+    edges: Array<{ fromIndex: number; toIndex: number; passageType: string }>;
+    initialCurrentNodeIndex: number;
+    initialVisitedNodeIndices: number[];
+  } | null;
+
+  let explorationData: ExplorationData = null;
+  if (campaign.currentLocationId && campaign.currentNodeId) {
+    const loc = await prisma.location.findUnique({
+      where: { id: campaign.currentLocationId },
+      include: {
+        nodes: { orderBy: { index: "asc" } },
+        edges: true,
+      },
+    });
+    if (loc) {
+      const nodeById = new Map(loc.nodes.map((n) => [n.id, n]));
+      const currentNode = loc.nodes.find((n) => n.id === campaign.currentNodeId);
+      if (currentNode) {
+        explorationData = {
+          campaignId: campaign.id,
+          location: { id: loc.id, name: loc.name, type: loc.type, description: loc.description },
+          nodes: loc.nodes.map((n) => ({
+            index: n.index, name: n.name, description: n.description,
+            feature: n.feature, npcSeed: n.npcSeed, x: n.x, y: n.y,
+          })),
+          edges: loc.edges.map((e) => ({
+            fromIndex: nodeById.get(e.fromNodeId)?.index ?? 0,
+            toIndex:   nodeById.get(e.toNodeId)?.index ?? 0,
+            passageType: e.passageType,
+          })),
+          initialCurrentNodeIndex: currentNode.index,
+          initialVisitedNodeIndices: [currentNode.index],
+        };
+      }
+    }
   }
 
   const { character, logs } = campaign;
@@ -717,6 +760,18 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               CENTRE — Chronicle + Action
           ════════════════════════════════════ */}
           <div className="min-w-0 space-y-5">
+
+            {/* ── Exploration map — visible when campaign has an active location ── */}
+            {explorationData && (
+              <ExplorationPanel
+                campaignId={explorationData.campaignId}
+                location={explorationData.location}
+                nodes={explorationData.nodes}
+                edges={explorationData.edges}
+                initialCurrentNodeIndex={explorationData.initialCurrentNodeIndex}
+                initialVisitedNodeIndices={explorationData.initialVisitedNodeIndices}
+              />
+            )}
 
             {/* ── VTT battle map — only visible during active encounters ── */}
             {activeEncounter && (

@@ -13,7 +13,7 @@
  * This module is pure: it performs no I/O and never mutates anything.
  */
 
-import type { CampaignContext } from "@/lib/memory/context";
+import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, MAX_LEVEL } from "@/lib/rules/progression";
 
@@ -110,6 +110,16 @@ function formatIronLaws(): string {
     "Narrate the discovered treasure using ONLY the `gold`, `mundaneItems`, and `magicItems` " +
     "from the tool response. Use the `flavorText` as atmospheric framing. " +
     "Item names and descriptions must appear verbatim — do not embellish or rename them. " +
+    "Code is Law.",
+    "",
+    "**Exploration Generation Mandate:** When the player declares intent to travel " +
+    "to a new location, explore an area, enter a building, or descend deeper, " +
+    "you MUST call `generateLocation` BEFORE narrating any environment. " +
+    "NEVER invent rooms, connections, exits, NPCs, or spatial structure. " +
+    "The tool response defines the ONLY rooms that exist in the location. " +
+    "Use node names and descriptions verbatim. " +
+    "When the player wants to move between rooms, call `moveToNode` — " +
+    "NEVER teleport the player to a non-adjacent node. " +
     "Code is Law.",
   ].join("\n");
 }
@@ -261,6 +271,57 @@ function formatQuests(quests: CampaignContext["quests"]): string {
   return lines.join("\n");
 }
 
+/**
+ * Returns a "## Exploration" section for the AI system prompt.
+ *
+ * When an exploration is active, injects the current location, room, feature,
+ * NPC seed, and a list of available exits with passage types. This gives the
+ * AI a complete, accurate picture of spatial context without hallucination.
+ *
+ * @pure — no side effects, deterministic output for the same input.
+ */
+function formatExploration(exploration: ContextExploration | null): string {
+  if (!exploration?.location) {
+    return "## Exploration\nNo active location.";
+  }
+
+  const { location, currentNode, adjacentNodes, visitedNodeIndices } = exploration;
+  const lines: string[] = [];
+
+  lines.push(`## Current Exploration: ${location.name} (${location.type})`);
+  lines.push(location.description);
+
+  if (currentNode) {
+    lines.push("");
+    lines.push(`## Current Room: ${currentNode.name}`);
+    lines.push(currentNode.description);
+    lines.push(`Feature: ${currentNode.feature}`);
+    lines.push(`NPC: ${currentNode.npcSeed ?? "None"}`);
+
+    if (adjacentNodes.length > 0) {
+      lines.push("");
+      lines.push("## Available Exits:");
+      for (const { node, passageType } of adjacentNodes) {
+        lines.push(`- ${node.name} — ${passageType}`);
+      }
+    } else {
+      lines.push("");
+      lines.push("## Available Exits:");
+      lines.push("- (None — dead end)");
+    }
+  }
+
+  if (visitedNodeIndices.length > 0) {
+    const visitedNames = visitedNodeIndices
+      .map((i) => exploration.allNodes.find((n) => n.index === i)?.name ?? `Node ${i}`)
+      .join(", ");
+    lines.push("");
+    lines.push(`## Visited Rooms: ${visitedNames}`);
+  }
+
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
@@ -276,6 +337,8 @@ export function formatSystemPrompt(context: CampaignContext): string {
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
 
+  const explorationSection = formatExploration(context.currentExploration);
+
   const sections = [
     formatIronLaws(),
     // Long-Term Memory inserted here so the model reads historical context
@@ -284,6 +347,9 @@ export function formatSystemPrompt(context: CampaignContext): string {
     ...(memorySection ? [memorySection] : []),
     "# Current Game State",
     formatCharacter(context.character),
+    // Exploration state injected between character and combat so the model
+    // always knows the party's spatial context when resolving movement.
+    explorationSection,
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.

@@ -51,6 +51,10 @@ model Campaign {
   /// Party gold pieces. Integer — no fractional currency.
   /// Mutations ONLY via Prisma transactions from tool execution, never from AI narration.
   gold        Int      @default(0)
+  /// The location the party is currently exploring. Null = no active exploration.
+  currentLocationId  String?
+  /// The specific node within the location the party occupies. Null = not in a location.
+  currentNodeId      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -61,6 +65,7 @@ model Campaign {
   memories   MemoryEntry[]
   quests     Quest[]
   npcs       NPC[]
+  locations  Location[]
 }
 
 model GameLog {
@@ -243,4 +248,80 @@ model SrdItem {
   id   String @id
   name String
   data Json
+}
+
+/// A procedurally generated location — a tavern, village, dungeon floor, etc.
+/// Created exclusively by the `generateLocation` tool; the AI narrator may NOT
+/// invent locations outside this table.
+model Location {
+  id          String  @id @default(cuid())
+  campaignId  String
+  /// Deterministic seed — the same seed always reproduces the same layout.
+  seed        String
+  /// Location archetype: "tavern" | "village" | "dungeon" | "wilderness" | "ruins"
+  type        String
+  /// Human-readable evocative name, e.g. "The Dripping Nave"
+  name        String
+  /// 1–3 sentence atmospheric description.
+  description String
+  /// Optional parent — e.g. a dungeon floor's parent is the dungeon entrance.
+  parentId    String?
+  createdAt   DateTime @default(now())
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id])
+  parent   Location?      @relation("LocationHierarchy", fields: [parentId], references: [id])
+  children Location[]     @relation("LocationHierarchy")
+  nodes    LocationNode[]
+  edges    LocationEdge[]
+
+  @@index([campaignId])
+  @@unique([campaignId, seed])
+}
+
+/// A single room, area, or zone within a Location.
+/// Part of the node graph that players navigate.
+model LocationNode {
+  id          String  @id @default(cuid())
+  locationId  String
+  /// Index within the generated graph (0 = entry node).
+  index       Int
+  /// Evocative name, e.g. "The Whispering Gallery"
+  name        String
+  /// Brief atmospheric description (≤ 300 chars).
+  description String
+  /// Feature tag: "empty" | "npc" | "hazard" | "treasure" | "quest_hook" | "rest" | "shop" | "exit"
+  feature     String  @default("empty")
+  /// Optional NPC seed — links to NPC generation for this node's inhabitant.
+  npcSeed     String?
+  /// Optional extra feature data (hazard details, shop inventory hints, etc.)
+  featureData Json    @default("{}")
+  /// Grid position for visual rendering (column, 0-based).
+  x           Int
+  /// Grid position for visual rendering (row, 0-based).
+  y           Int
+
+  location    Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  edgesFrom   LocationEdge[] @relation("EdgeFrom")
+  edgesTo     LocationEdge[] @relation("EdgeTo")
+
+  @@unique([locationId, index])
+  @@index([locationId])
+}
+
+/// An edge connecting two LocationNodes — defines navigable passages.
+/// Edges are bidirectional: if A→B exists, B→A is implicit.
+model LocationEdge {
+  id          String @id @default(cuid())
+  locationId  String
+  fromNodeId  String
+  toNodeId    String
+  /// Passage type: "open" | "door" | "locked" | "hidden" | "collapsed"
+  passageType String @default("open")
+
+  location Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  fromNode LocationNode @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode   LocationNode @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([fromNodeId, toNodeId])
+  @@index([locationId])
 }

@@ -35,6 +35,7 @@ const baseContext: CampaignContext = {
   recentLogs: [],
   relevantMemories: [],
   quests: [],
+  currentExploration: null,
 };
 
 const resolvedEncounter: CampaignContext["activeEncounter"] = {
