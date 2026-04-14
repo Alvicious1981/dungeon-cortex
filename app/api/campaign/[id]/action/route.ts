@@ -485,7 +485,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   // ── State is now safely mutated.  Start the narrative stream. ────────────────
 
-  const { textStream, textPromise } = await streamNarrative(campaignId, trimmedAction);
+  const { textStream, textPromise, levelUpPayload } = await streamNarrative(campaignId, trimmedAction);
 
   // After the stream body is fully read by the client, persist the full
   // narrative text and run memory consolidation.
@@ -534,6 +534,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         // Phase 2: stream narrative tokens
         for await (const delta of textStream) {
           controller.enqueue(sseFrame({ t: "txt", d: delta }));
+        }
+
+        // Phase 2.5: emit level-up payload if triggerLevelUp was called this turn.
+        // By the time the text stream is exhausted, all tool calls have completed.
+        const luPayload = await levelUpPayload;
+        if (luPayload) {
+          controller.enqueue(sseFrame({ t: "level_up", payload: luPayload }));
         }
 
         // Phase 3: signal completion

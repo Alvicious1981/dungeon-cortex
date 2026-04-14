@@ -147,6 +147,8 @@ const minimalContext: CampaignContext = {
     stats: { STR: 8, DEX: 14, CON: 12, INT: 18, WIS: 14, CHA: 10 },
     spellSlots: { 1: { current: 2, max: 4 }, 2: { current: 1, max: 3 }, 3: { current: 0, max: 2 } },
     concentrationSpellId: null,
+    hitDiceTotal: 5,
+    hitDiceRemaining: 5,
     inventory: [],
   },
   activeEncounter: null,

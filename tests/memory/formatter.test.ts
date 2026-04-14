@@ -18,7 +18,7 @@ const baseCharacter: CampaignContext["character"] = {
   id: "char-1",
   name: "Thalindra",
   race: "Elf",
-  class: "Wizard",
+  class: "wizard",
   level: 5,
   hp: 28,
   maxHp: 32,
@@ -26,6 +26,8 @@ const baseCharacter: CampaignContext["character"] = {
   stats: { STR: 8, DEX: 14, CON: 12, INT: 18, WIS: 14, CHA: 10 },
   spellSlots: null,
   concentrationSpellId: null,
+  hitDiceTotal: 5,
+  hitDiceRemaining: 3,
   inventory: [],
 };
 
@@ -141,5 +143,90 @@ describe("formatSystemPrompt — Victory trigger section", () => {
   it("does NOT include the Victory section when there is no active encounter", () => {
     const prompt = formatSystemPrompt(baseContext);
     expect(prompt).not.toContain("⚔️ VICTORY");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Milestone L Slice 2 — Level-Up Generation Mandate
+// ---------------------------------------------------------------------------
+
+describe("formatSystemPrompt — Level-Up Generation Mandate", () => {
+  it("includes 'Level-Up Generation Mandate' in Iron Laws", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("Level-Up Generation Mandate");
+  });
+
+  it("mandates calling triggerLevelUp after leveledUp: true", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("triggerLevelUp");
+  });
+
+  it("prohibits narrating HP increases without tool response", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("NEVER narrate HP increases");
+  });
+
+  it("instructs diegetic level-up narration — no 'you leveled up'", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("Never say 'you leveled up'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Milestone L Slice 2 — Hit dice display in Character State
+// ---------------------------------------------------------------------------
+
+describe("formatSystemPrompt — hit dice display", () => {
+  it("includes Hit Dice line in Character State", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("Hit Dice:");
+  });
+
+  it("shows remaining/total format", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    // wizard level 5: 3 remaining / 5 total d6
+    expect(prompt).toContain("3/5 d6");
+  });
+
+  it("shows correct die size for fighter (d10)", () => {
+    const fighterCtx: CampaignContext = {
+      ...baseContext,
+      character: { ...baseCharacter, class: "fighter", hitDiceTotal: 4, hitDiceRemaining: 4 },
+    };
+    const prompt = formatSystemPrompt(fighterCtx);
+    expect(prompt).toContain("4/4 d10");
+  });
+
+  it("shows correct die size for barbarian (d12)", () => {
+    const barbarianCtx: CampaignContext = {
+      ...baseContext,
+      character: { ...baseCharacter, class: "barbarian", hitDiceTotal: 3, hitDiceRemaining: 1 },
+    };
+    const prompt = formatSystemPrompt(barbarianCtx);
+    expect(prompt).toContain("1/3 d12");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Milestone L Slice 2 — Victory section awardXP guidance
+// ---------------------------------------------------------------------------
+
+describe("formatSystemPrompt — Victory section awardXP guidance", () => {
+  it("includes awardXP instruction in Victory section", () => {
+    const ctx: CampaignContext = {
+      ...baseContext,
+      activeEncounter: resolvedEncounter,
+    };
+    const prompt = formatSystemPrompt(ctx);
+    expect(prompt).toContain("awardXP");
+  });
+
+  it("references Challenge Ratings in the XP guidance", () => {
+    const ctx: CampaignContext = {
+      ...baseContext,
+      activeEncounter: resolvedEncounter,
+    };
+    const prompt = formatSystemPrompt(ctx);
+    expect(prompt).toContain("Challenge Ratings");
   });
 });

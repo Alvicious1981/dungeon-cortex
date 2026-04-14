@@ -28,7 +28,15 @@ import type { AsyncIterableStream } from "ai";
 import { getSpellInfo, getItemInfo, getMonsterInfo, queryMonsters } from "@/lib/ai/tools/srd-lookup";
 import { generateQuest } from "@/lib/rules/quests";
 import { prisma } from "@/lib/db/prisma";
-import { computeXPAward } from "@/lib/rules/progression";
+import {
+  computeXPAward,
+  buildLevelUpPayload,
+  TriggerLevelUpInputSchema,
+  LevelUpPayloadSchema,
+  EXPLORATION_XP,
+  type LevelUpPayload,
+} from "@/lib/rules/progression";
+import type { CharacterClass } from "@/lib/rules/proficiency";
 import { equipItem } from "@/lib/rules/inventory";
 import { MonsterSchema, type Monster } from "@/lib/rules/srd";
 import { buildEncounter, xpForCR, encounterMultiplier } from "@/lib/rules/encounters";
@@ -59,11 +67,21 @@ export interface NarrativeStream {
   textStream: AsyncIterableStream<string>;
   /** Resolves to the full assembled text once the LLM finishes. */
   textPromise: PromiseLike<string>;
+  /**
+   * Resolves to the LevelUpPayload if `triggerLevelUp` was called during this
+   * narrative turn, or null if no level-up occurred.
+   * Always resolves (never hangs) because it falls back to null when the text
+   * stream ends without a level-up tool call.
+   */
+  levelUpPayload: Promise<LevelUpPayload | null>;
 }
 
 // ─── Tool definitions (shared) ────────────────────────────────────────────────
 
-function buildTools(campaignId: string) {
+function buildTools(
+  campaignId: string,
+  callbacks?: { onLevelUp?: (payload: LevelUpPayload) => void },
+) {
   return {
     getTavernName: tool({
       description:
@@ -403,6 +421,62 @@ function buildTools(campaignId: string) {
           return JSON.stringify({ ok: true, newXP, newLevel, leveledUp, reason });
         } catch {
           return JSON.stringify({ error: "XP award failed mechanically." });
+        }
+      },
+    }),
+
+    triggerLevelUp: tool({
+      description:
+        "Resolve the mechanical effects of a character level-up. " +
+        "MUST be called immediately after `awardXP` returns `leveledUp: true`. " +
+        "Rolls the class-specific hit die + CON modifier to determine HP gained, " +
+        "updates maxHp, hp, level, and hit dice in the database, " +
+        "and returns the full LevelUpPayload for narration. " +
+        "NEVER invent HP increases, stat changes, or level-up effects without calling this tool. " +
+        "Code is Law.",
+      inputSchema: TriggerLevelUpInputSchema,
+      execute: async ({ characterId, useAverage }) => {
+        try {
+          const character = await prisma.character.findUnique({
+            where: { id: characterId },
+            select: { class: true, level: true, maxHp: true, hp: true, stats: true, hitDiceTotal: true },
+          });
+          if (!character) return JSON.stringify({ error: "Character not found." });
+
+          // Safely extract CON from the stats JSON blob.
+          const stats = character.stats as Record<string, number> | null;
+          const con = typeof stats?.CON === "number" ? stats.CON : 10;
+          const conModifier = Math.floor((con - 10) / 2);
+
+          const payload = buildLevelUpPayload({
+            characterId,
+            className: character.class as CharacterClass,
+            previousLevel: character.level - 1,
+            newLevel: character.level,
+            currentMaxHp: character.maxHp,
+            conModifier,
+            useAverage,
+          });
+
+          // Validate — belt-and-suspenders before any DB write.
+          LevelUpPayloadSchema.parse(payload);
+
+          await prisma.character.update({
+            where: { id: characterId },
+            data: {
+              maxHp:             payload.newMaxHp,
+              hp:                payload.newMaxHp,  // full heal on level-up
+              hitDiceTotal:      payload.newHitDiceTotal,
+              hitDiceRemaining:  payload.newHitDiceTotal,  // reset remaining on level-up
+            },
+          });
+
+          // Notify the stream so the client receives the payload as an SSE frame.
+          callbacks?.onLevelUp?.(payload);
+
+          return JSON.stringify(payload);
+        } catch {
+          return JSON.stringify({ error: "Level-up resolution failed mechanically." });
         }
       },
     }),
@@ -982,6 +1056,41 @@ function buildTools(campaignId: string) {
             })
             .filter((n): n is NonNullable<typeof n> => n !== null);
 
+          // Build exploration XP hints — AI must call awardXP for each.
+          const explorationXPHints: Array<{ event: string; amount: number; reason: string }> = [];
+          // Every successfully entered node counts as a discovery.
+          explorationXPHints.push({
+            event: "node_discovery",
+            amount: EXPLORATION_XP.node_discovery,
+            reason: `First visit to ${targetDbNode.name}`,
+          });
+          // Feature-based hints.
+          if (targetDbNode.feature === "hazard") {
+            explorationXPHints.push({
+              event: "hazard_survived",
+              amount: EXPLORATION_XP.hazard_survived,
+              reason: `Survived the hazard in ${targetDbNode.name}`,
+            });
+          } else if (targetDbNode.feature === "exit") {
+            explorationXPHints.push({
+              event: "exit_reached",
+              amount: EXPLORATION_XP.exit_reached,
+              reason: `Reached the exit at ${targetDbNode.name}`,
+            });
+          } else if (targetDbNode.feature === "treasure") {
+            explorationXPHints.push({
+              event: "treasure_found",
+              amount: EXPLORATION_XP.treasure_found,
+              reason: `Discovered treasure in ${targetDbNode.name}`,
+            });
+          } else if (targetDbNode.feature === "quest_hook") {
+            explorationXPHints.push({
+              event: "quest_hook_found",
+              amount: EXPLORATION_XP.quest_hook_found,
+              reason: `Found a quest hook in ${targetDbNode.name}`,
+            });
+          }
+
           return JSON.stringify({
             ok: true,
             targetNode: {
@@ -996,6 +1105,7 @@ function buildTools(campaignId: string) {
             },
             adjacentNodes,
             passageType: connectingEdge?.passageType ?? "open",
+            explorationXPHints,
           });
         } catch {
           return JSON.stringify({ error: "Movement failed mechanically." });
@@ -1080,6 +1190,14 @@ export async function streamNarrative(
   campaignId: string,
   playerInput: string,
 ): Promise<NarrativeStream> {
+  // Shared promise that resolves once we know whether a level-up occurred.
+  // The onLevelUp callback resolves it with the payload; the text-completion
+  // fallback resolves it with null so the promise never hangs.
+  let resolveLevelUp!: (p: LevelUpPayload | null) => void;
+  const levelUpPayload = new Promise<LevelUpPayload | null>((resolve) => {
+    resolveLevelUp = resolve;
+  });
+
   const context = await buildCampaignContext(campaignId);
   const system = formatSystemPrompt(context);
 
@@ -1088,11 +1206,19 @@ export async function streamNarrative(
     system,
     prompt: playerInput,
     stopWhen: stepCountIs(5),
-    tools: buildTools(campaignId),
+    tools: buildTools(campaignId, {
+      onLevelUp: (payload) => resolveLevelUp(payload),
+    }),
   });
+
+  // Fallback: if the text stream ends without a level-up tool call, resolve null.
+  // Promise.resolve wraps the PromiseLike so we can chain .catch().
+  // A second resolveLevelUp call after onLevelUp fires is a no-op (Promises resolve once).
+  Promise.resolve(result.text).then(() => resolveLevelUp(null)).catch(() => resolveLevelUp(null));
 
   return {
     textStream: result.textStream,
     textPromise: result.text,
+    levelUpPayload,
   };
 }

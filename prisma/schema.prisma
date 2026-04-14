@@ -35,6 +35,12 @@ model Character {
   xp                    Int     @default(0)
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId  String?
+  /// Total hit dice the character possesses (= level). Equals the number of
+  /// hit dice available at full rest. Decremented by short rest healing.
+  hitDiceTotal          Int     @default(1)
+  /// Remaining hit dice available for short rest healing.
+  /// Reset to hitDiceTotal on long rest. Must satisfy 0 ≤ remaining ≤ total.
+  hitDiceRemaining      Int     @default(1)
   createdAt             DateTime @default(now())
 
   user      User            @relation(fields: [userId], references: [id])

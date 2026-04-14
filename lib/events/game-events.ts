@@ -25,7 +25,8 @@ export type GameEventType =
   | "TURN_ADVANCE"         // A combatant's turn begins (non-round-boundary)
   | "ROUND_ADVANCE"        // Turn index wrapped; a new combat round begins
   | "COMBAT_CONSEQUENCE"   // Full Consequences Engine payload from a resolved attack
-  | "LOOT_GENERATED";      // generateLoot tool completed; LootPayload ready for display
+  | "LOOT_GENERATED"       // generateLoot tool completed; LootPayload ready for display
+  | "LEVEL_UP_RESOLVED";   // triggerLevelUp tool completed; LevelUpPayload ready for display
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.
@@ -79,13 +80,33 @@ export interface GameEvent {
 // ─── SSE wire protocol ───────────────────────────────────────────────────────
 
 /**
+ * Payload emitted when the `triggerLevelUp` AI tool completes.
+ * Shape mirrors LevelUpPayload from lib/rules/progression.ts.
+ */
+export interface LevelUpResolvedPayload {
+  characterId:     string;
+  previousLevel:   number;
+  newLevel:        number;
+  hitDie:          string;
+  hpRoll:          number;
+  conModifier:     number;
+  hpGained:        number;
+  previousMaxHp:   number;
+  newMaxHp:        number;
+  newHitDiceTotal: number;
+  className:       string;
+}
+
+/**
  * Discriminated union for frames sent over the action SSE stream.
  *
- *   t:"evt"  — a deterministic game event (fires before any LLM tokens)
- *   t:"txt"  — a text delta from the AI narrator
- *   t:"done" — stream complete; client should call router.refresh()
+ *   t:"evt"      — a deterministic game event (fires before any LLM tokens)
+ *   t:"txt"      — a text delta from the AI narrator
+ *   t:"level_up" — triggerLevelUp tool completed; contains the full LevelUpPayload
+ *   t:"done"     — stream complete; client should call router.refresh()
  */
 export type ActionStreamFrame =
   | { t: "evt"; e: GameEvent }
   | { t: "txt"; d: string }
+  | { t: "level_up"; payload: LevelUpResolvedPayload }
   | { t: "done" };

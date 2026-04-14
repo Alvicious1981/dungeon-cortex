@@ -19,7 +19,8 @@ import type {
   SpellProperties,
   ItemType,
 } from "@/lib/rules/inventory";
-import { xpForLevel, MAX_LEVEL } from "@/lib/rules/progression";
+import AscensionOverlayController from "@/components/character/AscensionOverlay";
+import XPProgressBar from "@/components/character/XPProgressBar";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -269,18 +270,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     ? Math.max(0, Math.min(100, Math.round((character.hp / character.maxHp) * 100)))
     : 0;
 
-  // XP progress within the current level.
-  const isMaxLevel = character.level >= MAX_LEVEL;
-  const currentLevelFloor = xpForLevel(character.level);
-  const nextLevelThreshold = isMaxLevel ? null : xpForLevel(character.level + 1);
-  const xpPercent = isMaxLevel
-    ? 100
-    : nextLevelThreshold !== null && nextLevelThreshold > currentLevelFloor
-      ? Math.min(100, Math.round(
-          ((character.xp - currentLevelFloor) / (nextLevelThreshold - currentLevelFloor)) * 100
-        ))
-      : 0;
-
   const initiativeEntries: InitiativeEntry[] = activeEncounter
     ? activeEncounter.combatants.map((c) => ({
         id: c.id,
@@ -319,6 +308,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       className={`${cinzel.variable} ${crimsonPro.variable} min-h-screen`}
       style={{ background: "#070710", color: "#E2D9C5" }}
     >
+      {/* Ascension Overlay — self-wiring, listens for dungeon-level-up events */}
+      <AscensionOverlayController />
       {/* Ambient glow — purely decorative */}
       <div
         aria-hidden="true"
@@ -505,64 +496,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               </div>
 
               {/* ── XP progress bar ── */}
-              <div>
-                <div className="flex items-baseline justify-between mb-2">
-                  <span
-                    className="text-[10px] uppercase tracking-widest font-semibold"
-                    style={{ fontFamily: "var(--font-cinzel)", color: "#7A5C1E" }}
-                  >
-                    Experience
-                  </span>
-                  {isMaxLevel ? (
-                    <span
-                      className="text-[10px] font-semibold uppercase tracking-wider"
-                      style={{ fontFamily: "var(--font-cinzel)", color: "#B38B2D" }}
-                    >
-                      Ascended
-                    </span>
-                  ) : (
-                    <span className="text-xs tabular-nums" style={{ color: "#7A5C1E" }}>
-                      <span style={{ color: "#B38B2D" }}>{character.xp.toLocaleString()}</span>
-                      <span style={{ color: "#3A2E14" }}> / {nextLevelThreshold?.toLocaleString()} xp</span>
-                    </span>
-                  )}
-                </div>
-
-                <div
-                  role="meter"
-                  aria-valuenow={character.xp}
-                  aria-valuemin={currentLevelFloor}
-                  aria-valuemax={nextLevelThreshold ?? character.xp}
-                  aria-label={
-                    isMaxLevel
-                      ? "Maximum level reached"
-                      : `Experience: ${character.xp} of ${nextLevelThreshold} XP`
-                  }
-                  className="relative h-2 overflow-hidden rounded-full"
-                  style={{
-                    background: "rgba(14,10,2,0.9)",
-                    border: "1px solid rgba(60,40,8,0.5)",
-                  }}
-                >
-                  <div
-                    className="h-full rounded-full motion-safe:transition-all motion-safe:duration-700"
-                    style={{
-                      width: `${xpPercent}%`,
-                      background: "linear-gradient(90deg, #5C3D0A, #B38B2D)",
-                      boxShadow: "0 0 8px rgba(179,139,45,0.4)",
-                    }}
-                  />
-                </div>
-
-                {!isMaxLevel && (
-                  <p
-                    className="mt-1 text-right text-[10px] tabular-nums"
-                    style={{ color: "#2A2010" }}
-                  >
-                    {xpPercent}% to Lv {character.level + 1}
-                  </p>
-                )}
-              </div>
+              <XPProgressBar xp={character.xp} level={character.level} />
             </section>
 
             {/* ── Spell Slots ── */}

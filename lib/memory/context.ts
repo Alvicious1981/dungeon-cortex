@@ -37,6 +37,10 @@ export interface ContextCharacter {
   spellSlots: Prisma.JsonValue | null;
   /** ID of the currently concentrated-on spell, or null. */
   concentrationSpellId: string | null;
+  /** Total hit dice the character possesses (= level). */
+  hitDiceTotal: number;
+  /** Remaining hit dice available for short rest healing. */
+  hitDiceRemaining: number;
   inventory: ContextInventoryItem[];
 }
 
@@ -270,6 +274,8 @@ export async function buildCampaignContext(
             stats: true,
             spellSlots: true,
             concentrationSpellId: true,
+            hitDiceTotal: true,
+            hitDiceRemaining: true,
             inventory: {
               select: {
                 id: true,

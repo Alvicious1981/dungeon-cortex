@@ -111,6 +111,11 @@ export default function ActionInput({ campaignId }: Props) {
           } else if (parsed.t === "txt") {
             // Phase 2: narrative token — append to optimistic bubble
             setStreamingText((prev) => (prev ?? "") + parsed.d);
+          } else if (parsed.t === "level_up") {
+            // Phase 2.5: level-up resolved — forward payload to AscensionOverlay
+            window.dispatchEvent(
+              new CustomEvent("dungeon-level-up", { detail: parsed.payload })
+            );
           } else if (parsed.t === "done") {
             // Phase 3: stream complete
             done = true;

@@ -15,7 +15,8 @@
 
 import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import { isSpellSlots } from "@/lib/rules/magic";
-import { xpForLevel, MAX_LEVEL } from "@/lib/rules/progression";
+import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
+import type { CharacterClass } from "@/lib/rules/proficiency";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,6 +122,16 @@ function formatIronLaws(): string {
     "When the player wants to move between rooms, call `moveToNode` — " +
     "NEVER teleport the player to a non-adjacent node. " +
     "Code is Law.",
+    "",
+    "**Level-Up Generation Mandate:** When `awardXP` returns `leveledUp: true`, " +
+    "you MUST immediately call `triggerLevelUp` with the character's ID. " +
+    "NEVER narrate HP increases, stat changes, new abilities, or level-up effects " +
+    "without the corresponding tool response. The tool rolls the class-specific hit die, " +
+    "computes the HP gain, and persists all changes. " +
+    "After calling `triggerLevelUp`, narrate the level-up as a significant in-world moment — " +
+    "muscles hardening, reflexes quickening, divine favor enveloping the character. " +
+    "Never say 'you leveled up' — describe the *feeling* of ascending. " +
+    "Code is Law.",
   ].join("\n");
 }
 
@@ -140,6 +151,12 @@ function formatCharacter(character: CampaignContext["character"]): string {
   } else {
     lines.push(`**XP:** ${character.xp} (Level 20 — max)`);
   }
+
+  // Hit dice — remaining / total for short-rest healing context.
+  const hitDieSize = HIT_DIE_MAP[character.class as CharacterClass] ?? "?";
+  lines.push(
+    `**Hit Dice:** ${character.hitDiceRemaining}/${character.hitDiceTotal} d${hitDieSize}`
+  );
 
   // Spell slots — only shown for characters with spellcasting ability
   const slots = character.spellSlots;
@@ -181,6 +198,9 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
       "",
       `**MANDATORY:** Call \`generateLoot\` with encounterId \`${encounter.id}\` and tensionScore \`${tensionDisplay}\` NOW.`,
       "Do NOT narrate any loot or treasure until you have the tool response.",
+      "",
+      "**Then call `awardXP`** with the combat XP for this encounter. " +
+      "Compute the total from the defeated enemies' Challenge Ratings using the CR/XP table (DMG p. 275).",
     ].join("\n");
   }
 
