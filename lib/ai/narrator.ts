@@ -65,6 +65,14 @@ import {
   buildMerchantPayload,
   type MerchantPayload,
 } from "@/lib/rules/trade";
+import {
+  rollReaction as rollReactionPure,
+  resolveSocialCheck,
+  getRumorsPayload,
+  ReactionRollInputSchema,
+  SocialCheckInputSchema,
+  GetRumorsInputSchema,
+} from "@/lib/rules/social";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1307,6 +1315,165 @@ function buildTools(
           return JSON.stringify(result);
         } catch (error: any) {
           return JSON.stringify({ error: error.message || "Trade execution failed mechanically." });
+        }
+      },
+    }),
+
+    // ── Social Interaction Tools (Milestone N) ──────────────────────────────
+
+    rollReaction: tool({
+      description:
+        "Perform the 2d6 AD&D 1e Reaction Roll to determine an NPC's initial disposition " +
+        "toward the party when they are first approached. " +
+        "MUST be called the FIRST TIME the party speaks to any NPC in a scene. " +
+        "Do NOT call this if NPC.hasMetPlayer is true — use the persisted disposition instead. " +
+        "The roll result determines the NPC's opening attitude. " +
+        "The Narrator MUST voice the NPC using ONLY the returned dispositionBand and personality tags. " +
+        "NEVER invent NPC attitudes, motivations, or secrets without calling this tool first. " +
+        "Code is Law.",
+      inputSchema: ReactionRollInputSchema,
+      execute: async ({ npcSeed, npcRole, charismaModifier }) => {
+        try {
+          // 1. Pure reaction roll — dice + personality determinism
+          const result = rollReactionPure({ npcSeed, npcRole, charismaModifier });
+
+          // 2. Deterministic statblock for CREATE branch (same seed = same person)
+          const statblock = generateNPC(npcSeed, npcRole as NPCRole);
+
+          // 3. Upsert NPC — create if first meeting, update social fields either way
+          await prisma.nPC.upsert({
+            where: { campaignId_seed: { campaignId, seed: npcSeed } },
+            create: {
+              campaignId,
+              seed:         npcSeed,
+              role:         npcRole,
+              name:         statblock.name,
+              maxHp:        statblock.maxHp,
+              hp:           statblock.hp,
+              ac:           statblock.ac,
+              race:         statblock.race,
+              profession:   statblock.profession,
+              alignment:    statblock.alignment,
+              abilityScores: statblock.abilityScores as object,
+              traits:       statblock.traits as object,
+              disposition:  result.initialDisposition,
+              personalityTags: result.personality as object,
+              hasMetPlayer: true,
+            },
+            update: {
+              disposition:     result.initialDisposition,
+              personalityTags: result.personality as object,
+              hasMetPlayer:    true,
+            },
+          });
+
+          return JSON.stringify(result);
+        } catch {
+          return JSON.stringify({ error: "Reaction roll failed mechanically. Narrate a moment of silence." });
+        }
+      },
+    }),
+
+    socialCheck: tool({
+      description:
+        "Resolve a social action — Persuade, Intimidate, or Deceive — against an NPC. " +
+        "Rolls 1d20 + the character's CHA modifier against a DC derived from " +
+        "the NPC's current disposition and the magnitude of the shift attempted. " +
+        "On success, the NPC's disposition increases. Intimidation failure causes backfire. " +
+        "MUST be called whenever the player attempts to influence an NPC through social means. " +
+        "NEVER decide the outcome of a social interaction without calling this tool. " +
+        "Narrate the result — and ONLY the result — that the tool returns. " +
+        "Code is Law.",
+      inputSchema: SocialCheckInputSchema,
+      execute: async ({ npcSeed, characterId, approach, dispositionDelta, intent }) => {
+        try {
+          // 1. Verify NPC exists and has been formally met
+          const npc = await prisma.nPC.findUnique({
+            where: { campaignId_seed: { campaignId, seed: npcSeed } },
+          });
+          if (!npc) {
+            return JSON.stringify({ error: "NPC not found. Call rollReaction first to establish first contact." });
+          }
+          if (!npc.hasMetPlayer) {
+            return JSON.stringify({ error: "Call rollReaction before socialCheck — the party has not yet met this NPC." });
+          }
+
+          // 2. Derive CHA modifier from character stats
+          const character = await prisma.character.findUnique({
+            where: { id: characterId },
+            select: { stats: true },
+          });
+          if (!character) {
+            return JSON.stringify({ error: "Character not found." });
+          }
+          const stats = character.stats as Record<string, number> | null;
+          const cha = typeof stats?.CHA === "number" ? stats.CHA : 10;
+          const charismaModifier = abilityModifier(cha);
+
+          // 3. Pure resolution — no I/O, deterministic given the d20 roll
+          const currentDisposition = npc.disposition ?? 0;
+          const result = resolveSocialCheck(
+            { npcSeed, characterId, approach, dispositionDelta, intent },
+            charismaModifier,
+            currentDisposition,
+          );
+
+          // 4. Persist disposition change (single row, no cascade risk)
+          await prisma.nPC.update({
+            where: { campaignId_seed: { campaignId, seed: npcSeed } },
+            data: { disposition: result.dispositionAfter },
+          });
+
+          return JSON.stringify(result);
+        } catch {
+          return JSON.stringify({ error: "Social check failed mechanically. Narrate a moment of ambiguity." });
+        }
+      },
+    }),
+
+    getRumors: tool({
+      description:
+        "Ask an NPC what they know about nearby areas. " +
+        "Only NPCs with disposition ≥ 3 (Friendly or better) will share information. " +
+        "The returned rumors are derived ENTIRELY from persisted database records — " +
+        "the NPC cannot share information the world does not contain. " +
+        "MUST be called when a player asks an NPC for directions, local knowledge, " +
+        "rumors, or information about nearby locations. " +
+        "NEVER invent rumors, location details, or quest hooks. " +
+        "Narrate ONLY the information this tool returns. " +
+        "Code is Law.",
+      inputSchema: GetRumorsInputSchema,
+      execute: async ({ npcSeed, campaignId: targetCampaignId }) => {
+        try {
+          // 1. Fetch NPC disposition
+          const npc = await prisma.nPC.findUnique({
+            where: { campaignId_seed: { campaignId: targetCampaignId, seed: npcSeed } },
+          });
+          if (!npc) {
+            return JSON.stringify({ error: "NPC not found. Cannot retrieve rumors." });
+          }
+
+          // 2. Fetch current location from campaign
+          const campaign = await prisma.campaign.findUnique({
+            where: { id: targetCampaignId },
+            select: { currentLocationId: true },
+          });
+          if (!campaign?.currentLocationId) {
+            return JSON.stringify({ error: "No active location — explore a location first." });
+          }
+
+          // 3. Fetch all nodes in the current location (NPC only knows their own floor)
+          const nodes = await prisma.locationNode.findMany({
+            where: { locationId: campaign.currentLocationId },
+            select: { id: true, name: true, feature: true, description: true },
+          });
+
+          // 4. Pure payload builder — no invention, no hallucination
+          const payload = getRumorsPayload(npcSeed, npc.name, npc.disposition ?? 0, nodes);
+
+          return JSON.stringify(payload);
+        } catch {
+          return JSON.stringify({ error: "Rumor retrieval failed mechanically. The NPC goes quiet." });
         }
       },
     }),

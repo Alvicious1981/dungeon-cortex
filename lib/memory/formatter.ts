@@ -17,6 +17,7 @@ import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
+import { getDispositionBand, type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -142,6 +143,14 @@ function formatIronLaws(): string {
     "NEVER grant items or modify gold without the trade tool confirming success. " +
     "If a trade fails (insufficient gold, item not found), narrate the failure — " +
     "do NOT override the system. Code is Law.",
+    "",
+    "**Social Interaction Mandate:** When you first speak with any NPC in a scene " +
+    "(as determined by NPC.hasMetPlayer being false), you MUST call `rollReaction` " +
+    "with the party leader's Charisma modifier. Never invent the NPC's opening attitude. " +
+    "When the player attempts to persuade, intimidate, or deceive an NPC, you MUST call " +
+    "`socialCheck` before narrating the outcome. When the player asks an NPC for local " +
+    "information, rumors, or directions, you MUST call `getRumors`. " +
+    "The engine decides what the NPC knows and feels. You voice it. Code is Law.",
   ].join("\n");
 }
 
@@ -390,6 +399,64 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
 }
 
 // ---------------------------------------------------------------------------
+// NPC Social Context
+// ---------------------------------------------------------------------------
+
+/** Shape passed to formatNPCContext — mirrors the social fields on the NPC model. */
+export interface ActiveNPC {
+  name: string;
+  disposition: number | null;
+  personalityTags: NPCPersonality | null;
+  hasMetPlayer: boolean;
+}
+
+const DISPOSITION_ICONS: Record<DispositionBand, string> = {
+  Hostile:     "🔴",
+  Unfriendly:  "🟠",
+  Indifferent: "⚪",
+  Friendly:    "🟢",
+  Helpful:     "💛",
+};
+
+/**
+ * Returns a "## 🎭 NPC" prompt section for the AI, grounding the narrator in
+ * the NPC's persisted personality and current disposition.
+ *
+ * - Unmet NPC: instructs the AI to call `rollReaction` first.
+ * - Met NPC: injects disposition band, icon, motivation, and distinctive trait.
+ *   The secret is intentionally withheld from the narrator prompt to prevent
+ *   premature disclosure — it is revealed only at Helpful disposition.
+ *
+ * @pure — no I/O, deterministic output for the same input.
+ */
+export function formatNPCContext(npc: ActiveNPC): string {
+  if (!npc.hasMetPlayer) {
+    return `## 🎭 NPC: ${npc.name}\n*(Not yet met — call rollReaction before first interaction.)*`;
+  }
+
+  const band = getDispositionBand(npc.disposition ?? 0);
+  const icon = DISPOSITION_ICONS[band];
+  const tags = npc.personalityTags;
+
+  const lines: string[] = [
+    `## 🎭 NPC: ${npc.name}`,
+    `**Disposition:** ${icon} ${band} (${npc.disposition ?? 0})`,
+  ];
+
+  if (tags) {
+    lines.push(`**Motivation:** ${tags.motivation}`);
+    lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);
+  }
+
+  lines.push(
+    "*(Note: The NPC's secret is known to them but concealed from the party. " +
+    "Reveal it only if disposition reaches Helpful and the player asks the right question.)*"
+  );
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -400,12 +467,11 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
  *
  * @pure — no side effects, deterministic output for the same input.
  */
-export function formatSystemPrompt(context: CampaignContext & { gold?: number }): string {
+export function formatSystemPrompt(
+  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC },
+): string {
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
-
-  // We pass context.gold to formatExploration if available, or 0. (The real gold is in context.character? no, the gold is in campaign object but CampaignContext currently doesn't have it explicitly at the root level).
-  // I will add gold to CampaignContext.
   const partyGold = context.gold ?? 0;
   const explorationSection = formatExploration(context.currentExploration, partyGold);
 
@@ -424,6 +490,9 @@ export function formatSystemPrompt(context: CampaignContext & { gold?: number })
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.
     ...(questSection ? [questSection] : []),
+    // NPC social context — injected when the party is actively interacting
+    // with a tracked NPC. Absent when no NPC is in scope.
+    ...(context.activeNPC ? [formatNPCContext(context.activeNPC)] : []),
     formatRecentLogs(context.recentLogs),
   ];
 

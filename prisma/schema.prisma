@@ -216,6 +216,18 @@ model NPC {
   abilityScores Json?
   /// Personality traits { personality, ideal, bond, flaw }. Null for legacy records.
   traits      Json?
+  /// Current disposition toward the party. Range: −10 (Hostile) to +10 (Helpful).
+  /// Set by rollReaction on first meeting; updated by socialCheck on social actions.
+  /// Null for NPCs the party has never spoken to (reaction roll pending).
+  disposition     Int?
+  /// Personality Tags generated deterministically from the seed.
+  /// JSON object: { motivation: string, secret: string, distinctiveTrait: string }
+  /// Populated by generateNPCPersonality(seed) on first interaction.
+  /// Never null after first meeting; null for legacy/unmet NPCs.
+  personalityTags Json?
+  /// True once the party has formally met this NPC (rollReaction has fired).
+  /// Prevents duplicate reaction rolls on subsequent encounters.
+  hasMetPlayer    Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
