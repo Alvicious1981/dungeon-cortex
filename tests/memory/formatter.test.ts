@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatSystemPrompt, formatNPCContext, type ActiveNPC } from "@/lib/memory/formatter";
+import { formatSystemPrompt, formatNPCContext, formatSurvivalHUD, type ActiveNPC, type ExplorationHUDContext } from "@/lib/memory/formatter";
 import type { CampaignContext } from "@/lib/memory/context";
 
 // ---------------------------------------------------------------------------
@@ -381,5 +381,163 @@ describe("formatNPCContext — unmet NPC (task 2.30)", () => {
     const output = formatNPCContext(unmetNPC);
     expect(output).not.toContain("Disposition:");
     expect(output).not.toContain("Motivation:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Milestone O Slice 2 — Exploration Time Mandate in Iron Laws
+// ---------------------------------------------------------------------------
+
+describe("formatSystemPrompt — Exploration Time Mandate", () => {
+  it("includes 'Exploration Time Mandate' in Iron Laws", () => {
+    expect(formatSystemPrompt(baseContext)).toContain("Exploration Time Mandate");
+  });
+
+  it("mandates calling executeExplorationTurn for every dungeon action", () => {
+    expect(formatSystemPrompt(baseContext)).toContain("executeExplorationTurn");
+  });
+
+  it("prohibits narrating torch burn without tool response", () => {
+    expect(formatSystemPrompt(baseContext)).toContain("NEVER narrate torch burn");
+  });
+
+  it("mandates rest action when restRequired is true", () => {
+    expect(formatSystemPrompt(baseContext)).toContain("action: \"rest\"");
+  });
+
+  it("instructs the AI to voice warnings[] diegetically", () => {
+    expect(formatSystemPrompt(baseContext)).toContain("warnings[]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Milestone O Slice 2 — formatSurvivalHUD (standalone)
+// ---------------------------------------------------------------------------
+
+const baseHUD: ExplorationHUDContext = {
+  totalTurns: 12,
+  totalHours: 2,
+  turnsSinceRest: 3,
+  activeLightSource: "torch",
+  lightSourceTurnsRemaining: 4,
+  torches: 2,
+  oilFlasks: 1,
+  rations: 8,
+  exhaustionLevel: 0,
+};
+
+describe("formatSurvivalHUD — time display", () => {
+  it("includes the dungeon turn count", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("12");
+  });
+
+  it("includes hours elapsed", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("2h");
+  });
+
+  it("computes minutes correctly (turn 12 = 2h 0min)", () => {
+    // totalTurns=12, TURNS_PER_HOUR=6 → 12%6=0 → 0*10=0min
+    expect(formatSurvivalHUD(baseHUD)).toContain("0min");
+  });
+
+  it("computes minutes correctly for non-zero remainder (turn 13 = 2h 10min)", () => {
+    const hud = { ...baseHUD, totalTurns: 13, totalHours: 2 };
+    expect(formatSurvivalHUD(hud)).toContain("10min");
+  });
+});
+
+describe("formatSurvivalHUD — rest status", () => {
+  it("shows turns until mandatory rest when not overdue", () => {
+    // turnsSinceRest=3, REST_INTERVAL=6 → 3 turns remaining
+    expect(formatSurvivalHUD(baseHUD)).toContain("3 turn");
+  });
+
+  it("shows overdue warning when turnsSinceRest >= 6", () => {
+    const overdue = { ...baseHUD, turnsSinceRest: 6 };
+    expect(formatSurvivalHUD(overdue)).toContain("OVERDUE");
+  });
+
+  it("does NOT show overdue warning when rest is current", () => {
+    expect(formatSurvivalHUD(baseHUD)).not.toContain("OVERDUE");
+  });
+});
+
+describe("formatSurvivalHUD — exhaustion", () => {
+  it("does NOT show exhaustion line when level is 0", () => {
+    expect(formatSurvivalHUD(baseHUD)).not.toContain("Exhaustion");
+  });
+
+  it("shows exhaustion level when > 0", () => {
+    const exhausted = { ...baseHUD, exhaustionLevel: 2 };
+    expect(formatSurvivalHUD(exhausted)).toContain("Exhaustion");
+    expect(formatSurvivalHUD(exhausted)).toContain("2");
+  });
+});
+
+describe("formatSurvivalHUD — light source", () => {
+  it("shows torch icon for active torch", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("🕯️");
+  });
+
+  it("shows lantern icon for active lantern", () => {
+    const withLantern = { ...baseHUD, activeLightSource: "lantern" as const };
+    expect(formatSurvivalHUD(withLantern)).toContain("🏮");
+  });
+
+  it("shows darkness icon when no light source", () => {
+    const dark = { ...baseHUD, activeLightSource: "none" as const, lightSourceTurnsRemaining: 0 };
+    expect(formatSurvivalHUD(dark)).toContain("⬛");
+  });
+
+  it("shows turns remaining on active source", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("4");
+  });
+
+  it("shows torch reserve count", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("2");
+  });
+
+  it("shows oil flask reserve count", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("1");
+  });
+});
+
+describe("formatSurvivalHUD — rations", () => {
+  it("includes rations count", () => {
+    expect(formatSurvivalHUD(baseHUD)).toContain("8");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Milestone O Slice 2 — explorationHUD injection into formatSystemPrompt
+// ---------------------------------------------------------------------------
+
+describe("formatSystemPrompt — explorationHUD injection", () => {
+  it("includes Dungeon Clock section when explorationHUD is provided", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, explorationHUD: baseHUD });
+    expect(prompt).toContain("Dungeon Clock");
+  });
+
+  it("includes turn count from HUD in the prompt", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, explorationHUD: baseHUD });
+    expect(prompt).toContain("12");
+  });
+
+  it("does NOT include Dungeon Clock section when explorationHUD is absent", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).not.toContain("Dungeon Clock");
+  });
+
+  it("shows torch icon in prompt when active light source is torch", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, explorationHUD: baseHUD });
+    expect(prompt).toContain("🕯️");
+  });
+
+  it("shows overdue rest warning in prompt when turnsSinceRest >= 6", () => {
+    const prompt = formatSystemPrompt({
+      ...baseContext,
+      explorationHUD: { ...baseHUD, turnsSinceRest: 6 },
+    });
+    expect(prompt).toContain("OVERDUE");
   });
 });

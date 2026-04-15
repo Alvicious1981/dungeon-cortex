@@ -56,6 +56,13 @@ import {
   LocationPayloadSchema,
   generateLocationPayload,
   canMoveToNode,
+  advanceTurn,
+  consumeResources,
+  checkRandomEncounter,
+  applyRest,
+  REST_INTERVAL_TURNS,
+  type CampaignTimeState,
+  type PartyInventoryState,
   type EdgePayload,
   type PassageType,
 } from "@/lib/rules/exploration";
@@ -1474,6 +1481,174 @@ function buildTools(
           return JSON.stringify(payload);
         } catch {
           return JSON.stringify({ error: "Rumor retrieval failed mechanically. The NPC goes quiet." });
+        }
+      },
+    }),
+
+    // ── Exploration Time Engine (Milestone O) ───────────────────────────────
+
+    executeExplorationTurn: tool({
+      description:
+        "Advance the dungeon clock by one exploration turn (10 minutes) for the given action. " +
+        "MUST be called for every dungeon action the party takes — moving, searching, resting, " +
+        "interacting, or making noise. " +
+        "Handles torch/lantern burn, ration consumption, random encounter checks, " +
+        "and mandatory rest enforcement automatically. " +
+        "NEVER narrate the passage of time, torch burn, ration loss, exhaustion, or encounters " +
+        "without calling this tool first. " +
+        "If the response contains `restRequired: true`, the NEXT call MUST use action='rest'. " +
+        "Voice the returned `warnings[]` diegetically. Code is Law.",
+      inputSchema: z.object({
+        action: z
+          .enum(["move", "search", "rest", "interact", "loud"])
+          .describe(
+            "The type of exploration action taken. " +
+            "'move': standard movement to adjacent node, 1 turn. " +
+            "'search': careful room examination, 1 turn. " +
+            "'rest': mandatory rest turn — resets the rest cycle, no resources consumed. " +
+            "'interact': non-combat interaction with environment or NPC, 1 turn. " +
+            "'loud': noisy action (breaking down door, shouting) — forces an immediate encounter check.",
+          ),
+        turnsToAdvance: z
+          .number()
+          .int()
+          .min(1)
+          .max(6)
+          .default(1)
+          .describe(
+            "How many turns this action consumes. Default 1. " +
+            "Only exceed 1 for explicitly multi-turn tasks such as extended rituals or camp setup.",
+          ),
+      }).strict(),
+
+      execute: async ({ action, turnsToAdvance }) => {
+        try {
+          // 1. Fetch current state from DB — single round-trip
+          const [campaignRec, campaignTime, partyInventory] = await Promise.all([
+            prisma.campaign.findUnique({
+              where: { id: campaignId },
+              select: { characterId: true },
+            }),
+            prisma.campaignTime.findUnique({ where: { campaignId } }),
+            prisma.partyInventory.findUnique({ where: { campaignId } }),
+          ]);
+
+          if (!campaignRec) {
+            return JSON.stringify({ error: "Campaign not found." });
+          }
+
+          // 2. Derive partySize from active encounter combatants (Q2 — never trust AI input)
+          const activeEncounter = await prisma.encounter.findFirst({
+            where: { campaignId, status: "active" },
+            select: { combatants: { where: { isPlayer: true }, select: { id: true } } },
+          });
+          const partySize = activeEncounter?.combatants.length ?? 1;
+
+          // 3. Bootstrap CampaignTime / PartyInventory if they don't exist yet
+          const currentTime: CampaignTimeState = campaignTime ?? {
+            totalTurns: 0,
+            totalHours: 0,
+            turnsSinceRest: 0,
+            turnsSinceEncounterCheck: 0,
+            turnsSinceRation: 0,
+          };
+          const currentInventory: PartyInventoryState = partyInventory
+            ? {
+                torches:                   partyInventory.torches,
+                oilFlasks:                 partyInventory.oilFlasks,
+                rations:                   partyInventory.rations,
+                activeLightSource:         partyInventory.activeLightSource as "torch" | "lantern" | "none",
+                lightSourceTurnsRemaining: partyInventory.lightSourceTurnsRemaining,
+              }
+            : {
+                torches: 0,
+                oilFlasks: 0,
+                rations: 0,
+                activeLightSource: "none",
+                lightSourceTurnsRemaining: 0,
+              };
+
+          // 4. REST branch — resets rest cycle, no resource consumption
+          if (action === "rest") {
+            const nextTime = applyRest(currentTime);
+            await prisma.campaignTime.upsert({
+              where: { campaignId },
+              create: { campaignId, ...nextTime },
+              update: nextTime,
+            });
+            return JSON.stringify({
+              action: "rest",
+              turnsAdvanced: 0,
+              totalTurns: nextTime.totalTurns,
+              totalHours: nextTime.totalHours,
+              restRequired: false,
+              encounter: null,
+              lightSource: currentInventory.activeLightSource,
+              lightSourceTurnsLeft: currentInventory.lightSourceTurnsRemaining,
+              lightExpired: false,
+              rationsDepleted: false,
+              warnings: ["The party rests for one turn. The rest cycle has been reset."],
+            });
+          }
+
+          // 5. NON-REST branch
+          // 5a. Check if rest was already overdue BEFORE advancing (Q1 exhaustion trigger)
+          const restAlreadyOverdue = currentTime.turnsSinceRest >= REST_INTERVAL_TURNS;
+
+          // 5b. Advance the clock
+          const turnResult = advanceTurn(currentTime, turnsToAdvance);
+
+          // 5c. Apply Exhaustion Level 1 immediately if rest was skipped (Q1)
+          if (restAlreadyOverdue && turnResult.restRequired) {
+            await prisma.character.update({
+              where: { id: campaignRec.characterId },
+              data: { exhaustionLevel: { increment: 1 } },
+            });
+          }
+
+          // 5d. Consume resources (light + rations)
+          const resourceResult = consumeResources(currentInventory, {
+            rationConsumptionDue: turnResult.rationConsumptionDue,
+            partySize,
+          });
+
+          // 5e. Random encounter check (every 2 turns, or forced for loud actions)
+          let encounter: { triggered: boolean; roll: number } | null = null;
+          if (turnResult.encounterCheckDue || action === "loud") {
+            const enc = checkRandomEncounter(action === "loud");
+            encounter = { triggered: enc.triggered, roll: enc.roll };
+          }
+
+          // 5f. Persist both records atomically
+          await prisma.$transaction([
+            prisma.campaignTime.upsert({
+              where: { campaignId },
+              create: { campaignId, ...turnResult.next },
+              update: turnResult.next,
+            }),
+            prisma.partyInventory.upsert({
+              where: { campaignId },
+              create: { campaignId, ...resourceResult.next },
+              update: resourceResult.next,
+            }),
+          ]);
+
+          return JSON.stringify({
+            action,
+            turnsAdvanced:      turnResult.turnsAdvanced,
+            totalTurns:         turnResult.next.totalTurns,
+            totalHours:         turnResult.next.totalHours,
+            restRequired:       turnResult.restRequired,
+            exhaustionApplied:  restAlreadyOverdue && turnResult.restRequired,
+            encounter,
+            lightSource:        resourceResult.next.activeLightSource,
+            lightSourceTurnsLeft: resourceResult.next.lightSourceTurnsRemaining,
+            lightExpired:       resourceResult.lightExpired,
+            rationsDepleted:    resourceResult.rationsDepleted,
+            warnings:           resourceResult.warnings,
+          });
+        } catch {
+          return JSON.stringify({ error: "Exploration turn failed mechanically. The moment hangs suspended." });
         }
       },
     }),

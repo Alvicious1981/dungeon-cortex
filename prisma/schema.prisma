@@ -41,6 +41,10 @@ model Character {
   /// Remaining hit dice available for short rest healing.
   /// Reset to hitDiceTotal on long rest. Must satisfy 0 ≤ remaining ≤ total.
   hitDiceRemaining      Int     @default(1)
+  /// D&D 5e 2014 exhaustion level. Range: 0 (none) to 6 (dead).
+  /// Incremented by executeExplorationTurn when a mandatory rest is skipped.
+  /// Decremented by 1 on long rest per 5e 2014 rules.
+  exhaustionLevel       Int     @default(0)
   createdAt             DateTime @default(now())
 
   user      User            @relation(fields: [userId], references: [id])
@@ -64,14 +68,16 @@ model Campaign {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user       User          @relation(fields: [userId], references: [id])
-  character  Character     @relation(fields: [characterId], references: [id])
-  logs       GameLog[]
-  encounters Encounter[]
-  memories   MemoryEntry[]
-  quests     Quest[]
-  npcs       NPC[]
-  locations  Location[]
+  user           User           @relation(fields: [userId], references: [id])
+  character      Character      @relation(fields: [characterId], references: [id])
+  logs           GameLog[]
+  encounters     Encounter[]
+  memories       MemoryEntry[]
+  quests         Quest[]
+  npcs           NPC[]
+  locations      Location[]
+  campaignTime   CampaignTime?
+  partyInventory PartyInventory?
 }
 
 model GameLog {
@@ -342,4 +348,70 @@ model LocationEdge {
 
   @@unique([fromNodeId, toNodeId])
   @@index([locationId])
+}
+
+/// Tracks the campaign's absolute temporal state for the OSR Exploration Time Engine.
+/// One record per campaign. totalTurns is monotonically increasing — never decremented.
+/// All mutations occur inside prisma.$transaction — no partial writes.
+model CampaignTime {
+  id          String @id @default(cuid())
+  campaignId  String @unique
+
+  /// Total dungeon turns elapsed since campaign start. 1 turn = 10 minutes.
+  totalTurns  Int @default(0)
+
+  /// Derived display field: floor(totalTurns / 6). Stored for query efficiency.
+  /// Must always equal floor(totalTurns / TURNS_PER_HOUR). Updated atomically.
+  totalHours  Int @default(0)
+
+  /// Turns accumulated in the current rest cycle (0–6).
+  /// Reaching REST_INTERVAL_TURNS (6) makes rest mandatory before the next turn.
+  /// Reset to 0 by applyRest(). Capped at 6 to prevent integer overflow.
+  turnsSinceRest Int @default(0)
+
+  /// Turns accumulated in the current encounter-check cycle (0–1).
+  /// An encounter roll fires when this reaches ENCOUNTER_CHECK_INTERVAL_TURNS (2).
+  /// Resets modulo 2 after each check fires.
+  turnsSinceEncounterCheck Int @default(0)
+
+  /// Turns accumulated in the current ration cycle (0–143).
+  /// Ration consumption fires when this reaches RATION_INTERVAL_TURNS (144).
+  /// Resets modulo 144 after each consumption fires.
+  turnsSinceRation Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+}
+
+/// Tracks consumable exploration resources for the OSR Exploration Time Engine.
+/// One record per campaign. Quantities are non-negative integers — never fractional.
+/// The AI narrator MUST NOT mutate this table directly.
+model PartyInventory {
+  id          String @id @default(cuid())
+  campaignId  String @unique
+
+  /// Unlit torches in the pack. Each provides TORCH_DURATION_TURNS (6) of light when lit.
+  /// Seeded at INITIAL_TORCHES_PER_PLAYER × partySize on campaign creation.
+  torches     Int @default(0)
+
+  /// Oil flasks in the pack. Each provides OIL_DURATION_TURNS (24) of light when burning.
+  /// Not seeded at campaign creation — must be purchased in-world.
+  oilFlasks   Int @default(0)
+
+  /// Total rations across all party members.
+  /// Seeded at INITIAL_RATIONS_PER_PLAYER × partySize on campaign creation.
+  rations     Int @default(0)
+
+  /// Active light source currently being consumed. "torch" | "lantern" | "none".
+  /// "none" means the party is in darkness — may trigger penalties.
+  activeLightSource String @default("none")
+
+  /// Turns remaining on the active light source before it burns out.
+  /// At 0, consumeResources() auto-selects the next source (torch priority — Q3).
+  lightSourceTurnsRemaining Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
 }

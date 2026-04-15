@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   LOCATION_TYPES,
   NODE_FEATURES,
@@ -18,7 +18,28 @@ import {
   type LocationType,
   type EdgePayload,
   type NodePayload,
+  // Milestone O Time Engine
+  TURNS_PER_HOUR,
+  TORCH_DURATION_TURNS,
+  OIL_DURATION_TURNS,
+  ENCOUNTER_CHECK_INTERVAL_TURNS,
+  ENCOUNTER_TRIGGER_RESULT,
+  REST_INTERVAL_TURNS,
+  RATION_INTERVAL_TURNS,
+  INITIAL_TORCHES_PER_PLAYER,
+  INITIAL_RATIONS_PER_PLAYER,
+  advanceTurn,
+  checkRandomEncounter,
+  consumeResources,
+  applyRest,
+  initialPartyInventory,
+  type CampaignTimeState,
+  type PartyInventoryState,
 } from "@/lib/rules/exploration";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -747,5 +768,466 @@ describe("describeCurrentNode", () => {
       };
       expect(() => describeCurrentNode(node, [], [])).not.toThrow();
     }
+  });
+});
+
+// ===========================================================================
+// MILESTONE O — Exploration Time Engine
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const freshTime: CampaignTimeState = {
+  totalTurns: 0,
+  totalHours: 0,
+  turnsSinceRest: 0,
+  turnsSinceEncounterCheck: 0,
+  turnsSinceRation: 0,
+};
+
+const freshInventory: PartyInventoryState = {
+  torches: 3,
+  oilFlasks: 2,
+  rations: 10,
+  activeLightSource: "torch",
+  lightSourceTurnsRemaining: 4,
+};
+
+const darkInventory: PartyInventoryState = {
+  torches: 0,
+  oilFlasks: 0,
+  rations: 5,
+  activeLightSource: "none",
+  lightSourceTurnsRemaining: 0,
+};
+
+// ---------------------------------------------------------------------------
+// Constants sanity checks
+// ---------------------------------------------------------------------------
+
+describe("Exploration Time Engine — constants", () => {
+  it("TURNS_PER_HOUR is 6 (10 min × 6 = 1 hour)", () => {
+    expect(TURNS_PER_HOUR).toBe(6);
+  });
+  it("TORCH_DURATION_TURNS is 6 (= 1 hour)", () => {
+    expect(TORCH_DURATION_TURNS).toBe(6);
+  });
+  it("OIL_DURATION_TURNS is 24 (= 4 hours)", () => {
+    expect(OIL_DURATION_TURNS).toBe(24);
+  });
+  it("ENCOUNTER_CHECK_INTERVAL_TURNS is 2", () => {
+    expect(ENCOUNTER_CHECK_INTERVAL_TURNS).toBe(2);
+  });
+  it("ENCOUNTER_TRIGGER_RESULT is 1 (1-in-6 chance)", () => {
+    expect(ENCOUNTER_TRIGGER_RESULT).toBe(1);
+  });
+  it("REST_INTERVAL_TURNS is 6", () => {
+    expect(REST_INTERVAL_TURNS).toBe(6);
+  });
+  it("RATION_INTERVAL_TURNS is 144 (6 turns/hr × 24 hr)", () => {
+    expect(RATION_INTERVAL_TURNS).toBe(6 * 24);
+  });
+  it("INITIAL_TORCHES_PER_PLAYER is 5", () => {
+    expect(INITIAL_TORCHES_PER_PLAYER).toBe(5);
+  });
+  it("INITIAL_RATIONS_PER_PLAYER is 7", () => {
+    expect(INITIAL_RATIONS_PER_PLAYER).toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// advanceTurn — turn counter and derived fields
+// ---------------------------------------------------------------------------
+
+describe("advanceTurn — turn counter", () => {
+  it("increments totalTurns by 1 (default)", () => {
+    expect(advanceTurn(freshTime).next.totalTurns).toBe(1);
+  });
+
+  it("increments totalTurns by N when turns=N", () => {
+    expect(advanceTurn(freshTime, 3).next.totalTurns).toBe(3);
+  });
+
+  it("clamps turns to minimum 1", () => {
+    const { next, turnsAdvanced } = advanceTurn(freshTime, 0);
+    expect(next.totalTurns).toBe(1);
+    expect(turnsAdvanced).toBe(1);
+  });
+
+  it("clamps turns to maximum 6", () => {
+    const { next, turnsAdvanced } = advanceTurn(freshTime, 10);
+    expect(next.totalTurns).toBe(6);
+    expect(turnsAdvanced).toBe(6);
+  });
+
+  it("echoes clamped turnsAdvanced in result", () => {
+    expect(advanceTurn(freshTime, 3).turnsAdvanced).toBe(3);
+  });
+
+  it("totalHours = floor(totalTurns / 6) at boundary", () => {
+    // 5 existing + 1 = 6 → 1 hour
+    expect(advanceTurn({ ...freshTime, totalTurns: 5 }).next.totalHours).toBe(1);
+  });
+
+  it("totalHours stays 0 for turns 1–5 from fresh state", () => {
+    expect(advanceTurn(freshTime, 5).next.totalHours).toBe(0);
+  });
+
+  it("totalHours increments correctly at 12 turns", () => {
+    expect(advanceTurn({ ...freshTime, totalTurns: 11 }).next.totalHours).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// advanceTurn — rest cycle
+// ---------------------------------------------------------------------------
+
+describe("advanceTurn — rest cycle", () => {
+  it("restRequired = false after turn 1 from fresh state", () => {
+    expect(advanceTurn(freshTime).restRequired).toBe(false);
+  });
+
+  it("restRequired = false after turn 5 from fresh state", () => {
+    expect(advanceTurn(freshTime, 5).restRequired).toBe(false);
+  });
+
+  it("restRequired = true after turn 6 from fresh state", () => {
+    expect(advanceTurn(freshTime, 6).restRequired).toBe(true);
+  });
+
+  it("restRequired = true when turnsSinceRest is already at REST_INTERVAL_TURNS", () => {
+    expect(advanceTurn({ ...freshTime, turnsSinceRest: 6 }).restRequired).toBe(true);
+  });
+
+  it("turnsSinceRest never exceeds REST_INTERVAL_TURNS (6)", () => {
+    const { next } = advanceTurn({ ...freshTime, turnsSinceRest: 6 }, 6);
+    expect(next.turnsSinceRest).toBe(6);
+  });
+
+  it("turnsSinceRest accumulates across multiple calls", () => {
+    const s1 = advanceTurn(freshTime, 3).next;
+    const s2 = advanceTurn(s1, 2).next;
+    expect(s2.turnsSinceRest).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// advanceTurn — encounter check cycle
+// ---------------------------------------------------------------------------
+
+describe("advanceTurn — encounter check cycle", () => {
+  it("encounterCheckDue = false on turn 1", () => {
+    expect(advanceTurn(freshTime).encounterCheckDue).toBe(false);
+  });
+
+  it("encounterCheckDue = true on turn 2", () => {
+    expect(advanceTurn(freshTime, 2).encounterCheckDue).toBe(true);
+  });
+
+  it("turnsSinceEncounterCheck resets to 0 after check fires", () => {
+    expect(advanceTurn(freshTime, 2).next.turnsSinceEncounterCheck).toBe(0);
+  });
+
+  it("encounterCheckDue fires again after counter resets", () => {
+    const s1 = advanceTurn(freshTime, 2).next;
+    expect(advanceTurn(s1, 2).encounterCheckDue).toBe(true);
+  });
+
+  it("encounterCheckDue = false at turn 1 after previous check", () => {
+    const s1 = advanceTurn(freshTime, 2).next;
+    expect(advanceTurn(s1, 1).encounterCheckDue).toBe(false);
+  });
+
+  it("partial advances accumulate correctly across two calls", () => {
+    const s1 = advanceTurn(freshTime, 1).next;
+    expect(advanceTurn(s1, 1).encounterCheckDue).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// advanceTurn — ration cycle
+// ---------------------------------------------------------------------------
+
+describe("advanceTurn — ration cycle", () => {
+  it("rationConsumptionDue = false when turnsSinceRation = 0, turns = 1", () => {
+    expect(advanceTurn(freshTime, 1).rationConsumptionDue).toBe(false);
+  });
+
+  it("rationConsumptionDue = true when crossing 144-turn threshold", () => {
+    const near: CampaignTimeState = { ...freshTime, turnsSinceRation: RATION_INTERVAL_TURNS - 1 };
+    expect(advanceTurn(near, 1).rationConsumptionDue).toBe(true);
+  });
+
+  it("turnsSinceRation resets modulo 144 after consumption fires", () => {
+    const near: CampaignTimeState = { ...freshTime, turnsSinceRation: 143 };
+    expect(advanceTurn(near, 1).next.turnsSinceRation).toBe(0);
+  });
+
+  it("turnsSinceRation = 2 after advancing 2 turns from fresh state", () => {
+    expect(advanceTurn(freshTime, 2).next.turnsSinceRation).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkRandomEncounter
+// ---------------------------------------------------------------------------
+
+describe("checkRandomEncounter — roll results", () => {
+  it("triggered = true when forcedRoll = 1", () => {
+    const r = checkRandomEncounter(false, 1);
+    expect(r.triggered).toBe(true);
+    expect(r.roll).toBe(1);
+  });
+
+  it("triggered = false when forcedRoll = 2", () => {
+    expect(checkRandomEncounter(false, 2).triggered).toBe(false);
+  });
+
+  it("triggered = false when forcedRoll = 6", () => {
+    expect(checkRandomEncounter(false, 6).triggered).toBe(false);
+  });
+
+  it("loudAction = true is echoed in result", () => {
+    expect(checkRandomEncounter(true, 3).loudAction).toBe(true);
+  });
+
+  it("loudAction does not guarantee trigger — roll still decides", () => {
+    expect(checkRandomEncounter(true, 4).triggered).toBe(false);
+  });
+
+  it("loudAction = true + forcedRoll = 1 → triggered", () => {
+    expect(checkRandomEncounter(true, 1).triggered).toBe(true);
+  });
+
+  it("uses rollDie(6) — Math.random mock 0 → result 1 → triggered", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const r = checkRandomEncounter(false);
+    expect(r.roll).toBe(1);
+    expect(r.triggered).toBe(true);
+  });
+
+  it("Math.random mock 5/6 → result 6 → not triggered", () => {
+    vi.spyOn(Math, "random").mockReturnValue(5 / 6);
+    const r = checkRandomEncounter(false);
+    expect(r.roll).toBe(6);
+    expect(r.triggered).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// consumeResources — light source
+// ---------------------------------------------------------------------------
+
+describe("consumeResources — torch attrition", () => {
+  it("lightSourceTurnsRemaining decrements by 1 per turn", () => {
+    const { next } = consumeResources(freshInventory, { rationConsumptionDue: false, partySize: 1 });
+    expect(next.lightSourceTurnsRemaining).toBe(3);
+  });
+
+  it("lightExpired = false when remaining > 1", () => {
+    expect(consumeResources(freshInventory, { rationConsumptionDue: false, partySize: 1 }).lightExpired).toBe(false);
+  });
+});
+
+describe("consumeResources — torch expiry auto-selects next torch (Q3)", () => {
+  const oneLeft: PartyInventoryState = {
+    ...freshInventory,
+    activeLightSource: "torch",
+    lightSourceTurnsRemaining: 1,
+    torches: 2,
+  };
+
+  it("lights next torch when torches > 0", () => {
+    const { next } = consumeResources(oneLeft, { rationConsumptionDue: false, partySize: 1 });
+    expect(next.activeLightSource).toBe("torch");
+    expect(next.lightSourceTurnsRemaining).toBe(TORCH_DURATION_TURNS);
+  });
+
+  it("decrements torches count by 1", () => {
+    expect(consumeResources(oneLeft, { rationConsumptionDue: false, partySize: 1 }).next.torches).toBe(1);
+  });
+
+  it("lightSourceAutoSelected = true", () => {
+    expect(consumeResources(oneLeft, { rationConsumptionDue: false, partySize: 1 }).lightSourceAutoSelected).toBe(true);
+  });
+
+  it("lightExpired = true", () => {
+    expect(consumeResources(oneLeft, { rationConsumptionDue: false, partySize: 1 }).lightExpired).toBe(true);
+  });
+});
+
+describe("consumeResources — fallback to lantern when no torches (Q3)", () => {
+  const noTorches: PartyInventoryState = {
+    ...freshInventory,
+    activeLightSource: "torch",
+    lightSourceTurnsRemaining: 1,
+    torches: 0,
+    oilFlasks: 1,
+  };
+
+  it("switches to lantern", () => {
+    const { next } = consumeResources(noTorches, { rationConsumptionDue: false, partySize: 1 });
+    expect(next.activeLightSource).toBe("lantern");
+    expect(next.lightSourceTurnsRemaining).toBe(OIL_DURATION_TURNS);
+  });
+
+  it("decrements oilFlasks by 1", () => {
+    expect(consumeResources(noTorches, { rationConsumptionDue: false, partySize: 1 }).next.oilFlasks).toBe(0);
+  });
+});
+
+describe("consumeResources — darkness when no light sources", () => {
+  const lastLight: PartyInventoryState = {
+    ...freshInventory,
+    activeLightSource: "torch",
+    lightSourceTurnsRemaining: 1,
+    torches: 0,
+    oilFlasks: 0,
+  };
+
+  it("activeLightSource becomes 'none'", () => {
+    expect(consumeResources(lastLight, { rationConsumptionDue: false, partySize: 1 }).next.activeLightSource).toBe("none");
+  });
+
+  it("lightSourceTurnsRemaining becomes 0", () => {
+    expect(consumeResources(lastLight, { rationConsumptionDue: false, partySize: 1 }).next.lightSourceTurnsRemaining).toBe(0);
+  });
+
+  it("darkness warning is present", () => {
+    const { warnings } = consumeResources(lastLight, { rationConsumptionDue: false, partySize: 1 });
+    expect(warnings.some((w) => w.toLowerCase().includes("darkness"))).toBe(true);
+  });
+
+  it("lightExpired = true", () => {
+    expect(consumeResources(lastLight, { rationConsumptionDue: false, partySize: 1 }).lightExpired).toBe(true);
+  });
+});
+
+describe("consumeResources — already in darkness", () => {
+  it("remaining stays at 0 and source stays 'none'", () => {
+    const { next } = consumeResources(darkInventory, { rationConsumptionDue: false, partySize: 1 });
+    expect(next.lightSourceTurnsRemaining).toBe(0);
+    expect(next.activeLightSource).toBe("none");
+  });
+
+  it("lightExpired = false when already in darkness", () => {
+    expect(consumeResources(darkInventory, { rationConsumptionDue: false, partySize: 1 }).lightExpired).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// consumeResources — ration consumption
+// ---------------------------------------------------------------------------
+
+describe("consumeResources — rations", () => {
+  it("deducts partySize rations when rationConsumptionDue = true", () => {
+    const { next } = consumeResources({ ...freshInventory, rations: 10 }, { rationConsumptionDue: true, partySize: 3 });
+    expect(next.rations).toBe(7);
+  });
+
+  it("rations unchanged when rationConsumptionDue = false", () => {
+    const { next } = consumeResources({ ...freshInventory, rations: 10 }, { rationConsumptionDue: false, partySize: 3 });
+    expect(next.rations).toBe(10);
+  });
+
+  it("rations floored at 0 — never negative", () => {
+    const { next } = consumeResources({ ...freshInventory, rations: 2 }, { rationConsumptionDue: true, partySize: 4 });
+    expect(next.rations).toBe(0);
+  });
+
+  it("rationsDepleted = true when rations hit 0", () => {
+    expect(consumeResources({ ...freshInventory, rations: 3 }, { rationConsumptionDue: true, partySize: 3 }).rationsDepleted).toBe(true);
+  });
+
+  it("rationsDepleted = false when rations remain > 0", () => {
+    expect(consumeResources({ ...freshInventory, rations: 10 }, { rationConsumptionDue: true, partySize: 3 }).rationsDepleted).toBe(false);
+  });
+
+  it("depletion warning added when rations hit 0", () => {
+    const { warnings } = consumeResources({ ...freshInventory, rations: 2 }, { rationConsumptionDue: true, partySize: 4 });
+    expect(warnings.some((w) => w.toLowerCase().includes("ration"))).toBe(true);
+  });
+
+  it("low-ration warning when rations ≤ partySize after consumption", () => {
+    // 5 - 4 = 1 remaining, which is ≤ partySize (4)
+    const { warnings } = consumeResources({ ...freshInventory, rations: 5 }, { rationConsumptionDue: true, partySize: 4 });
+    expect(warnings.some((w) => w.toLowerCase().includes("ration"))).toBe(true);
+  });
+
+  it("partySize = 1 deducts exactly 1 ration", () => {
+    expect(consumeResources({ ...freshInventory, rations: 7 }, { rationConsumptionDue: true, partySize: 1 }).next.rations).toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyRest
+// ---------------------------------------------------------------------------
+
+describe("applyRest", () => {
+  it("resets turnsSinceRest to 0", () => {
+    expect(applyRest({ ...freshTime, turnsSinceRest: 6 }).turnsSinceRest).toBe(0);
+  });
+
+  it("does not alter totalTurns", () => {
+    expect(applyRest({ ...freshTime, totalTurns: 42, turnsSinceRest: 6 }).totalTurns).toBe(42);
+  });
+
+  it("does not alter totalHours", () => {
+    expect(applyRest({ ...freshTime, totalHours: 7, turnsSinceRest: 6 }).totalHours).toBe(7);
+  });
+
+  it("does not alter turnsSinceEncounterCheck", () => {
+    expect(applyRest({ ...freshTime, turnsSinceEncounterCheck: 1, turnsSinceRest: 6 }).turnsSinceEncounterCheck).toBe(1);
+  });
+
+  it("does not alter turnsSinceRation", () => {
+    expect(applyRest({ ...freshTime, turnsSinceRation: 100, turnsSinceRest: 6 }).turnsSinceRation).toBe(100);
+  });
+
+  it("calling applyRest on fresh state is a no-op", () => {
+    expect(applyRest(freshTime)).toEqual(freshTime);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initialPartyInventory (campaign seeding — Q4)
+// ---------------------------------------------------------------------------
+
+describe("initialPartyInventory", () => {
+  it("partySize = 1 → torches = 5", () => {
+    expect(initialPartyInventory(1).torches).toBe(5);
+  });
+
+  it("partySize = 1 → rations = 7", () => {
+    expect(initialPartyInventory(1).rations).toBe(7);
+  });
+
+  it("partySize = 4 → torches = 20 (5 × 4)", () => {
+    expect(initialPartyInventory(4).torches).toBe(20);
+  });
+
+  it("partySize = 4 → rations = 28 (7 × 4)", () => {
+    expect(initialPartyInventory(4).rations).toBe(28);
+  });
+
+  it("oilFlasks = 0 for any party size (Q4: must be purchased)", () => {
+    expect(initialPartyInventory(1).oilFlasks).toBe(0);
+    expect(initialPartyInventory(4).oilFlasks).toBe(0);
+  });
+
+  it("activeLightSource = 'none' at campaign start", () => {
+    expect(initialPartyInventory(1).activeLightSource).toBe("none");
+  });
+
+  it("lightSourceTurnsRemaining = 0", () => {
+    expect(initialPartyInventory(1).lightSourceTurnsRemaining).toBe(0);
+  });
+
+  it("partySize = 3 → torches = 15, rations = 21", () => {
+    const inv = initialPartyInventory(3);
+    expect(inv.torches).toBe(15);
+    expect(inv.rations).toBe(21);
   });
 });

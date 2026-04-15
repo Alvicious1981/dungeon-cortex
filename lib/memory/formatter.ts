@@ -18,6 +18,7 @@ import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { getDispositionBand, type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
+import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -151,6 +152,16 @@ function formatIronLaws(): string {
     "`socialCheck` before narrating the outcome. When the player asks an NPC for local " +
     "information, rumors, or directions, you MUST call `getRumors`. " +
     "The engine decides what the NPC knows and feels. You voice it. Code is Law.",
+    "",
+    "**Exploration Time Mandate:** Every dungeon action the party takes MUST be advanced " +
+    "by calling `executeExplorationTurn` with the appropriate action type. " +
+    "NEVER narrate torch burn, ration consumption, exhaustion, or random encounters " +
+    "without a tool response confirming it. " +
+    "If `restRequired` is true in the response, the NEXT action MUST be " +
+    "`executeExplorationTurn` with `action: \"rest\"` — do NOT advance time for any other " +
+    "purpose until the party has rested. " +
+    "Voice the returned `warnings[]` diegetically — they are the only events that happened. " +
+    "Code is Law.",
   ].join("\n");
 }
 
@@ -399,6 +410,75 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
 }
 
 // ---------------------------------------------------------------------------
+// Exploration Survival HUD
+// ---------------------------------------------------------------------------
+
+/**
+ * Exploration time and resource snapshot injected into the system prompt.
+ * Mirrors CampaignTime + PartyInventory DB fields — the caller fetches and passes these.
+ */
+export interface ExplorationHUDContext {
+  totalTurns:                  number;
+  totalHours:                  number;
+  turnsSinceRest:              number;
+  activeLightSource:           "torch" | "lantern" | "none";
+  lightSourceTurnsRemaining:   number;
+  torches:                     number;
+  oilFlasks:                   number;
+  rations:                     number;
+  exhaustionLevel:             number;
+}
+
+const LIGHT_ICONS: Record<"torch" | "lantern" | "none", string> = {
+  torch:   "🕯️",
+  lantern: "🏮",
+  none:    "⬛",
+};
+
+/**
+ * Returns the "## ⏱️ Dungeon Clock & Survival" prompt section.
+ * Gives the AI an accurate picture of time, light, and rations so it can
+ * voice warnings and mandate `executeExplorationTurn` correctly.
+ *
+ * @pure — no I/O, deterministic output for the same input.
+ */
+export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
+  const lines: string[] = ["## ⏱️ Dungeon Clock & Survival"];
+
+  // Time
+  const minutesThisHour = (hud.totalTurns % TURNS_PER_HOUR) * 10;
+  lines.push(`**Turn:** ${hud.totalTurns} — ${hud.totalHours}h ${minutesThisHour}min elapsed`);
+
+  // Rest status
+  const turnsUntilRest = REST_INTERVAL_TURNS - hud.turnsSinceRest;
+  if (hud.turnsSinceRest >= REST_INTERVAL_TURNS) {
+    lines.push("**Rest:** ⚠️ OVERDUE — mandatory rest not taken. Exhaustion applies on next non-rest action.");
+  } else {
+    lines.push(`**Rest:** ${turnsUntilRest} turn(s) until mandatory rest`);
+  }
+
+  // Exhaustion
+  if (hud.exhaustionLevel > 0) {
+    lines.push(`**Exhaustion:** Level ${hud.exhaustionLevel}/6 ⚠️`);
+  }
+
+  // Light source
+  const lightIcon = LIGHT_ICONS[hud.activeLightSource];
+  if (hud.activeLightSource === "none") {
+    lines.push(`**Light:** ${lightIcon} Darkness — no active light source`);
+  } else {
+    const sourceName = hud.activeLightSource === "torch" ? "Torch" : "Lantern";
+    lines.push(`**Light:** ${lightIcon} ${sourceName} — ${hud.lightSourceTurnsRemaining} turn(s) remaining`);
+  }
+  lines.push(`**Torches:** ${hud.torches} | **Oil Flasks:** ${hud.oilFlasks}`);
+
+  // Rations
+  lines.push(`**Rations:** ${hud.rations}`);
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // NPC Social Context
 // ---------------------------------------------------------------------------
 
@@ -468,7 +548,7 @@ export function formatNPCContext(npc: ActiveNPC): string {
  * @pure — no side effects, deterministic output for the same input.
  */
 export function formatSystemPrompt(
-  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC },
+  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext },
 ): string {
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
@@ -486,6 +566,9 @@ export function formatSystemPrompt(
     // Exploration state injected between character and combat so the model
     // always knows the party's spatial context when resolving movement.
     explorationSection,
+    // Survival HUD — dungeon clock, light, and rations. Injected when CampaignTime
+    // and PartyInventory records exist (after first executeExplorationTurn call).
+    ...(context.explorationHUD ? [formatSurvivalHUD(context.explorationHUD)] : []),
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.
