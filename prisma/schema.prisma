@@ -78,6 +78,8 @@ model Campaign {
   locations      Location[]
   campaignTime   CampaignTime?
   partyInventory PartyInventory?
+  wildernessMap  WildernessMap[]
+  travelState    TravelState?
 }
 
 model GameLog {
@@ -410,6 +412,110 @@ model PartyInventory {
   /// Turns remaining on the active light source before it burns out.
   /// At 0, consumeResources() auto-selects the next source (torch priority — Q3).
   lightSourceTurnsRemaining Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+}
+
+/// One record per unique hex coordinate per campaign — the wilderness map grid.
+/// Created on first visit (infinite on-demand generation — Q1).
+/// The AI narrator MUST NOT invent hex contents. Hex is real only once this record exists
+/// and discovered = true.
+model WildernessMap {
+  id         String  @id @default(cuid())
+  campaignId String
+
+  /// Azgaar cube coordinate Q axis. s = -q - r (never stored).
+  q          Int
+  /// Azgaar cube coordinate R axis.
+  r          Int
+
+  /// Canonical terrain type: plains | forest | hills | mountain | swamp | desert | coast | tundra | taiga
+  terrain    String
+  /// Azgaar biome label for narrative flavor (e.g. "temperate broadleaf forest").
+  biome      String
+  /// Elevation 0–100. Used with moisture to derive terrain + biome deterministically.
+  elevation  Int     @default(0)
+  /// Moisture 0–100. Used with elevation to derive terrain + biome deterministically.
+  moisture   Int     @default(0)
+
+  /// True once the party has physically occupied this hex.
+  /// Write-once-forward — never reverts to false.
+  discovered Boolean @default(false)
+  /// True if revealed from an adjacent hex (fog-of-war lite).
+  /// Write-once-forward — never reverts to false.
+  scouted    Boolean @default(false)
+
+  /// Optional overworld feature: "dungeon_entrance" | "village" | "ruins" | "shrine" | null
+  feature    String?
+  /// FK → Location if the feature has been expanded into a generated Location record.
+  locationId String?
+
+  /// Deterministic content seed — derived from campaignId + q + r.
+  /// The same coordinate always generates identical terrain, biome, elevation, moisture, and feature.
+  seed       String
+
+  createdAt DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  /// One hex per coordinate per campaign.
+  @@unique([campaignId, q, r])
+  @@index([campaignId])
+}
+
+/// Tracks the campaign's overworld temporal and spatial state.
+/// One record per campaign. All mutations occur inside prisma.$transaction — no partial writes.
+/// Coexists with CampaignTime (Milestone O). Active system inferred from Campaign.currentLocationId:
+///   non-null → CampaignTime governs (dungeon); null + this record exists → TravelState governs.
+model TravelState {
+  id         String @id @default(cuid())
+  campaignId String @unique
+
+  /// Current party position — Azgaar cube coordinate Q.
+  currentQ   Int @default(0)
+  /// Current party position — Azgaar cube coordinate R.
+  currentR   Int @default(0)
+
+  /// Watch index within the current day (0–5). 5 = mandatory Night rest.
+  currentWatch Int @default(0)
+  /// Monotonically increasing watch counter. Never decremented.
+  totalWatches Int @default(0)
+  /// floor(totalWatches / 6). Stored for query efficiency.
+  totalDays    Int @default(0)
+
+  /// How many travel-action watches have been spent today.
+  /// Resets to 0 at the start of each new day (watch 0 = Dawn).
+  /// When this reaches MAX_TRAVEL_WATCHES_PER_DAY (2), next travel signals Constitution save risk.
+  watchesTraveledToday Int @default(0)
+
+  /// Watches accumulated since last ration consumption.
+  /// Ration fires at WILDERNESS_RATION_INTERVAL_WATCHES (6). Resets to 0 after deduction.
+  watchesSinceRation Int @default(0)
+
+  /// Watches since last weather recalculation.
+  /// generateWeatherCheck fires at WEATHER_RECALC_INTERVAL_WATCHES (6). Resets to 0 after recalc.
+  weatherWatchCounter Int @default(0)
+
+  /// Sub-hex movement accumulator for Slow pace. Range: 0.0 to <1.0.
+  /// Slow pace adds 0.5 per travel watch. When >= 1.0, a hex is crossed and value wraps mod 1.
+  partialHexProgress Float @default(0.0)
+
+  /// Persisted party pace setting. Overridable per-watch by executeTravelWatch input.
+  /// "slow" | "normal" | "fast"
+  partyPace String @default("normal")
+
+  /// Current weather condition. Updated by generateWeatherCheck every 6 watches.
+  /// "clear" | "overcast" | "rain" | "storm" | "fog" | "snow"
+  weatherCondition String @default("clear")
+
+  /// Weather severity: 0 = mild, 1 = moderate, 2 = severe.
+  weatherIntensity Int @default(0)
+
+  /// Season index fixed at campaign creation. 0=spring 1=summer 2=autumn 3=winter.
+  /// Used by generateWeatherCheck to gate snow and adjust transition probabilities.
+  seasonIndex Int @default(0)
 
   updatedAt DateTime @updatedAt
 

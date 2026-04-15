@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatSystemPrompt, formatNPCContext, formatSurvivalHUD, type ActiveNPC, type ExplorationHUDContext } from "@/lib/memory/formatter";
+import { formatSystemPrompt, formatNPCContext, formatSurvivalHUD, type ActiveNPC, type ExplorationHUDContext, type WildernessHUDContext } from "@/lib/memory/formatter";
 import type { CampaignContext } from "@/lib/memory/context";
 
 // ---------------------------------------------------------------------------
@@ -539,5 +539,130 @@ describe("formatSystemPrompt — explorationHUD injection", () => {
       explorationHUD: { ...baseHUD, turnsSinceRest: 6 },
     });
     expect(prompt).toContain("OVERDUE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wilderness Travel Mandate (Iron Laws)
+// ---------------------------------------------------------------------------
+
+describe("formatSystemPrompt — Wilderness Travel Mandate", () => {
+  it("includes Wilderness Travel Mandate in Iron Laws", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("Wilderness Travel Mandate");
+  });
+
+  it("references executeTravelWatch tool in mandate", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("executeTravelWatch");
+  });
+
+  it("mentions movementBlocked in mandate", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("movementBlocked");
+  });
+
+  it("mentions exhaustionRisk in mandate", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("exhaustionRisk");
+  });
+
+  it("mentions featureDiscovered in mandate", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).toContain("featureDiscovered");
+  });
+
+  it("mentions Code is Law in wilderness mandate", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    // Check it appears at least twice (once for other mandates, once for wilderness)
+    const matches = (prompt.match(/Code is Law/g) ?? []).length;
+    expect(matches).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatSystemPrompt — wildernessHUD injection
+// ---------------------------------------------------------------------------
+
+const baseWildernessHUD: WildernessHUDContext = {
+  currentQ: 3,
+  currentR: -2,
+  terrain: "forest",
+  biome: "temperate broadleaf forest",
+  watchIndex: 1,
+  totalDays: 4,
+  weatherCondition: "rain",
+  weatherIntensity: 1,
+  partyPace: "normal",
+  rations: 7,
+  featureHere: false,
+};
+
+describe("formatSystemPrompt — wildernessHUD injection", () => {
+  it("omits Wilderness HUD section when wildernessHUD is absent", () => {
+    const prompt = formatSystemPrompt(baseContext);
+    expect(prompt).not.toContain("Wilderness & Travel Status");
+  });
+
+  it("injects Wilderness HUD section when wildernessHUD is provided", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("Wilderness & Travel Status");
+  });
+
+  it("includes hex position in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("(3, -2)");
+  });
+
+  it("includes terrain in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("forest");
+  });
+
+  it("includes watch name in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("Morning");
+  });
+
+  it("includes total days in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("Day 4");
+  });
+
+  it("includes weather condition in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("rain");
+  });
+
+  it("includes weather intensity when > 0", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("Intensity 1");
+  });
+
+  it("omits intensity marker when weatherIntensity is 0", () => {
+    const ctx = { ...baseWildernessHUD, weatherCondition: "clear", weatherIntensity: 0 };
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: ctx });
+    expect(prompt).not.toContain("Intensity 0");
+  });
+
+  it("includes party pace in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("normal");
+  });
+
+  it("includes rations count in HUD", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).toContain("7");
+  });
+
+  it("omits feature line when featureHere is false", () => {
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: baseWildernessHUD });
+    expect(prompt).not.toContain("Notable feature");
+  });
+
+  it("includes feature line when featureHere is true", () => {
+    const ctx = { ...baseWildernessHUD, featureHere: true };
+    const prompt = formatSystemPrompt({ ...baseContext, wildernessHUD: ctx });
+    expect(prompt).toContain("Feature Present");
   });
 });

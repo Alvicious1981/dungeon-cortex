@@ -19,6 +19,7 @@ import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { getDispositionBand, type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
+import { WEATHER_RECALC_INTERVAL_WATCHES, WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -161,6 +162,19 @@ function formatIronLaws(): string {
     "`executeExplorationTurn` with `action: \"rest\"` — do NOT advance time for any other " +
     "purpose until the party has rested. " +
     "Voice the returned `warnings[]` diegetically — they are the only events that happened. " +
+    "Code is Law.",
+    "",
+    "**Wilderness Travel Mandate:** Every overworld action (travel, forage, rest, camp, scout) " +
+    `MUST advance the watch clock by calling \`executeTravelWatch\`. ` +
+    "Weather, ration depletion, hex discovery, and encounter rolls are computed by the tool — " +
+    "NEVER invent these outcomes. " +
+    `Watch index 5 (Night) forces action: \"rest\" — do NOT allow travel during Night. ` +
+    "If `movementBlocked` is true, narrate the obstacle and await a new action. " +
+    "If `exhaustionRisk` is true, narrate the strain — a Constitution save is due. " +
+    `Weather recalculates every ${WEATHER_RECALC_INTERVAL_WATCHES} watches (${WATCHES_PER_DAY / WEATHER_RECALC_INTERVAL_WATCHES} times per day). ` +
+    "If `featureDiscovered` is true, narrate the feature as a significant discovery. " +
+    "If `encounter` is true, transition immediately to the encounter flow. " +
+    "Voice `foragingResult.description` verbatim when foraging resolves. " +
     "Code is Law.",
   ].join("\n");
 }
@@ -537,6 +551,41 @@ export function formatNPCContext(npc: ActiveNPC): string {
 }
 
 // ---------------------------------------------------------------------------
+// Wilderness HUD
+// ---------------------------------------------------------------------------
+
+export interface WildernessHUDContext {
+  currentQ: number;
+  currentR: number;
+  terrain: string;
+  biome: string;
+  watchIndex: number;
+  totalDays: number;
+  weatherCondition: string;
+  weatherIntensity: number;
+  partyPace: string;
+  rations: number;
+  featureHere: boolean;
+}
+
+const WATCH_NAMES = ["Dawn", "Morning", "Midday", "Afternoon", "Evening", "Night"] as const;
+
+function formatWildernessHUD(ctx: WildernessHUDContext): string {
+  const watchName = WATCH_NAMES[ctx.watchIndex] ?? "Unknown";
+  const lines: string[] = [
+    "## Wilderness & Travel Status",
+    `**Position:** Hex (${ctx.currentQ}, ${ctx.currentR}) — ${ctx.terrain} / ${ctx.biome}`,
+    `**Watch:** ${watchName} (${ctx.watchIndex + 1}/6) — Day ${ctx.totalDays}`,
+    `**Weather:** ${ctx.weatherCondition}${ctx.weatherIntensity > 0 ? ` (Intensity ${ctx.weatherIntensity})` : ""}`,
+    `**Pace:** ${ctx.partyPace} | **Rations:** ${ctx.rations}`,
+  ];
+  if (ctx.featureHere) {
+    lines.push("**Feature Present:** Yes — a notable location awaits investigation.");
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -548,7 +597,7 @@ export function formatNPCContext(npc: ActiveNPC): string {
  * @pure — no side effects, deterministic output for the same input.
  */
 export function formatSystemPrompt(
-  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext },
+  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext; wildernessHUD?: WildernessHUDContext },
 ): string {
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
@@ -569,6 +618,9 @@ export function formatSystemPrompt(
     // Survival HUD — dungeon clock, light, and rations. Injected when CampaignTime
     // and PartyInventory records exist (after first executeExplorationTurn call).
     ...(context.explorationHUD ? [formatSurvivalHUD(context.explorationHUD)] : []),
+    // Wilderness HUD — hex position, terrain, weather, pace, rations, watch clock.
+    // Injected when TravelState exists (after first executeTravelWatch call).
+    ...(context.wildernessHUD ? [formatWildernessHUD(context.wildernessHUD)] : []),
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.

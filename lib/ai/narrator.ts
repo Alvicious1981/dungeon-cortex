@@ -80,6 +80,7 @@ import {
   SocialCheckInputSchema,
   GetRumorsInputSchema,
 } from "@/lib/rules/social";
+import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1652,6 +1653,10 @@ function buildTools(
         }
       },
     }),
+
+    // ── Wilderness Travel Engine (Milestone P) ──────────────────────────────
+
+    executeTravelWatch: buildWildernessTool(campaignId),
   };
 }
 
