@@ -176,6 +176,8 @@ function formatIronLaws(): string {
     "If `encounter` is true, transition immediately to the encounter flow. " +
     "Voice `foragingResult.description` verbatim when foraging resolves. " +
     "Code is Law.",
+    "",
+    "**Downtime Mandate:** When the party rests at a haven, pays living expenses, or deposits gold for XP, you MUST call `executeDowntime` before narrating. NEVER invent or narrate changes to party wealth, XP from gold, or retainer morale without a tool response confirming it. Code is Law.",
   ].join("\n");
 }
 
@@ -586,6 +588,25 @@ function formatWildernessHUD(ctx: WildernessHUDContext): string {
 }
 
 // ---------------------------------------------------------------------------
+// Haven HUD
+// ---------------------------------------------------------------------------
+
+export interface HavenHUDContext {
+  currentWealth: number;
+  havenUpkeep: number;
+  retainerMorale: string;
+}
+
+export function formatHavenHUD(ctx: HavenHUDContext): string {
+  return [
+    "## Haven & Downtime Status",
+    `**Party Wealth:** ${ctx.currentWealth} GP`,
+    `**Haven Upkeep:** ${ctx.havenUpkeep} GP/day`,
+    `**Retainer Morale:** ${ctx.retainerMorale}`,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -597,7 +618,7 @@ function formatWildernessHUD(ctx: WildernessHUDContext): string {
  * @pure — no side effects, deterministic output for the same input.
  */
 export function formatSystemPrompt(
-  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext; wildernessHUD?: WildernessHUDContext },
+  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext; wildernessHUD?: WildernessHUDContext; havenHUD?: HavenHUDContext },
 ): string {
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
@@ -621,6 +642,7 @@ export function formatSystemPrompt(
     // Wilderness HUD — hex position, terrain, weather, pace, rations, watch clock.
     // Injected when TravelState exists (after first executeTravelWatch call).
     ...(context.wildernessHUD ? [formatWildernessHUD(context.wildernessHUD)] : []),
+    ...(context.havenHUD ? [formatHavenHUD(context.havenHUD)] : []),
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.
