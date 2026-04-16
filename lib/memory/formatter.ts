@@ -17,7 +17,8 @@ import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
-import { getDispositionBand, type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
+import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
+import { getDispositionBand } from "@/lib/rules/social-logic";
 import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WEATHER_RECALC_INTERVAL_WATCHES, WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 

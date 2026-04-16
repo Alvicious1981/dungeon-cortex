@@ -19,7 +19,7 @@
  * failures fall through to a generic message.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
 
@@ -36,22 +36,38 @@ export default function ActionInput({ campaignId }: Props) {
    *  string = partial or complete optimistic narrative text           */
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [lastRemoteAction, setLastRemoteAction] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!action.trim() || submitting) return;
+  async function handleSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    const pendingAction = action.trim();
+    if (!pendingAction || submitting) return;
+    setAction("");
+    await executeAction(pendingAction);
+  }
 
+  // Allow external triggers (e.g. from DialogueOverlay)
+  useEffect(() => {
+    function handleRemote(e: Event) {
+      const customEvent = e as CustomEvent<{ action: string }>;
+      const { action: remoteText } = customEvent.detail;
+      if (remoteText && !submitting) {
+        setLastRemoteAction(remoteText);
+        executeAction(remoteText);
+      }
+    }
+    window.addEventListener("dungeon-remote-action", handleRemote);
+    return () => window.removeEventListener("dungeon-remote-action", handleRemote);
+  }, [submitting]);
+
+  async function executeAction(pendingAction: string) {
     setError(null);
     setSubmitting(true);
     setStreamingText("");
     setStreamError(null);
 
     // ── User-gesture chain: warm up AudioContext in GameEventHandler ──────────
-    // This fires synchronously before any await, so it counts as a user gesture.
     window.dispatchEvent(new CustomEvent("dungeon-action-start"));
-
-    const pendingAction = action.trim();
-    setAction("");
 
     try {
       const res = await fetch(`/api/campaign/${campaignId}/action`, {
@@ -111,6 +127,10 @@ export default function ActionInput({ campaignId }: Props) {
           } else if (parsed.t === "txt") {
             // Phase 2: narrative token — append to optimistic bubble
             setStreamingText((prev) => (prev ?? "") + parsed.d);
+            // Forward to DialogueOverlayController if it's listening
+            window.dispatchEvent(
+              new CustomEvent("dungeon-token", { detail: { chunk: parsed.d } })
+            );
           } else if (parsed.t === "level_up") {
             // Phase 2.5: level-up resolved — forward payload to AscensionOverlay
             window.dispatchEvent(
@@ -120,6 +140,16 @@ export default function ActionInput({ campaignId }: Props) {
             // Phase 2.5: trade initiated — forward payload to TradeOverlayController
             window.dispatchEvent(
               new CustomEvent("dungeon-merchant", { detail: parsed.payload })
+            );
+          } else if (parsed.t === "dialogue_open") {
+            // Phase 2.5: dialogue initiated — forward payload to DialogueOverlayController
+            window.dispatchEvent(
+              new CustomEvent("dungeon-dialogue-open", { detail: parsed.payload })
+            );
+          } else if (parsed.t === "dialogue_update") {
+            // Phase 2.5: disposition update — forward payload to DialogueOverlayController
+            window.dispatchEvent(
+              new CustomEvent("dungeon-dialogue-update", { detail: { disposition: parsed.disposition } })
             );
           } else if (parsed.t === "done") {
             // Phase 3: stream complete
@@ -137,6 +167,7 @@ export default function ActionInput({ campaignId }: Props) {
       setStreamError("The connection to the Dungeon Master was severed. Please refresh or try your action again.");
     } finally {
       setSubmitting(false);
+      window.dispatchEvent(new CustomEvent("dungeon-action-end"));
     }
   }
 

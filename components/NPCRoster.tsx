@@ -43,6 +43,8 @@ interface NPC {
   notes: string;
   abilityScores: unknown;
   traits: unknown;
+  disposition: number | null;
+  hasMetPlayer: boolean;
 }
 
 interface NPCRosterProps {
@@ -82,6 +84,30 @@ function getRoleConfig(role: string) {
 const STAT_KEYS: ReadonlyArray<keyof AbilityScores> = [
   "STR", "DEX", "CON", "INT", "WIS", "CHA",
 ];
+
+const DISPOSITION_ICONS: Record<string, string> = {
+  Hostile: "💀",
+  Unfriendly: "⚔️",
+  Indifferent: "👁️",
+  Friendly: "🤝",
+  Helpful: "⭐"
+};
+
+const DISPOSITION_COLORS: Record<string, string> = {
+  Hostile: "#ef4444",
+  Unfriendly: "#f97316",
+  Indifferent: "#71717a",
+  Friendly: "#eab308",
+  Helpful: "#22c55e"
+};
+
+function getDispositionBand(disposition: number) {
+  if (disposition <= -7) return "Hostile";
+  if (disposition <= -2) return "Unfriendly";
+  if (disposition <=  2) return "Indifferent";
+  if (disposition <=  7) return "Friendly";
+  return "Helpful";
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -197,6 +223,19 @@ function NPCCard({ npc }: { npc: NPC }) {
         >
           {cfg.label}
         </span>
+        {npc.hasMetPlayer && npc.disposition !== null && (
+          <span
+            className="shrink-0 rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider leading-none flex items-center gap-1"
+            style={{ 
+              color: DISPOSITION_COLORS[getDispositionBand(npc.disposition)], 
+              background: "rgba(0,0,0,0.35)",
+              border: `1px solid ${DISPOSITION_COLORS[getDispositionBand(npc.disposition)]}44`
+            }}
+          >
+            <span>{DISPOSITION_ICONS[getDispositionBand(npc.disposition)]}</span>
+            <span>{getDispositionBand(npc.disposition)}</span>
+          </span>
+        )}
       </div>
 
       {/* ── Identity line: race · profession · alignment ── */}

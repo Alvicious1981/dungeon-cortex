@@ -14,7 +14,8 @@
  */
 
 import React from "react";
-import { getDispositionBand, type DispositionBand } from "@/lib/rules/social";
+import { type DispositionBand } from "@/lib/rules/social";
+import { getDispositionBand } from "@/lib/rules/social-logic";
 
 // ---------------------------------------------------------------------------
 // Constants

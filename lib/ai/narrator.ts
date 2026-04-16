@@ -73,13 +73,15 @@ import {
   type MerchantPayload,
 } from "@/lib/rules/trade";
 import {
-  rollReaction as rollReactionPure,
-  resolveSocialCheck,
-  getRumorsPayload,
   ReactionRollInputSchema,
   SocialCheckInputSchema,
   GetRumorsInputSchema,
 } from "@/lib/rules/social";
+import {
+  rollReaction as rollReactionPure,
+  resolveSocialCheck,
+  getRumorsPayload,
+} from "@/lib/rules/social-logic";
 import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1395,46 +1397,50 @@ function buildTools(
       inputSchema: SocialCheckInputSchema,
       execute: async ({ npcSeed, characterId, approach, dispositionDelta, intent }) => {
         try {
-          // 1. Verify NPC exists and has been formally met
-          const npc = await prisma.nPC.findUnique({
-            where: { campaignId_seed: { campaignId, seed: npcSeed } },
-          });
-          if (!npc) {
-            return JSON.stringify({ error: "NPC not found. Call rollReaction first to establish first contact." });
-          }
-          if (!npc.hasMetPlayer) {
-            return JSON.stringify({ error: "Call rollReaction before socialCheck — the party has not yet met this NPC." });
-          }
+          const result = await prisma.$transaction(async (tx) => {
+            // 1. Verify NPC exists and has been formally met
+            const npc = await tx.nPC.findUnique({
+              where: { campaignId_seed: { campaignId, seed: npcSeed } },
+            });
+            if (!npc) {
+              throw new Error("NPC not found. Call rollReaction first to establish first contact.");
+            }
+            if (!npc.hasMetPlayer) {
+              throw new Error("Call rollReaction before socialCheck — the party has not yet met this NPC.");
+            }
 
-          // 2. Derive CHA modifier from character stats
-          const character = await prisma.character.findUnique({
-            where: { id: characterId },
-            select: { stats: true },
-          });
-          if (!character) {
-            return JSON.stringify({ error: "Character not found." });
-          }
-          const stats = character.stats as Record<string, number> | null;
-          const cha = typeof stats?.CHA === "number" ? stats.CHA : 10;
-          const charismaModifier = abilityModifier(cha);
+            // 2. Derive CHA modifier from character stats
+            const character = await tx.character.findUnique({
+              where: { id: characterId },
+              select: { stats: true },
+            });
+            if (!character) {
+              throw new Error("Character not found.");
+            }
+            const stats = character.stats as Record<string, number> | null;
+            const cha = typeof stats?.CHA === "number" ? stats.CHA : 10;
+            const charismaModifier = abilityModifier(cha);
 
-          // 3. Pure resolution — no I/O, deterministic given the d20 roll
-          const currentDisposition = npc.disposition ?? 0;
-          const result = resolveSocialCheck(
-            { npcSeed, characterId, approach, dispositionDelta, intent },
-            charismaModifier,
-            currentDisposition,
-          );
+            // 3. Pure resolution — no I/O, deterministic given the d20 roll
+            const currentDisposition = npc.disposition ?? 0;
+            const socialResult = resolveSocialCheck(
+              { npcSeed, characterId, approach, dispositionDelta, intent },
+              charismaModifier,
+              currentDisposition,
+            );
 
-          // 4. Persist disposition change (single row, no cascade risk)
-          await prisma.nPC.update({
-            where: { campaignId_seed: { campaignId, seed: npcSeed } },
-            data: { disposition: result.dispositionAfter },
+            // 4. Persist disposition change
+            await tx.nPC.update({
+              where: { campaignId_seed: { campaignId, seed: npcSeed } },
+              data: { disposition: socialResult.dispositionAfter },
+            });
+
+            return socialResult;
           });
 
           return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Social check failed mechanically. Narrate a moment of ambiguity." });
+        } catch (err: any) {
+          return JSON.stringify({ error: err.message || "Social check failed mechanically." });
         }
       },
     }),

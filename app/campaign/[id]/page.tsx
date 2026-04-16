@@ -22,6 +22,7 @@ import type {
 import AscensionOverlayController from "@/components/character/AscensionOverlay";
 import XPProgressBar from "@/components/character/XPProgressBar";
 import TradeOverlayController from "@/components/trade/TradeOverlayController";
+import DialogueOverlayController from "@/components/social/DialogueOverlayController";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -213,6 +214,10 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         notes: true,
         abilityScores: true,
         traits: true,
+        disposition: true,
+        personalityTags: true,
+        hasMetPlayer: true,
+        seed: true,
       },
     }),
   ]);
@@ -313,6 +318,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       <AscensionOverlayController />
       {/* Trade Overlay — self-wiring, listens for dungeon-merchant events */}
       <TradeOverlayController campaignId={campaign.id} initialGold={campaign.gold} playerInventory={character.inventory} />
+      {/* Dialogue Overlay — self-wiring, listens for dungeon-dialogue-open events */}
+      <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
       {/* Ambient glow — purely decorative */}
       <div
         aria-hidden="true"
