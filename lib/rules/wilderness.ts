@@ -431,7 +431,7 @@ const WEATHER_DESCRIPTIONS: Record<string, string> = {
   snow_2:     "A blizzard howls across the open land, blinding and deadly.",
 };
 
-function getWeatherDescription(
+export function getWeatherDescription(
   condition: WeatherCondition,
   intensity: WeatherIntensity,
 ): string {

@@ -45,7 +45,7 @@ export type GenerateLootInput = z.infer<typeof GenerateLootInputSchema>;
 
 export const LootItemSchema = z.object({
   name: z.string(),
-  type: z.enum(["weapon", "armor", "consumable", "misc"]),
+  type: z.enum(["weapon", "armor", "consumable", "misc", "spell"]),
   rarity: z.enum(["mundane", "uncommon", "rare", "very_rare", "legendary"]),
   description: z.string().max(200),
   properties: z.record(z.string(), z.unknown()),
