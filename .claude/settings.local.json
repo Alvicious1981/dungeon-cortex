@@ -29,7 +29,10 @@
       "Bash(grep -r \"ActionStreamFrame\\\\|GameEvent\" /d/dungeon-cortex/lib --include=*.ts --include=*.tsx)",
       "Bash(pnpm vitest:*)",
       "Bash(npx prisma:*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Skill(commit-commands:commit)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

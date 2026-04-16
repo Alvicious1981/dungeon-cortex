@@ -22,30 +22,30 @@ model User {
 }
 
 model Character {
-  id         String   @id @default(cuid())
-  userId     String
-  name       String
-  race       String
-  class      String
-  level      Int      @default(1)
-  hp         Int
-  maxHp      Int
-  stats      Json
-  spellSlots            Json?
-  xp                    Int     @default(0)
+  id                   String   @id @default(cuid())
+  userId               String
+  name                 String
+  race                 String
+  class                String
+  level                Int      @default(1)
+  hp                   Int
+  maxHp                Int
+  stats                Json
+  spellSlots           Json?
+  xp                   Int      @default(0)
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
-  concentrationSpellId  String?
+  concentrationSpellId String?
   /// Total hit dice the character possesses (= level). Equals the number of
   /// hit dice available at full rest. Decremented by short rest healing.
-  hitDiceTotal          Int     @default(1)
+  hitDiceTotal         Int      @default(1)
   /// Remaining hit dice available for short rest healing.
   /// Reset to hitDiceTotal on long rest. Must satisfy 0 ≤ remaining ≤ total.
-  hitDiceRemaining      Int     @default(1)
+  hitDiceRemaining     Int      @default(1)
   /// D&D 5e 2014 exhaustion level. Range: 0 (none) to 6 (dead).
   /// Incremented by executeExplorationTurn when a mandatory rest is skipped.
   /// Decremented by 1 on long rest per 5e 2014 rules.
-  exhaustionLevel       Int     @default(0)
-  createdAt             DateTime @default(now())
+  exhaustionLevel      Int      @default(0)
+  createdAt            DateTime @default(now())
 
   user      User            @relation(fields: [userId], references: [id])
   campaigns Campaign[]
@@ -53,23 +53,23 @@ model Character {
 }
 
 model Campaign {
-  id          String   @id @default(cuid())
-  userId      String
-  characterId String
-  title       String
-  status      String   @default("active")
+  id                String   @id @default(cuid())
+  userId            String
+  characterId       String
+  title             String
+  status            String   @default("active")
   /// Party gold pieces. Integer — no fractional currency.
   /// Mutations ONLY via Prisma transactions from tool execution, never from AI narration.
-  gold        Int      @default(0)
+  gold              Int      @default(0)
   /// The location the party is currently exploring. Null = no active exploration.
-  currentLocationId  String?
+  currentLocationId String?
   /// The specific node within the location the party occupies. Null = not in a location.
-  currentNodeId      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  currentNodeId     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  user           User           @relation(fields: [userId], references: [id])
-  character      Character      @relation(fields: [characterId], references: [id])
+  user           User            @relation(fields: [userId], references: [id])
+  character      Character       @relation(fields: [characterId], references: [id])
   logs           GameLog[]
   encounters     Encounter[]
   memories       MemoryEntry[]
@@ -80,6 +80,8 @@ model Campaign {
   partyInventory PartyInventory?
   wildernessMap  WildernessMap[]
   travelState    TravelState?
+  havens         Haven[]
+  retainers      Retainer[]
 }
 
 model GameLog {
@@ -142,13 +144,13 @@ model Zone {
 }
 
 model InventoryItem {
-  id          String  @id @default(cuid())
-  characterId String
-  name        String
-  type        String
+  id           String  @id @default(cuid())
+  characterId  String
+  name         String
+  type         String
   // "weapon" | "armor" | "consumable" | "spell" | "misc"
-  quantity    Int     @default(1)
-  properties  Json
+  quantity     Int     @default(1)
+  properties   Json
   /// Equipped slot name, e.g. 'MAIN_HAND' | 'OFF_HAND' | 'ARMOR' | 'ACCESSORY'.
   /// Null means the item is in the bag but not equipped.
   equippedSlot String?
@@ -198,32 +200,32 @@ model Quest {
 }
 
 model NPC {
-  id         String   @id @default(cuid())
-  campaignId String
+  id              String   @id @default(cuid())
+  campaignId      String
   /// Stable generator seed — deterministically reproduces the full statblock
   /// via generateNPC(seed, role). Never changes after creation.
-  seed       String
+  seed            String
   /// Archetype used for statblock generation: "guard" | "bandit" | "commoner"
-  role       String
+  role            String
   /// Denormalized from generateNPC — stored for fast display and HP-bar rendering.
-  name       String
-  maxHp      Int
+  name            String
+  maxHp           Int
   /// Mutable. Callers decrement this when damage is applied.
-  hp         Int
+  hp              Int
   /// Armor class — denormalized from the deterministic statblock.
-  ac         Int
+  ac              Int
   /// Free-form DM notes: story beats, attitudes, plot ties, last seen location.
-  notes      String   @default("")
+  notes           String   @default("")
   /// Creature race, e.g. "human", "elf", "dwarf". Null for legacy records.
-  race        String?
+  race            String?
   /// Mundane profession, e.g. "blacksmith", "soldier". Null for legacy records.
-  profession  String?
+  profession      String?
   /// Moral alignment, e.g. "lawful good", "chaotic neutral". Null for legacy records.
-  alignment   String?
+  alignment       String?
   /// Six ability scores: { STR, DEX, CON, INT, WIS, CHA }. Null for legacy records.
-  abilityScores Json?
+  abilityScores   Json?
   /// Personality traits { personality, ideal, bond, flaw }. Null for legacy records.
-  traits      Json?
+  traits          Json?
   /// Current disposition toward the party. Range: −10 (Hostile) to +10 (Helpful).
   /// Set by rollReaction on first meeting; updated by socialCheck on social actions.
   /// Null for NPCs the party has never spoken to (reaction roll pending).
@@ -236,8 +238,8 @@ model NPC {
   /// True once the party has formally met this NPC (rollReaction has fired).
   /// Prevents duplicate reaction rolls on subsequent encounters.
   hasMetPlayer    Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
 
@@ -280,7 +282,7 @@ model SrdItem {
 /// Created exclusively by the `generateLocation` tool; the AI narrator may NOT
 /// invent locations outside this table.
 model Location {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   campaignId  String
   /// Deterministic seed — the same seed always reproduces the same layout.
   seed        String
@@ -300,8 +302,8 @@ model Location {
   nodes    LocationNode[]
   edges    LocationEdge[]
 
-  @@index([campaignId])
   @@unique([campaignId, seed])
+  @@index([campaignId])
 }
 
 /// A single room, area, or zone within a Location.
@@ -326,9 +328,9 @@ model LocationNode {
   /// Grid position for visual rendering (row, 0-based).
   y           Int
 
-  location    Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  edgesFrom   LocationEdge[] @relation("EdgeFrom")
-  edgesTo     LocationEdge[] @relation("EdgeTo")
+  location  Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  edgesFrom LocationEdge[] @relation("EdgeFrom")
+  edgesTo   LocationEdge[] @relation("EdgeTo")
 
   @@unique([locationId, index])
   @@index([locationId])
@@ -356,15 +358,15 @@ model LocationEdge {
 /// One record per campaign. totalTurns is monotonically increasing — never decremented.
 /// All mutations occur inside prisma.$transaction — no partial writes.
 model CampaignTime {
-  id          String @id @default(cuid())
-  campaignId  String @unique
+  id         String @id @default(cuid())
+  campaignId String @unique
 
   /// Total dungeon turns elapsed since campaign start. 1 turn = 10 minutes.
-  totalTurns  Int @default(0)
+  totalTurns Int @default(0)
 
   /// Derived display field: floor(totalTurns / 6). Stored for query efficiency.
   /// Must always equal floor(totalTurns / TURNS_PER_HOUR). Updated atomically.
-  totalHours  Int @default(0)
+  totalHours Int @default(0)
 
   /// Turns accumulated in the current rest cycle (0–6).
   /// Reaching REST_INTERVAL_TURNS (6) makes rest mandatory before the next turn.
@@ -390,20 +392,20 @@ model CampaignTime {
 /// One record per campaign. Quantities are non-negative integers — never fractional.
 /// The AI narrator MUST NOT mutate this table directly.
 model PartyInventory {
-  id          String @id @default(cuid())
-  campaignId  String @unique
+  id         String @id @default(cuid())
+  campaignId String @unique
 
   /// Unlit torches in the pack. Each provides TORCH_DURATION_TURNS (6) of light when lit.
   /// Seeded at INITIAL_TORCHES_PER_PLAYER × partySize on campaign creation.
-  torches     Int @default(0)
+  torches Int @default(0)
 
   /// Oil flasks in the pack. Each provides OIL_DURATION_TURNS (24) of light when burning.
   /// Not seeded at campaign creation — must be purchased in-world.
-  oilFlasks   Int @default(0)
+  oilFlasks Int @default(0)
 
   /// Total rations across all party members.
   /// Seeded at INITIAL_RATIONS_PER_PLAYER × partySize on campaign creation.
-  rations     Int @default(0)
+  rations Int @default(0)
 
   /// Active light source currently being consumed. "torch" | "lantern" | "none".
   /// "none" means the party is in darkness — may trigger penalties.
@@ -423,22 +425,22 @@ model PartyInventory {
 /// The AI narrator MUST NOT invent hex contents. Hex is real only once this record exists
 /// and discovered = true.
 model WildernessMap {
-  id         String  @id @default(cuid())
+  id         String @id @default(cuid())
   campaignId String
 
   /// Azgaar cube coordinate Q axis. s = -q - r (never stored).
-  q          Int
+  q Int
   /// Azgaar cube coordinate R axis.
-  r          Int
+  r Int
 
   /// Canonical terrain type: plains | forest | hills | mountain | swamp | desert | coast | tundra | taiga
-  terrain    String
+  terrain   String
   /// Azgaar biome label for narrative flavor (e.g. "temperate broadleaf forest").
-  biome      String
+  biome     String
   /// Elevation 0–100. Used with moisture to derive terrain + biome deterministically.
-  elevation  Int     @default(0)
+  elevation Int    @default(0)
   /// Moisture 0–100. Used with elevation to derive terrain + biome deterministically.
-  moisture   Int     @default(0)
+  moisture  Int    @default(0)
 
   /// True once the party has physically occupied this hex.
   /// Write-once-forward — never reverts to false.
@@ -454,7 +456,7 @@ model WildernessMap {
 
   /// Deterministic content seed — derived from campaignId + q + r.
   /// The same coordinate always generates identical terrain, biome, elevation, moisture, and feature.
-  seed       String
+  seed String
 
   createdAt DateTime @default(now())
 
@@ -474,9 +476,9 @@ model TravelState {
   campaignId String @unique
 
   /// Current party position — Azgaar cube coordinate Q.
-  currentQ   Int @default(0)
+  currentQ Int @default(0)
   /// Current party position — Azgaar cube coordinate R.
-  currentR   Int @default(0)
+  currentR Int @default(0)
 
   /// Watch index within the current day (0–5). 5 = mandatory Night rest.
   currentWatch Int @default(0)
@@ -520,4 +522,35 @@ model TravelState {
   updatedAt DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
+}
+
+/// A safe zone or town where the party can rest and convert gold to XP.
+model Haven {
+  id              String   @id @default(cuid())
+  campaignId      String
+  name            String
+  prosperityLevel Int      @default(1)
+  baseUpkeepCost  Int      @default(10)
+  createdAt       DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
+
+/// A hired NPC companion that demands wages and maintains morale.
+model Retainer {
+  id           String   @id @default(cuid())
+  campaignId   String
+  name         String
+  class        String
+  level        Int      @default(1)
+  wage         Int      @default(5)
+  loyaltyScore Int      @default(7) // 2d6 scale, 7 is average
+  moraleState  String   @default("confident")
+  createdAt    DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
 }
