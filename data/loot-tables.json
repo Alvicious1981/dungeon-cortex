@@ -4,25 +4,29 @@
       "name": "Tarnished copper bracelet",
       "description": "A thin band of hammered copper, green with age. Worth melting down.",
       "type": "misc",
-      "valueGP": 1
+      "valueGP": 1,
+      "iconPath": "/assets/icons/items/ring.svg"
     },
     {
       "name": "Cracked leather satchel",
       "description": "Sun-faded and split at the seams, but the buckle is still good.",
       "type": "misc",
-      "valueGP": 2
+      "valueGP": 2,
+      "iconPath": "/assets/icons/items/key.svg"
     },
     {
       "name": "Rusted belt knife",
       "description": "A short blade pitted with rust. Holds an edge, barely.",
       "type": "weapon",
-      "valueGP": 1
+      "valueGP": 1,
+      "iconPath": "/assets/icons/items/dagger.svg"
     },
     {
       "name": "Dried rations bundle",
       "description": "Hard bread and salt meat wrapped in waxed cloth. Smells of the road.",
       "type": "consumable",
-      "valueGP": 1
+      "valueGP": 1,
+      "iconPath": "/assets/icons/items/bread.svg"
     },
     {
       "name": "Worn iron flask",
@@ -34,7 +38,8 @@
       "name": "Chipped wooden bowl",
       "description": "A camp bowl carved from dark wood, worn smooth by decades of use.",
       "type": "misc",
-      "valueGP": 1
+      "valueGP": 1,
+      "iconPath": "/assets/icons/items/bow.svg"
     },
     {
       "name": "Tallow candle stub",
@@ -46,25 +51,29 @@
       "name": "Leather coin purse",
       "description": "Empty. The drawstring is frayed but holds.",
       "type": "misc",
-      "valueGP": 1
+      "valueGP": 1,
+      "iconPath": "/assets/icons/items/key.svg"
     },
     {
       "name": "Crude iron ring",
       "description": "A plain band stamped with a maker's mark no one recognises.",
       "type": "misc",
-      "valueGP": 2
+      "valueGP": 2,
+      "iconPath": "/assets/icons/items/ring.svg"
     },
     {
       "name": "Notched hunting knife",
       "description": "The blade is chipped near the tip from cutting through bone.",
       "type": "weapon",
-      "valueGP": 3
+      "valueGP": 3,
+      "iconPath": "/assets/icons/items/dagger.svg"
     },
     {
       "name": "Vial of lamp oil",
       "description": "A small clay vial, sealed with wax. Burns clean for three hours.",
       "type": "consumable",
-      "valueGP": 2
+      "valueGP": 2,
+      "iconPath": "/assets/icons/items/lamp.svg"
     },
     {
       "name": "Coarse wool blanket",
@@ -100,13 +109,15 @@
       "name": "Tin of bitter salve",
       "description": "A small tin of foul-smelling herb paste. Applied to wounds, it keeps rot away.",
       "type": "consumable",
-      "valueGP": 3
+      "valueGP": 3,
+      "iconPath": "/assets/icons/items/meat.svg"
     },
     {
       "name": "Frayed rope coil",
       "description": "Fifteen feet of hempen rope, worn thin in the middle.",
       "type": "misc",
-      "valueGP": 2
+      "valueGP": 2,
+      "iconPath": "/assets/icons/items/health-potion.svg"
     },
     {
       "name": "Cracked clay pipe",
@@ -171,7 +182,8 @@
       "properties": {
         "effect": "dim_light_10ft"
       },
-      "valueGP": 50
+      "valueGP": 50,
+      "iconPath": "/assets/icons/items/ring.svg"
     },
     {
       "name": "Flask of Everburn Oil",
@@ -181,7 +193,8 @@
         "effect": "ignite_on_contact",
         "refills": true
       },
-      "valueGP": 75
+      "valueGP": 75,
+      "iconPath": "/assets/icons/items/meat.svg"
     },
     {
       "name": "Thornweave Gloves",
@@ -190,7 +203,8 @@
       "properties": {
         "effect": "advantage_climb_checks"
       },
-      "valueGP": 60
+      "valueGP": 60,
+      "iconPath": "/assets/icons/items/gauntlet.svg"
     },
     {
       "name": "Resonance Stone",
@@ -227,7 +241,8 @@
         "effect": "stabilise_creature",
         "uses": 1
       },
-      "valueGP": 50
+      "valueGP": 50,
+      "iconPath": "/assets/icons/items/herbs.svg"
     },
     {
       "name": "Cartographer's Compass",
@@ -245,7 +260,8 @@
       "properties": {
         "effect": "silent_movement"
       },
-      "valueGP": 120
+      "valueGP": 120,
+      "iconPath": "/assets/icons/items/boots.svg"
     },
     {
       "name": "Ironwood Shield Fragment",
@@ -254,7 +270,8 @@
       "properties": {
         "ac_bonus": 1
       },
-      "valueGP": 150
+      "valueGP": 150,
+      "iconPath": "/assets/icons/items/shield.svg"
     },
     {
       "name": "Venom Extractor Kit",
@@ -293,7 +310,8 @@
         "effect": "smoke_cloud_10ft",
         "uses": 1
       },
-      "valueGP": 50
+      "valueGP": 50,
+      "iconPath": "/assets/icons/items/meat.svg"
     },
     {
       "name": "Featherweight Chalk",
@@ -312,7 +330,8 @@
         "effect": "heal_1d8_plus_2",
         "uses": 1
       },
-      "valueGP": 40
+      "valueGP": 40,
+      "iconPath": "/assets/icons/items/scroll.svg"
     },
     {
       "name": "Scroll of Sparks",
@@ -322,7 +341,8 @@
         "effect": "lightning_damage_1d6",
         "uses": 1
       },
-      "valueGP": 50
+      "valueGP": 50,
+      "iconPath": "/assets/icons/items/scroll.svg"
     },
     {
       "name": "Draught of Giant's Strength",
@@ -332,7 +352,8 @@
         "effect": "strength_advantage_10m",
         "uses": 1
       },
-      "valueGP": 100
+      "valueGP": 100,
+      "iconPath": "/assets/icons/items/meat.svg"
     }
   ],
   "rare": [
@@ -345,7 +366,8 @@
         "damageBonus": 1,
         "damageType": "slashing"
       },
-      "valueGP": 500
+      "valueGP": 500,
+      "iconPath": "/assets/icons/items/dagger.svg"
     },
     {
       "name": "Ashwalker Boots",
@@ -355,7 +377,8 @@
         "effect": "fire_resistance",
         "no_tracks": true
       },
-      "valueGP": 600
+      "valueGP": 600,
+      "iconPath": "/assets/icons/items/boots.svg"
     },
     {
       "name": "Warden's Eye",
@@ -416,7 +439,8 @@
         "effect": "immunity_surprised_condition",
         "ac_bonus": 1
       },
-      "valueGP": 700
+      "valueGP": 700,
+      "iconPath": "/assets/icons/items/helmet.svg"
     },
     {
       "name": "Dirge Dagger",
@@ -428,7 +452,8 @@
         "damageType": "piercing",
         "effect": "concentration_break_on_hit"
       },
-      "valueGP": 650
+      "valueGP": 650,
+      "iconPath": "/assets/icons/items/dagger.svg"
     },
     {
       "name": "Mossgrown Amulet",
@@ -437,7 +462,8 @@
       "properties": {
         "effect": "regenerate_1hp_per_minute_outdoors"
       },
-      "valueGP": 500
+      "valueGP": 500,
+      "iconPath": "/assets/icons/items/ring.svg"
     },
     {
       "name": "Tome of the Unseen Step",
@@ -446,7 +472,8 @@
       "properties": {
         "effect": "teleport_30ft"
       },
-      "valueGP": 400
+      "valueGP": 400,
+      "iconPath": "/assets/icons/items/tome.svg"
     },
     {
       "name": "Alchemist's Fire (Batch)",
@@ -469,7 +496,8 @@
         "addDexModifier": false,
         "effect": "shadow_trail"
       },
-      "valueGP": 2000
+      "valueGP": 2000,
+      "iconPath": "/assets/icons/items/gauntlet.svg"
     },
     {
       "name": "Greatsword of the Sunken Keep",
@@ -480,7 +508,8 @@
         "damageBonus": 2,
         "damageType": "slashing"
       },
-      "valueGP": 2500
+      "valueGP": 2500,
+      "iconPath": "/assets/icons/items/broadsword.svg"
     },
     {
       "name": "Shroud of Still Water",
@@ -511,7 +540,8 @@
         "damageType": "piercing",
         "effect": "ignore_cover_concealment"
       },
-      "valueGP": 3000
+      "valueGP": 3000,
+      "iconPath": "/assets/icons/items/dagger.svg"
     },
     {
       "name": "Tomb Warden's Cuirass",
@@ -521,7 +551,8 @@
         "ac_bonus": 2,
         "effect": "no_opportunity_attacks_vs_wearer"
       },
-      "valueGP": 2800
+      "valueGP": 2800,
+      "iconPath": "/assets/icons/items/breastplate.svg"
     },
     {
       "name": "Whisper Chain",
@@ -530,7 +561,8 @@
       "properties": {
         "effect": "whisper_communication_1mile"
       },
-      "valueGP": 1600
+      "valueGP": 1600,
+      "iconPath": "/assets/icons/items/helmet.svg"
     },
     {
       "name": "Soulbrand Brand",
@@ -560,7 +592,8 @@
         "effect": "wisdom_advantage",
         "curse": "whispers"
       },
-      "valueGP": 10000
+      "valueGP": 10000,
+      "iconPath": "/assets/icons/items/crown.svg"
     },
     {
       "name": "Gravewalker's Mantle",
@@ -592,7 +625,8 @@
         "effect": "fated_death_determination",
         "curse": "binds_fate"
       },
-      "valueGP": 20000
+      "valueGP": 20000,
+      "iconPath": "/assets/icons/items/key.svg"
     },
     {
       "name": "Veilborn Blade",
@@ -604,7 +638,8 @@
         "damageType": "force",
         "effect": "hit_incorporeal_creatures"
       },
-      "valueGP": 18000
+      "valueGP": 18000,
+      "iconPath": "/assets/icons/items/dagger.svg"
     }
   ],
   "flavorText": {
