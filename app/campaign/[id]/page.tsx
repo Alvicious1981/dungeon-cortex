@@ -25,6 +25,7 @@ import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
 import { WildernessMapController } from "@/components/exploration/map/WildernessMapController";
 import WildernessHUD from "@/components/exploration/WildernessHUD";
+import CharacterSheetController from "@/components/character/CharacterSheetController";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -348,6 +349,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       {/* Dialogue Overlay — self-wiring, listens for dungeon-dialogue-open events */}
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
       
+      {/* Detailed Character Sheet — Floating toggle */}
+      <CharacterSheetController character={character} inventory={character.inventory} />
+
       {/* Wilderness HUD — Only visible in Wilderness Mode */}
       {isWildernessMode && travelState && (
         <WildernessHUD
