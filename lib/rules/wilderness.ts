@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { rollDie } from "@/lib/rules/dice";
 
 // ---------------------------------------------------------------------------
@@ -514,3 +515,34 @@ export function generateWeatherCheck(
     description: getWeatherDescription(gated.condition, gated.intensity),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas (Single Source of Truth)
+// ---------------------------------------------------------------------------
+
+export const TravelWatchInputSchema = z.object({
+  action: z
+    .enum(["travel", "forage", "rest", "camp", "scout"])
+    .describe(
+      "The overworld action the party is taking this watch. " +
+      "'travel' moves the party, 'forage' finds food, 'rest' is mandatory at Night, " +
+      "'camp' stays put, 'scout' reveals terrain."
+    ),
+  direction: z
+    .number()
+    .int()
+    .min(0)
+    .max(5)
+    .optional()
+    .describe(
+      "Hex direction for 'travel' action only. " +
+      "0=Northeast, 1=East, 2=Southeast, 3=Southwest, 4=West, 5=Northwest."
+    ),
+  pace: z
+    .enum(["slow", "normal", "fast"])
+    .optional()
+    .describe(
+      "Travel pace override for this watch. " +
+      "slow=0.5 hexes/watch, normal=1 hex/watch, fast=2 hexes/watch."
+    ),
+}).strict();

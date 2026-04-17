@@ -265,6 +265,35 @@ export const ExplorationXPInputSchema = z.object({
 
 export type ExplorationXPInput = z.infer<typeof ExplorationXPInputSchema>;
 
+export const AwardXPInputSchema = z.object({
+  characterId: z
+    .string()
+    .min(1)
+    .describe("The character's ID from the Character State section."),
+  amount: z
+    .number()
+    .int()
+    .positive()
+    .describe("XP to award. Typical ranges: minor (10–50), moderate (100–300), major (300–1000)."),
+  reason: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe("Brief reason for the award."),
+}).strict();
+
+export type AwardXPInput = z.infer<typeof AwardXPInputSchema>;
+
+export const UpdateQuestStatusInputSchema = z.object({
+  questId: z
+    .string()
+    .min(1)
+    .describe("The quest ID from the ## Active Quests section."),
+  status: z.enum(["completed", "failed"]),
+}).strict();
+
+export type UpdateQuestStatusInput = z.infer<typeof UpdateQuestStatusInputSchema>;
+
 // ---------------------------------------------------------------------------
 // Milestone L — Slice 2: The Forge Engine (pure functions)
 // ---------------------------------------------------------------------------

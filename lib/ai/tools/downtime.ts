@@ -1,33 +1,21 @@
 import { tool } from "ai";
-import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { 
   convertGoldToXP, 
   payLivingExpenses, 
-  rollRetainerMorale 
+  rollRetainerMorale,
+  ResolveDowntimeInputSchema,
 } from "@/lib/rules/downtime";
 
-export function buildDowntimeTool() {
-  return tool({
-    description: "Executes downtime operations at a Haven: pays living expenses, converts gold to XP, and updates retainer morale.",
-    inputSchema: z.object({
-      campaignId: z.string().describe("The ID of the campaign."),
-      characterId: z.string().describe("The ID of the character gaining XP."),
-      havenUpkeepCost: z.number().describe("The daily upkeep cost of the haven."),
-      daysSpent: z.number().describe("The number of days spent resting in the haven."),
-      goldDeposited: z.number().describe("The amount of gold deposited to convert into XP."),
-      partySize: z.number().optional().default(1).describe("The number of characters paying upkeep."),
-      retainerMoraleChecks: z.array(z.object({
-        retainerId: z.string(),
-        baseLoyalty: z.number(),
-        roll2d6: z.number().min(2).max(12),
-        unpaidWages: z.boolean().optional().default(false),
-        partyLeaderCharismaMod: z.number().optional().default(0),
-        recentTrauma: z.boolean().optional().default(false)
-      })).optional().default([])
-    }),
+export function buildDowntimeTools(campaignId: string) {
+  return {
+    resolveDowntime: tool({
+    description:
+      "Resolve haven downtime mechanically: living expenses, gold-to-XP conversion, and retainer morale updates. " +
+      "Use this when the party rests in a haven, pays upkeep, or deposits gold for XP. " +
+      "NEVER narrate gold, XP, or morale changes before this tool confirms them.",
+    inputSchema: ResolveDowntimeInputSchema,
     execute: async ({
-      campaignId,
       characterId,
       havenUpkeepCost,
       daysSpent,
@@ -104,6 +92,7 @@ export function buildDowntimeTool() {
           message: "Downtime resolved successfully."
         };
       });
-    }
-  });
+    },
+    }),
+  };
 }

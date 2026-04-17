@@ -38,25 +38,62 @@ vi.mock("@/lib/memory/formatter", () => ({
   formatSystemPrompt: vi.fn().mockReturnValue("## Iron Laws\n..."),
 }));
 
-vi.mock("@/lib/ai/tools/srd-lookup", () => ({
-  getSpellInfo: vi.fn(),
-  getItemInfo: vi.fn(),
-  getMonsterInfo: vi.fn(),
-  queryMonsters: vi.fn(),
-}));
+vi.mock("@/lib/ai/tools/srd-lookup", () => {
+  const mockGetSpellInfo = vi.fn();
+  const mockGetItemInfo = vi.fn();
+  const mockGetMonsterInfo = vi.fn();
+  const mockQueryMonsters = vi.fn();
+  return {
+    getSpellInfo: mockGetSpellInfo,
+    getItemInfo: mockGetItemInfo,
+    getMonsterInfo: mockGetMonsterInfo,
+    queryMonsters: mockQueryMonsters,
+    buildSrdTools: vi.fn().mockImplementation(() => ({
+      getSpellInfo: {
+        execute: async ({ query }: any) => {
+          const data = await mockGetSpellInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Spell not found" });
+        },
+      },
+      getItemInfo: {
+        execute: async ({ query }: any) => {
+          const data = await mockGetItemInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Item not found" });
+        },
+      },
+      getMonsterInfo: {
+        execute: async ({ query }: any) => {
+          const data = await mockGetMonsterInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Monster not found" });
+        },
+      },
+      queryMonsters: {
+        execute: async (opts: any) => {
+          const data = await mockQueryMonsters(opts);
+          return JSON.stringify(data || []);
+        },
+      },
+    })),
+  };
+});
 
 vi.mock("@/lib/memory/search", () => ({
   searchMemories: vi.fn(),
 }));
 
-vi.mock("@/lib/rules/generators", () => ({
-  generateTavernName: vi.fn(),
-  generateMundaneLoot: vi.fn(),
-}));
+vi.mock("@/lib/rules/generators", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rules/generators")>();
+  return {
+    ...actual,
+    generateTavernName: vi.fn(),
+    generateMundaneLoot: vi.fn(),
+  };
+});
 
-vi.mock("@/lib/rules/npc", () => ({
-  generateNPC: vi.fn(),
-}));
+vi.mock("@/lib/rules/npc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rules/npc")>();
+  return { ...actual, generateNPC: vi.fn() };
+});
 
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
@@ -99,9 +136,10 @@ vi.mock("@/lib/rules/loot", async (importOriginal) => {
   return { ...actual, generateLootPayload: vi.fn() };
 });
 
-vi.mock("@/lib/rules/quests", () => ({
-  generateQuest: vi.fn(),
-}));
+vi.mock("@/lib/rules/quests", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rules/quests")>();
+  return { ...actual, generateQuest: vi.fn() };
+});
 
 // Spread the real combat module but replace the two dice-rolling functions
 // so resolveAttack tests are deterministic (no random misses).
@@ -119,14 +157,17 @@ vi.mock("@/lib/rules/combat", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { streamText } from "ai";
-import { buildCampaignContext } from "@/lib/memory/context";
-import { getSpellInfo, getItemInfo } from "@/lib/ai/tools/srd-lookup";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { prisma } from "@/lib/db/prisma";
+import { buildCampaignContext } from "@/lib/memory/context";
 import { generateNPC } from "@/lib/rules/npc";
 import { generateQuest } from "@/lib/rules/quests";
 import { computeConsequences, deriveCombatBeat } from "@/lib/rules/combat";
 import { generateLootPayload } from "@/lib/rules/loot";
+
+import { 
+  getSpellInfo, getItemInfo, getMonsterInfo 
+} from "@/lib/ai/tools/srd-lookup";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -166,6 +207,7 @@ const mockStreamText = vi.mocked(streamText);
 const mockBuildContext = vi.mocked(buildCampaignContext);
 const mockGetSpellInfo = vi.mocked(getSpellInfo);
 const mockGetItemInfo = vi.mocked(getItemInfo);
+
 const mockPrisma = vi.mocked(prisma, true);
 const mockGenerateNPC = vi.mocked(generateNPC);
 const mockGenerateQuest = vi.mocked(generateQuest);

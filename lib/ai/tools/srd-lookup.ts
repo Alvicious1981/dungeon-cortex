@@ -1,4 +1,6 @@
+import { tool } from "ai";
 import { prisma } from "@/lib/db/prisma";
+import { SrdLookupInputSchema } from "@/lib/rules/srd";
 
 /**
  * Looks up a spell in the deterministic SRD database.
@@ -79,6 +81,52 @@ export async function getItemInfo(query: string) {
   }
 
   return item ? item.data : null;
+}
+
+export function buildSrdTools() {
+  return {
+    getSpellInfo: tool({
+      description:
+        "Fetch exact mechanical JSON data for a spell by name or ID. MUST be used before narrating spell effects.",
+      inputSchema: SrdLookupInputSchema,
+      execute: async ({ query }) => {
+        try {
+          const data = await getSpellInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Spell not found mechanically." });
+        } catch {
+          return JSON.stringify({ error: "Action failed mechanically." });
+        }
+      },
+    }),
+    getItemInfo: tool({
+      description:
+        "Fetch exact mechanical JSON data for an item or piece of equipment by name or ID. MUST be used before narrating the properties of magical or mundane items.",
+      inputSchema: SrdLookupInputSchema,
+      execute: async ({ query }) => {
+        try {
+          const data = await getItemInfo(query);
+          return data ? JSON.stringify(data) : JSON.stringify({ error: "Item not found mechanically." });
+        } catch {
+          return JSON.stringify({ error: "Action failed mechanically." });
+        }
+      },
+    }),
+    getMonsterInfo: tool({
+      description:
+        "Fetch exact mechanical JSON data for a monster by name or ID. MUST be used before narrating combat encounters, describing enemy abilities, or resolving monster actions. Never invent AC, HP, or attack stats.",
+      inputSchema: SrdLookupInputSchema,
+      execute: async ({ query }) => {
+        try {
+          const data = await getMonsterInfo(query);
+          return data
+            ? JSON.stringify(data)
+            : JSON.stringify({ error: "Monster not found mechanically." });
+        } catch {
+          return JSON.stringify({ error: "Action failed mechanically." });
+        }
+      },
+    }),
+  };
 }
 
 // ─── Monster querying via typed columns ───────────────────────────────────────

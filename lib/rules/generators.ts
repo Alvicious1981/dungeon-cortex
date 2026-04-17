@@ -11,6 +11,7 @@
  *
  * This module is pure: no I/O, no side effects, no external dependencies.
  */
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // PRNG — cyrb53 (string → float in [0, 1))
@@ -180,3 +181,19 @@ export function generateMundaneLoot(seedOrEntityId: number | string): string {
   }
   return pickSeeded(seedOrEntityId, MUNDANE_LOOT);
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas (Single Source of Truth)
+// ---------------------------------------------------------------------------
+
+export const GetTavernNameInputSchema = z.object({
+  locationId: z.string().min(1).max(100),
+}).strict();
+
+export type GetTavernNameInput = z.infer<typeof GetTavernNameInputSchema>;
+
+export const GetMundaneLootInputSchema = z.object({
+  entityId: z.string().min(1).max(100),
+}).strict();
+
+export type GetMundaneLootInput = z.infer<typeof GetMundaneLootInputSchema>;

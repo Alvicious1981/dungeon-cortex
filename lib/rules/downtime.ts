@@ -2,6 +2,7 @@
  * OSR/AD&D 1e Downtime Rules Engine
  * Handles the logic required for Haven operations and Retainer upkeep.
  */
+import { z } from "zod";
 
 export type LivingExpenseResult = {
   totalCost: number;
@@ -107,3 +108,25 @@ export function rollRetainerMorale(
     newState
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas (Single Source of Truth)
+// ---------------------------------------------------------------------------
+
+export const ResolveDowntimeInputSchema = z.object({
+  characterId: z.string().min(1).describe("Character receiving XP from deposited gold."),
+  havenUpkeepCost: z.number().nonnegative().describe("Haven upkeep cost per day."),
+  daysSpent: z.number().int().nonnegative().describe("Days spent in downtime."),
+  goldDeposited: z.number().nonnegative().describe("Gold converted to XP (1:1)."),
+  partySize: z.number().int().positive().optional().default(1).describe("Characters paying upkeep."),
+  retainerMoraleChecks: z.array(z.object({
+    retainerId: z.string(),
+    baseLoyalty: z.number(),
+    roll2d6: z.number().int().min(2).max(12),
+    unpaidWages: z.boolean().optional().default(false),
+    partyLeaderCharismaMod: z.number().optional().default(0),
+    recentTrauma: z.boolean().optional().default(false),
+  })).optional().default([]),
+}).strict();
+
+export type ResolveDowntimeInput = z.infer<typeof ResolveDowntimeInputSchema>;

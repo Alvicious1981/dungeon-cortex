@@ -126,6 +126,31 @@ export const MoveToNodeInputSchema = z.object({
 
 export type MoveToNodeInput = z.infer<typeof MoveToNodeInputSchema>;
 
+export const ExplorationTurnInputSchema = z.object({
+  action: z
+    .enum(["move", "search", "rest", "interact", "loud"])
+    .describe(
+      "The type of exploration action taken. " +
+      "'move': standard movement to adjacent node, 1 turn. " +
+      "'search': careful room examination, 1 turn. " +
+      "'rest': mandatory rest turn — resets the rest cycle, no resources consumed. " +
+      "'interact': non-combat interaction with environment or NPC, 1 turn. " +
+      "'loud': noisy action (breaking down door, shouting) — forces an immediate encounter check.",
+    ),
+  turnsToAdvance: z
+    .number()
+    .int()
+    .min(1)
+    .max(6)
+    .default(1)
+    .describe(
+      "How many turns this action consumes. Default 1. " +
+      "Only exceed 1 for explicitly multi-turn tasks such as extended rituals or camp setup.",
+    ),
+}).strict();
+
+export type ExplorationTurnInput = z.infer<typeof ExplorationTurnInputSchema>;
+
 // ---------------------------------------------------------------------------
 // Location templates
 // ---------------------------------------------------------------------------

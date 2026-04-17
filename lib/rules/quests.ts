@@ -12,6 +12,7 @@
  */
 
 import { seededFloat } from "@/lib/rules/generators";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -185,3 +186,21 @@ export function generateQuest(seed: number, giverId?: string): ProceduralQuest {
     ...(giverId !== undefined && { giverId }),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas (Single Source of Truth)
+// ---------------------------------------------------------------------------
+
+export const GenerateAndTrackQuestInputSchema = z.object({
+  giverId: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      "Seed of the NPC issuing this quest (e.g. 'innkeeper_saltmarsh_main'). " +
+      "Omit for anonymous sources like bounty boards."
+    ),
+}).strict();
+
+export type GenerateAndTrackQuestInput = z.infer<typeof GenerateAndTrackQuestInputSchema>;

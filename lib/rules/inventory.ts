@@ -1,3 +1,4 @@
+import { z } from "zod";
 /**
  * lib/rules/inventory.ts
  *
@@ -250,3 +251,29 @@ export function validateItem(item: InventoryItem): boolean {
       return true;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas (Single Source of Truth)
+// ---------------------------------------------------------------------------
+
+export const UseConsumableInputSchema = z.object({
+  characterId: z.string().describe("The ID of the character consuming the item."),
+  itemName: z.string().describe("The name of the item being consumed (e.g. 'Health Potion')."),
+});
+
+export type UseConsumableInput = z.infer<typeof UseConsumableInputSchema>;
+
+export const EQUIPMENT_SLOTS = [
+  "MAIN_HAND",
+  "OFF_HAND",
+  "ARMOR",
+  "ACCESSORY",
+] as const;
+
+export const ManageEquipmentInputSchema = z.object({
+  characterId: z.string().min(1).describe("The character's ID from Character State."),
+  itemId: z.string().min(1).describe("The inventory item ID to equip."),
+  targetSlot: z.enum(EQUIPMENT_SLOTS).describe("The target equipment slot."),
+}).strict();
+
+export type ManageEquipmentInput = z.infer<typeof ManageEquipmentInputSchema>;

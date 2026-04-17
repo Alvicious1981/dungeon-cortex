@@ -153,7 +153,7 @@ export default function WildernessHUD({
             display: flex;
             flex-direction: column;
             gap: 1rem;
-            z-index: 1000;
+            z-index: 3000;
             animation: hud-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
           }
 

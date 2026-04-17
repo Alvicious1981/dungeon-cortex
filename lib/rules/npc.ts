@@ -12,6 +12,7 @@
  * This module is pure: no I/O, no side effects.
  */
 
+import { z } from "zod";
 import { seededFloat, pickSeeded } from "@/lib/rules/generators";
 import { abilityModifier } from "@/lib/rules/dice";
 
@@ -68,6 +69,43 @@ export interface NPCStatblock {
   /** Personality pillars — personality, ideal, bond, flaw. */
   traits: NPCTraits;
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas
+// ---------------------------------------------------------------------------
+
+export const GenerateNPCInputSchema = z.object({
+  seed: z
+    .string()
+    .min(1)
+    .max(100)
+    .describe("Stable unique identifier, e.g. 'blacksmith_ironhaven_oskar'."),
+  role: z.enum(["guard", "bandit", "commoner"]),
+}).strict();
+
+export type GenerateNPCInput = z.infer<typeof GenerateNPCInputSchema>;
+
+export const TrackNPCInputSchema = z.object({
+  seed: z
+    .string()
+    .min(1)
+    .max(100)
+    .describe("Stable unique identifier, e.g. 'innkeeper_saltmarsh_main'."),
+  role: z.enum(["guard", "bandit", "commoner"]),
+  notes: z
+    .string()
+    .max(500)
+    .optional()
+    .describe("Brief contextual notes."),
+  hp: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Current HP — supply only if changed."),
+}).strict();
+
+export type TrackNPCInput = z.infer<typeof TrackNPCInputSchema>;
 
 // ---------------------------------------------------------------------------
 // Name tables

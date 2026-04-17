@@ -287,6 +287,12 @@ export function filterMonsters(filter: MonsterFilter): Monster[] {
     });
 }
 
+export const SrdLookupInputSchema = z.object({
+  query: z.string().min(1).max(100),
+}).strict();
+
+export type SrdLookupInput = z.infer<typeof SrdLookupInputSchema>;
+
 /** Number of valid spells parsed from the SRD. */
 export const SPELL_COUNT = spells.length;
 

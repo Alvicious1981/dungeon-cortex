@@ -23,6 +23,8 @@ import AscensionOverlayController from "@/components/character/AscensionOverlay"
 import XPProgressBar from "@/components/character/XPProgressBar";
 import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
+import { WildernessMapController } from "@/components/exploration/map/WildernessMapController";
+import WildernessHUD from "@/components/exploration/WildernessHUD";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -153,7 +155,7 @@ export async function generateMetadata({ params }: CampaignPageProps) {
 export default async function CampaignPage({ params }: CampaignPageProps) {
   const { id } = await params;
 
-  const [campaign, memories, quests, npcs] = await Promise.all([
+  const [campaign, memories, quests, npcs, wildernessHexes, travelState, partyInventory] = await Promise.all([
     prisma.campaign.findUnique({
       where: { id },
       include: {
@@ -220,6 +222,18 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         seed: true,
       },
     }),
+    // Fetch all discovered/scouted hexes for the wilderness map
+    prisma.wildernessMap.findMany({
+      where: { campaignId: id, OR: [{ discovered: true }, { scouted: true }] },
+    }),
+    // Fetch travel state for the wilderness engine
+    prisma.travelState.findUnique({
+      where: { campaignId: id },
+    }),
+    // Fetch party inventory for rations check
+    prisma.partyInventory.findUnique({
+      where: { campaignId: id },
+    }),
   ]);
 
   if (!campaign) {
@@ -271,6 +285,19 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   const { character, logs } = campaign;
   const activeEncounter = campaign.encounters[0] ?? null;
 
+  // ── Wilderness & Mode Detection ─────────────────────────────────────────────
+  
+  // Decide if we are in Wilderness Mode (TravelState exists and not in a dungeon node)
+  const isWildernessMode = travelState !== null && !explorationData;
+  const currentHex = isWildernessMode 
+    ? (npcs as any[]).find(() => false) // dummy check to see if we need hex info
+    : null; // will be derived below if in wilderness
+
+  // Robustly find current location details for HUD if in wilderness
+  const activeHex = isWildernessMode && travelState
+    ? (wildernessHexes as any[]).find(h => h.q === travelState.currentQ && h.r === travelState.currentR)
+    : null;
+
   const spellSlots = parseSpellSlots(character.spellSlots);
   const hpPercent = character.maxHp > 0
     ? Math.max(0, Math.min(100, Math.round((character.hp / character.maxHp) * 100)))
@@ -320,6 +347,23 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       <TradeOverlayController campaignId={campaign.id} initialGold={campaign.gold} playerInventory={character.inventory} />
       {/* Dialogue Overlay — self-wiring, listens for dungeon-dialogue-open events */}
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
+      
+      {/* Wilderness HUD — Only visible in Wilderness Mode */}
+      {isWildernessMode && travelState && (
+        <WildernessHUD
+          currentQ={travelState.currentQ}
+          currentR={travelState.currentR}
+          terrain={activeHex?.terrain ?? "unknown"}
+          biome={activeHex?.biome ?? "The Great Unknown"}
+          watchIndex={travelState.currentWatch}
+          totalDays={travelState.totalDays}
+          weatherCondition={travelState.weatherCondition}
+          weatherIntensity={travelState.weatherIntensity}
+          partyPace={travelState.partyPace}
+          rations={partyInventory?.rations ?? 0}
+          featureHere={!!activeHex?.feature}
+        />
+      )}
       {/* Ambient glow — purely decorative */}
       <div
         aria-hidden="true"
@@ -714,6 +758,22 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 edges={explorationData.edges}
                 initialCurrentNodeIndex={explorationData.initialCurrentNodeIndex}
                 initialVisitedNodeIndices={explorationData.initialVisitedNodeIndices}
+              />
+            )}
+
+            {/* ── Wilderness VTT — visible when in Wilderness Mode ── */}
+            {isWildernessMode && travelState && (
+              <WildernessMapController
+                hexes={wildernessHexes.map(h => ({
+                  q: h.q,
+                  r: h.r,
+                  terrain: h.terrain,
+                  feature: h.feature,
+                  discovered: h.discovered,
+                  scouted: h.scouted
+                }))}
+                currentQ={travelState.currentQ}
+                currentR={travelState.currentR}
               />
             )}
 

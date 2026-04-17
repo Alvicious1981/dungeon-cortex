@@ -20,7 +20,7 @@ import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 import { getDispositionBand } from "@/lib/rules/social-logic";
 import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
-import { WEATHER_RECALC_INTERVAL_WATCHES, WATCHES_PER_DAY } from "@/lib/rules/wilderness";
+import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,115 +70,17 @@ function formatIronLaws(): string {
     "**Tone:** Dark, serious, visceral, and brief. No embellishment. No comfort.",
     "",
     "**Code is Law / State is Truth:** You have **no mechanical authority**.",
-    "Only narrate the exact mathematical and state changes provided in the context below.",
-    "Never invent miraculous saves, never fudge dice, and never protect the players",
-    "from the consequences of the rules. If the rules kill the character, the character dies.",
+    "Never invent rolls, damage, loot, XP, movement outcomes, social outcomes, weather, or economy changes.",
+    "Narrate only mechanics that come from tool outputs or persisted state in this prompt.",
     "",
-    "**Lookup Mandate:** Before describing the effects of a spell, the properties of a magic item, or the abilities and stats of a monster, YOU MUST use the lookup tools (`getSpellInfo` / `getItemInfo` / `getMonsterInfo`) to ensure mechanical accuracy. Never invent mechanical stats. Code is Law.",
+    "**Tooling Protocol:** Tool descriptions are the canonical action procedures.",
+    "When a player action implies a mechanic, call the relevant tool first, then narrate only its returned result.",
     "",
-    "**XP Authority:** You have full authority to award XP for narrative achievements. " +
-    "Call `awardXP` whenever a meaningful achievement occurs — do not wait for the player to ask. " +
-    "Suggested amounts: minor (10–50 XP), moderate (100–300 XP), major (300–1000 XP). " +
-    "When `leveledUp` is true in the tool response, narrate the level-up as a significant moment before continuing.",
+    "**Lookup Accuracy:** For spells, items, and monsters, use lookup tools before narrating mechanics.",
+    "Never invent AC, HP, damage, or feature text.",
     "",
-    "**Equipment Mandate:** When a player equips, wields, dons, or switches gear, " +
-    "you MUST call `manageEquipment` before narrating the item as equipped. " +
-    "Never describe an item as equipped without the corresponding state mutation. " +
-    "Slot exclusivity is enforced by the tool — the prior occupant is automatically unequipped.",
-    "",
-    "**Quest Generation Mandate:** When the player looks for work, inspects a bounty board, " +
-    "asks an NPC for rumors or quests, or seeks any new objective, " +
-    "you MUST call `generateAndTrackQuest` BEFORE describing the quest. " +
-    "Use the returned title, hook, location, objective, and reward verbatim — do not invent details. " +
-    "Pass `giverId` when the quest comes from a tracked NPC so the giver is recorded.",
-    "",
-    "**NPC Generation Mandate:** When introducing ANY new named character — innkeeper, guard, " +
-    "shopkeeper, bystander — call `generateAndTrackNPC` BEFORE narrating them. " +
-    "The tool returns the NPC's race, profession, alignment, and personality traits; " +
-    "use these details to ground your narration in consistent characterization. " +
-    "The same seed always produces the same person, so recurring characters are stable across sessions. " +
-    "Use `trackNPC` instead when updating state for an NPC already in the database.",
-    "",
-    "**Visceral Combat Mandate:** Every attack — player or enemy — MUST begin with a `resolveAttack` call. " +
-    "NEVER invent damage numbers, hit locations, overkill values, or narrative intensity. " +
-    "Ground all combat prose in the returned fields: " +
-    "`combat_facts` (damage, hit_location, is_crit, overkill), " +
-    "`narrative_tags` (curated sensory labels to weave into prose), " +
-    "`combat_beat` (opening / first_blood / turning_point / climax / aftermath — drives paragraph structure), " +
-    "`narrative_intensity` (0.0–1.0 — calibrate prose density: ≥0.8 = visceral full paragraph; 0.4–0.8 = purposeful two sentences; <0.4 = clinical one sentence), " +
-    "`style_dsl` (voice=active, verbs=hard, adverbs=low — obey strictly). " +
-    "Do not describe any attack as hitting or missing until `resolveAttack` returns. Code is Law.",
-    "",
-    "**Loot Generation Mandate:** When an encounter ends with all enemies dead, " +
-    "you MUST immediately call `generateLoot` with the encounter's encounterId and Tension Score. " +
-    "NEVER invent gold amounts, item names, rarity levels, or magical properties. " +
-    "Narrate the discovered treasure using ONLY the `gold`, `mundaneItems`, and `magicItems` " +
-    "from the tool response. Use the `flavorText` as atmospheric framing. " +
-    "Item names and descriptions must appear verbatim — do not embellish or rename them. " +
-    "Code is Law.",
-    "",
-    "**Exploration Generation Mandate:** When the player declares intent to travel " +
-    "to a new location, explore an area, enter a building, or descend deeper, " +
-    "you MUST call `generateLocation` BEFORE narrating any environment. " +
-    "NEVER invent rooms, connections, exits, NPCs, or spatial structure. " +
-    "The tool response defines the ONLY rooms that exist in the location. " +
-    "Use node names and descriptions verbatim. " +
-    "When the player wants to move between rooms, call `moveToNode` — " +
-    "NEVER teleport the player to a non-adjacent node. " +
-    "Code is Law.",
-    "",
-    "**Level-Up Generation Mandate:** When `awardXP` returns `leveledUp: true`, " +
-    "you MUST immediately call `triggerLevelUp` with the character's ID. " +
-    "NEVER narrate HP increases, stat changes, new abilities, or level-up effects " +
-    "without the corresponding tool response. The tool rolls the class-specific hit die, " +
-    "computes the HP gain, and persists all changes. " +
-    "After calling `triggerLevelUp`, narrate the level-up as a significant in-world moment — " +
-    "muscles hardening, reflexes quickening, divine favor enveloping the character. " +
-    "Never say 'you leveled up' — describe the *feeling* of ascending. " +
-    "Code is Law.",
-    "",
-    "**Trade Generation Mandate:** When the player is at a 'shop' node and " +
-    "initiates trade or conversation with a merchant, you MUST call `generateMerchant` " +
-    "with the node's npcSeed and an appropriate archetype. " +
-    "NEVER invent merchant names, item prices, or inventory. " +
-    "When the player wants to buy or sell, call `executeTrade` with the precise " +
-    "item index, quantity, and action. " +
-    "NEVER grant items or modify gold without the trade tool confirming success. " +
-    "If a trade fails (insufficient gold, item not found), narrate the failure — " +
-    "do NOT override the system. Code is Law.",
-    "",
-    "**Social Interaction Mandate:** When you first speak with any NPC in a scene " +
-    "(as determined by NPC.hasMetPlayer being false), you MUST call `rollReaction` " +
-    "with the party leader's Charisma modifier. Never invent the NPC's opening attitude. " +
-    "When the player attempts to persuade, intimidate, or deceive an NPC, you MUST call " +
-    "`socialCheck` before narrating the outcome. When the player asks an NPC for local " +
-    "information, rumors, or directions, you MUST call `getRumors`. " +
-    "The engine decides what the NPC knows and feels. You voice it. Code is Law.",
-    "",
-    "**Exploration Time Mandate:** Every dungeon action the party takes MUST be advanced " +
-    "by calling `executeExplorationTurn` with the appropriate action type. " +
-    "NEVER narrate torch burn, ration consumption, exhaustion, or random encounters " +
-    "without a tool response confirming it. " +
-    "If `restRequired` is true in the response, the NEXT action MUST be " +
-    "`executeExplorationTurn` with `action: \"rest\"` — do NOT advance time for any other " +
-    "purpose until the party has rested. " +
-    "Voice the returned `warnings[]` diegetically — they are the only events that happened. " +
-    "Code is Law.",
-    "",
-    "**Wilderness Travel Mandate:** Every overworld action (travel, forage, rest, camp, scout) " +
-    `MUST advance the watch clock by calling \`executeTravelWatch\`. ` +
-    "Weather, ration depletion, hex discovery, and encounter rolls are computed by the tool — " +
-    "NEVER invent these outcomes. " +
-    `Watch index 5 (Night) forces action: \"rest\" — do NOT allow travel during Night. ` +
-    "If `movementBlocked` is true, narrate the obstacle and await a new action. " +
-    "If `exhaustionRisk` is true, narrate the strain — a Constitution save is due. " +
-    `Weather recalculates every ${WEATHER_RECALC_INTERVAL_WATCHES} watches (${WATCHES_PER_DAY / WEATHER_RECALC_INTERVAL_WATCHES} times per day). ` +
-    "If `featureDiscovered` is true, narrate the feature as a significant discovery. " +
-    "If `encounter` is true, transition immediately to the encounter flow. " +
-    "Voice `foragingResult.description` verbatim when foraging resolves. " +
-    "Code is Law.",
-    "",
-    "**Downtime Mandate:** When the party rests at a haven, pays living expenses, or deposits gold for XP, you MUST call `executeDowntime` before narrating. NEVER invent or narrate changes to party wealth, XP from gold, or retainer morale without a tool response confirming it. Code is Law.",
+    "**Continuity:** Keep narration tightly grounded in current state, recent events, and scene context.",
+    `Wilderness day structure is fixed at ${WATCHES_PER_DAY} watches.`,
   ].join("\n");
 }
 
@@ -381,7 +283,7 @@ export function formatShopNode(merchantPayload: any, partyGold: number): string 
  */
 function formatExploration(exploration: ContextExploration | null, partyGold: number = 0): string {
   if (!exploration?.location) {
-    return "## Exploration\nNo active location.";
+    return "";
   }
 
   const { location, currentNode, adjacentNodes, visitedNodeIndices } = exploration;
@@ -621,6 +523,13 @@ export function formatHavenHUD(ctx: HavenHUDContext): string {
 export function formatSystemPrompt(
   context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext; wildernessHUD?: WildernessHUDContext; havenHUD?: HavenHUDContext },
 ): string {
+  const locationType = context.currentExploration?.location?.type?.toLowerCase() ?? null;
+  const hasLocation = Boolean(context.currentExploration?.location);
+  const isOverworldScene = locationType === "wilderness" || (!hasLocation && Boolean(context.wildernessHUD));
+  const isDungeonScene = hasLocation && locationType !== "wilderness";
+  const isHavenScene = !hasLocation && !context.activeEncounter && Boolean(context.havenHUD);
+  const shouldShowNPCContext = Boolean(context.activeNPC) && !context.activeEncounter;
+
   const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
   const partyGold = context.gold ?? 0;
@@ -636,21 +545,22 @@ export function formatSystemPrompt(
     formatCharacter(context.character),
     // Exploration state injected between character and combat so the model
     // always knows the party's spatial context when resolving movement.
-    explorationSection,
+    ...(explorationSection ? [explorationSection] : []),
     // Survival HUD — dungeon clock, light, and rations. Injected when CampaignTime
-    // and PartyInventory records exist (after first executeExplorationTurn call).
-    ...(context.explorationHUD ? [formatSurvivalHUD(context.explorationHUD)] : []),
+    // and PartyInventory records exist and the party is in a dungeon scene.
+    ...(context.explorationHUD && isDungeonScene ? [formatSurvivalHUD(context.explorationHUD)] : []),
     // Wilderness HUD — hex position, terrain, weather, pace, rations, watch clock.
-    // Injected when TravelState exists (after first executeTravelWatch call).
-    ...(context.wildernessHUD ? [formatWildernessHUD(context.wildernessHUD)] : []),
-    ...(context.havenHUD ? [formatHavenHUD(context.havenHUD)] : []),
+    // Injected only in overworld scenes to avoid irrelevant context.
+    ...(context.wildernessHUD && isOverworldScene ? [formatWildernessHUD(context.wildernessHUD)] : []),
+    // Haven-only economics and morale context.
+    ...(context.havenHUD && isHavenScene ? [formatHavenHUD(context.havenHUD)] : []),
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.
     ...(questSection ? [questSection] : []),
     // NPC social context — injected when the party is actively interacting
     // with a tracked NPC. Absent when no NPC is in scope.
-    ...(context.activeNPC ? [formatNPCContext(context.activeNPC)] : []),
+    ...(shouldShowNPCContext && context.activeNPC ? [formatNPCContext(context.activeNPC)] : []),
     formatRecentLogs(context.recentLogs),
   ];
 

@@ -8,6 +8,7 @@
  */
 
 import type { Monster } from "@/lib/rules/srd";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // XP values by Challenge Rating — DMG 2014, p. 275
@@ -92,6 +93,29 @@ export function encounterMultiplier(monsterCount: number): number {
 
 /** Maximum number of monsters per generated encounter. */
 export const MAX_ENCOUNTER_SIZE = 6;
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas (Single Source of Truth)
+// ---------------------------------------------------------------------------
+
+export const SpawnEncounterInputSchema = z.object({
+  targetCR: z
+    .number()
+    .min(0)
+    .max(30)
+    .describe(
+      "Target Challenge Rating for the encounter (0–30). " +
+      "Match roughly to party level and danger intent."
+    ),
+  theme: z
+    .string()
+    .optional()
+    .describe(
+      "Optional creature type filter, e.g. 'undead', 'beast', 'humanoid', 'dragon'."
+    ),
+}).strict();
+
+export type SpawnEncounterInput = z.infer<typeof SpawnEncounterInputSchema>;
 
 /**
  * Builds an encounter using a greedy CR/XP budget algorithm.

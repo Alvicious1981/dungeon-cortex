@@ -1,15 +1,12 @@
 import { tool } from "ai";
-import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { UseConsumableInputSchema } from "@/lib/rules/inventory";
 
-export function buildInventoryTools() {
+export function buildInventoryTools(campaignId: string) {
   return {
     useConsumable: tool({
       description: "Consumes an inventory item (like a health potion) to apply its effects to a character. Removes 1 from quantity, or deletes the item if 0. Validates ownership and applies healing if applicable.",
-      inputSchema: z.object({
-        characterId: z.string().describe("The ID of the character consuming the item."),
-        itemName: z.string().describe("The name of the item being consumed (e.g. 'Health Potion')."),
-      }),
+      inputSchema: UseConsumableInputSchema,
       execute: async ({ characterId, itemName }) => {
         return await prisma.$transaction(async (tx) => {
           // 1. Verify the character

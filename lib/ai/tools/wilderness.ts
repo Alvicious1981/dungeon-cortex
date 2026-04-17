@@ -18,7 +18,6 @@
  */
 
 import { tool } from "ai";
-import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { seededFloat } from "@/lib/rules/generators";
@@ -32,6 +31,7 @@ import {
   WILDERNESS_ENCOUNTER_DANGEROUS,
   FAST_PACE_FORAGING_DC_PENALTY,
   SCOUTING_REVEAL_RADIUS,
+  TravelWatchInputSchema,
   calculateTravelProgress,
   resolveForaging,
   generateWeatherCheck,
@@ -154,37 +154,7 @@ export function buildWildernessTool(campaignId: string) {
       "If `restRequired` is true, the NEXT action MUST be action='rest'. " +
       "Voice `warnings[]` diegetically. Code is Law.",
 
-    inputSchema: z.object({
-      action: z
-        .enum(["travel", "forage", "rest", "camp", "scout"])
-        .describe(
-          "The overworld action the party is taking this watch. " +
-          "'travel' moves the party in the given direction. " +
-          "'forage' attempts to gather food (takes the full watch unless pace is slow). " +
-          "'rest' is the mandatory Night watch action — required at watch index 5. " +
-          "'camp' makes camp for the watch without triggering long-rest recovery. " +
-          "'scout' reveals adjacent hexes without moving.",
-        ),
-      direction: z
-        .number()
-        .int()
-        .min(0)
-        .max(5)
-        .optional()
-        .describe(
-          "Hex direction for 'travel' action only. " +
-          "0=NE 1=E 2=SE 3=SW 4=W 5=NW. Omit for all other actions.",
-        ),
-      pace: z
-        .enum(["slow", "normal", "fast"])
-        .optional()
-        .describe(
-          "Travel pace override for this watch. " +
-          "Omit to use the party's persisted pace. " +
-          "slow=0.5 hexes/watch (stealth advantage, can forage while traveling). " +
-          "normal=1 hex/watch. fast=2 hexes/watch (−5 passive Perception, +5 foraging DC).",
-        ),
-    }).strict(),
+    inputSchema: TravelWatchInputSchema,
 
     execute: async ({ action, direction, pace }) => {
       try {

@@ -6,6 +6,7 @@
  * deterministic and auditable given a fixed roll sequence.
  */
 
+import { z } from "zod";
 import { roll } from "./dice";
 import type { RollResult } from "./dice";
 
@@ -243,6 +244,44 @@ export interface ComputeConsequencesInput {
   usedSenses: string[];
   zones: Array<{ name: string }>;
 }
+
+// ---------------------------------------------------------------------------
+// Tool Input Schemas
+// ---------------------------------------------------------------------------
+
+export const ResolveAttackInputSchema = z.object({
+  attackerId: z
+    .string()
+    .min(1)
+    .describe("Combatant ID of the attacker (from initiative order)."),
+  targetId: z
+    .string()
+    .min(1)
+    .describe("Combatant ID of the target (from initiative order)."),
+  weaponDamageDice: z
+    .string()
+    .min(1)
+    .describe("Dice notation for the weapon's damage, e.g. '1d8', '2d6'."),
+  attackModifier: z
+    .number()
+    .int()
+    .describe("Total attack modifier (proficiency + ability mod, etc)."),
+  damageType: z
+    .enum(DAMAGE_TYPES as [DamageType, ...DamageType[]])
+    .describe("Damage type — must be a valid SRD damage type."),
+}).strict();
+
+export type ResolveAttackInput = z.infer<typeof ResolveAttackInputSchema>;
+
+export const InitiativeInputSchema = z.object({
+  combatants: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    dexModifier: z.number().int(),
+  })).min(1),
+}).strict();
+
+export type InitiativeInput = z.infer<typeof InitiativeInputSchema>;
 
 // ---------------------------------------------------------------------------
 // Milestone J — Slice 1: Consequences Engine implementations
