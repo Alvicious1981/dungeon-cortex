@@ -30,9 +30,33 @@ body {
     opacity: 0;
     transform: translateY(-4px);
   }
-
   to {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes condition-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes critical-hit-impact {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+.animate-condition-enter {
+  animation: condition-enter 160ms ease-out forwards;
+}
+
+.animate-critical-hit {
+  animation: critical-hit-impact 200ms ease-in-out;
 }

@@ -11,6 +11,7 @@ import {
   rollInitiative, acFromMonsterData, acFromInventory,
   computeConsequences, deriveCombatBeat, DAMAGE_TYPES,
   ResolveAttackInputSchema, InitiativeInputSchema,
+  resolveConcentrationCheck,
   type DamageType, type EncounterSnapshot,
 } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
@@ -227,6 +228,9 @@ export function buildCombatTools(campaignId: string) {
             targetIsPlayer: defender.isPlayer,
             targetIsBoss: !defender.isPlayer && enemyCombatants.length === 1,
             statusApplied: [],
+            attackerConditions: attacker?.conditions as string[] ?? [],
+            defenderConditions: defender.conditions as string[] ?? [],
+            isMelee: true, // Defaulting to melee for now; can be refined in Slice 2
             encounterSnapshot: snapshot,
             usedSenses: [],
             zones: [],
@@ -243,17 +247,50 @@ export function buildCombatTools(campaignId: string) {
 
           // Persist HP change and encounter-wide damage total only when damage was dealt.
           const { hp_after, damage } = consequences.combat_facts;
+
           if (damage > 0) {
-            await prisma.$transaction([
-              prisma.combatant.update({
+            await prisma.$transaction(async (tx) => {
+              // 1. Update HP
+              await tx.combatant.update({
                 where: { id: targetId },
                 data: { hp: hp_after },
-              }),
-              prisma.encounter.update({
+              });
+
+              // 2. Update Encounter-wide total
+              await tx.encounter.update({
                 where: { id: encounter.id },
                 data: { totalDamageDealt: { increment: damage } },
-              }),
-            ]);
+              });
+
+              // 3. Concentration Disruption Logic
+              if (defender.concentrationSpellId) {
+                // Fetch stats (denormalized from character/npc)
+                const targetStats = (defender.stats as Record<string, number>) || {};
+                const conMod = abilityModifier(targetStats.CON ?? 10);
+                const conSave = resolveConcentrationCheck(damage, conMod);
+                
+                if (!conSave.success) {
+                  // If player, also clear Character-level state
+                  if (defender.isPlayer) {
+                    const campaign = await tx.campaign.findUnique({
+                      where: { id: campaignId },
+                      select: { characterId: true }
+                    });
+                    if (campaign) {
+                      await tx.character.update({
+                        where: { id: campaign.characterId },
+                        data: { concentrationSpellId: null }
+                      });
+                    }
+                  }
+                  
+                  await tx.combatant.update({
+                    where: { id: targetId },
+                    data: { concentrationSpellId: null }
+                  });
+                }
+              }
+            });
           }
 
           return JSON.stringify({ ok: true, ...finalConsequences });

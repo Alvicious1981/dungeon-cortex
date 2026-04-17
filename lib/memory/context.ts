@@ -50,6 +50,8 @@ export interface ContextInventoryItem {
   type: string;
   quantity: number;
   properties: Prisma.JsonValue;
+  /** Equipped slot name, e.g. 'MAIN_HAND' | 'OFF_HAND' | 'ARMOR' | 'ACCESSORY'. */
+  equippedSlot: string | null;
 }
 
 export interface ContextEncounter {
@@ -81,6 +83,10 @@ export interface ContextCombatant {
   initiativeTotal: number;
   /** Raw JSON string[] of active condition names. */
   conditions: Prisma.JsonValue;
+  /** Raw JSON — { STR, DEX, CON, INT, WIS, CHA } */
+  stats: Prisma.JsonValue;
+  /** ID of the currently concentrated-on spell, or null. */
+  concentrationSpellId: string | null;
 }
 
 export interface ContextLog {
@@ -283,6 +289,7 @@ export async function buildCampaignContext(
                 type: true,
                 quantity: true,
                 properties: true,
+                equippedSlot: true,
               },
             },
           },
@@ -307,6 +314,8 @@ export async function buildCampaignContext(
             ac: true,
             initiativeTotal: true,
             conditions: true,
+            stats: true,
+            concentrationSpellId: true,
           },
           orderBy: { initiativeTotal: "desc" },
         },

@@ -309,6 +309,8 @@ export interface SpellEffect {
   hasSavingThrow: boolean;
   /** Ability score index for the saving throw, e.g. "dex". Null if none. */
   saveAbility: string | null;
+  /** Condition to apply on failed save (or non-save spells), e.g. "Blinded". Null if none. */
+  condition: string | null;
 }
 
 /**
@@ -376,6 +378,7 @@ export function resolveSpellEffect(
         damageType: dmgType,
         hasSavingThrow: !!dc,
         saveAbility: dcType,
+        condition: null, // To be extracted from SRD description or specialized fields
       };
     }
   }
@@ -393,10 +396,34 @@ export function resolveSpellEffect(
         .replace(/\s*\+\s*APT\b/gi, modStr)
         .replace(/\bAPT\b/gi, String(spellcastingMod))
         .replace(/\s+/g, ""); // strip remaining whitespace for dice parser
-      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null };
+      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, condition: null };
     }
   }
 
   // --- Utility spell ---
-  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null };
+  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, condition: null };
+}
+
+/**
+ * Returns the 5e proficiency bonus for a character of the given level.
+ * Formula: floor((level - 1) / 4) + 2.
+ * Range: [+2 .. +6].
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function calculateProficiency(level: number): number {
+  return Math.floor((level - 1) / 4) + 2;
+}
+
+/**
+ * Calculates the Spell Save DC for a caster.
+ * Formula: 8 + Spellcasting Ability Modifier + Proficiency Bonus.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function calculateSpellSaveDC(
+  abilityMod: number,
+  proficiencyBonus: number
+): number {
+  return 8 + abilityMod + proficiencyBonus;
 }

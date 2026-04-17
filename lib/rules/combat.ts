@@ -7,8 +7,9 @@
  */
 
 import { z } from "zod";
-import { roll } from "./dice";
+import { roll, rollN, rollWithAdvantage, rollWithDisadvantage, abilityModifier } from "./dice";
 import type { RollResult } from "./dice";
+import { evaluateAdvantage } from "./conditions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -134,6 +135,49 @@ export function checkDeath(hp: number): boolean {
   return hp <= 0;
 }
 
+/**
+ * Safely extracts a string array from a Prisma Json field.
+ * Defaults to an empty array if the field is null or not an array.
+ */
+export function extractConditions(conditions: any): string[] {
+  if (Array.isArray(conditions)) {
+    return conditions.filter((c): c is string => typeof c === "string");
+  }
+  return [];
+}
+
+/**
+ * Adds a condition to an array, ensuring no duplicates (case-insensitive).
+ * Returns a new array.
+ * @pure
+ */
+export function applyCondition(
+  currentConditions: string[],
+  conditionId: string
+): string[] {
+  const normalizedToAdd = conditionId.toLowerCase();
+  const exists = currentConditions.some(
+    (c) => c.toLowerCase() === normalizedToAdd
+  );
+  if (exists) return [...currentConditions];
+  return [...currentConditions, conditionId];
+}
+
+/**
+ * Removes a condition from an array (case-insensitive).
+ * Returns a new array.
+ * @pure
+ */
+export function removeCondition(
+  currentConditions: string[],
+  conditionId: string
+): string[] {
+  const normalizedToRemove = conditionId.toLowerCase();
+  return currentConditions.filter(
+    (c) => c.toLowerCase() !== normalizedToRemove
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Milestone J — Slice 1: Consequences Engine types
 // ---------------------------------------------------------------------------
@@ -240,6 +284,9 @@ export interface ComputeConsequencesInput {
   targetIsPlayer: boolean;
   targetIsBoss: boolean;
   statusApplied: string[];
+  attackerConditions: string[];
+  defenderConditions: string[];
+  isMelee: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
   zones: Array<{ name: string }>;
@@ -581,10 +628,19 @@ export function computeConsequences(
     targetAC, targetHp, targetMaxHp,
     statusApplied, encounterSnapshot,
     usedSenses, zones,
+    attackerConditions,
+    defenderConditions,
+    isMelee,
   } = input;
 
   // 1. Resolve the attack roll.
-  const attackResult = resolveAttackRoll(attackModifier, targetAC);
+  const attackResult = resolveAttackRoll(
+    attackModifier,
+    targetAC,
+    attackerConditions,
+    defenderConditions,
+    isMelee
+  );
 
   // 2. Roll damage and hit location only on a hit.
   let damage      = 0;
@@ -731,10 +787,15 @@ export function acFromInventory(
 // ---------------------------------------------------------------------------
 
 export interface AttackRollResult {
-  /** The raw d20 face result (1–20). */
+  /** The final d20 face result selected (highest/lowest/normal). */
   roll: number;
-  /** roll + attackModifier. */
+  /** Individual dice rolls for audit. */
+  dice: number[];
+  /** total = roll + attackModifier. */
   total: number;
+  /** Roll metadata for narrative/VTT. */
+  advantage: boolean;
+  disadvantage: boolean;
   /** True when the attack hits (natural 20 always hits; natural 1 always misses). */
   hit: boolean;
   /** Natural 20 — damage dice are doubled per 5e 2014 SRD p. 196. */
@@ -746,26 +807,104 @@ export interface AttackRollResult {
 /**
  * Resolves a single melee/ranged attack roll against a target's AC.
  *
- * Critical hit rule (5e 2014 SRD p. 196):
- *   A natural 20 always hits, regardless of the target's AC.
- * Fumble rule:
- *   A natural 1 always misses, regardless of modifiers.
+ * Implements authoritative Advantage/Disadvantage and Condition evaluation.
  *
- * @pure — uses Math.random() internally; not deterministic across runs.
+ * @pure — uses Math.random() via dice.ts helpers.
  */
 export function resolveAttackRoll(
   attackModifier: number,
-  targetAC: number
+  targetAC: number,
+  attackerConditions: string[] = [],
+  defenderConditions: string[] = [],
+  isMelee: boolean = true
 ): AttackRollResult {
-  const rollValue = Math.floor(Math.random() * 20) + 1;
-  const total = rollValue + attackModifier;
-  const critical = rollValue === 20;
-  const fumble = rollValue === 1;
+  const { advantage, disadvantage } = evaluateAdvantage(
+    attackerConditions,
+    defenderConditions,
+    isMelee
+  );
+
+  let rollResult: RollResult;
+  if (advantage) {
+    rollResult = rollWithAdvantage(20, attackModifier);
+  } else if (disadvantage) {
+    rollResult = rollWithDisadvantage(20, attackModifier);
+  } else {
+    rollResult = rollN(20, attackModifier);
+  }
+
+  const naturalRoll = rollResult.diceTotal;
+  const total = rollResult.total;
+  const critical = naturalRoll === 20;
+  const fumble = naturalRoll === 1;
+
   return {
-    roll: rollValue,
+    roll: naturalRoll,
+    dice: rollResult.dice.map((d) => d.result),
     total,
+    advantage,
+    disadvantage,
     hit: critical || (!fumble && total >= targetAC),
     critical,
     fumble,
+  };
+}
+
+/**
+ * Resolves a d20 saving throw against a Difficulty Class.
+ *
+ * @param abilityMod  The ability modifier (e.g., DEX modifier).
+ * @param dc          The Spell Save DC or Hazard DC.
+ * @param advantage   True if the save is made with advantage.
+ * @param disadvantage True if the save is made with disadvantage.
+ *
+ * @pure — uses Math.random() via dice.ts helpers.
+ */
+export function resolveSavingThrow(
+  abilityMod: number,
+  dc: number,
+  advantage: boolean = false,
+  disadvantage: boolean = false
+): { success: boolean; roll: number; total: number } {
+  let rollResult: RollResult;
+
+  if (advantage && !disadvantage) {
+    rollResult = rollWithAdvantage(20, abilityMod);
+  } else if (disadvantage && !advantage) {
+    rollResult = rollWithDisadvantage(20, abilityMod);
+  } else {
+    rollResult = rollN(20, abilityMod);
+  }
+
+  const naturalRoll = rollResult.diceTotal;
+  const total = rollResult.total;
+
+  // 5e RAW: Saving throws don't have automatic critical success/failure
+  // but we return the success boolean based on DC.
+  return {
+    success: total >= dc,
+    roll: naturalRoll,
+    total,
+  };
+}
+
+/**
+ * Resolves a 5e RAW Concentration check.
+ * DC is 10 or half the damage taken, whichever is higher.
+ *
+ * @param damage      Total damage taken.
+ * @param conModifier Constitution modifier.
+ *
+ * @pure — uses Math.random() via resolveSavingThrow.
+ */
+export function resolveConcentrationCheck(
+  damage: number,
+  conModifier: number
+): { success: boolean; dc: number; roll: number; total: number } {
+  const dc = Math.max(10, Math.floor(damage / 2));
+  const result = resolveSavingThrow(conModifier, dc);
+  return {
+    ...result,
+    dc,
   };
 }

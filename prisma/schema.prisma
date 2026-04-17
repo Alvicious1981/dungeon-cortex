@@ -120,8 +120,11 @@ model Combatant {
   maxHp           Int
   ac              Int     @default(10)
   initiativeTotal Int
+  stats           Json    @default("{}")
   conditions      Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
+  /// The ID of the spell currently being concentrated on. Null = no active concentration.
+  concentrationSpellId String?
   /// Zone the combatant currently occupies. Null = zone system not active for this encounter.
   zoneId          String?
 
@@ -239,6 +242,8 @@ model NPC {
   /// Prevents duplicate reaction rolls on subsequent encounters.
   hasMetPlayer    Boolean  @default(false)
   knownRumors     String[] @default([])
+  /// The ID of the spell currently being concentrated on. Null = no active concentration.
+  concentrationSpellId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

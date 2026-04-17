@@ -20,6 +20,9 @@ import {
   selectSenses,
   selectTacticalHooks,
   computeConsequences,
+  extractConditions,
+  applyCondition,
+  removeCondition,
 } from "@/lib/rules/combat";
 import type {
   CombatFacts,
@@ -101,6 +104,29 @@ describe("combat rules", () => {
       expect(checkDeath(10)).toBe(false);
       expect(checkDeath(0)).toBe(true);
       expect(checkDeath(-5)).toBe(true);
+    });
+  });
+
+  describe("condition helpers", () => {
+    it("extractConditions handles valid and invalid inputs", () => {
+      expect(extractConditions(["Blinded", "Prone"])).toEqual(["Blinded", "Prone"]);
+      expect(extractConditions(["Blinded", 123])).toEqual(["Blinded"]);
+      expect(extractConditions({})).toEqual([]);
+      expect(extractConditions(null)).toEqual([]);
+    });
+
+    it("applyCondition adds unique conditions case-insensitively", () => {
+      const start = ["Blinded"];
+      expect(applyCondition(start, "Prone")).toEqual(["Blinded", "Prone"]);
+      expect(applyCondition(start, "blinded")).toEqual(["Blinded"]);
+      expect(applyCondition(start, "BLINDED")).toEqual(["Blinded"]);
+    });
+
+    it("removeCondition removes conditions case-insensitively", () => {
+      const start = ["Blinded", "Prone"];
+      expect(removeCondition(start, "blinded")).toEqual(["Prone"]);
+      expect(removeCondition(start, "PRONE")).toEqual(["Blinded"]);
+      expect(removeCondition(start, "Missing")).toEqual(["Blinded", "Prone"]);
     });
   });
 
@@ -778,6 +804,9 @@ describe("computeConsequences", () => {
       targetIsPlayer:    false,
       targetIsBoss:      false,
       statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
       zones:             [],
@@ -815,6 +844,9 @@ describe("computeConsequences", () => {
       targetIsPlayer:    false,
       targetIsBoss:      false,
       statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
       zones:             [],
@@ -839,6 +871,9 @@ describe("computeConsequences", () => {
       targetIsPlayer:    false,
       targetIsBoss:      false,
       statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
       zones:             [],
@@ -863,6 +898,9 @@ describe("computeConsequences", () => {
       targetIsPlayer:    false,
       targetIsBoss:      false,
       statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
       zones:             [],
@@ -887,6 +925,9 @@ describe("computeConsequences", () => {
       targetIsPlayer:    false,
       targetIsBoss:      false,
       statusApplied:     ["disintegrated", "burned"],
+      attackerConditions: [],
+      defenderConditions: [],
+      isMelee:           true,
       encounterSnapshot: makeSnapshot({ 
         totalDamageDealt: 1000, 
         combatants: [

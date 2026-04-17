@@ -141,6 +141,52 @@ export function rollMany(count: number, faces: number, modifier = 0): RollResult
   return roll(notation);
 }
 
+/**
+ * Roll a d20 with Advantage: roll twice, keep the highest.
+ * Both dice results are returned in the result for transparency.
+ */
+export function rollWithAdvantage(faces: number, modifier = 0): RollResult {
+  const d1 = rollDie(faces);
+  const d2 = rollDie(faces);
+  const chosen = Math.max(d1, d2);
+  const sign = modifier >= 0 ? "+" : "";
+  const notation = `1d${faces}${modifier !== 0 ? sign + modifier : ""} (Adv)`;
+
+  return {
+    notation,
+    dice: [
+      { faces, result: d1 },
+      { faces, result: d2 },
+    ],
+    diceTotal: chosen,
+    modifier,
+    total: chosen + modifier,
+  };
+}
+
+/**
+ * Roll a d20 with Disadvantage: roll twice, keep the lowest.
+ * Both dice results are returned in the result for transparency.
+ */
+export function rollWithDisadvantage(faces: number, modifier = 0): RollResult {
+  const d1 = rollDie(faces);
+  const d2 = rollDie(faces);
+  const chosen = Math.min(d1, d2);
+  const sign = modifier >= 0 ? "+" : "";
+  const notation = `1d${faces}${modifier !== 0 ? sign + modifier : ""} (Dis)`;
+
+  return {
+    notation,
+    dice: [
+      { faces, result: d1 },
+      { faces, result: d2 },
+    ],
+    diceTotal: chosen,
+    modifier,
+    total: chosen + modifier,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // D&D-specific helpers
 // ---------------------------------------------------------------------------

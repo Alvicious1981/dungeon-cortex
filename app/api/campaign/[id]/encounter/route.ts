@@ -103,12 +103,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // Callers without monsterIndex are unaffected (backward compatible).
   const resolvedEnemies = await Promise.all(
     enemies.map(async (e) => {
-      if (!e.monsterIndex) return { ...e, ac: 10 };
+      if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
       const srdMonster = await prisma.srdMonster.findUnique({
         where: { id: e.monsterIndex },
       });
-      if (!srdMonster) return { ...e, ac: 10 };
+      if (!srdMonster) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
       const data = srdMonster.data as Record<string, unknown>;
+      const abilityScores = (data.ability_scores || {}) as Record<string, number>;
       return {
         ...e,
         hp: typeof data.hit_points === "number" ? data.hit_points : e.hp,
@@ -118,6 +119,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             ? abilityModifier(data.dexterity)
             : e.dexModifier,
         ac: acFromMonsterData(data),
+        stats: abilityScores,
       };
     })
   );
@@ -157,6 +159,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         maxHp: campaign.character.maxHp,
         ac: playerAC,
         initiativeTotal: entry.initiative,
+        stats: campaign.character.stats || {},
+        concentrationSpellId: campaign.character.concentrationSpellId,
       };
     }
     // Recover original enemy input by stripping the "enemy-{i}" prefix
@@ -169,6 +173,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       maxHp: enemy.maxHp,
       ac: enemy.ac,
       initiativeTotal: entry.initiative,
+      stats: enemy.stats || {},
     };
   });
 

@@ -26,6 +26,7 @@ import DialogueOverlayController from "@/components/social/DialogueOverlayContro
 import { WildernessMapController } from "@/components/exploration/map/WildernessMapController";
 import WildernessHUD from "@/components/exploration/WildernessHUD";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
+import CombatHUDController from "@/components/combat/CombatHUDController";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -386,6 +387,20 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6"
         id="main-content"
       >
+        {activeEncounter && (
+          <CombatHUDController
+            campaignId={campaign.id}
+            activeTurnIndex={activeEncounter.currentTurnIndex}
+            combatants={activeEncounter.combatants.map((c) => ({
+              id: c.id,
+              name: c.name,
+              hp: c.hp,
+              maxHp: c.maxHp,
+              initiativeTotal: c.initiativeTotal,
+              conditions: (c.conditions as string[]) || [],
+            }))}
+          />
+        )}
         {/* ── Skip link (accessibility) ── */}
         <a
           href="#chronicle"

@@ -27,7 +27,9 @@ export type GameEventType =
   | "ROUND_ADVANCE"        // Turn index wrapped; a new combat round begins
   | "COMBAT_CONSEQUENCE"   // Full Consequences Engine payload from a resolved attack
   | "LOOT_GENERATED"       // generateLoot tool completed; LootPayload ready for display
-  | "LEVEL_UP_RESOLVED";   // triggerLevelUp tool completed; LevelUpPayload ready for display
+  | "LEVEL_UP_RESOLVED"    // triggerLevelUp tool completed; LevelUpPayload ready for display
+  | "CONCENTRATION_STARTED" // Combatant began concentrating on a spell
+  | "CONCENTRATION_BROKEN"; // Combatant failed a concentration check or cast a new conc spell
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.
@@ -58,18 +60,54 @@ export interface LootGeneratedPayload {
   flavorText: string;
 }
 
-/** Rich payload emitted when the Consequences Engine resolves an attack. */
-export interface CombatConsequencePayload {
-  attackerName: string;
+export interface SingleTargetConsequence {
   targetName: string;
+  targetId: string;
   damage: number;
   naturalRoll: number;
   isCrit: boolean;
+  isFumble: boolean;
   hitLocation: string;
   narrativeTags: string[];
   hpAfter: number;
   targetMaxHp: number;
   isKill: boolean;
+  conditionsApplied: string[];
+}
+
+export interface CombatConsequencePayload {
+  attackerName: string;
+  targets: SingleTargetConsequence[];
+
+  // ── Legacy Flat Fields (Backward Compatibility for Slice 2) ────────────────
+  // These allow the existing VTT UI to function while targeting is refactored.
+  // In Slice 3, the UI should be updated to iterate over targets[].
+  
+  /** @deprecated Use targets[0].targetId */
+  targetId: string;
+  /** @deprecated Use targets[0].targetName */
+  targetName: string;
+  /** @deprecated Use targets[0].damage */
+  damage: number;
+  /** @deprecated Use targets[0].hpAfter */
+  hpAfter: number;
+  /** @deprecated Use targets[0].targetMaxHp */
+  targetMaxHp: number;
+  /** @deprecated Use targets[0].isCrit */
+  isCrit: boolean;
+  /** @deprecated Use targets[0].isFumble */
+  isFumble: boolean;
+  /** @deprecated Use targets[0].naturalRoll */
+  naturalRoll: number;
+  /** @deprecated Use targets[0].isKill */
+  isKill: boolean;
+  /** @deprecated Use targets[0].hitLocation */
+  hitLocation?: string;
+  /** @deprecated Use targets[0].narrativeTags */
+  narrativeTags: string[];
+
+  // Index signature to satisfy Record<string, unknown> in GameEvent
+  [key: string]: unknown;
 }
 
 export interface GameEvent {
