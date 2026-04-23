@@ -60,6 +60,8 @@ export interface ContextEncounter {
   currentTurnIndex: number;
   /** Ordered by initiativeTotal DESC — index 0 acts first. */
   combatants: ContextCombatant[];
+  /** Total damage dealt to enemies. */
+  totalDamageDealt: number;
   /** Encounter lifecycle status. "active" | "resolved" | "fled". */
   status?: string;
   /**
@@ -304,6 +306,7 @@ export async function buildCampaignContext(
         id: true,
         round: true,
         currentTurnIndex: true,
+        totalDamageDealt: true,
         combatants: {
           select: {
             id: true,

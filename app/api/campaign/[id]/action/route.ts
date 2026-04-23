@@ -14,19 +14,20 @@ import {
 } from "@/lib/rules/magic";
 import { getSpellInfo } from "@/lib/ai/tools/srd-lookup";
 import {
-  advanceTurn, resolveEncounterEnd, resolveAttackRoll,
-  rollHitLocation, computeOverkill, deriveNarrativeTags,
-  extractConditions, applyCondition, removeCondition,
-  resolveSavingThrow, resolveConcentrationCheck,
-  type CombatFacts, type DamageType,
+  advanceTurn,
+  extractConditions,
+  type DamageType,
 } from "@/lib/rules/combat";
+import {
+  buildCombatConsequenceEvent,
+  finalizeEncounterTurn,
+  executeCombatAction,
+} from "@/lib/rules/combat-pipeline";
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties } from "@/lib/rules/inventory";
 import type { 
-  GameEvent, ActionStreamFrame, 
-  CombatConsequencePayload, SingleTargetConsequence 
+  GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
-import type { HitLocation } from "@/lib/rules/combat";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 interface ActionBody {
@@ -234,139 +235,48 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-
-      const consequences: SingleTargetConsequence[] = [];
-      let totalDamage = 0;
+      const attackModifier = strMod + 2; // Proficiency baseline
 
       await prisma.$transaction(async (tx) => {
-        for (const target of targets) {
-          const defenderConditions = extractConditions(target.conditions);
-          const attackModifier = strMod + 2; // Proficiency baseline
-          
-          const attackResult = resolveAttackRoll(
-            attackModifier, 
-            target.ac,
-            playerConditions,
-            defenderConditions,
-            true
-          );
+        const attackOutcome = await executeCombatAction({
+          actionType: "attack",
+          encounter: {
+            id: activeEncounter.id,
+            round: activeEncounter.round,
+            currentTurnIndex: activeEncounter.currentTurnIndex,
+            totalDamageDealt: activeEncounter.totalDamageDealt,
+            status: "active",
+            combatants: activeEncounter.combatants as any[],
+          },
+          actorId: playerCombatant?.id ?? context.character.id,
+          actorName: context.character.name,
+          actorConditions: playerConditions,
+          targetCombatants: targets,
+          weaponName: foundWeapon?.name || "Unarmed",
+          weaponDice,
+          damageType: ((foundWeapon?.properties as any)?.damageType || "bludgeoning") as DamageType,
+          attackModifier,
+          flatDamageBonus: strMod + weaponBonus,
+          playerCharacterId: context.character.id,
+        }, tx as Prisma.TransactionClient);
 
-          let damage = 0;
-          let hitLoc: HitLocation = "chest";
-          let tags: string[] = [];
+        gameEvents.push(...attackOutcome.events);
 
-          if (attackResult.hit) {
-            const baseDamage = roll(weaponDice).total;
-            const critBonus = attackResult.critical ? roll(weaponDice).total : 0;
-            damage = baseDamage + critBonus + strMod + weaponBonus;
-            totalDamage += damage;
-            hitLoc = rollHitLocation();
-            
-            const facts: CombatFacts = {
-              attacker: context.character.name,
-              defender: target.name,
-              weapon: foundWeapon?.name || "Unarmed",
-              damage,
-              damage_type: (foundWeapon?.properties as any)?.damageType || "bludgeoning",
-              hp_before: target.hp,
-              hp_after: Math.max(0, target.hp - damage),
-              maxHp: target.maxHp,
-              is_crit: attackResult.critical,
-              is_fumble: false,
-              hit_location: hitLoc,
-              status_applied: [],
-              overkill: computeOverkill(damage, target.hp),
-            };
-            tags = deriveNarrativeTags(facts);
-          }
-
-          const newHp = Math.max(0, target.hp - damage);
-
-          // Concentration Disruption
-          if (damage > 0 && target.concentrationSpellId) {
-            const targetStats = (target.stats as Record<string, number>) || {};
-            const conMod = abilityModifier(targetStats.CON ?? 10);
-            const conSave = resolveConcentrationCheck(damage, conMod);
-            
-            if (!conSave.success) {
-              await tx.combatant.update({
-                where: { id: target.id },
-                data: { concentrationSpellId: null }
-              });
-              gameEvents.push({ type: "CONCENTRATION_BROKEN", payload: { targetName: target.name, dc: conSave.dc, roll: conSave.total } });
-            }
-          }
-
-          await tx.combatant.update({
-            where: { id: target.id },
-            data: { hp: newHp },
-          });
-
-          consequences.push({
-            targetName: target.name,
-            targetId: target.id,
-            damage,
-            naturalRoll: attackResult.roll,
-            isCrit: attackResult.critical,
-            isFumble: attackResult.fumble,
-            hitLocation: hitLoc,
-            hpAfter: newHp,
-            targetMaxHp: target.maxHp,
-            isKill: newHp <= 0,
-            conditionsApplied: [],
-            narrativeTags: tags
-          });
-
-          if (attackResult.fumble) {
-            gameEvents.push({ type: "CRITICAL_MISS", payload: { naturalRoll: attackResult.roll, targetName: target.name } });
-          } else if (attackResult.critical) {
-            gameEvents.push({ type: "CRITICAL_HIT", payload: { damage, naturalRoll: attackResult.roll, targetName: target.name } });
-          } else if (attackResult.hit) {
-            gameEvents.push({ type: "DAMAGE_DEALT", payload: { damage, naturalRoll: attackResult.roll, targetName: target.name } });
-          }
-
-          if (newHp <= 0) {
-            gameEvents.push({ type: "ENEMY_DEFEATED", payload: { name: target.name } });
-          }
-        }
-
-        const allCombatants = await tx.combatant.findMany({
-          where: { encounterId: activeEncounter.id }
+        const finalizeOutcome = await finalizeEncounterTurn({
+          tx: tx as Prisma.TransactionClient,
+          encounterId: activeEncounter.id,
+          currentTurnIndex: activeEncounter.currentTurnIndex,
+          round: activeEncounter.round,
         });
+        gameEvents.push(...finalizeOutcome.events);
 
-        const resolution = resolveEncounterEnd(allCombatants);
-
-        if (resolution.shouldEnd) {
-          await tx.encounter.update({
-            where: { id: activeEncounter.id },
-            data: { status: "resolved" }
-          });
-        } else {
-          await emitTurnAdvance(
-            tx,
-            activeEncounter.id,
-            activeEncounter.currentTurnIndex,
-            activeEncounter.round,
-            allCombatants.length,
-            gameEvents
-          );
-        }
-
-        await tx.encounter.update({
-          where: { id: activeEncounter.id },
-          data: { totalDamageDealt: { increment: totalDamage } }
-        });
-      });
-
-      if (consequences.length > 0) {
-        gameEvents.push({
-          type: "COMBAT_CONSEQUENCE",
-          payload: {
+        if (attackOutcome.consequences.length > 0) {
+          gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: consequences,
-          } as CombatConsequencePayload,
-        });
-      }
+            targets: attackOutcome.consequences,
+          }));
+        }
+      });
     }
 
     // After mechanical resolution, proceed to narration using the NEW state.
@@ -377,239 +287,97 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     // ── Gate: cast_spell ────────────────────────────────────────────────────────
     if (intent.actionType === "cast_spell" && intent.spellLevel !== undefined) {
-    const rawSlots = context.character.spellSlots;
+      const rawSlots = context.character.spellSlots;
 
-    if (!isSpellSlots(rawSlots)) {
-      return NextResponse.json(
-        { error: "This character has no spellcasting ability." },
-        { status: 400 }
-      );
-    }
-
-    if (intent.spellLevel !== undefined && !hasAvailableSlot(rawSlots, intent.spellLevel)) {
-      return NextResponse.json(
-        { error: `No available spell slots remaining at level ${intent.spellLevel}.` },
-        { status: 400 }
-      );
-    }
-
-    // Deduct the slot — Code is Law, this happens before any narration
-    const updatedSlots = consumeSlot(rawSlots, intent.spellLevel ?? 0);
-    await prisma.character.update({
-      where: { id: context.character.id },
-      data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
-    });
-
-    gameEvents.push({
-      type: "SPELL_CAST",
-      payload: { spellLevel: intent.spellLevel ?? 0, spellName: intent.targetName ?? null },
-    });
-
-    // Resolve spell mechanical effect if the spell name was parsed
-    if (intent.spellName) {
-      const spellData = (await getSpellInfo(intent.spellName)) as any;
-      if (spellData) {
-        const charStats = context.character.stats as Record<string, number>;
-        const spellAbilityKey = spellcastingAbility(context.character.class);
-        const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
-        const profBonus = calculateProficiency(context.character.level);
-        const saveDC = calculateSpellSaveDC(abilityMod, profBonus);
-
-        const effect = resolveSpellEffect(
-          spellData as Record<string, unknown>,
-          intent.spellLevel ?? 0,
-          abilityMod
+      if (!isSpellSlots(rawSlots)) {
+        return NextResponse.json(
+          { error: "This character has no spellcasting ability." },
+          { status: 400 }
         );
+      }
 
-        const isConcentration = !!spellData.data?.concentration;
-        const consequences: any[] = [];
-        let totalDamageDealt = 0;
+      if (intent.spellLevel !== undefined && !hasAvailableSlot(rawSlots, intent.spellLevel)) {
+        return NextResponse.json(
+          { error: `No available spell slots remaining at level ${intent.spellLevel}.` },
+          { status: 400 }
+        );
+      }
 
-        // Resolve Targets
-        let targets: any[] = [];
-        if (body.targetIds && body.targetIds.length > 0 && context.activeEncounter) {
-          targets = context.activeEncounter.combatants.filter(c => body.targetIds!.includes(c.id));
-        } else if (intent.targetName && context.activeEncounter) {
-          const normalizedTarget = intent.targetName.toLowerCase();
-          const found = context.activeEncounter.combatants.find(c => c.name.toLowerCase().includes(normalizedTarget));
-          if (found) targets = [found];
-        }
+      let effect: any = undefined;
+      let saveDC: number | undefined = undefined;
 
-        await prisma.$transaction(async (tx) => {
-          if (isConcentration) {
-            await tx.character.update({
-              where: { id: context.character.id },
-              data: { concentrationSpellId: intent.spellName! }
-            });
-            gameEvents.push({ type: "CONCENTRATION_STARTED", payload: { spellName: intent.spellName } });
-          }
+      if (intent.spellName) {
+        const spellData = (await getSpellInfo(intent.spellName)) as any;
+        if (spellData) {
+          const charStats = context.character.stats as Record<string, number>;
+          const spellAbilityKey = spellcastingAbility(context.character.class);
+          const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
+          const profBonus = calculateProficiency(context.character.level);
+          saveDC = calculateSpellSaveDC(abilityMod, profBonus);
 
-          for (const target of targets) {
-            let damage = 0;
-            let saved = false;
-            let saveRoll = 0;
-            let hitLoc: HitLocation = "chest";
-            let tags: string[] = [];
-
-            if (effect.hasSavingThrow && effect.saveAbility) {
-              const targetStats = target.stats as Record<string, number>;
-              const targetMod = abilityModifier(targetStats[effect.saveAbility] ?? 10);
-              const saveResult = resolveSavingThrow(targetMod, saveDC);
-              saved = saveResult.success;
-              saveRoll = saveResult.total;
-              
-              const diceTotal = roll(effect.dice!).total;
-              damage = saved ? Math.floor(diceTotal / 2) : diceTotal;
-              totalDamageDealt += damage;
-              
-              if (damage > 0) {
-                hitLoc = rollHitLocation();
-                const facts: CombatFacts = {
-                  attacker: context.character.name,
-                  defender: target.name,
-                  weapon: intent.spellName || "Spell",
-                  damage,
-                  damage_type: (effect as any).damageType || "force",
-                  hp_before: target.hp,
-                  hp_after: Math.max(0, target.hp - damage),
-                  maxHp: target.maxHp,
-                  is_crit: false,
-                  is_fumble: false,
-                  hit_location: hitLoc,
-                  status_applied: !saved && effect.condition ? [effect.condition] : [],
-                  overkill: computeOverkill(damage, target.hp),
-                };
-                tags = deriveNarrativeTags(facts);
-              }
-            } else if (effect.dice) {
-              damage = roll(effect.dice).total;
-              totalDamageDealt += damage;
-              hitLoc = rollHitLocation();
-              const facts: CombatFacts = {
-                attacker: context.character.name,
-                defender: target.name,
-                weapon: intent.spellName || "Spell",
-                damage,
-                damage_type: (effect as any).damageType || "force",
-                hp_before: target.hp,
-                hp_after: Math.max(0, target.hp - damage),
-                maxHp: target.maxHp,
-                is_crit: false,
-                is_fumble: false,
-                hit_location: hitLoc,
-                status_applied: effect.condition ? [effect.condition] : [],
-                overkill: computeOverkill(damage, target.hp),
-              };
-              tags = deriveNarrativeTags(facts);
-            }
-
-            const newHp = Math.max(0, target.hp - damage);
-
-            let conditionsToApply: string[] = [];
-            if (!saved && effect.condition) {
-              conditionsToApply = [effect.condition];
-            }
-            const finalConditions = conditionsToApply.reduce(
-              (acc, cond) => applyCondition(acc, cond), 
-              extractConditions(target.conditions)
-            );
-
-            if (damage > 0 && target.concentrationSpellId) {
-              const targetStats = (target.stats as Record<string, number>) || {};
-              const conMod = abilityModifier(targetStats.CON ?? 10);
-              const conSave = resolveConcentrationCheck(damage, conMod);
-              
-              if (!conSave.success) {
-                if (target.isPlayer) {
-                  await tx.character.update({
-                    where: { id: context.character.id },
-                    data: { concentrationSpellId: null }
-                  });
-                }
-                await tx.combatant.update({
-                  where: { id: target.id },
-                  data: { concentrationSpellId: null }
-                });
-                gameEvents.push({ type: "CONCENTRATION_BROKEN", payload: { targetName: target.name, dc: conSave.dc, roll: conSave.total } });
-              }
-            }
-
-            await tx.combatant.update({
-              where: { id: target.id },
-              data: { hp: newHp, conditions: finalConditions }
-            });
-
-            consequences.push({
-              targetName: target.name,
-              targetId: target.id,
-              damage,
-              naturalRoll: saveRoll,
-              isCrit: false,
-              isFumble: false,
-              hitLocation: hitLoc,
-              hpAfter: newHp,
-              targetMaxHp: target.maxHp,
-              isKill: newHp <= 0,
-              conditionsApplied: conditionsToApply,
-              narrativeTags: tags
-            });
-
-            if (damage > 0) gameEvents.push({ type: "DAMAGE_DEALT", payload: { damage, targetName: target.name, naturalRoll: saveRoll } });
-            if (newHp <= 0) gameEvents.push({ type: "ENEMY_DEFEATED", payload: { name: target.name } });
-          }
-
-          if (effect.type === "healing" && effect.dice) {
-            const healed = roll(effect.dice).total;
-            const newHp = Math.min(context.character.hp + healed, context.character.maxHp);
-            await tx.character.update({
-              where: { id: context.character.id },
-              data: { hp: newHp },
-            });
-            gameEvents.push({ type: "HEALING_RECEIVED", payload: { amount: healed, newHp, spellName: intent.spellName } });
-          }
-
-          if (context.activeEncounter) {
-            const allCombatants = await tx.combatant.findMany({
-              where: { encounterId: context.activeEncounter.id }
-            });
-
-            const resolution = resolveEncounterEnd(allCombatants);
-
-            if (resolution.shouldEnd) {
-              await tx.encounter.update({
-                where: { id: context.activeEncounter.id },
-                data: { status: "resolved" }
-              });
-            } else {
-              await emitTurnAdvance(
-                tx,
-                context.activeEncounter.id,
-                context.activeEncounter.currentTurnIndex,
-                context.activeEncounter.round,
-                allCombatants.length,
-                gameEvents
-              );
-            }
-
-            await tx.encounter.update({
-              where: { id: context.activeEncounter.id },
-              data: { totalDamageDealt: { increment: totalDamageDealt } }
-            });
-          }
-        });
-
-        if (consequences.length > 0) {
-          gameEvents.push({
-            type: "COMBAT_CONSEQUENCE",
-            payload: {
-              attackerName: context.character.name,
-              targets: consequences,
-            } as CombatConsequencePayload,
-          });
+          effect = resolveSpellEffect(
+            spellData as Record<string, unknown>,
+            intent.spellLevel ?? 0,
+            abilityMod
+          );
         }
       }
+
+      let targets: any[] = [];
+      if (body.targetIds && body.targetIds.length > 0 && context.activeEncounter) {
+        targets = context.activeEncounter.combatants.filter(c => body.targetIds!.includes(c.id));
+      } else if (intent.targetName && context.activeEncounter) {
+        const normalizedTarget = intent.targetName.toLowerCase();
+        const found = context.activeEncounter.combatants.find(c => c.name.toLowerCase().includes(normalizedTarget));
+        if (found) targets = [found];
+      }
+
+      const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
+      const playerConditions = extractConditions(playerCombatant?.conditions);
+
+      await prisma.$transaction(async (tx) => {
+        const spellOutcome = await executeCombatAction({
+          actionType: "cast_spell",
+          encounter: context.activeEncounter ? {
+            id: context.activeEncounter.id,
+            round: context.activeEncounter.round,
+            currentTurnIndex: context.activeEncounter.currentTurnIndex,
+            totalDamageDealt: context.activeEncounter.totalDamageDealt,
+            status: "active",
+            combatants: context.activeEncounter.combatants as any[],
+          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+          actorId: playerCombatant?.id ?? context.character.id,
+          actorName: context.character.name,
+          actorConditions: playerConditions,
+          targetCombatants: targets,
+          spellName: intent.spellName,
+          spellLevel: intent.spellLevel,
+          spellEffect: effect,
+          spellSaveDC: saveDC,
+          rawSpellSlots: rawSlots,
+          playerCharacterId: context.character.id,
+        }, tx as Prisma.TransactionClient);
+
+        gameEvents.push(...spellOutcome.events);
+
+        if (context.activeEncounter) {
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: tx as Prisma.TransactionClient,
+            encounterId: context.activeEncounter.id,
+            currentTurnIndex: context.activeEncounter.currentTurnIndex,
+            round: context.activeEncounter.round,
+          });
+          gameEvents.push(...finalizeOutcome.events);
+        }
+
+        if (spellOutcome.consequences.length > 0) {
+          gameEvents.push(buildCombatConsequenceEvent({
+            attackerName: context.character.name,
+            targets: spellOutcome.consequences,
+          }));
+        }
+      });
     }
-  }
 
   // ── Gate: use_item ──────────────────────────────────────────────────────────
   if (intent.actionType === "use_item" && intent.targetName) {
@@ -625,43 +393,39 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      // Decrement quantity; delete the row when the last charge is consumed
-      if (foundItem.quantity <= 1) {
-        await prisma.inventoryItem.delete({ where: { id: foundItem.id } });
-      } else {
-        await prisma.inventoryItem.update({
-          where: { id: foundItem.id },
-          data: { quantity: foundItem.quantity - 1 },
-        });
-      }
-
-      // Healing consumables: calculate and apply HP delta
       const consumableProps = getItemProperties(
         { ...foundItem, characterId: context.character.id },
         "consumable"
       );
 
-      if (consumableProps?.healingDice) {
-        const healed =
-          roll(consumableProps.healingDice).total + (consumableProps.healingBonus ?? 0);
-        const newHp = Math.min(
-          context.character.hp + healed,
-          context.character.maxHp
-        );
-        await prisma.character.update({
-          where: { id: context.character.id },
-          data: { hp: newHp },
-        });
+      const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
+      const playerConditions = extractConditions(playerCombatant?.conditions);
 
-        gameEvents.push({
-          type: "HEALING_RECEIVED",
-          payload: { amount: healed, newHp, itemName: foundItem.name },
-        });
+      await prisma.$transaction(async (tx) => {
+        const itemOutcome = await executeCombatAction({
+          actionType: "use_item",
+          encounter: context.activeEncounter ? {
+            id: context.activeEncounter.id,
+            round: context.activeEncounter.round,
+            currentTurnIndex: context.activeEncounter.currentTurnIndex,
+            totalDamageDealt: context.activeEncounter.totalDamageDealt,
+            status: "active",
+            combatants: context.activeEncounter.combatants as any[],
+          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+          actorId: playerCombatant?.id ?? context.character.id,
+          actorName: context.character.name,
+          actorConditions: playerConditions,
+          targetCombatants: [],
+          itemId: foundItem.id,
+          itemName: foundItem.name,
+          itemQuantity: foundItem.quantity,
+          healingDice: consumableProps?.healingDice,
+          healingBonus: consumableProps?.healingBonus,
+          playerCharacterId: context.character.id,
+        }, tx as Prisma.TransactionClient);
 
-        if (newHp <= 0) {
-          gameEvents.push({ type: "PLAYER_DOWNED", payload: {} });
-        }
-      }
+        gameEvents.push(...itemOutcome.events);
+      });
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
@@ -689,111 +453,48 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const strMod = abilityModifier(charStats.STR ?? 10);
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-
-      const consequences: SingleTargetConsequence[] = [];
-      let totalDamage = 0;
+      const attackModifier = strMod + 2;
 
       await prisma.$transaction(async (tx) => {
-        for (const target of targets) {
-          const defenderConditions = extractConditions(target.conditions);
-          const attackModifier = strMod + 2;
-          
-          const attackResult = resolveAttackRoll(
-            attackModifier, target.ac, playerConditions, defenderConditions, true
-          );
+        const attackOutcome = await executeCombatAction({
+          actionType: "attack",
+          encounter: {
+            id: context.activeEncounter!.id,
+            round: context.activeEncounter!.round,
+            currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+            totalDamageDealt: context.activeEncounter!.totalDamageDealt,
+            status: "active",
+            combatants: context.activeEncounter!.combatants as any[],
+          },
+          actorId: playerCombatant?.id ?? context.character.id,
+          actorName: context.character.name,
+          actorConditions: playerConditions,
+          targetCombatants: targets,
+          weaponName: foundWeapon.name,
+          weaponDice: weaponProps?.damageDice || "1d4",
+          damageType: (weaponProps?.damageType as DamageType) || "slashing",
+          attackModifier,
+          flatDamageBonus: strMod + (weaponProps?.damageBonus || 0),
+          playerCharacterId: context.character.id,
+        }, tx as Prisma.TransactionClient);
 
-          let damage = 0;
-          let hitLoc: HitLocation = "chest";
-          let tags: string[] = [];
+        gameEvents.push(...attackOutcome.events);
 
-          if (attackResult.hit) {
-            const baseDamage = roll(weaponProps?.damageDice || "1d4").total;
-            const critBonus = attackResult.critical ? roll(weaponProps?.damageDice || "1d4").total : 0;
-            damage = baseDamage + critBonus + (weaponProps?.damageBonus || 0);
-            totalDamage += damage;
-            hitLoc = rollHitLocation();
-            
-            const facts: CombatFacts = {
-              attacker: context.character.name,
-              defender: target.name,
-              weapon: foundWeapon.name,
-              damage,
-              damage_type: (weaponProps?.damageType as any) || "slashing",
-              hp_before: target.hp,
-              hp_after: Math.max(0, target.hp - damage),
-              maxHp: target.maxHp,
-              is_crit: attackResult.critical,
-              is_fumble: false,
-              hit_location: hitLoc,
-              status_applied: [],
-              overkill: computeOverkill(damage, target.hp),
-            };
-            tags = deriveNarrativeTags(facts);
-          }
-
-          const newHp = Math.max(0, target.hp - damage);
-
-          if (damage > 0 && target.concentrationSpellId) {
-            const targetStats = (target.stats as Record<string, number>) || {};
-            const conMod = abilityModifier(targetStats.CON ?? 10);
-            const conSave = resolveConcentrationCheck(damage, conMod);
-            
-            if (!conSave.success) {
-              await tx.combatant.update({ where: { id: target.id }, data: { concentrationSpellId: null } });
-              gameEvents.push({ type: "CONCENTRATION_BROKEN", payload: { targetName: target.name, dc: conSave.dc, roll: conSave.total } });
-            }
-          }
-
-          await tx.combatant.update({ where: { id: target.id }, data: { hp: newHp } });
-
-          consequences.push({
-            targetName: target.name,
-            targetId: target.id,
-            damage,
-            naturalRoll: attackResult.roll,
-            isCrit: attackResult.critical,
-            isFumble: attackResult.fumble,
-            hitLocation: hitLoc,
-            hpAfter: newHp,
-            targetMaxHp: target.maxHp,
-            isKill: newHp <= 0,
-            conditionsApplied: [],
-            narrativeTags: tags
-          });
-
-          if (attackResult.fumble) gameEvents.push({ type: "CRITICAL_MISS", payload: { naturalRoll: attackResult.roll, targetName: target.name } });
-          else if (attackResult.critical) gameEvents.push({ type: "CRITICAL_HIT", payload: { damage, naturalRoll: attackResult.roll, targetName: target.name } });
-          else if (attackResult.hit) gameEvents.push({ type: "DAMAGE_DEALT", payload: { damage, naturalRoll: attackResult.roll, targetName: target.name } });
-          if (newHp <= 0) gameEvents.push({ type: "ENEMY_DEFEATED", payload: { name: target.name } });
-        }
-
-        const allCombatants = await tx.combatant.findMany({ where: { encounterId: context.activeEncounter!.id } });
-        const resolution = resolveEncounterEnd(allCombatants);
-
-        if (resolution.shouldEnd) {
-          await tx.encounter.update({ where: { id: context.activeEncounter!.id }, data: { status: "resolved" } });
-        } else {
-          await emitTurnAdvance(
-            tx, context.activeEncounter!.id, context.activeEncounter!.currentTurnIndex,
-            context.activeEncounter!.round, allCombatants.length, gameEvents
-          );
-        }
-
-        await tx.encounter.update({
-          where: { id: context.activeEncounter!.id },
-          data: { totalDamageDealt: { increment: totalDamage } }
+        const finalizeOutcome = await finalizeEncounterTurn({
+          tx: tx as Prisma.TransactionClient,
+          encounterId: context.activeEncounter!.id,
+          currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+          round: context.activeEncounter!.round,
         });
-      });
+        gameEvents.push(...finalizeOutcome.events);
 
-      if (consequences.length > 0) {
-        gameEvents.push({
-          type: "COMBAT_CONSEQUENCE",
-          payload: {
+        if (attackOutcome.consequences.length > 0) {
+          gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: consequences,
-          } as CombatConsequencePayload,
-        });
-      }
+            targets: attackOutcome.consequences,
+          }));
+        }
+      });
     }
   }
 

@@ -9,12 +9,12 @@ import {
 } from "@/lib/rules/encounters";
 import {
   rollInitiative, acFromMonsterData, acFromInventory,
-  computeConsequences, deriveCombatBeat, DAMAGE_TYPES,
-  ResolveAttackInputSchema, InitiativeInputSchema,
-  resolveConcentrationCheck,
-  type DamageType, type EncounterSnapshot,
+  deriveCombatBeat, extractConditions,
+  ResolveAttackInputSchema,
+  type EncounterSnapshot,
 } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
+import { executeCombatAction } from "@/lib/rules/combat-pipeline";
 import {
   GenerateLootInputSchema,
   generateLootPayload,
@@ -196,6 +196,11 @@ export function buildCombatTools(campaignId: string) {
             return JSON.stringify({ error: `Target combatant '${targetId}' not found in encounter.` });
           }
 
+          const campaign = await prisma.campaign.findUnique({
+            where: { id: campaignId },
+            select: { characterId: true },
+          });
+
           const enemyCombatants = encounter.combatants.filter((c) => !c.isPlayer);
           const encStatus: "active" | "resolved" | "fled" =
             encounter.status === "active" ? "active" : "resolved";
@@ -215,26 +220,43 @@ export function buildCombatTools(campaignId: string) {
             })),
           };
 
-          const consequences = computeConsequences({
-            attacker: attacker?.name ?? attackerId,
-            defender: defender.name,
-            weapon: weaponDamageDice,
-            weaponDice: weaponDamageDice,
-            attackModifier,
-            damageType,
-            targetAC: defender.ac,
-            targetHp: defender.hp,
-            targetMaxHp: defender.maxHp,
-            targetIsPlayer: defender.isPlayer,
-            targetIsBoss: !defender.isPlayer && enemyCombatants.length === 1,
-            statusApplied: [],
-            attackerConditions: attacker?.conditions as string[] ?? [],
-            defenderConditions: defender.conditions as string[] ?? [],
-            isMelee: true, // Defaulting to melee for now; can be refined in Slice 2
-            encounterSnapshot: snapshot,
-            usedSenses: [],
-            zones: [],
-          });
+          const attackOutcome = await executeCombatAction(
+            {
+              actionType: "attack",
+              encounter: {
+                id: encounter.id,
+                round: encounter.round,
+                currentTurnIndex: encounter.currentTurnIndex,
+                totalDamageDealt: encounter.totalDamageDealt,
+                status: encStatus,
+                combatants: encounter.combatants as any[],
+              },
+              actorId: attackerId,
+              actorName: attacker?.name ?? attackerId,
+              actorConditions: extractConditions(attacker?.conditions),
+              targetCombatants: [defender as any],
+              weaponName: weaponDamageDice,
+              weaponDice: weaponDamageDice,
+              damageType,
+              attackModifier,
+              flatDamageBonus: 0,
+              playerCharacterId: campaign?.characterId,
+              collectEvents: false,
+            },
+            prisma as any
+          );
+
+          if (attackOutcome.totalDamageDealt > 0) {
+            await prisma.encounter.update({
+              where: { id: encounter.id },
+              data: { totalDamageDealt: { increment: attackOutcome.totalDamageDealt } },
+            });
+          }
+
+          const consequences = attackOutcome.consequenceDetails?.[0];
+          if (!consequences) {
+            return JSON.stringify({ error: "Attack resolution failed mechanically." });
+          }
 
           // Re-derive beat with corrected totalDamageDealt (post-roll)
           const correctedTotal =
@@ -246,53 +268,6 @@ export function buildCombatTools(campaignId: string) {
           const finalConsequences = { ...consequences, combat_beat: finalBeat };
 
           // Persist HP change and encounter-wide damage total only when damage was dealt.
-          const { hp_after, damage } = consequences.combat_facts;
-
-          if (damage > 0) {
-            await prisma.$transaction(async (tx) => {
-              // 1. Update HP
-              await tx.combatant.update({
-                where: { id: targetId },
-                data: { hp: hp_after },
-              });
-
-              // 2. Update Encounter-wide total
-              await tx.encounter.update({
-                where: { id: encounter.id },
-                data: { totalDamageDealt: { increment: damage } },
-              });
-
-              // 3. Concentration Disruption Logic
-              if (defender.concentrationSpellId) {
-                // Fetch stats (denormalized from character/npc)
-                const targetStats = (defender.stats as Record<string, number>) || {};
-                const conMod = abilityModifier(targetStats.CON ?? 10);
-                const conSave = resolveConcentrationCheck(damage, conMod);
-                
-                if (!conSave.success) {
-                  // If player, also clear Character-level state
-                  if (defender.isPlayer) {
-                    const campaign = await tx.campaign.findUnique({
-                      where: { id: campaignId },
-                      select: { characterId: true }
-                    });
-                    if (campaign) {
-                      await tx.character.update({
-                        where: { id: campaign.characterId },
-                        data: { concentrationSpellId: null }
-                      });
-                    }
-                  }
-                  
-                  await tx.combatant.update({
-                    where: { id: targetId },
-                    data: { concentrationSpellId: null }
-                  });
-                }
-              }
-            });
-          }
-
           return JSON.stringify({ ok: true, ...finalConsequences });
         } catch {
           return JSON.stringify({ error: "Attack resolution failed mechanically." });

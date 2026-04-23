@@ -46,6 +46,7 @@ const resolvedEncounter: CampaignContext["activeEncounter"] = {
   id: "enc-resolved-01",
   round: 4,
   currentTurnIndex: 0,
+  totalDamageDealt: 0,
   status: "resolved",
   tensionScore: 0.73,
   reason: "all_enemies_dead",
@@ -248,6 +249,7 @@ describe("formatSystemPrompt — relevance clipping", () => {
         id: "enc-1",
         round: 1,
         currentTurnIndex: 0,
+        totalDamageDealt: 0,
         combatants: [],
       },
     });
