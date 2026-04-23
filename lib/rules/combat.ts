@@ -7,9 +7,11 @@
  */
 
 import { z } from "zod";
-import { roll, rollN, rollWithAdvantage, rollWithDisadvantage, abilityModifier } from "./dice";
+import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
 import { evaluateAdvantage } from "./conditions";
+
+import { calculateDistance, type GridZone } from "./spatial";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -139,7 +141,7 @@ export function checkDeath(hp: number): boolean {
  * Safely extracts a string array from a Prisma Json field.
  * Defaults to an empty array if the field is null or not an array.
  */
-export function extractConditions(conditions: any): string[] {
+export function extractConditions(conditions: unknown): string[] {
   if (Array.isArray(conditions)) {
     return conditions.filter((c): c is string => typeof c === "string");
   }
@@ -182,6 +184,12 @@ export function removeCondition(
 // Milestone J — Slice 1: Consequences Engine types
 // ---------------------------------------------------------------------------
 
+export interface AttackSpatialContext {
+  attackerZone: GridZone;
+  targetZone: GridZone;
+  rangeInFeet: number;
+}
+
 export type DamageType =
   | "slashing" | "piercing" | "bludgeoning"
   | "fire" | "cold" | "lightning" | "acid" | "poison"
@@ -218,6 +226,7 @@ export interface CombatFacts {
   maxHp: number;
   is_crit: boolean;
   is_fumble: boolean;
+  attack_roll?: number;
   hit_location: HitLocation;
   status_applied: string[];
   overkill: number;
@@ -277,6 +286,7 @@ export interface ComputeConsequencesInput {
   weapon: string;
   weaponDice: string;
   attackModifier: number;
+  flatDamageBonus?: number;
   damageType: DamageType;
   targetAC: number;
   targetHp: number;
@@ -536,7 +546,7 @@ export function deriveStyleDSL(intensity: number, beat: CombatBeat): StyleDSL {
   const isHigh = intensity > 0.7;
   const isLow  = intensity < 0.3;
 
-  let visual:    StyleDSL["visual"]    = isHigh ? "high"   : isLow ? "low"    : "medium";
+  const visual: StyleDSL["visual"] = isHigh ? "high" : isLow ? "low" : "medium";
   let sentences: StyleDSL["sentences"] = isHigh ? "short"  : isLow ? "long"   : "medium";
   let metaphors: StyleDSL["metaphors"] = isHigh ? "sparse" : isLow ? "rich"   : "moderate";
 
@@ -588,9 +598,10 @@ export function selectSenses(usedRecently: string[]): string[] {
  */
 export function selectTacticalHooks(
   facts: CombatFacts,
-  _zones: Array<{ name: string }>
+  zones: Array<{ name: string }>
 ): string[] {
   const hooks: string[] = [];
+  void zones;
 
   // Always available in melee.
   hooks.push("push");
@@ -625,6 +636,7 @@ export function computeConsequences(
   const {
     attacker, defender, weapon,
     weaponDice, attackModifier, damageType,
+    flatDamageBonus = 0,
     targetAC, targetHp, targetMaxHp,
     statusApplied, encounterSnapshot,
     usedSenses, zones,
@@ -643,16 +655,20 @@ export function computeConsequences(
   );
 
   // 2. Roll damage and hit location only on a hit.
-  let damage      = 0;
-  let rollsArr: number[] = [];
-  let hitLocation: HitLocation = "chest"; // placeholder for misses
-
-  if (attackResult.hit) {
-    const damageResult = rollDamage(weaponDice, attackResult.critical);
-    damage   = damageResult.total;
-    rollsArr = damageResult.rolls;
-    hitLocation = rollHitLocation();
-  }
+  const { damage, rollsArr, hitLocation } = attackResult.hit
+    ? (() => {
+      const damageResult = rollDamage(weaponDice, attackResult.critical);
+      return {
+        damage: damageResult.total + flatDamageBonus,
+        rollsArr: damageResult.rolls,
+        hitLocation: rollHitLocation(),
+      };
+    })()
+    : {
+      damage: 0,
+      rollsArr: [] as number[],
+      hitLocation: "chest" as HitLocation, // placeholder for misses
+    };
 
   // 3. Apply damage and compute overkill.
   const hpBefore = targetHp;
@@ -671,6 +687,7 @@ export function computeConsequences(
     maxHp:       targetMaxHp,
     is_crit:     attackResult.critical,
     is_fumble:   attackResult.fumble,
+    attack_roll: attackResult.roll,
     hit_location: hitLocation,
     status_applied: statusApplied,
     overkill,
@@ -697,6 +714,46 @@ export function computeConsequences(
     style_dsl,
     suggested_senses,
     suggested_actions,
+  };
+}
+
+/**
+ * Maps CombatConsequences into the transport shape consumed by VTT combat event
+ * payloads. Pure helper used by route/tool orchestration layers.
+ */
+export function toSingleTargetConsequence(
+  consequences: CombatConsequences,
+  input: {
+    targetId: string;
+    conditionsApplied?: string[];
+  }
+): {
+  targetName: string;
+  targetId: string;
+  damage: number;
+  naturalRoll: number;
+  isCrit: boolean;
+  isFumble: boolean;
+  hitLocation: string;
+  narrativeTags: string[];
+  hpAfter: number;
+  targetMaxHp: number;
+  isKill: boolean;
+  conditionsApplied: string[];
+} {
+  return {
+    targetName: consequences.combat_facts.defender,
+    targetId: input.targetId,
+    damage: consequences.combat_facts.damage,
+    naturalRoll: consequences.combat_facts.attack_roll ?? 0,
+    isCrit: consequences.combat_facts.is_crit,
+    isFumble: consequences.combat_facts.is_fumble,
+    hitLocation: consequences.combat_facts.hit_location,
+    narrativeTags: consequences.narrative_tags,
+    hpAfter: consequences.combat_facts.hp_after,
+    targetMaxHp: consequences.combat_facts.maxHp,
+    isKill: consequences.combat_facts.hp_after <= 0,
+    conditionsApplied: input.conditionsApplied ?? [],
   };
 }
 
@@ -802,6 +859,8 @@ export interface AttackRollResult {
   critical: boolean;
   /** Natural 1 — automatic miss regardless of modifiers. */
   fumble: boolean;
+  /** Narrative reason for a miss, e.g. 'out_of_range'. */
+  reason?: string;
 }
 
 /**
@@ -816,22 +875,41 @@ export function resolveAttackRoll(
   targetAC: number,
   attackerConditions: string[] = [],
   defenderConditions: string[] = [],
-  isMelee: boolean = true
+  /** @deprecated — Use spatialContext instead. */
+  isMelee: boolean = true,
+  spatialContext?: AttackSpatialContext
 ): AttackRollResult {
+  if (spatialContext) {
+    const distance = calculateDistance(
+      spatialContext.attackerZone,
+      spatialContext.targetZone
+    );
+    if (distance > spatialContext.rangeInFeet) {
+      return {
+        roll: 0,
+        dice: [],
+        total: 0,
+        advantage: false,
+        disadvantage: false,
+        hit: false,
+        critical: false,
+        fumble: false,
+        reason: "out_of_range",
+      };
+    }
+  }
+
   const { advantage, disadvantage } = evaluateAdvantage(
     attackerConditions,
     defenderConditions,
     isMelee
   );
 
-  let rollResult: RollResult;
-  if (advantage) {
-    rollResult = rollWithAdvantage(20, attackModifier);
-  } else if (disadvantage) {
-    rollResult = rollWithDisadvantage(20, attackModifier);
-  } else {
-    rollResult = rollN(20, attackModifier);
-  }
+  const rollResult: RollResult = advantage
+    ? rollWithAdvantage(20, attackModifier)
+    : disadvantage
+      ? rollWithDisadvantage(20, attackModifier)
+      : rollN(20, attackModifier);
 
   const naturalRoll = rollResult.diceTotal;
   const total = rollResult.total;
@@ -866,15 +944,12 @@ export function resolveSavingThrow(
   advantage: boolean = false,
   disadvantage: boolean = false
 ): { success: boolean; roll: number; total: number } {
-  let rollResult: RollResult;
-
-  if (advantage && !disadvantage) {
-    rollResult = rollWithAdvantage(20, abilityMod);
-  } else if (disadvantage && !advantage) {
-    rollResult = rollWithDisadvantage(20, abilityMod);
-  } else {
-    rollResult = rollN(20, abilityMod);
-  }
+  const rollResult: RollResult =
+    advantage && !disadvantage
+      ? rollWithAdvantage(20, abilityMod)
+      : disadvantage && !advantage
+        ? rollWithDisadvantage(20, abilityMod)
+        : rollN(20, abilityMod);
 
   const naturalRoll = rollResult.diceTotal;
   const total = rollResult.total;

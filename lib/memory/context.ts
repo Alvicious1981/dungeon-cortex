@@ -41,6 +41,8 @@ export interface ContextCharacter {
   hitDiceTotal: number;
   /** Remaining hit dice available for short rest healing. */
   hitDiceRemaining: number;
+  /** D&D 5e exhaustion level (0-6). */
+  exhaustionLevel: number;
   inventory: ContextInventoryItem[];
 }
 
@@ -284,6 +286,7 @@ export async function buildCampaignContext(
             concentrationSpellId: true,
             hitDiceTotal: true,
             hitDiceRemaining: true,
+            exhaustionLevel: true,
             inventory: {
               select: {
                 id: true,

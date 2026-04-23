@@ -11,6 +11,7 @@ import {
 } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { generateQuest, GenerateAndTrackQuestInputSchema } from "@/lib/rules/quests";
+import { seededFloat } from "@/lib/rules/generators";
 
 export function buildProgressionTools(
   campaignId: string,
@@ -42,7 +43,8 @@ export function buildProgressionTools(
       inputSchema: GenerateAndTrackQuestInputSchema,
       execute: async ({ giverId }) => {
         try {
-          const seed = Date.now();
+          const seedKey = `${campaignId}:quest:${giverId ?? "anon"}`;
+          const seed = Math.floor(seededFloat(seedKey) * Number.MAX_SAFE_INTEGER);
           const questData = generateQuest(seed, giverId);
 
           const quest = await prisma.quest.create({

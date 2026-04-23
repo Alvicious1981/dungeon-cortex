@@ -120,7 +120,6 @@ describe("ReactionRollResultSchema", () => {
 describe("SocialCheckInputSchema", () => {
   const valid = {
     npcSeed: "merchant-01",
-    characterId: "char_123",
     approach: "persuade" as const,
     dispositionDelta: 2,
     intent: "Ask for a discount.",

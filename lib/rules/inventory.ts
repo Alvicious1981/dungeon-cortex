@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getEquipmentInfo } from "@/lib/ai/tools/srd-lookup";
 /**
  * lib/rules/inventory.ts
  *
@@ -25,6 +26,8 @@ export interface InventoryItem {
   properties: unknown;
   /** Equipped slot name, e.g. 'MAIN_HAND' | 'OFF_HAND' | 'ARMOR' | 'ACCESSORY'. Null = in bag. */
   equippedSlot?: string | null;
+  /** Canonical SRD slug reference */
+  indexSlug?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +208,108 @@ export function getItemProperties<T extends ItemType>(
 ): ItemProperties[T] | null {
   if (item.type !== type) return null;
   return item.properties as ItemProperties[T];
+}
+
+// ---------------------------------------------------------------------------
+// Add / Remove / Validate
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates ownership by returning the first matching inventory item (case-insensitive substring match).
+ */
+export function validateOwnership<T extends { name: string; indexSlug?: string | null }>(
+  inventory: T[], 
+  targetName: string
+): T | undefined {
+  const normalizedTarget = targetName.toLowerCase();
+  return inventory.find((item) => item.name.toLowerCase().includes(normalizedTarget) || (item.indexSlug && item.indexSlug.toLowerCase().includes(normalizedTarget)));
+}
+
+/**
+ * Removes an item or decrements its quantity. Returns the new inventory array.
+ */
+export function removeItem(inventory: InventoryItem[], itemId: string, quantity: number = 1): InventoryItem[] {
+  return inventory.reduce((acc: InventoryItem[], item) => {
+    if (item.id === itemId) {
+      if (item.quantity > quantity) {
+        acc.push({ ...item, quantity: item.quantity - quantity });
+      }
+    } else {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+}
+
+/**
+ * Adds an SRD item to the inventory array, merging quantities if possible.
+ */
+export async function addItem(
+  inventory: InventoryItem[], 
+  itemSlug: string, 
+  quantity: number, 
+  characterId: string
+): Promise<InventoryItem[]> {
+  const info = await getEquipmentInfo(itemSlug);
+  if (!info) {
+    throw new Error(`Item ${itemSlug} not found in SRD.`);
+  }
+
+  // Check if we already have it
+  const existing = inventory.find(i => i.indexSlug === itemSlug || i.name === info.name);
+  if (existing) {
+    return inventory.map(i => i.id === existing.id ? { ...i, quantity: i.quantity + quantity } : i);
+  }
+
+  let type: ItemType = "misc";
+  let properties: any = {};
+
+  if (info.weaponCategory) {
+    type = "weapon";
+    properties = {
+      damageDice: info.damageDice || "1d4",
+      damageBonus: 0,
+      damageType: info.damageType || "bludgeoning",
+      rangeNormal: info.rangeNormal,
+      rangeLong: info.rangeLong,
+      weaponProperties: info.properties
+    };
+  } else if (info.armorCategory) {
+    type = "armor";
+    properties = {
+      baseAC: info.armorClassBase || 10,
+      armorClass: info.armorCategory.toLowerCase(),
+      addDexModifier: info.armorClassDexBonus || false,
+      maxDexBonus: info.armorClassMaxBonus,
+      strengthRequirement: info.strMinimum || undefined,
+      stealthDisadvantage: info.stealthDisadvantage || false
+    };
+  } else if (info.equipmentCategory?.toLowerCase().includes("potion")) {
+    type = "consumable";
+    properties = {
+      healingDice: "2d4+2", // default for potion of healing if missing
+      effects: []
+    };
+  } else {
+    properties = {
+      description: info.desc,
+      valueGP: info.costQuantity,
+      weightLbs: info.weight
+    };
+  }
+
+  const newItem: InventoryItem = {
+    id: `temp-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+    characterId,
+    name: info.name,
+    type,
+    quantity,
+    properties,
+    equippedSlot: null,
+    indexSlug: itemSlug
+  };
+
+  return [...inventory, newItem];
 }
 
 // ---------------------------------------------------------------------------

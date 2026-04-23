@@ -510,9 +510,10 @@ export function buildWildernessTool(campaignId: string) {
         // Update rations only when they changed.
         if (newRations !== currentRations) {
           mutations.push(
-            prisma.partyInventory.update({
+            prisma.partyInventory.upsert({
               where: { campaignId },
-              data: { rations: newRations },
+              create: { campaignId, rations: newRations },
+              update: { rations: newRations },
             }),
           );
         }

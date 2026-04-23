@@ -99,7 +99,6 @@ export type ReactionRollResult = z.infer<typeof ReactionRollResultSchema>;
 export const SocialCheckInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
-    characterId: z.string().min(1),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
     dispositionDelta: z.number().int().min(1).max(4),
     intent: z.string().max(200),
@@ -131,7 +130,6 @@ export type SocialCheckResult = z.infer<typeof SocialCheckResultSchema>;
 export const GetRumorsInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
-    campaignId: z.string().min(1),
   })
   .strict();
 

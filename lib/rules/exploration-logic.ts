@@ -33,6 +33,9 @@ import {
   type ConsumeResourcesOptions,
   type ConsumeResourcesResult,
   type EncounterCheckResult,
+  type CharacterState,
+  type ShortRestResult,
+  type LongRestResult,
 } from "./exploration";
 
 // ---------------------------------------------------------------------------
@@ -327,6 +330,7 @@ export function advanceTurn(
 
   const totalTurns = state.totalTurns + turnsAdvanced;
   const totalHours = Math.floor(totalTurns / TURNS_PER_HOUR);
+  const totalDays = Math.floor(totalTurns / 144);
 
   const rawTurnsSinceRest = state.turnsSinceRest + turnsAdvanced;
   const restRequired = rawTurnsSinceRest >= REST_INTERVAL_TURNS;
@@ -344,6 +348,7 @@ export function advanceTurn(
     next: {
       totalTurns,
       totalHours,
+      totalDays,
       turnsSinceRest,
       turnsSinceEncounterCheck,
       turnsSinceRation,
@@ -443,6 +448,81 @@ export function applyRest(state: CampaignTimeState): CampaignTimeState {
   return {
     ...state,
     turnsSinceRest: 0,
+  };
+}
+
+const HIT_DICE_BY_CLASS: Record<string, number> = {
+  Barbarian: 12,
+  Fighter: 10,
+  Paladin: 10,
+  Ranger: 10,
+  Sorcerer: 6,
+  Wizard: 6,
+};
+// Default is d8 for Bard, Cleric, Druid, Monk, Rogue, Warlock, etc.
+
+export function applyShortRest(character: CharacterState): ShortRestResult {
+  const next = { ...character };
+  let hpRecovered = 0;
+  let hitDiceSpent = 0;
+
+  const hitDieSize = HIT_DICE_BY_CLASS[character.class] || 8;
+  const conMod = Math.floor(((character.stats.constitution || 10) - 10) / 2);
+
+  // Spend hit dice until fully healed or out of hit dice
+  while (next.hp < next.maxHp && next.hitDiceRemaining > 0) {
+    // Automated heuristic: heal max possible to ensure deterministic results or average roll.
+    // For "Code is Law" we can use expected value or assume a roll. Let's use average (hitDieSize / 2 + 0.5) rounded up? No, let's just use average roll rounded down + con mod.
+    // Actually, just standard SRD automated max or average. Let's use average:
+    const healing = Math.max(1, Math.floor(hitDieSize / 2) + 1 + conMod);
+    next.hp = Math.min(next.maxHp, next.hp + healing);
+    hpRecovered += healing;
+    next.hitDiceRemaining -= 1;
+    hitDiceSpent += 1;
+  }
+
+  // Ensure we didn't overheal
+  if (next.hp > next.maxHp) {
+    hpRecovered -= (next.hp - next.maxHp);
+    next.hp = next.maxHp;
+  }
+
+  return { next, hpRecovered, hitDiceSpent };
+}
+
+export function applyLongRest(character: CharacterState): LongRestResult {
+  const next = { ...character };
+  
+  const hpRecovered = next.maxHp - next.hp;
+  next.hp = next.maxHp;
+
+  const hitDiceRecovered = Math.max(1, Math.floor(next.hitDiceTotal / 2));
+  next.hitDiceRemaining = Math.min(next.hitDiceTotal, next.hitDiceRemaining + hitDiceRecovered);
+
+  let exhaustionReduced = 0;
+  if (next.exhaustionLevel > 0) {
+    next.exhaustionLevel -= 1;
+    exhaustionReduced = 1;
+  }
+
+  let spellSlotsRecovered = false;
+  if (next.spellSlots) {
+    const slots = { ...next.spellSlots };
+    for (const level in slots) {
+      if (slots[level]!.current < slots[level]!.max) {
+        spellSlotsRecovered = true;
+      }
+      slots[level]!.current = slots[level]!.max;
+    }
+    next.spellSlots = slots;
+  }
+
+  return { 
+    next, 
+    hpRecovered, 
+    hitDiceRecovered: Math.min(hitDiceRecovered, next.hitDiceTotal - (character.hitDiceRemaining)), 
+    exhaustionReduced, 
+    spellSlotsRecovered 
   };
 }
 

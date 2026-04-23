@@ -190,6 +190,7 @@ const minimalContext: CampaignContext = {
     concentrationSpellId: null,
     hitDiceTotal: 5,
     hitDiceRemaining: 5,
+    exhaustionLevel: 0,
     inventory: [],
   },
   activeEncounter: null,
@@ -257,7 +258,7 @@ describe("streamNarrative — Code is Law tool-call enforcement", () => {
   it("calls getSpellInfo when the LLM chooses to look up a spell", async () => {
     // Arrange: mock spell lookup returning real-looking SRD data
     mockGetSpellInfo.mockResolvedValue(
-      JSON.stringify({ name: "Fireball", level: 3, range: "150 feet", damage: "8d6 fire" })
+      { name: "Fireball", level: 3, range: "150 feet", damage: "8d6 fire" } as any
     );
 
     // Arrange: simulate an LLM response that invokes getSpellInfo then returns text
@@ -329,7 +330,7 @@ describe("streamNarrative — Code is Law tool-call enforcement", () => {
 
   it("both getSpellInfo and getItemInfo tools are registered and callable via the orchestrator", async () => {
     // Arrange: both lookups return data
-    mockGetSpellInfo.mockResolvedValue(JSON.stringify({ name: "Magic Missile", level: 1 }));
+    mockGetSpellInfo.mockResolvedValue({ name: "Magic Missile", level: 1 } as any);
     mockGetItemInfo.mockResolvedValue(JSON.stringify({ name: "Wand of Magic Missiles", charges: 7 }));
 
     // Arrange: LLM calls both tools in sequence

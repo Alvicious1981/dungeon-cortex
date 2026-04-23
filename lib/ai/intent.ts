@@ -18,6 +18,7 @@
 import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
+import { getSpellInfo, type SpellEffect } from "@/lib/ai/tools/srd-lookup";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -33,9 +34,13 @@ export const IntentSchema = z.object({
    * - "cast_spell" — player is attempting to cast a spell
    * - "attack"     — player is attempting a weapon/unarmed attack
    * - "use_item"   — player is attempting to use an inventory item
-   * - "general"    — roleplay, movement, dialogue, or anything non-mechanical
+   * - "equip"      — player is attempting to equip an item
+   * - "rest"       — player is attempting to take a short or long rest
+   * - "explore"    — player is interacting with the environment (search, move, etc.)
+   * - "travel"     — player is traveling overland
+   * - "general"    — roleplay, dialogue, or anything non-mechanical
    */
-  actionType: z.enum(["cast_spell", "attack", "use_item", "general"]),
+  actionType: z.enum(["cast_spell", "attack", "use_item", "equip", "rest", "explore", "travel", "general"]),
 
   /**
    * Name of the target (creature, NPC, object) if one is present in the input.
@@ -55,9 +60,20 @@ export const IntentSchema = z.object({
    * Omitted for cantrips (slot-free) and all other action types.
    */
   spellLevel: z.number().int().min(1).max(9).optional(),
+
+  /**
+   * Whether the player is taking a "short" or "long" rest.
+   * Only relevant when actionType is "rest".
+   */
+  restType: z.enum(["short", "long"]).optional(),
 });
 
-export type Intent = z.infer<typeof IntentSchema>;
+export type BaseIntent = z.infer<typeof IntentSchema>;
+
+export interface Intent extends BaseIntent {
+  /** The strongly typed mechanical spell data resolved from the SRD, if applicable. */
+  spellEffect?: SpellEffect | null;
+}
 
 // ---------------------------------------------------------------------------
 // Parser
@@ -82,7 +98,7 @@ export async function parseIntent(
       "You are a D&D 5e rules classifier. Your only job is to extract structured intent from a player's action.",
       "Classify the actionType as precisely as possible based on the player's words and the game state below.",
       "For 'cast_spell': include spellLevel only if the player specifies a slot level; omit it for cantrips.",
-      "For 'attack' or 'use_item': include targetName if a target is named.",
+      "For 'attack', 'use_item', or 'equip': include targetName if a target is named.",
       "When in doubt, classify as 'general'.",
       "",
       systemContext,
@@ -90,5 +106,13 @@ export async function parseIntent(
     prompt: playerInput,
   });
 
-  return object;
+  const intent: Intent = { ...object };
+
+  // Consume strongly typed SpellEffect immediately if spell was identified.
+  // The caller acts on this without hallucinating raw JSON stats.
+  if (intent.actionType === "cast_spell" && intent.spellName) {
+    intent.spellEffect = await getSpellInfo(intent.spellName);
+  }
+
+  return intent;
 }

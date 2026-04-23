@@ -18,6 +18,7 @@ import {
   type PassageType,
 } from "@/lib/rules/exploration";
 import { EXPLORATION_XP } from "@/lib/rules/progression";
+import { seededFloat } from "@/lib/rules/generators";
 
 export function buildExplorationTools(campaignId: string) {
   return {
@@ -32,7 +33,7 @@ export function buildExplorationTools(campaignId: string) {
       inputSchema: GenerateLocationInputSchema,
       execute: async ({ locationType, seed, parentLocationId }) => {
         try {
-          const resolvedSeed = seed ?? `${campaignId}:${Date.now()}`;
+          const resolvedSeed = seed ?? String(Math.floor(seededFloat(`${campaignId}:loc`) * Number.MAX_SAFE_INTEGER));
 
           const existing = await prisma.location.findUnique({
             where: { campaignId_seed: { campaignId, seed: resolvedSeed } },
@@ -339,6 +340,7 @@ export function buildExplorationTools(campaignId: string) {
           const currentTime: CampaignTimeState = campaignTime ?? {
             totalTurns: 0,
             totalHours: 0,
+            totalDays: 0,
             turnsSinceRest: 0,
             turnsSinceEncounterCheck: 0,
             turnsSinceRation: 0,

@@ -30,6 +30,7 @@ const baseCharacter: CampaignContext["character"] = {
   concentrationSpellId: null,
   hitDiceTotal: 5,
   hitDiceRemaining: 3,
+  exhaustionLevel: 0,
   inventory: [],
 };
 

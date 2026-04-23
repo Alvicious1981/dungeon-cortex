@@ -14,6 +14,7 @@
  */
 
 import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
+import type { Monster } from "@/lib/rules/srd";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
@@ -164,8 +165,23 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
     const conditions = extractConditions(combatant.conditions);
     const conditionText = conditions.length > 0 ? ` [${conditions.join(", ")}]` : "";
     const tag = combatant.isPlayer ? "(Player)" : "(Enemy)";
+
+    let mechanicalSummary = "";
+    if (!combatant.isPlayer && combatant.stats) {
+      const m = combatant.stats as unknown as Monster;
+      const ac = m.armor_class?.[0]?.value ?? combatant.ac;
+      const constraints: string[] = [];
+      if (m.damage_immunities?.length) constraints.push(`Immune: ${m.damage_immunities.join(", ")}`);
+      if (m.damage_resistances?.length) constraints.push(`Resist: ${m.damage_resistances.join(", ")}`);
+      if (m.condition_immunities?.length) constraints.push(`Cond Immune: ${m.condition_immunities.map((c: any) => typeof c === "string" ? c : c.name).join(", ")}`);
+      const constraintStr = constraints.length > 0 ? ` | ${constraints.join(" | ")}` : "";
+      mechanicalSummary = `AC: ${ac}${constraintStr}, `;
+    } else {
+      mechanicalSummary = `AC: ${combatant.ac}, `;
+    }
+
     lines.push(
-      `${index + 1}. **${combatant.name}** ${tag} — HP: ${combatant.hp}/${combatant.maxHp}, Initiative: ${combatant.initiativeTotal}${conditionText}${turnMarker}`
+      `${index + 1}. **${combatant.name}** ${tag} — ${mechanicalSummary}HP: ${combatant.hp}/${combatant.maxHp}, Initiative: ${combatant.initiativeTotal}${conditionText}${turnMarker}`
     );
   });
 

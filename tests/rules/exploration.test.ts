@@ -782,6 +782,7 @@ describe("describeCurrentNode", () => {
 const freshTime: CampaignTimeState = {
   totalTurns: 0,
   totalHours: 0,
+  totalDays: 0,
   turnsSinceRest: 0,
   turnsSinceEncounterCheck: 0,
   turnsSinceRation: 0,

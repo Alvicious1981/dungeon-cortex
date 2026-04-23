@@ -89,7 +89,7 @@ A player can create a character, enter a campaign quickly, interact with an AI D
 
 - `MASTER_ARCH_GUIDE.md` — Architecture law, truth alignment, obsolescence registry.
 - `MILSTONE_U_CONSOLIDATED_TASKS.md` — Definitive backend-first Milestone U execution queue.
-- `docs/MILESTONE_U_SPEC.md` — Historical milestone intent (subordinate to consolidated docs where conflicts exist).
+
 
 ## 8. Operating summary
 

@@ -5,7 +5,7 @@ Effective Date: 2026-04-17
 Scope: Milestone U consolidation slice and downstream implementation guardrails
 
 ## 1. Purpose
-This document resolves documentation-code drift identified in `DOC_AUDIT_MILESTONE_U.md` and defines authoritative architectural law for Milestone U execution.
+This document resolves historical documentation-code drift and defines authoritative architectural law for Milestone U execution.
 
 When documents conflict, use this precedence order:
 1. Explicit user instruction in the active conversation.

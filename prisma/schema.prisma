@@ -8,7 +8,21 @@ datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
   directUrl  = env("DIRECT_URL")
-  extensions = [vector, pg_graphql, pg_stat_statements, pgcrypto, supabase_vault, uuid_ossp(map: "uuid-ossp")]
+  extensions = [vector, pg_graphql, pg_stat_statements, pgcrypto, supabase_vault, uuid_ossp(map: "uuid-ossp"), ltree, pgrouting, postgis]
+}
+
+model Zone {
+  id          String   @id @default(cuid())
+  encounterId String
+  name        String
+  x           Int      @default(0)
+  y           Int      @default(0)
+
+  encounter  Encounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  combatants Combatant[]
+
+  @@unique([encounterId, x, y])
+  @@index([encounterId])
 }
 
 model User {
@@ -106,44 +120,37 @@ model Encounter {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  campaign   Campaign    @relation(fields: [campaignId], references: [id])
-  combatants Combatant[]
-  zones      Zone[]
+  campaign     Campaign      @relation(fields: [campaignId], references: [id])
+  combatants   Combatant[]
+  zones        Zone[]
 }
 
 model Combatant {
-  id              String  @id @default(cuid())
-  encounterId     String
-  name            String
-  isPlayer        Boolean @default(false)
-  hp              Int
-  maxHp           Int
-  ac              Int     @default(10)
-  initiativeTotal Int
-  stats           Json    @default("{}")
-  conditions      Json    @default("[]")
+  id                   String  @id @default(cuid())
+  encounterId          String
+  name                 String
+  isPlayer             Boolean @default(false)
+  hp                   Int
+  maxHp                Int
+  ac                   Int     @default(10)
+  initiativeTotal      Int
+  stats                Json    @default("{}")
+  conditions           Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
-  /// Zone the combatant currently occupies. Null = zone system not active for this encounter.
-  zoneId          String?
+  size                 String  @default("Medium")
+  zoneId               String?
+  /// Precise grid column (0-based). Relative to the encounter's global space.
+  x                    Int     @default(0)
+  /// Precise grid row (0-based). Relative to the encounter's global space.
+  y                    Int     @default(0)
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
   zone      Zone?     @relation(fields: [zoneId], references: [id])
-}
 
-/// Ephemeral combat zone — scoped to a single Encounter, deleted on Cascade.
-model Zone {
-  id          String @id @default(cuid())
-  encounterId String
-  name        String
-  /// Grid column (0-based, left → right).
-  x           Int
-  /// Grid row (0-based, top → bottom).
-  y           Int
-
-  encounter  Encounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
-  combatants Combatant[]
+  @@index([encounterId])
+  @@index([encounterId, zoneId])
 }
 
 model InventoryItem {
@@ -157,6 +164,8 @@ model InventoryItem {
   /// Equipped slot name, e.g. 'MAIN_HAND' | 'OFF_HAND' | 'ARMOR' | 'ACCESSORY'.
   /// Null means the item is in the bag but not equipped.
   equippedSlot String?
+  /// Canonical SRD slug reference
+  indexSlug    String?
 
   character Character @relation(fields: [characterId], references: [id])
 }
@@ -203,49 +212,49 @@ model Quest {
 }
 
 model NPC {
-  id              String   @id @default(cuid())
-  campaignId      String
+  id                   String   @id @default(cuid())
+  campaignId           String
   /// Stable generator seed — deterministically reproduces the full statblock
   /// via generateNPC(seed, role). Never changes after creation.
-  seed            String
+  seed                 String
   /// Archetype used for statblock generation: "guard" | "bandit" | "commoner"
-  role            String
+  role                 String
   /// Denormalized from generateNPC — stored for fast display and HP-bar rendering.
-  name            String
-  maxHp           Int
+  name                 String
+  maxHp                Int
   /// Mutable. Callers decrement this when damage is applied.
-  hp              Int
+  hp                   Int
   /// Armor class — denormalized from the deterministic statblock.
-  ac              Int
+  ac                   Int
   /// Free-form DM notes: story beats, attitudes, plot ties, last seen location.
-  notes           String   @default("")
+  notes                String   @default("")
   /// Creature race, e.g. "human", "elf", "dwarf". Null for legacy records.
-  race            String?
+  race                 String?
   /// Mundane profession, e.g. "blacksmith", "soldier". Null for legacy records.
-  profession      String?
+  profession           String?
   /// Moral alignment, e.g. "lawful good", "chaotic neutral". Null for legacy records.
-  alignment       String?
+  alignment            String?
   /// Six ability scores: { STR, DEX, CON, INT, WIS, CHA }. Null for legacy records.
-  abilityScores   Json?
+  abilityScores        Json?
   /// Personality traits { personality, ideal, bond, flaw }. Null for legacy records.
-  traits          Json?
+  traits               Json?
   /// Current disposition toward the party. Range: −10 (Hostile) to +10 (Helpful).
   /// Set by rollReaction on first meeting; updated by socialCheck on social actions.
   /// Null for NPCs the party has never spoken to (reaction roll pending).
-  disposition     Int?
+  disposition          Int?
   /// Personality Tags generated deterministically from the seed.
   /// JSON object: { motivation: string, secret: string, distinctiveTrait: string }
   /// Populated by generateNPCPersonality(seed) on first interaction.
   /// Never null after first meeting; null for legacy/unmet NPCs.
-  personalityTags Json?
+  personalityTags      Json?
   /// True once the party has formally met this NPC (rollReaction has fired).
   /// Prevents duplicate reaction rolls on subsequent encounters.
-  hasMetPlayer    Boolean  @default(false)
-  knownRumors     String[] @default([])
+  hasMetPlayer         Boolean  @default(false)
+  knownRumors          String[] @default([])
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
 
@@ -255,33 +264,131 @@ model NPC {
 }
 
 model SrdMonster {
-  id        String  @id
+  id        String   @id
   name      String
+  /// Canonical SRD slug/index, e.g. "adult-red-dragon".
+  indexSlug String?
   /// Challenge Rating as a float (0.125, 0.25, 0.5, 1–30). Null for legacy records.
   cr        Float?
   /// Creature type, e.g. "dragon", "undead", "humanoid", "beast".
   type      String?
+  /// Creature subtype, if present in source data.
+  subtype   String?
   /// Size category: "Tiny" | "Small" | "Medium" | "Large" | "Huge" | "Gargantuan".
   size      String?
   /// Alignment string, e.g. "lawful evil", "any alignment", "unaligned".
   alignment String?
+  /// XP reward for defeating the creature.
+  xp        Int?
+  /// Monster proficiency bonus (derived in SRD block).
+  proficiencyBonus Int?
+  /// Canonical HP and hit dice from SRD.
+  hitPoints Int?
+  hitDice   String?
+  /// Flattened AC primary value from armor_class.
+  armorClass Int?
+  /// Human-readable speed block (raw text/JSON stringified).
+  speed     String?
+  /// Human-readable languages field.
+  languages String?
+  /// Ability scores (if present).
+  strength     Int?
+  dexterity    Int?
+  constitution Int?
+  intelligence Int?
+  wisdom       Int?
+  charisma     Int?
+  /// Quick filter flags inferred from abilities/actions payloads.
+  hasLegendaryActions Boolean?
+  hasSpellcasting     Boolean?
+  /// Resistance/immunity vectors for fast filtering.
+  damageImmunities     String[] @default([])
+  damageResistances    String[] @default([])
+  damageVulnerabilities String[] @default([])
+  conditionImmunities  String[] @default([])
   /// Full raw JSON blob from the SRD dataset.
   data      Json
 
   @@index([cr])
   @@index([type])
+  @@index([size])
+  @@index([alignment])
+  @@index([indexSlug])
+  @@index([hasSpellcasting])
 }
 
 model SrdSpell {
   id   String @id
   name String
+  /// Canonical SRD slug/index, e.g. "magic-missile".
+  indexSlug String?
+  level Int?
+  /// Spell school index, e.g. "evocation".
+  school String?
+  castingTime String?
+  range String?
+  duration String?
+  ritual Boolean?
+  concentration Boolean?
+  attackType String?
+  /// damage.damage_type.index when present.
+  damageType String?
+  /// dc.dc_type.index when present.
+  saveAbility String?
+  /// True when the spell includes healing scaling/data.
+  hasHealing Boolean?
+  hasAreaOfEffect Boolean?
+  /// Class and component vectors for filtering.
+  classes String[] @default([])
+  components String[] @default([])
   data Json
+
+  @@index([level])
+  @@index([school])
+  @@index([ritual])
+  @@index([concentration])
+  @@index([attackType])
+  @@index([damageType])
+  @@index([saveAbility])
 }
 
 model SrdItem {
   id   String @id
   name String
   data Json
+}
+
+model SrdEquipment {
+  id                  String   @id
+  name                String
+  indexSlug           String?
+  equipmentCategory   String?
+  weaponCategory      String?
+  weaponRange         String?
+  categoryRange       String?
+  costQuantity        Int?
+  costUnit            String?
+  weight              Float?
+  damageDice          String?
+  damageType          String?
+  twoHandedDamageDice String?
+  twoHandedDamageType String?
+  rangeNormal         Int?
+  rangeLong           Int?
+  armorCategory       String?
+  armorClassBase      Int?
+  armorClassDexBonus  Boolean?
+  armorClassMaxBonus  Int?
+  strMinimum          Int?
+  stealthDisadvantage Boolean?
+  desc                String?
+  properties          String[] @default([])
+  data                Json
+
+  @@index([indexSlug])
+  @@index([equipmentCategory])
+  @@index([weaponCategory])
+  @@index([armorCategory])
 }
 
 /// A procedurally generated location — a tavern, village, dungeon floor, etc.
@@ -373,6 +480,9 @@ model CampaignTime {
   /// Derived display field: floor(totalTurns / 6). Stored for query efficiency.
   /// Must always equal floor(totalTurns / TURNS_PER_HOUR). Updated atomically.
   totalHours Int @default(0)
+
+  /// The current adventuring day, based on 24 hours (144 turns).
+  totalDays Int @default(0)
 
   /// Turns accumulated in the current rest cycle (0–6).
   /// Reaching REST_INTERVAL_TURNS (6) makes rest mandatory before the next turn.

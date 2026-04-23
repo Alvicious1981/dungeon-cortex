@@ -9,7 +9,7 @@ import { parseIntent } from "@/lib/ai/intent";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
 import { 
   isSpellSlots, hasAvailableSlot, consumeSlot, 
-  spellcastingAbility, resolveSpellEffect, 
+  spellcastingAbility,
   calculateProficiency, calculateSpellSaveDC 
 } from "@/lib/rules/magic";
 import { getSpellInfo } from "@/lib/ai/tools/srd-lookup";
@@ -19,16 +19,24 @@ import {
   type DamageType,
 } from "@/lib/rules/combat";
 import {
+  advanceTurn as advanceExplorationTurn,
+  consumeResources,
+  applyRest,
+  applyShortRest,
+  applyLongRest,
+  type CharacterState,
+} from "@/lib/rules/exploration";
+import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
   executeCombatAction,
 } from "@/lib/rules/combat-pipeline";
 import { abilityModifier } from "@/lib/rules/dice";
-import { getItemProperties } from "@/lib/rules/inventory";
+import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import type { 
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
-import type { Prisma } from "@/app/generated/prisma/client";
+import { Prisma } from "@/app/generated/prisma/client";
 
 interface ActionBody {
   action: string;
@@ -307,19 +315,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       let saveDC: number | undefined = undefined;
 
       if (intent.spellName) {
-        const spellData = (await getSpellInfo(intent.spellName)) as any;
-        if (spellData) {
+        const spellEffect = await getSpellInfo(intent.spellName);
+        if (spellEffect) {
           const charStats = context.character.stats as Record<string, number>;
           const spellAbilityKey = spellcastingAbility(context.character.class);
           const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
           const profBonus = calculateProficiency(context.character.level);
           saveDC = calculateSpellSaveDC(abilityMod, profBonus);
 
-          effect = resolveSpellEffect(
-            spellData as Record<string, unknown>,
-            intent.spellLevel ?? 0,
-            abilityMod
-          );
+          effect = spellEffect;
         }
       }
 
@@ -379,12 +383,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       });
     }
 
-  // ── Gate: use_item ──────────────────────────────────────────────────────────
   if (intent.actionType === "use_item" && intent.targetName) {
-      const normalizedTarget = intent.targetName.toLowerCase();
-      const foundItem = context.character.inventory.find(
-        (item) => item.name.toLowerCase().includes(normalizedTarget)
-      );
+      const foundItem = validateOwnership(context.character.inventory, intent.targetName);
 
       if (!foundItem) {
         return NextResponse.json(
@@ -426,6 +426,40 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
         gameEvents.push(...itemOutcome.events);
       });
+    }
+
+    // ── Gate: equip ─────────────────────────────────────────────────────────────
+    if (intent.actionType === "equip" && intent.targetName) {
+      const foundItem = validateOwnership(context.character.inventory, intent.targetName);
+
+      if (!foundItem) {
+        return NextResponse.json(
+          { error: `Item "${intent.targetName}" not found in inventory.` },
+          { status: 400 }
+        );
+      }
+
+      let targetSlot = "ACCESSORY";
+      if (foundItem.type === "weapon") targetSlot = "MAIN_HAND";
+      else if (foundItem.type === "armor") targetSlot = "ARMOR";
+
+      await prisma.$transaction(async (tx) => {
+        await tx.inventoryItem.updateMany({
+          where: { characterId: context.character.id, equippedSlot: targetSlot },
+          data: { equippedSlot: null },
+        });
+
+        await tx.inventoryItem.update({
+          where: { id: foundItem.id },
+          data: { equippedSlot: targetSlot },
+        });
+      });
+      
+      // Send event to update the UI
+      gameEvents.push({
+        type: "EQUIP_ITEM",
+        payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
+      } as any);
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
@@ -493,6 +527,97 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             attackerName: context.character.name,
             targets: attackOutcome.consequences,
           }));
+        }
+      });
+    }
+
+    // ── Gate: rest ──────────────────────────────────────────────────────────────
+    if (intent.actionType === "rest") {
+      const charData = context.character;
+      
+      await prisma.$transaction(async (tx) => {
+        const charState: CharacterState = {
+          hp: charData.hp,
+          maxHp: charData.maxHp,
+          level: charData.level,
+          class: charData.class,
+          stats: charData.stats as Record<string, number>,
+          spellSlots: charData.spellSlots as Record<string, { current: number; max: number }> | null,
+          hitDiceTotal: charData.hitDiceTotal,
+          hitDiceRemaining: charData.hitDiceRemaining,
+          exhaustionLevel: charData.exhaustionLevel,
+        };
+
+        const isLongRest = intent.restType === "long" || trimmedAction.toLowerCase().includes("long rest");
+        
+        let nextChar: CharacterState;
+        let eventPayload: any;
+
+        if (isLongRest) {
+          const result = applyLongRest(charState);
+          nextChar = result.next;
+          eventPayload = { type: "LONG_REST", hpRecovered: result.hpRecovered, hitDiceRecovered: result.hitDiceRecovered, exhaustionReduced: result.exhaustionReduced, spellSlotsRecovered: result.spellSlotsRecovered };
+        } else {
+          const result = applyShortRest(charState);
+          nextChar = result.next;
+          eventPayload = { type: "SHORT_REST", hpRecovered: result.hpRecovered, hitDiceSpent: result.hitDiceSpent };
+        }
+
+        await tx.character.update({
+          where: { id: charData.id },
+          data: {
+            hp: nextChar.hp,
+            hitDiceRemaining: nextChar.hitDiceRemaining,
+            exhaustionLevel: nextChar.exhaustionLevel,
+            spellSlots: nextChar.spellSlots ? (nextChar.spellSlots as Prisma.InputJsonValue) : Prisma.JsonNull,
+          },
+        });
+
+        const campaignTime = await tx.campaignTime.findUnique({ where: { campaignId } });
+        if (campaignTime) {
+          const nextTime = applyRest(campaignTime);
+          await tx.campaignTime.update({
+            where: { campaignId },
+            data: { turnsSinceRest: nextTime.turnsSinceRest },
+          });
+        }
+        
+        gameEvents.push({
+          type: "REST_COMPLETED",
+          payload: eventPayload,
+        } as any);
+      });
+    }
+
+    // ── Gate: explore / travel ──────────────────────────────────────────────────
+    if (intent.actionType === "explore" || intent.actionType === "travel") {
+      await prisma.$transaction(async (tx) => {
+        const campaignTime = await tx.campaignTime.findUnique({ where: { campaignId } });
+        const partyInventory = await tx.partyInventory.findUnique({ where: { campaignId } });
+        
+        if (campaignTime && partyInventory) {
+          const advanceResult = advanceExplorationTurn(campaignTime, 1);
+          
+          await tx.campaignTime.update({
+            where: { campaignId },
+            data: advanceResult.next,
+          });
+
+          if (advanceResult.rationConsumptionDue || advanceResult.turnsAdvanced > 0) {
+             const consumeResult = consumeResources(partyInventory as any, { rationConsumptionDue: advanceResult.rationConsumptionDue, partySize: 1 }, advanceResult.turnsAdvanced);
+             
+             await tx.partyInventory.update({
+               where: { campaignId },
+               data: consumeResult.next,
+             });
+             
+             if (consumeResult.warnings.length > 0) {
+               gameEvents.push({
+                 type: "EXPLORATION_WARNING",
+                 payload: { warnings: consumeResult.warnings },
+               } as any);
+             }
+          }
         }
       });
     }

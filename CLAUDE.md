@@ -1,3 +1,4 @@
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -54,13 +55,14 @@ A campaign belongs to one user and one active character. Combat state must be re
 
 ## Current Implementation Status
 
-**Milestone A (foundation) — partial:**
-- Character creation, campaign creation, game log persistence, dice rolling via `/roll` command, narrative log display
+**100% Functional (Backend / Data Triforce):**
+- **SRD Ingestion:** Complete for Monsters, Spells, and Equipment. Data is validated with Zod, stored in DB, and fetched via `lib/ai/tools/srd-lookup.ts`.
+- **Combat Engine & Intent Parsing:** Complete. Actions are gated deterministically in the API route, parsed via `lib/ai/intent.ts`, and resolved via `executeCombatAction` in `lib/rules/combat.ts`.
+- **Inventory Management:** Complete. Equipment gating and ownership validation (`lib/rules/inventory.ts`) are fully integrated and tested via the action route.
 
-**Milestone B (combat clarity) — partial:**
-- Initiative ordering, InitiativeTracker UI, encounter creation; turn resolution logic is stubbed
-
-**Stubbed / TODO:** AI narration pipeline (`lib/ai/narrator.ts`), intent parsing, spell slots, condition tracking, inventory mechanics, memory/recall system (`lib/memory/`), full turn resolution
+**Stubbed / Pending (Skeletons):**
+- **Priority 7 (Exploration & Time):** Constant time tracking (`CampaignTimeState`) and dungeon turn logic (`lib/rules/exploration.ts`) are implemented but pending full integration with the API routing and AI intent parser.
+- **Narrator Pipeline:** Core is stubbed (`lib/ai/narrator.ts`); depends on semantic memory (`lib/memory/`) for context to avoid hallucination.
 
 ## Mechanical Rules Authority (Code is Law)
 

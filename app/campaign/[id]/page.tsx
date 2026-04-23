@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
-import CombatVTT from "@/components/combat/CombatVTT";
 import GameEventHandler from "@/components/combat/GameEventHandler";
 import ExplorationPanel from "@/components/exploration/ExplorationPanel";
 import MemoryJournal from "@/components/MemoryJournal";
@@ -173,7 +172,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           where: { status: "active" },
           include: {
             combatants: { orderBy: { initiativeTotal: "desc" } },
-            zones: true,
           },
         },
       },
@@ -291,13 +289,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   
   // Decide if we are in Wilderness Mode (TravelState exists and not in a dungeon node)
   const isWildernessMode = travelState !== null && !explorationData;
-  const currentHex = isWildernessMode 
-    ? (npcs as any[]).find(() => false) // dummy check to see if we need hex info
-    : null; // will be derived below if in wilderness
 
   // Robustly find current location details for HUD if in wilderness
   const activeHex = isWildernessMode && travelState
-    ? (wildernessHexes as any[]).find(h => h.q === travelState.currentQ && h.r === travelState.currentR)
+    ? wildernessHexes.find(
+        (h) => h.q === travelState.currentQ && h.r === travelState.currentR
+      )
     : null;
 
   const spellSlots = parseSpellSlots(character.spellSlots);
@@ -796,32 +793,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               />
             )}
 
-            {/* ── VTT battle map — only visible during active encounters ── */}
-            {activeEncounter && (
-              <CombatVTT
-                encounter={{
-                  id:               activeEncounter.id,
-                  round:            activeEncounter.round,
-                  currentTurnIndex: activeEncounter.currentTurnIndex,
-                  combatants:       activeEncounter.combatants.map((c) => ({
-                    id:              c.id,
-                    name:            c.name,
-                    isPlayer:        c.isPlayer,
-                    hp:              c.hp,
-                    maxHp:           c.maxHp,
-                    ac:              c.ac,
-                    initiativeTotal: c.initiativeTotal,
-                    zoneId:          c.zoneId ?? null,
-                  })),
-                  zones: activeEncounter.zones.map((z) => ({
-                    id:   z.id,
-                    name: z.name,
-                    x:    z.x,
-                    y:    z.y,
-                  })),
-                }}
-              />
-            )}
+            {/* Legacy zone-based combat map removed in Phase 1.5. */}
 
             <section aria-label="Adventure chronicle" id="chronicle">
               <p

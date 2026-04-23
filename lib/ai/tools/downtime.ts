@@ -16,7 +16,6 @@ export function buildDowntimeTools(campaignId: string) {
       "NEVER narrate gold, XP, or morale changes before this tool confirms them.",
     inputSchema: ResolveDowntimeInputSchema,
     execute: async ({
-      characterId,
       havenUpkeepCost,
       daysSpent,
       goldDeposited,
@@ -24,14 +23,17 @@ export function buildDowntimeTools(campaignId: string) {
       retainerMoraleChecks
     }) => {
       return await prisma.$transaction(async (tx) => {
-        // Fetch campaign to get current party gold/wealth
+        // Fetch campaign to get current party gold/wealth and active character
         const campaign = await tx.campaign.findUnique({
-          where: { id: campaignId }
+          where: { id: campaignId },
+          select: { gold: true, characterId: true },
         });
-        
+
         if (!campaign) {
           throw new Error(`Campaign not found: ${campaignId}`);
         }
+
+        const { characterId } = campaign;
 
         // Calculate expenses
         const expenseResult = payLivingExpenses(campaign.gold, havenUpkeepCost, daysSpent, partySize);

@@ -193,7 +193,7 @@ export function buildSocialTools(
         "Narrate the result — and ONLY the result — that the tool returns. " +
         "Code is Law.",
       inputSchema: SocialCheckInputSchema,
-      execute: async ({ npcSeed, characterId, approach, dispositionDelta, intent }) => {
+      execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
         try {
           const result = await prisma.$transaction(async (tx) => {
             const npc = await tx.nPC.findUnique({
@@ -206,8 +206,16 @@ export function buildSocialTools(
               throw new Error("Call rollReaction before socialCheck — the party has not yet met this NPC.");
             }
 
+            const campaignRec = await tx.campaign.findUnique({
+              where: { id: campaignId },
+              select: { characterId: true },
+            });
+            if (!campaignRec) {
+              throw new Error("Campaign not found.");
+            }
+
             const character = await tx.character.findUnique({
-              where: { id: characterId },
+              where: { id: campaignRec.characterId },
               select: { stats: true },
             });
             if (!character) {
@@ -219,7 +227,7 @@ export function buildSocialTools(
 
             const currentDisposition = npc.disposition ?? 0;
             const socialResult = resolveSocialCheck(
-              { npcSeed, characterId, approach, dispositionDelta, intent },
+              { npcSeed, approach, dispositionDelta, intent },
               charismaModifier,
               currentDisposition,
             );
@@ -233,8 +241,8 @@ export function buildSocialTools(
           });
 
           return JSON.stringify(result);
-        } catch (err: any) {
-          return JSON.stringify({ error: err.message || "Social check failed mechanically." });
+        } catch (err: unknown) {
+          return JSON.stringify({ error: err instanceof Error ? err.message : "Social check failed mechanically." });
         }
       },
     }),
@@ -251,17 +259,17 @@ export function buildSocialTools(
         "Narrate ONLY the information this tool returns. " +
         "Code is Law.",
       inputSchema: GetRumorsInputSchema,
-      execute: async ({ npcSeed, campaignId: targetCampaignId }) => {
+      execute: async ({ npcSeed }) => {
         try {
           const npc = await prisma.nPC.findUnique({
-            where: { campaignId_seed: { campaignId: targetCampaignId, seed: npcSeed } },
+            where: { campaignId_seed: { campaignId, seed: npcSeed } },
           });
           if (!npc) {
             return JSON.stringify({ error: "NPC not found. Cannot retrieve rumors." });
           }
 
           const campaign = await prisma.campaign.findUnique({
-            where: { id: targetCampaignId },
+            where: { id: campaignId },
             select: { currentLocationId: true },
           });
           if (!campaign?.currentLocationId) {
@@ -398,8 +406,8 @@ export function buildSocialTools(
             }
           });
           return JSON.stringify(result);
-        } catch (error: any) {
-          return JSON.stringify({ error: error.message || "Trade execution failed mechanically." });
+        } catch (error: unknown) {
+          return JSON.stringify({ error: error instanceof Error ? error.message : "Trade execution failed mechanically." });
         }
       },
     }),

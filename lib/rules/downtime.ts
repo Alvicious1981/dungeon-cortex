@@ -114,7 +114,6 @@ export function rollRetainerMorale(
 // ---------------------------------------------------------------------------
 
 export const ResolveDowntimeInputSchema = z.object({
-  characterId: z.string().min(1).describe("Character receiving XP from deposited gold."),
   havenUpkeepCost: z.number().nonnegative().describe("Haven upkeep cost per day."),
   daysSpent: z.number().int().nonnegative().describe("Days spent in downtime."),
   goldDeposited: z.number().nonnegative().describe("Gold converted to XP (1:1)."),

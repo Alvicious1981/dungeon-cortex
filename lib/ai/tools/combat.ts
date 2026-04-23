@@ -1,6 +1,5 @@
 import { tool } from "ai";
 import { prisma } from "@/lib/db/prisma";
-import { MonsterSchema, type Monster } from "@/lib/rules/srd";
 import {
   buildEncounter,
   xpForCR,
@@ -19,7 +18,7 @@ import {
   GenerateLootInputSchema,
   generateLootPayload,
 } from "@/lib/rules/loot";
-import { queryMonsters } from "@/lib/ai/tools/srd-lookup";
+import { queryMonsters, buildMonsterRawData } from "@/lib/ai/tools/srd-lookup";
 
 export function buildCombatTools(campaignId: string) {
   return {
@@ -51,27 +50,15 @@ export function buildCombatTools(campaignId: string) {
             });
           }
 
-          // Query monsters from DB using typed columns (broad pool for budget math)
-          const rawMonsters = await queryMonsters({
+          // Query monsters from DB using typed columns (broad pool for budget math).
+          // queryMonsters returns pre-shaped Monster[] — no secondary parsing needed.
+          const typedMonsters = await queryMonsters({
             type: theme,
             maxCR: targetCR === 0 ? 1 : Math.min(targetCR * 2, 30),
             limit: 30,
           });
 
-          // Parse raw blobs into typed Monster[], tracking raw data for AC derivation
-          const monsterPairs: Array<{ parsed: Monster; raw: Record<string, unknown> }> = [];
-          for (const raw of rawMonsters) {
-            const result = MonsterSchema.safeParse(raw);
-            if (result.success) {
-              monsterPairs.push({ parsed: result.data, raw: raw as Record<string, unknown> });
-            }
-          }
-
-          const selectedMonsters = buildEncounter(
-            targetCR,
-            monsterPairs.map((p) => p.parsed),
-            theme
-          );
+          const selectedMonsters = buildEncounter(targetCR, typedMonsters, theme);
 
           if (selectedMonsters.length === 0) {
             return JSON.stringify({
@@ -100,7 +87,8 @@ export function buildCombatTools(campaignId: string) {
 
           const { order } = rollInitiative(initiativeInputs);
 
-          // Map initiative order back to full combatant data
+          // Map initiative order back to full combatant data.
+          // buildMonsterRawData converts Monster → armor_class-array shape for acFromMonsterData.
           const combatantData = order.map((entry) => {
             const isPlayer = entry.id.startsWith("player-");
             if (isPlayer) {
@@ -114,15 +102,13 @@ export function buildCombatTools(campaignId: string) {
               };
             }
             const idx = parseInt(entry.id.replace("enemy-", ""), 10);
-            const monster = selectedMonsters[idx];
-            const pair = monsterPairs.find((p) => p.parsed === monster);
-            const rawData = pair?.raw ?? {};
+            const monster = selectedMonsters[idx]!;
             return {
               name: monster.name,
               isPlayer: false,
               hp: monster.hit_points,
               maxHp: monster.hit_points,
-              ac: acFromMonsterData(rawData),
+              ac: acFromMonsterData(buildMonsterRawData(monster)),
               initiativeTotal: entry.initiative,
             };
           });

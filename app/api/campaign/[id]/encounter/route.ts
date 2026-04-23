@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
   if (!enemies.every(isEnemyInput)) {
     return NextResponse.json(
-      { error: "Each enemy must have name (string), hp (number > 0), maxHp (number > 0), and dexModifier (number)." },
+      { error: "Each enemy must have name, hp, maxHp, and dexModifier." },
       { status: 400 }
     );
   }
@@ -68,8 +68,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     throw e;
   }
 
-  // Fetch campaign with character + inventory — validates existence and ownership,
-  // and provides the inventory needed to derive player AC.
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
     include: { character: { include: { inventory: true } } },
@@ -79,28 +77,23 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
   }
   if (campaign.userId !== user.id) {
-    return NextResponse.json(
-      { error: "Campaign does not belong to this user." },
-      { status: 403 }
-    );
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
   if (campaign.status !== "active") {
     return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
   }
 
-  // Guard: only one active encounter per campaign at a time
   const existingEncounter = await prisma.encounter.findFirst({
     where: { campaignId, status: "active" },
   });
   if (existingEncounter) {
     return NextResponse.json(
-      { error: "An active encounter already exists for this campaign.", encounterId: existingEncounter.id },
+      { error: "An active encounter already exists.", encounterId: existingEncounter.id },
       { status: 409 }
     );
   }
 
-  // Resolve optional monsterIndex fields: fetch real HP, DEX, and AC from SrdMonster.
-  // Callers without monsterIndex are unaffected (backward compatible).
+  // Resolve HP, DEX, and AC for enemies from SRD or inputs
   const resolvedEnemies = await Promise.all(
     enemies.map(async (e) => {
       if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
@@ -124,16 +117,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     })
   );
 
-  // Derive player DEX modifier and AC from the character's stats and inventory
   const stats = campaign.character.stats as Record<string, number>;
   const playerDexMod = abilityModifier(stats.DEX ?? 10);
   const playerAC = acFromInventory(campaign.character.inventory, playerDexMod);
 
-  // Build CombatantInput list: player first, then enemies
-  // rollInitiative accepts any order — it sorts internally
   const combatantInputs = [
     {
-      id: `player-${campaign.character.id}`,
+      id: "player",
       name: campaign.character.name,
       dexModifier: playerDexMod,
     },
@@ -146,53 +136,123 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const { order } = rollInitiative(combatantInputs);
 
-  // Map initiative order back to full combatant data for persistence.
-  // order is sorted DESC by initiativeTotal — index 0 acts first, matching
-  // Encounter.currentTurnIndex default of 0.
-  const combatantData = order.map((entry) => {
-    const isPlayer = entry.id.startsWith("player-");
-    if (isPlayer) {
-      return {
-        name: campaign.character.name,
-        isPlayer: true,
-        hp: campaign.character.hp,
-        maxHp: campaign.character.maxHp,
-        ac: playerAC,
-        initiativeTotal: entry.initiative,
-        stats: campaign.character.stats || {},
-        concentrationSpellId: campaign.character.concentrationSpellId,
-      };
-    }
-    // Recover original enemy input by stripping the "enemy-{i}" prefix
-    const idx = parseInt(entry.id.replace("enemy-", ""), 10);
-    const enemy = resolvedEnemies[idx];
-    return {
-      name: enemy.name,
-      isPlayer: false,
-      hp: enemy.hp,
-      maxHp: enemy.maxHp,
-      ac: enemy.ac,
-      initiativeTotal: entry.initiative,
-      stats: enemy.stats || {},
-    };
-  });
+  // Define spatial scaling
+  const totalCombatants = combatantInputs.length;
+  const mapSize = totalCombatants > 9 ? 5 : 3;
+  const centerX = Math.floor(mapSize / 2);
+  const centerY = Math.floor(mapSize / 2);
 
-  // Create encounter with all combatants in a single transaction
-  const encounter = await prisma.encounter.create({
-    data: {
-      campaignId,
-      status: "active",
-      round: 1,
-      currentTurnIndex: 0,
-      combatants: {
-        create: combatantData,
+  // Available slots for enemies (all cells except center)
+  const enemySlots: Array<{ x: number; y: number }> = [];
+  for (let x = 0; x < mapSize; x++) {
+    for (let y = 0; y < mapSize; y++) {
+      if (x === centerX && y === centerY) continue;
+      enemySlots.push({ x, y });
+    }
+  }
+
+  // Transaction for atomic spatial initialization
+  const encounter = await prisma.$transaction(async (tx) => {
+    // 1. Create Encounter
+    const e = await tx.encounter.create({
+      data: {
+        campaignId,
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
       },
-    },
-    include: {
-      combatants: {
-        orderBy: { initiativeTotal: "desc" },
+    });
+
+    // 2. Create Zones (Grid Cells)
+    const zonesToCreate = [];
+    for (let x = 0; x < mapSize; x++) {
+      for (let y = 0; y < mapSize; y++) {
+        zonesToCreate.push({
+          encounterId: e.id,
+          name: `z_${x}_${y}`,
+          x,
+          y,
+        });
+      }
+    }
+
+    // Using a loop to ensure we have the created objects with IDs
+    const createdZones = await Promise.all(
+      zonesToCreate.map((z) => tx.zone.create({ data: z }))
+    );
+
+    // Map coordinates to zone IDs for fast lookup
+    const zoneMap: Record<string, string> = {};
+    createdZones.forEach((z) => {
+      zoneMap[`${z.x},${z.y}`] = z.id;
+    });
+
+    // 3. Prepare Combatant Data with spatial placement tied to zoneId
+    let enemyIdx = 0;
+    const combatantData = order.map((entry) => {
+      const isPlayer = entry.id === "player";
+      let posX, posY;
+
+      if (isPlayer) {
+        posX = centerX;
+        posY = centerY;
+      } else {
+        const slot = enemySlots[enemyIdx % enemySlots.length];
+        posX = slot.x;
+        posY = slot.y;
+        enemyIdx++;
+      }
+      
+      const zoneId = zoneMap[`${posX},${posY}`];
+      
+      if (isPlayer) {
+        return {
+          encounterId: e.id,
+          zoneId,
+          name: campaign.character.name,
+          isPlayer: true,
+          hp: campaign.character.hp,
+          maxHp: campaign.character.maxHp,
+          ac: playerAC,
+          initiativeTotal: entry.initiative,
+          stats: campaign.character.stats || {},
+          concentrationSpellId: campaign.character.concentrationSpellId,
+          x: posX,
+          y: posY,
+        };
+      }
+      
+      const idx = parseInt(entry.id.replace("enemy-", ""), 10);
+      const enemy = resolvedEnemies[idx];
+
+      return {
+        encounterId: e.id,
+        zoneId,
+        name: enemy.name,
+        isPlayer: false,
+        hp: enemy.hp,
+        maxHp: enemy.maxHp,
+        ac: enemy.ac,
+        initiativeTotal: entry.initiative,
+        stats: enemy.stats || {},
+        x: posX,
+        y: posY,
+      };
+    });
+
+    // 4. Create Combatants
+    await tx.combatant.createMany({
+      data: combatantData,
+    });
+
+    // 5. Return complete graph
+    return tx.encounter.findUnique({
+      where: { id: e.id },
+      include: {
+        combatants: { orderBy: { initiativeTotal: "desc" } },
+        zones: { orderBy: [{ x: "asc" }, { y: "asc" }] },
       },
-    },
+    });
   });
 
   return NextResponse.json(encounter, { status: 201 });
