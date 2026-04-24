@@ -165,12 +165,14 @@ export function isInCone(
   const ptNx = dx / ptMag
   const ptNy = dy / ptMag
 
-  // Dot product of unit vectors = cos(angle between them)
-  // Clamp to [-1, 1] to guard against floating-point drift before acos
+  // Dot product of unit vectors = cos(angle between them).
+  // Compare directly in cosine space instead of calling acos:
+  //   angle ≤ CONE_HALF_ANGLE_RAD  ↔  dot ≥ cos(CONE_HALF_ANGLE_RAD)
+  // This avoids acos entirely and eliminates IEEE-754 drift at the exact boundary
+  // (acos and atan use different code paths and can differ by one ULP).
   const dot = Math.min(1, Math.max(-1, dirNx * ptNx + dirNy * ptNy))
-  const angle = Math.acos(dot)
 
-  return angle <= CONE_HALF_ANGLE_RAD
+  return dot >= Math.cos(CONE_HALF_ANGLE_RAD)
 }
 
 // ---------------------------------------------------------------------------
