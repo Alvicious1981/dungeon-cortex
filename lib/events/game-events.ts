@@ -29,7 +29,8 @@ export type GameEventType =
   | "LOOT_GENERATED"       // generateLoot tool completed; LootPayload ready for display
   | "LEVEL_UP_RESOLVED"    // triggerLevelUp tool completed; LevelUpPayload ready for display
   | "CONCENTRATION_STARTED" // Combatant began concentrating on a spell
-  | "CONCENTRATION_BROKEN"; // Combatant failed a concentration check or cast a new conc spell
+  | "CONCENTRATION_BROKEN"  // Combatant failed a concentration check or cast a new conc spell
+  | "MOVE_COMBATANT";       // Combatant moved on the tactical grid
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.

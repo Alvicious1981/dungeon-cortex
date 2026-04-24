@@ -26,6 +26,7 @@ import {
   applyLongRest,
   type CharacterState,
 } from "@/lib/rules/exploration";
+import { moveToNode } from "@/lib/rules/navigation";
 import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
@@ -33,7 +34,15 @@ import {
 } from "@/lib/rules/combat-pipeline";
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
-import type { 
+import {
+  chebyshevSquares,
+  isOccupied,
+  getCombatantOccupiedSquares,
+  sizeToSquares,
+  type GridCombatant,
+  type SizeCategory,
+} from "@/lib/rules/geometry";
+import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
 import { Prisma } from "@/app/generated/prisma/client";
@@ -41,6 +50,8 @@ import { Prisma } from "@/app/generated/prisma/client";
 interface ActionBody {
   action: string;
   targetIds?: string[];
+  targetX?: number;
+  targetY?: number;
 }
 
 interface RouteContext {
@@ -185,7 +196,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // ── Macro Action Detector (Strategic Gate) ──────────────────────────────────
   // Authoritative "fast-path" for UI-triggered buttons (CombatHUD).
   // This bypasses LLM intent parsing to ensure 100% reliability for core mechanics.
-  const MACRO_ACTIONS = ["Attack", "End Turn"];
+  const MACRO_ACTIONS = ["Attack", "End Turn", "Move"];
   if (MACRO_ACTIONS.includes(trimmedAction)) {
     if (!context.activeEncounter) {
       return NextResponse.json({ error: "No active encounter." }, { status: 400 });
@@ -284,6 +295,111 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             targets: attackOutcome.consequences,
           }));
         }
+      });
+    }
+
+    if (trimmedAction === "Move") {
+      // ── Gate: Move (tactical grid) ──────────────────────────────────────────
+      // Validates coordinates, distance against speed, and collision before
+      // mutating the combatant's (x, y) on the grid.  Pure geometry from
+      // lib/rules/geometry.ts — the AI narrator never decides movement legality.
+
+      const targetX = body.targetX;
+      const targetY = body.targetY;
+
+      if (targetX === undefined || targetY === undefined
+        || !Number.isInteger(targetX) || !Number.isInteger(targetY)) {
+        return NextResponse.json(
+          { error: "Move requires integer targetX and targetY." },
+          { status: 400 }
+        );
+      }
+
+      const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
+      if (!playerCombatant) {
+        return NextResponse.json(
+          { error: "Player combatant not found in encounter." },
+          { status: 400 }
+        );
+      }
+
+      // ── Speed extraction ──────────────────────────────────────────────────
+      // Attempt to read speed from the combatant's stats JSON.
+      // Fallback: 30 ft (6 squares) — the D&D 5e 2014 SRD default.
+      const DEFAULT_SPEED_FT = 30;
+      const combatantStats = (playerCombatant.stats as Record<string, unknown>) ?? {};
+      const rawSpeed = combatantStats.speed;
+      const speedFt = typeof rawSpeed === "number" && rawSpeed > 0
+        ? rawSpeed
+        : DEFAULT_SPEED_FT;
+      const speedSquares = Math.floor(speedFt / 5);
+
+      // ── Distance validation (Chebyshev — 5e grid diagonal = 1 square) ─────
+      const from = { x: playerCombatant.x, y: playerCombatant.y };
+      const to   = { x: targetX, y: targetY };
+      const distSquares = chebyshevSquares(from, to);
+
+      if (distSquares === 0) {
+        return NextResponse.json(
+          { error: "Already at that position." },
+          { status: 400 }
+        );
+      }
+
+      if (distSquares > speedSquares) {
+        return NextResponse.json(
+          { error: `Movement exceeds speed. Distance: ${distSquares * 5} ft, speed: ${speedFt} ft.` },
+          { status: 400 }
+        );
+      }
+
+      // ── Collision validation (size-aware footprint) ────────────────────────
+      // Build a list of all other combatants as GridCombatants, then check
+      // every square the mover's footprint would cover at the destination.
+      const VALID_SIZES: SizeCategory[] = ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"];
+      const moverSize: SizeCategory = VALID_SIZES.includes(playerCombatant.size as SizeCategory)
+        ? (playerCombatant.size as SizeCategory)
+        : "Medium";
+
+      const otherCombatants: GridCombatant[] = context.activeEncounter.combatants
+        .filter(c => c.id !== playerCombatant.id)
+        .map(c => ({
+          id: c.id,
+          x: c.x,
+          y: c.y,
+          size: VALID_SIZES.includes(c.size as SizeCategory)
+            ? (c.size as SizeCategory)
+            : "Medium",
+        }));
+
+      const footprintSide = sizeToSquares(moverSize);
+      for (let row = targetY; row < targetY + footprintSide; row++) {
+        for (let col = targetX; col < targetX + footprintSide; col++) {
+          if (isOccupied({ x: col, y: row }, otherCombatants)) {
+            return NextResponse.json(
+              { error: "Target square is occupied." },
+              { status: 400 }
+            );
+          }
+        }
+      }
+
+      // ── State mutation ─────────────────────────────────────────────────────
+      await prisma.combatant.update({
+        where: { id: playerCombatant.id },
+        data: { x: targetX, y: targetY },
+      });
+
+      gameEvents.push({
+        type: "MOVE_COMBATANT",
+        payload: {
+          combatantId: playerCombatant.id,
+          fromX: from.x,
+          fromY: from.y,
+          toX: targetX,
+          toY: targetY,
+          distanceFt: distSquares * 5,
+        },
       });
     }
 
@@ -620,6 +736,32 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           }
         }
       });
+    }
+
+    // ── Gate: move ──────────────────────────────────────────────────────────────
+    if (intent.actionType === "move" && intent.destination) {
+      const moveResult = await prisma.$transaction(async (tx) => {
+        return await moveToNode(
+          tx as Prisma.TransactionClient,
+          campaignId,
+          intent.destination!
+        );
+      });
+
+      if (!moveResult.success) {
+        return NextResponse.json(
+          { error: moveResult.error },
+          { status: 400 }
+        );
+      }
+
+      gameEvents.push({
+        type: "PLAYER_MOVE",
+        payload: { 
+          targetNodeId: moveResult.targetNodeId,
+          passageType: moveResult.passageType 
+        },
+      } as any);
     }
   }
 

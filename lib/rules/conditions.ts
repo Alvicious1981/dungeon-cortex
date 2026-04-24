@@ -3,26 +3,36 @@
  *
  * Implements authoritative mechanics for 5e status effects.
  * Every condition has specific flags that modulate combat resolution.
+ *
+ * Canon: D&D 5e 2014 SRD — all 15 standard conditions.
+ * Source of truth for condition validation: SrdCondition DB table (seeded via
+ * scripts/seed-conditions.ts). This registry is the compile-time guard.
  */
 
 export interface ConditionRegistryEntry {
   id: string;
   name: string;
-  /** Advantage derived from this condition when it applies to the combatant. */
+  /** Disadvantage on attack rolls when the combatant has this condition. */
   selfDisadvantageOnAttack?: boolean;
+  /** Advantage on attack rolls when the combatant has this condition. */
   selfAdvantageOnAttack?: boolean;
-  /** Advantage derived from this condition when it applies to the target. */
+  /** Attackers gain advantage against a target with this condition. */
   attackerAdvantage?: boolean;
+  /** Attackers suffer disadvantage against a target with this condition. */
   attackerDisadvantage?: boolean;
+  /** Combatant cannot take actions or reactions. */
+  incapacitated?: boolean;
 }
 
 /**
- * The Standard 5e Condition Registry.
+ * The complete D&D 5e 2014 SRD Condition Registry (all 15 conditions).
  *
- * This dictionary maps condition IDs (case-insensitive) to their mechanical
- * impacts on attack rolls and defenses.
+ * Maps lowercase condition slugs to their mechanical impacts.
+ * Used as the compile-time validation set in isKnownCondition().
+ * Attack-roll modifiers are consumed by evaluateAdvantage().
  */
 export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
+  // ── Attack-roll modifiers ─────────────────────────────────────────────────
   blinded: {
     id: "blinded",
     name: "Blinded",
@@ -33,22 +43,31 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     id: "prone",
     name: "Prone",
     selfDisadvantageOnAttack: true,
-    // Note: Prone logic requires 'isMelee' check in evaluateAdvantage.
+    // Prone melee vs ranged is handled in evaluateAdvantage — see the isMelee branch.
   },
   paralyzed: {
     id: "paralyzed",
     name: "Paralyzed",
     attackerAdvantage: true,
+    incapacitated: true,
+  },
+  petrified: {
+    id: "petrified",
+    name: "Petrified",
+    attackerAdvantage: true,
+    incapacitated: true,
   },
   stunned: {
     id: "stunned",
     name: "Stunned",
     attackerAdvantage: true,
+    incapacitated: true,
   },
   unconscious: {
     id: "unconscious",
     name: "Unconscious",
     attackerAdvantage: true,
+    incapacitated: true,
   },
   restrained: {
     id: "restrained",
@@ -67,7 +86,50 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     name: "Frightened",
     selfDisadvantageOnAttack: true,
   },
+  poisoned: {
+    id: "poisoned",
+    name: "Poisoned",
+    selfDisadvantageOnAttack: true,
+  },
+  // ── No direct attack-roll modifier (tracked for state completeness) ────────
+  charmed: {
+    id: "charmed",
+    name: "Charmed",
+    // Cannot attack the charmer — enforced at intent-parse level, not roll level.
+  },
+  deafened: {
+    id: "deafened",
+    name: "Deafened",
+    // No attack-roll modifier per 5e 2014 SRD.
+  },
+  exhaustion: {
+    id: "exhaustion",
+    name: "Exhaustion",
+    // Level-dependent penalties tracked via Character.exhaustionLevel, not this flag.
+  },
+  grappled: {
+    id: "grappled",
+    name: "Grappled",
+    // Speed 0; no direct attack-roll modifier per 5e 2014 SRD.
+  },
+  incapacitated: {
+    id: "incapacitated",
+    name: "Incapacitated",
+    incapacitated: true,
+  },
 };
+
+/**
+ * Returns true when `conditionId` is a recognized D&D 5e 2014 SRD condition.
+ *
+ * This is a synchronous compile-time guard. DB-level validation
+ * (SrdCondition table) is performed asynchronously at the route/pipeline layer.
+ *
+ * Comparison is case-insensitive.
+ */
+export function isKnownCondition(conditionId: string): boolean {
+  return conditionId.toLowerCase() in CONDITION_REGISTRY;
+}
 
 /**
  * Evaluates the net advantage/disadvantage for an attack roll.

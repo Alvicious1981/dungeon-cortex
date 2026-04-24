@@ -63,6 +63,9 @@ const resolvedEncounter: CampaignContext["activeEncounter"] = {
       conditions: [],
       stats: { STR: 10, DEX: 10, CON: 10, INT: 10, WIS: 10, CHA: 10 },
       concentrationSpellId: null,
+      x: 0,
+      y: 0,
+      size: "Medium",
     },
   ],
 };

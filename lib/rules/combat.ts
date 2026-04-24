@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
-import { evaluateAdvantage } from "./conditions";
+import { evaluateAdvantage, isKnownCondition } from "./conditions";
 
 import { calculateDistance, type GridZone } from "./spatial";
 
@@ -151,12 +151,22 @@ export function extractConditions(conditions: unknown): string[] {
 /**
  * Adds a condition to an array, ensuring no duplicates (case-insensitive).
  * Returns a new array.
- * @pure
+ *
+ * Throws if `conditionId` is not a recognized D&D 5e 2014 SRD condition.
+ * This is the compile-time Code-is-Law gate: unknown strings from AI narration
+ * are rejected before any state mutation reaches the database.
+ *
+ * @pure (throws on invalid input)
  */
 export function applyCondition(
   currentConditions: string[],
   conditionId: string
 ): string[] {
+  if (!isKnownCondition(conditionId)) {
+    throw new Error(
+      `Unknown condition "${conditionId}". Only D&D 5e 2014 SRD conditions are permitted.`
+    );
+  }
   const normalizedToAdd = conditionId.toLowerCase();
   const exists = currentConditions.some(
     (c) => c.toLowerCase() === normalizedToAdd

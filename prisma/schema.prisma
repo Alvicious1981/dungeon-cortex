@@ -12,11 +12,11 @@ datasource db {
 }
 
 model Zone {
-  id          String   @id @default(cuid())
+  id          String @id @default(cuid())
   encounterId String
   name        String
-  x           Int      @default(0)
-  y           Int      @default(0)
+  x           Int    @default(0)
+  y           Int    @default(0)
 
   encounter  Encounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
   combatants Combatant[]
@@ -120,9 +120,9 @@ model Encounter {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  campaign     Campaign      @relation(fields: [campaignId], references: [id])
-  combatants   Combatant[]
-  zones        Zone[]
+  campaign   Campaign    @relation(fields: [campaignId], references: [id])
+  combatants Combatant[]
+  zones      Zone[]
 }
 
 model Combatant {
@@ -264,50 +264,50 @@ model NPC {
 }
 
 model SrdMonster {
-  id        String   @id
-  name      String
+  id                    String   @id
+  name                  String
   /// Canonical SRD slug/index, e.g. "adult-red-dragon".
-  indexSlug String?
+  indexSlug             String?
   /// Challenge Rating as a float (0.125, 0.25, 0.5, 1–30). Null for legacy records.
-  cr        Float?
+  cr                    Float?
   /// Creature type, e.g. "dragon", "undead", "humanoid", "beast".
-  type      String?
+  type                  String?
   /// Creature subtype, if present in source data.
-  subtype   String?
+  subtype               String?
   /// Size category: "Tiny" | "Small" | "Medium" | "Large" | "Huge" | "Gargantuan".
-  size      String?
+  size                  String?
   /// Alignment string, e.g. "lawful evil", "any alignment", "unaligned".
-  alignment String?
+  alignment             String?
   /// XP reward for defeating the creature.
-  xp        Int?
+  xp                    Int?
   /// Monster proficiency bonus (derived in SRD block).
-  proficiencyBonus Int?
+  proficiencyBonus      Int?
   /// Canonical HP and hit dice from SRD.
-  hitPoints Int?
-  hitDice   String?
+  hitPoints             Int?
+  hitDice               String?
   /// Flattened AC primary value from armor_class.
-  armorClass Int?
+  armorClass            Int?
   /// Human-readable speed block (raw text/JSON stringified).
-  speed     String?
+  speed                 String?
   /// Human-readable languages field.
-  languages String?
+  languages             String?
   /// Ability scores (if present).
-  strength     Int?
-  dexterity    Int?
-  constitution Int?
-  intelligence Int?
-  wisdom       Int?
-  charisma     Int?
+  strength              Int?
+  dexterity             Int?
+  constitution          Int?
+  intelligence          Int?
+  wisdom                Int?
+  charisma              Int?
   /// Quick filter flags inferred from abilities/actions payloads.
-  hasLegendaryActions Boolean?
-  hasSpellcasting     Boolean?
+  hasLegendaryActions   Boolean?
+  hasSpellcasting       Boolean?
   /// Resistance/immunity vectors for fast filtering.
-  damageImmunities     String[] @default([])
-  damageResistances    String[] @default([])
+  damageImmunities      String[] @default([])
+  damageResistances     String[] @default([])
   damageVulnerabilities String[] @default([])
-  conditionImmunities  String[] @default([])
+  conditionImmunities   String[] @default([])
   /// Full raw JSON blob from the SRD dataset.
-  data      Json
+  data                  Json
 
   @@index([cr])
   @@index([type])
@@ -318,30 +318,30 @@ model SrdMonster {
 }
 
 model SrdSpell {
-  id   String @id
-  name String
+  id              String   @id
+  name            String
   /// Canonical SRD slug/index, e.g. "magic-missile".
-  indexSlug String?
-  level Int?
+  indexSlug       String?
+  level           Int?
   /// Spell school index, e.g. "evocation".
-  school String?
-  castingTime String?
-  range String?
-  duration String?
-  ritual Boolean?
-  concentration Boolean?
-  attackType String?
+  school          String?
+  castingTime     String?
+  range           String?
+  duration        String?
+  ritual          Boolean?
+  concentration   Boolean?
+  attackType      String?
   /// damage.damage_type.index when present.
-  damageType String?
+  damageType      String?
   /// dc.dc_type.index when present.
-  saveAbility String?
+  saveAbility     String?
   /// True when the spell includes healing scaling/data.
-  hasHealing Boolean?
+  hasHealing      Boolean?
   hasAreaOfEffect Boolean?
   /// Class and component vectors for filtering.
-  classes String[] @default([])
-  components String[] @default([])
-  data Json
+  classes         String[] @default([])
+  components      String[] @default([])
+  data            Json
 
   @@index([level])
   @@index([school])
@@ -356,6 +356,23 @@ model SrdItem {
   id   String @id
   name String
   data Json
+}
+
+/// A D&D 5e 2014 SRD condition seeded from dnd5eapi /api/2014/conditions.
+/// The AI narrator MUST NOT apply conditions not present in this table.
+/// Condition mutations on Combatant.conditions are validated against this table
+/// at the rules-engine layer before any DB write.
+model SrdCondition {
+  id        String  @id
+  name      String
+  /// Canonical SRD slug, e.g. "blinded". Lowercase-kebab, unique.
+  indexSlug String  @unique
+  /// Concatenated desc paragraphs from the SRD, joined by newline.
+  desc      String?
+  /// Full raw JSON payload from dnd5eapi — source of truth.
+  data      Json
+
+  @@index([indexSlug])
 }
 
 model SrdEquipment {

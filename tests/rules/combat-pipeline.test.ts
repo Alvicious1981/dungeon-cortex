@@ -779,7 +779,7 @@ describe("executeCombatAction", () => {
           dice: "1d8",
           hasSavingThrow: true,
           saveAbility: "DEX",
-          condition: "Slowed",
+          condition: "poisoned",
         },
         spellSaveDC: 15,
         collectEvents: true,
@@ -787,12 +787,12 @@ describe("executeCombatAction", () => {
 
       const outcome = await executeCombatAction(payload, tx);
 
-      expect(outcome.consequences[0]?.conditionsApplied).toContain("Slowed");
+      expect(outcome.consequences[0]?.conditionsApplied).toContain("poisoned");
       expect(tx.combatant.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: "enemy-1" },
           data: expect.objectContaining({
-            conditions: expect.arrayContaining(["Slowed"]),
+            conditions: expect.arrayContaining(["poisoned"]),
           }),
         })
       );
@@ -819,7 +819,7 @@ describe("executeCombatAction", () => {
           dice: "1d8",
           hasSavingThrow: true,
           saveAbility: "DEX",
-          condition: "Slowed",
+          condition: "poisoned",
         },
         spellSaveDC: 15,
         collectEvents: true,

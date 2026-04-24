@@ -91,6 +91,12 @@ export interface ContextCombatant {
   stats: Prisma.JsonValue;
   /** ID of the currently concentrated-on spell, or null. */
   concentrationSpellId: string | null;
+  /** Grid column (0-based). Used by tactical movement validation. */
+  x: number;
+  /** Grid row (0-based). Used by tactical movement validation. */
+  y: number;
+  /** D&D 5e size category — determines footprint for collision detection. */
+  size: string;
 }
 
 export interface ContextLog {
@@ -322,6 +328,9 @@ export async function buildCampaignContext(
             conditions: true,
             stats: true,
             concentrationSpellId: true,
+            x: true,
+            y: true,
+            size: true,
           },
           orderBy: { initiativeTotal: "desc" },
         },
