@@ -26,6 +26,7 @@ import { WildernessMapController } from "@/components/exploration/map/Wilderness
 import WildernessHUD from "@/components/exploration/WildernessHUD";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
 import CombatHUDController from "@/components/combat/CombatHUDController";
+import BattleGrid from "@/components/combat/BattleGrid";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -794,6 +795,23 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             )}
 
             {/* Legacy zone-based combat map removed in Phase 1.5. */}
+            {activeEncounter && (
+              <BattleGrid
+                campaignId={campaign.id}
+                activeCombatantId={activeCombatantId}
+                combatants={activeEncounter.combatants.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  isPlayer: c.isPlayer,
+                  hp: c.hp,
+                  maxHp: c.maxHp,
+                  ac: c.ac,
+                  x: c.x,
+                  y: c.y,
+                  size: c.size ?? "Medium",
+                }))}
+              />
+            )}
 
             <section aria-label="Adventure chronicle" id="chronicle">
               <p

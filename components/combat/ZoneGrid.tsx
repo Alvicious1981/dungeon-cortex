@@ -14,7 +14,9 @@ export interface CombatantData {
   maxHp: number;
   ac: number;
   initiativeTotal: number;
-  zoneId: string | null;
+  x: number;
+  y: number;
+  size: string;
 }
 
 export interface ZoneData {
@@ -224,12 +226,12 @@ export const ZoneGrid = memo(function ZoneGrid({
   const occupantsByZone = useMemo(() => {
     const byZone = new Map<string, CombatantData[]>();
     for (const combatant of combatants) {
-      if (!combatant.zoneId) continue;
-      const existing = byZone.get(combatant.zoneId);
+      const key = `${combatant.x},${combatant.y}`;
+      const existing = byZone.get(key);
       if (existing) {
         existing.push(combatant);
       } else {
-        byZone.set(combatant.zoneId, [combatant]);
+        byZone.set(key, [combatant]);
       }
     }
     return byZone;
@@ -256,7 +258,7 @@ export const ZoneGrid = memo(function ZoneGrid({
         {zones.map((zone) => {
           const col = zone.x - minX + 1;
           const row = zone.y - minY + 1;
-          const occupants = occupantsByZone.get(zone.id) ?? [];
+          const occupants = occupantsByZone.get(`${zone.x},${zone.y}`) ?? [];
 
           return (
             <div

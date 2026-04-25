@@ -69,6 +69,11 @@ export async function summarizeAndStore(
   try {
     const logBlock = buildLogBlock(logs);
 
+    // ─── MOCK TEMPORAL PARA TESTING LOCAL ─────────────────────────────────────
+    // Para evitar bloqueos por falta de OPENAI_API_KEY.
+    const summary = "Resumen de memoria (MODO MOCK).";
+
+    /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
     const { text: summary } = await generateText({
       model: openai("gpt-4o-mini"),
       system: [
@@ -80,6 +85,7 @@ export async function summarizeAndStore(
       ].join(" "),
       prompt: logBlock,
     });
+    */
 
     if (!summary.trim()) {
       console.error("[consolidator] LLM returned empty summary — skipping memory write.");

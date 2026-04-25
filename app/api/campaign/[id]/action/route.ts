@@ -8,7 +8,7 @@ import { formatSystemPrompt } from "@/lib/memory/formatter";
 import { parseIntent } from "@/lib/ai/intent";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
 import { 
-  isSpellSlots, hasAvailableSlot, consumeSlot, 
+  isSpellSlots, hasAvailableSlot, 
   spellcastingAbility,
   calculateProficiency, calculateSpellSaveDC 
 } from "@/lib/rules/magic";
@@ -31,13 +31,13 @@ import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
   executeCombatAction,
+  type PipelineCombatant,
 } from "@/lib/rules/combat-pipeline";
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
   chebyshevSquares,
   isOccupied,
-  getCombatantOccupiedSquares,
   sizeToSquares,
   type GridCombatant,
   type SizeCategory,
@@ -46,6 +46,8 @@ import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
 import { Prisma } from "@/app/generated/prisma/client";
+import type { ContextCombatant } from "@/lib/memory/context";
+import type { PartyInventoryState } from "@/lib/rules/exploration";
 
 interface ActionBody {
   action: string;
@@ -224,7 +226,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const activeEncounter = context.activeEncounter;
       const targetIds = body.targetIds ?? [];
       
-      let targets: any[] = [];
+      let targets: ContextCombatant[] = [];
       if (targetIds.length > 0) {
         targets = activeEncounter.combatants.filter(c => targetIds.includes(c.id));
         if (targets.length === 0) {
@@ -246,10 +248,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const strMod = abilityModifier(charStats.STR ?? 10);
       
       const weaponDice = foundWeapon 
-        ? (foundWeapon.properties as Record<string, any>).damageDice ?? "1d4"
+        ? (foundWeapon.properties as Record<string, unknown>).damageDice as string ?? "1d4"
         : "1d4";
       const weaponBonus = foundWeapon 
-        ? (foundWeapon.properties as Record<string, any>).damageBonus ?? 0 
+        ? (foundWeapon.properties as Record<string, unknown>).damageBonus as number ?? 0 
         : 0;
 
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
@@ -265,7 +267,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             currentTurnIndex: activeEncounter.currentTurnIndex,
             totalDamageDealt: activeEncounter.totalDamageDealt,
             status: "active",
-            combatants: activeEncounter.combatants as any[],
+            combatants: activeEncounter.combatants as PipelineCombatant[],
           },
           actorId: playerCombatant?.id ?? context.character.id,
           actorName: context.character.name,
@@ -273,7 +275,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           targetCombatants: targets,
           weaponName: foundWeapon?.name || "Unarmed",
           weaponDice,
-          damageType: ((foundWeapon?.properties as any)?.damageType || "bludgeoning") as DamageType,
+          damageType: ((foundWeapon?.properties as Record<string, unknown>)?.damageType || "bludgeoning") as DamageType,
           attackModifier,
           flatDamageBonus: strMod + weaponBonus,
           playerCharacterId: context.character.id,
@@ -427,7 +429,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      let effect: any = undefined;
+      let effect: unknown = undefined;
       let saveDC: number | undefined = undefined;
 
       if (intent.spellName) {
@@ -443,7 +445,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         }
       }
 
-      let targets: any[] = [];
+      let targets: ContextCombatant[] = [];
       if (body.targetIds && body.targetIds.length > 0 && context.activeEncounter) {
         targets = context.activeEncounter.combatants.filter(c => body.targetIds!.includes(c.id));
       } else if (intent.targetName && context.activeEncounter) {
@@ -464,7 +466,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             currentTurnIndex: context.activeEncounter.currentTurnIndex,
             totalDamageDealt: context.activeEncounter.totalDamageDealt,
             status: "active",
-            combatants: context.activeEncounter.combatants as any[],
+            combatants: context.activeEncounter.combatants as PipelineCombatant[],
           } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
           actorId: playerCombatant?.id ?? context.character.id,
           actorName: context.character.name,
@@ -526,7 +528,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             currentTurnIndex: context.activeEncounter.currentTurnIndex,
             totalDamageDealt: context.activeEncounter.totalDamageDealt,
             status: "active",
-            combatants: context.activeEncounter.combatants as any[],
+            combatants: context.activeEncounter.combatants as PipelineCombatant[],
           } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
           actorId: playerCombatant?.id ?? context.character.id,
           actorName: context.character.name,
@@ -575,7 +577,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       gameEvents.push({
         type: "EQUIP_ITEM",
         payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
-      } as any);
+      } as GameEvent);
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
@@ -614,7 +616,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             currentTurnIndex: context.activeEncounter!.currentTurnIndex,
             totalDamageDealt: context.activeEncounter!.totalDamageDealt,
             status: "active",
-            combatants: context.activeEncounter!.combatants as any[],
+            combatants: context.activeEncounter!.combatants as PipelineCombatant[],
           },
           actorId: playerCombatant?.id ?? context.character.id,
           actorName: context.character.name,
@@ -667,7 +669,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         const isLongRest = intent.restType === "long" || trimmedAction.toLowerCase().includes("long rest");
         
         let nextChar: CharacterState;
-        let eventPayload: any;
+        let eventPayload: Record<string, unknown>;
 
         if (isLongRest) {
           const result = applyLongRest(charState);
@@ -701,7 +703,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         gameEvents.push({
           type: "REST_COMPLETED",
           payload: eventPayload,
-        } as any);
+        } as GameEvent);
       });
     }
 
@@ -720,7 +722,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           });
 
           if (advanceResult.rationConsumptionDue || advanceResult.turnsAdvanced > 0) {
-             const consumeResult = consumeResources(partyInventory as any, { rationConsumptionDue: advanceResult.rationConsumptionDue, partySize: 1 }, advanceResult.turnsAdvanced);
+             const consumeResult = consumeResources(partyInventory as unknown as PartyInventoryState, { rationConsumptionDue: advanceResult.rationConsumptionDue, partySize: 1 }, advanceResult.turnsAdvanced);
              
              await tx.partyInventory.update({
                where: { campaignId },
@@ -731,7 +733,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
                gameEvents.push({
                  type: "EXPLORATION_WARNING",
                  payload: { warnings: consumeResult.warnings },
-               } as any);
+               } as GameEvent);
              }
           }
         }
@@ -761,7 +763,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           targetNodeId: moveResult.targetNodeId,
           passageType: moveResult.passageType 
         },
-      } as any);
+      } as GameEvent);
     }
   }
 

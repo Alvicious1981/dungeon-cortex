@@ -302,7 +302,7 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
     return "";
   }
 
-  const { location, currentNode, adjacentNodes, visitedNodeIndices } = exploration;
+  const { location, currentNode, adjacentNodes } = exploration;
   const lines: string[] = [];
 
   lines.push(`## Current Exploration: ${location.name} (${location.type})`);
@@ -328,13 +328,13 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
     }
   }
 
-  if (visitedNodeIndices.length > 0) {
-    const visitedNames = visitedNodeIndices
-      .map((i) => exploration.allNodes.find((n) => n.index === i)?.name ?? `Node ${i}`)
-      .join(", ");
-    lines.push("");
-    lines.push(`## Visited Rooms: ${visitedNames}`);
-  }
+
+
+
+
+
+
+
 
   if (currentNode?.feature === "shop" && (currentNode as any).merchantPayload) {
     lines.push("");

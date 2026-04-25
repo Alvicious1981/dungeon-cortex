@@ -40,7 +40,7 @@ export const IntentSchema = z.object({
    * - "travel"     — player is traveling overland
    * - "general"    — roleplay, dialogue, or anything non-mechanical
    */
-  actionType: z.enum(["cast_spell", "attack", "use_item", "equip", "rest", "explore", "travel", "general"]),
+  actionType: z.enum(["cast_spell", "attack", "use_item", "equip", "rest", "explore", "travel", "move", "general"]),
 
   /**
    * Name of the target (creature, NPC, object) if one is present in the input.
@@ -66,6 +66,12 @@ export const IntentSchema = z.object({
    * Only relevant when actionType is "rest".
    */
   restType: z.enum(["short", "long"]).optional(),
+
+  /**
+   * The name or ID of the destination node the player wants to move to.
+   * Only present when actionType is "move".
+   */
+  destination: z.string().optional(),
 });
 
 export type BaseIntent = z.infer<typeof IntentSchema>;
@@ -91,6 +97,14 @@ export async function parseIntent(
   playerInput: string,
   systemContext: string
 ): Promise<Intent> {
+  // ─── MOCK TEMPORAL PARA TESTING LOCAL ───────────────────────────────────────
+  // Para evitar bloqueos por falta de OPENAI_API_KEY.
+  // Clasifica todas las acciones como "general" por defecto.
+  const object = {
+    actionType: "general" as const,
+  };
+
+  /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
   const { object } = await generateObject({
     model: openai("gpt-4o-mini"),
     schema: IntentSchema,
@@ -105,6 +119,7 @@ export async function parseIntent(
     ].join("\n"),
     prompt: playerInput,
   });
+  */
 
   const intent: Intent = { ...object };
 

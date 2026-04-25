@@ -105,6 +105,25 @@ export async function streamNarrative(
     resolveMerchant = resolve;
   });
 
+  // ─── MOCK TEMPORAL PARA TESTING LOCAL ───────────────────────────────────────
+  // Para evitar bloqueos por falta de OPENAI_API_KEY. 
+  // Retorna una narrativa estática determinista.
+  const mockContent = "El héroe realiza su acción con determinación en el campo de batalla (MODO MOCK).";
+  
+  // Resolvemos los payloads de herramientas como null para que no queden colgando
+  resolveLevelUp(null);
+  resolveMerchant(null);
+
+  return {
+    textStream: (async function* () {
+      yield mockContent;
+    })() as any,
+    textPromise: Promise.resolve(mockContent),
+    levelUpPayload: Promise.resolve(null),
+    merchantPayload: Promise.resolve(null),
+  };
+
+  /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
   const context = await buildCampaignContext(campaignId);
   const system = formatSystemPrompt(context);
 
@@ -136,4 +155,5 @@ export async function streamNarrative(
     levelUpPayload,
     merchantPayload,
   };
+  */
 }

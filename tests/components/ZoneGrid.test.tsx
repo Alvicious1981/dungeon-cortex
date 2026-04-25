@@ -19,7 +19,9 @@ describe("ZoneGrid Smoke Test", () => {
       maxHp: 20,
       ac: 16,
       initiativeTotal: 15,
-      zoneId: "z1",
+      x: 0,
+      y: 0,
+      size: "Medium",
     },
     {
       id: "c2",
@@ -29,7 +31,9 @@ describe("ZoneGrid Smoke Test", () => {
       maxHp: 7,
       ac: 13,
       initiativeTotal: 12,
-      zoneId: "z1",
+      x: 0,
+      y: 0,
+      size: "Small",
     },
   ];
 

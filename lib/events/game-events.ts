@@ -30,7 +30,11 @@ export type GameEventType =
   | "LEVEL_UP_RESOLVED"    // triggerLevelUp tool completed; LevelUpPayload ready for display
   | "CONCENTRATION_STARTED" // Combatant began concentrating on a spell
   | "CONCENTRATION_BROKEN"  // Combatant failed a concentration check or cast a new conc spell
-  | "MOVE_COMBATANT";       // Combatant moved on the tactical grid
+  | "MOVE_COMBATANT"       // Combatant moved on the tactical grid
+  | "EQUIP_ITEM"           // Item was equipped/unequipped
+  | "REST_COMPLETED"       // Short or long rest completed
+  | "EXPLORATION_WARNING"   // Resource depletion or other exploration danger
+  | "PLAYER_MOVE";         // Player moved between dungeon nodes
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.
