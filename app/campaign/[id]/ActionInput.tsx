@@ -19,48 +19,84 @@
  * failures fall through to a generic message.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
 
 interface Props {
   campaignId: string;
+  selectableTargets?: Array<{
+    id: string;
+    name: string;
+    hp: number;
+    maxHp: number;
+    isPlayer: boolean;
+  }>;
 }
 
-export default function ActionInput({ campaignId }: Props) {
+interface ActionPayload {
+  action: string;
+  targetIds?: string[];
+}
+
+export default function ActionInput({ campaignId, selectableTargets = [] }: Props) {
   const router = useRouter();
   const [action, setAction] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   /** null  = idle; ""    = events received, waiting for first token;
    *  string = partial or complete optimistic narrative text           */
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [lastRemoteAction, setLastRemoteAction] = useState<string | null>(null);
+  const aliveHostileTargets = useMemo(
+    () => selectableTargets.filter((target) => !target.isPlayer && target.hp > 0),
+    [selectableTargets]
+  );
 
   async function handleSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault();
     const pendingAction = action.trim();
     if (!pendingAction || submitting) return;
     setAction("");
-    await executeAction(pendingAction);
+    await executeAction({ action: pendingAction, targetIds: selectedTargetIds });
   }
+
+  useEffect(() => {
+    const validTargetIds = new Set(aliveHostileTargets.map((target) => target.id));
+    setSelectedTargetIds((current) => {
+      const next = current.filter((id) => validTargetIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [aliveHostileTargets]);
 
   // Allow external triggers (e.g. from DialogueOverlay)
   useEffect(() => {
     function handleRemote(e: Event) {
-      const customEvent = e as CustomEvent<{ action: string }>;
-      const { action: remoteText } = customEvent.detail;
+      const customEvent = e as CustomEvent<ActionPayload>;
+      const { action: remoteText, targetIds } = customEvent.detail;
       if (remoteText && !submitting) {
         setLastRemoteAction(remoteText);
-        executeAction(remoteText);
+        executeAction({ action: remoteText, targetIds });
       }
     }
     window.addEventListener("dungeon-remote-action", handleRemote);
     return () => window.removeEventListener("dungeon-remote-action", handleRemote);
   }, [submitting]);
 
-  async function executeAction(pendingAction: string) {
+  function toggleTarget(targetId: string) {
+    setSelectedTargetIds((current) =>
+      current.includes(targetId)
+        ? current.filter((id) => id !== targetId)
+        : [...current, targetId]
+    );
+  }
+
+  async function executeAction(payload: ActionPayload) {
+    const pendingAction = payload.action.trim();
+    const targetIds = payload.targetIds ?? [];
+
     setError(null);
     setSubmitting(true);
     setStreamingText("");
@@ -73,7 +109,7 @@ export default function ActionInput({ campaignId }: Props) {
       const res = await fetch(`/api/campaign/${campaignId}/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: pendingAction }),
+        body: JSON.stringify({ action: pendingAction, targetIds }),
       });
 
       // 4xx / 5xx: read JSON error body (same shape as before)
@@ -260,6 +296,44 @@ export default function ActionInput({ campaignId }: Props) {
 
       {/* ── Input form ────────────────────────────────────────────────────── */}
       <form onSubmit={handleSubmit} className="space-y-3">
+        {aliveHostileTargets.length > 0 && (
+          <fieldset className="rounded-md border border-neutral-700/80 bg-neutral-900/60 px-3 py-2">
+            <legend
+              className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400"
+              style={{ fontFamily: "var(--font-cinzel), serif" }}
+            >
+              Targets
+            </legend>
+            <div className="flex flex-wrap gap-2">
+              {aliveHostileTargets.map((target) => {
+                const selected = selectedTargetIds.includes(target.id);
+                return (
+                  <label
+                    key={target.id}
+                    className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                      selected
+                        ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
+                        : "border-neutral-700 bg-neutral-950/30 text-neutral-300 hover:border-neutral-500"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={submitting}
+                      onChange={() => toggleTarget(target.id)}
+                      className="h-3.5 w-3.5 accent-amber-500"
+                    />
+                    <span className="font-medium">{target.name}</span>
+                    <span className="text-neutral-500">
+                      {target.hp}/{target.maxHp}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
+
         <div className="flex gap-2">
           <label htmlFor="action-input" className="sr-only">
             Your action
