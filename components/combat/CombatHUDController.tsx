@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import CombatHUD from "./CombatHUD";
-import type { ActionStreamFrame, CombatConsequencePayload, SingleTargetConsequence } from "@/lib/events/game-events";
+import type { ActionStreamFrame, CombatConsequencePayload } from "@/lib/events/game-events";
+import { applyCombatTargetsToCombatants } from "./combat-state";
+
+function isCombatConsequencePayload(
+  p: Record<string, unknown>
+): p is CombatConsequencePayload {
+  return Array.isArray(p.targets);
+}
 
 interface Props {
   campaignId: string;
@@ -84,27 +91,12 @@ export default function CombatHUDController({
 
               // 2. Map to local HUD state for immediate visual feedback
               if (frame.e.type === "COMBAT_CONSEQUENCE") {
-                const payload = frame.e.payload as unknown as CombatConsequencePayload; 
-                const targets = payload.targets || [];
-                
-                setLocalCombatants(current => 
-                  current.map(c => {
-                    const targetData = targets.find((t: SingleTargetConsequence) => t.targetId === c.id);
-                    if (targetData) {
-                      return { 
-                        ...c, 
-                        hp: targetData.hpAfter,
-                        // We replace conditions with whatever the backend says is applied.
-                        // If 'conditionsApplied' is a delta, we'd need to merge, but 
-                        // authoritative state will be handled by router.refresh() at 'done'.
-                        conditions: targetData.conditionsApplied && targetData.conditionsApplied.length > 0 
-                          ? [...new Set([...c.conditions, ...targetData.conditionsApplied])]
-                          : c.conditions
-                      };
-                    }
-                    return c;
-                  })
-                );
+                const raw = frame.e.payload as Record<string, unknown>;
+                if (isCombatConsequencePayload(raw)) {
+                  setLocalCombatants((current) =>
+                    applyCombatTargetsToCombatants(current, raw.targets)
+                  );
+                }
               } else if (frame.e.type === "TURN_ADVANCE" || frame.e.type === "ROUND_ADVANCE") {
                 const nextId = frame.e.payload.nextTurnIndex;
                 if (typeof nextId === "number") {
