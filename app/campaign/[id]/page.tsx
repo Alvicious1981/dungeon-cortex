@@ -24,7 +24,10 @@ import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
 import { WildernessMapController } from "@/components/exploration/map/WildernessMapController";
 import WildernessHUD from "@/components/exploration/WildernessHUD";
+import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
+import CharacterSheetSidebar from "@/components/character/sheet/CharacterSheetSidebar";
+import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
 
@@ -244,7 +247,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   // ── Exploration data (conditional — only when campaign has an active location) ──
   type ExplorationData = {
     campaignId: string;
-    location: { id: string; name: string; type: string; description: string };
+    location: { id: string; name: string; type: string; description: string; seed: string };
     nodes: Array<{ index: number; name: string; description: string; feature: string; npcSeed: string | null; x: number; y: number }>;
     edges: Array<{ fromIndex: number; toIndex: number; passageType: string }>;
     initialCurrentNodeIndex: number;
@@ -266,7 +269,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       if (currentNode) {
         explorationData = {
           campaignId: campaign.id,
-          location: { id: loc.id, name: loc.name, type: loc.type, description: loc.description },
+          location: { id: loc.id, name: loc.name, type: loc.type, description: loc.description, seed: loc.seed },
           nodes: loc.nodes.map((n) => ({
             index: n.index, name: n.name, description: n.description,
             feature: n.feature, npcSeed: n.npcSeed, x: n.x, y: n.y,
@@ -348,8 +351,37 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       {/* Dialogue Overlay — self-wiring, listens for dungeon-dialogue-open events */}
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
       
-      {/* Detailed Character Sheet — Floating toggle */}
+      {/* Detailed Character Sheet — Floating toggle (mobile / expanded view) */}
       <CharacterSheetController character={character} inventory={character.inventory} />
+
+      {/* Persistent left sidebar — visible on lg+, hidden on mobile (CharacterSheetController takes over there) */}
+      <CharacterSheetSidebar
+        viewModel={buildSheetViewModel({
+          character: {
+            id: character.id,
+            name: character.name,
+            race: character.race,
+            class: character.class,
+            level: character.level,
+            hp: character.hp,
+            maxHp: character.maxHp,
+            xp: character.xp,
+            stats: character.stats,
+            spellSlots: character.spellSlots,
+            knownSpells: character.knownSpells,
+            concentrationSpellId: character.concentrationSpellId,
+          },
+          inventory: character.inventory.map((i) => ({
+            id: i.id,
+            name: i.name,
+            type: i.type,
+            quantity: i.quantity,
+            equippedSlot: i.equippedSlot ?? null,
+            properties: i.properties,
+          })),
+        })}
+        className="fixed left-0 top-0 z-20 hidden lg:flex"
+      />
 
       {/* Wilderness HUD — Only visible in Wilderness Mode */}
       {isWildernessMode && travelState && (
@@ -382,7 +414,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       />
 
       <main
-        className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6"
+        className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:ml-80 lg:mr-0 lg:max-w-none xl:ml-96 xl:max-w-6xl xl:mx-auto"
         id="main-content"
       >
         {activeEncounter && (
@@ -778,6 +810,26 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               />
             )}
 
+            {/* ── Dungeon VTT — visible when in a dungeon location with a seed and current node ── */}
+            {explorationData &&
+              explorationData.location.type === "dungeon" &&
+              explorationData.location.seed &&
+              (() => {
+                const dungeonNode = explorationData.nodes.find(
+                  (n) => n.index === explorationData.initialCurrentNodeIndex
+                );
+                return dungeonNode ? (
+                  <DungeonMapVTT
+                    seed={explorationData.location.seed}
+                    playerX={dungeonNode.x}
+                    playerY={dungeonNode.y}
+                    currentNodeIndex={explorationData.initialCurrentNodeIndex}
+                    visitedNodeIndices={explorationData.initialVisitedNodeIndices}
+                  />
+                ) : null;
+              })()
+            }
+
             {/* ── Wilderness VTT — visible when in Wilderness Mode ── */}
             {isWildernessMode && travelState && (
               <WildernessMapController
@@ -893,7 +945,18 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             </section>
 
             <MacroDeck campaignId={campaign.id} inCombat={!!activeEncounter} />
-            <ActionInput campaignId={campaign.id} />
+            <ActionInput
+              campaignId={campaign.id}
+              selectableTargets={
+                activeEncounter?.combatants.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  hp: c.hp,
+                  maxHp: c.maxHp,
+                  isPlayer: c.isPlayer,
+                })) ?? []
+              }
+            />
 
           </div>
 
