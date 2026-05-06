@@ -135,6 +135,7 @@ export function computeFOV(
   fov.compute(originX, originY, radius, (x: number, y: number) => {
     visible.add(`${x},${y}`)
   })
+  visible.add(`${originX},${originY}`)  // guarantee origin always visible
 
   return visible
 }
