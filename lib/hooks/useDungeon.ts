@@ -16,7 +16,7 @@ export function useDungeon(
   options?: { width?: number; height?: number; nodeCount?: number }
 ): UseDungeonResult {
   const dungeon = useMemo(() => {
-    if (!seed) return null
+    if (seed === null) return null
     return generateDungeon(seed, options)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed, options?.width, options?.height, options?.nodeCount])
