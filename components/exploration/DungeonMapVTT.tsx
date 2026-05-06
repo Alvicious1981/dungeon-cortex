@@ -1,10 +1,17 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { PointerEvent, WheelEvent } from "react";
 import { useDungeon } from "../../lib/hooks/useDungeon";
 import type { TileType } from "../../lib/rules/dungeon";
 
 const TILE_SIZE = 16;
+
+const TILE_COLORS: Record<TileType, { fill: string; stroke: string }> = {
+  floor: { fill: "#2a1f1a", stroke: "#3d2f28" },
+  wall: { fill: "#0d0d0d", stroke: "#1a1a1a" },
+  door: { fill: "#7c5c2e", stroke: "#a07840" },
+};
 
 export interface DungeonMapVTTProps {
   seed: string;
@@ -15,14 +22,14 @@ export interface DungeonMapVTTProps {
   onNodeClick?: (nodeIndex: number) => void;
 }
 
-export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
+export function DungeonMapVTT({
   seed,
   playerX,
   playerY,
   currentNodeIndex,
   visitedNodeIndices,
   onNodeClick,
-}) => {
+}: DungeonMapVTTProps) {
   const { dungeon, fov, isReady } = useDungeon(seed, playerX, playerY);
 
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -48,7 +55,7 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
 
   // Pointer capture drag pattern
   const handlePointerDown = useCallback(
-    (e: React.PointerEvent<SVGSVGElement>) => {
+    (e: PointerEvent<SVGSVGElement>) => {
       isDragging.current = true;
       dragStart.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
       (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
@@ -57,7 +64,7 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
   );
 
   const handlePointerMove = useCallback(
-    (e: React.PointerEvent<SVGSVGElement>) => {
+    (e: PointerEvent<SVGSVGElement>) => {
       if (!isDragging.current) return;
       setOffset({
         x: e.clientX - dragStart.current.x,
@@ -72,7 +79,7 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
   }, []);
 
   const handleWheel = useCallback(
-    (e: React.WheelEvent<SVGSVGElement>) => {
+    (e: WheelEvent) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
       setZoom((prev) => Math.min(Math.max(prev * delta, 0.2), 4));
@@ -94,13 +101,6 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
   const resetZoom = useCallback(() => {
     setZoom(1);
   }, []);
-
-  // Tile color/stroke helpers
-  const tileColors: Record<TileType, { fill: string; stroke: string }> = {
-    floor: { fill: "#2a1f1a", stroke: "#3d2f28" },
-    wall: { fill: "#0d0d0d", stroke: "#1a1a1a" },
-    door: { fill: "#7c5c2e", stroke: "#a07840" },
-  };
 
   const visitedSet = new Set(visitedNodeIndices);
 
@@ -131,15 +131,13 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
         style={{ touchAction: "none" }}
       >
         <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
-          {/* Tile grid */}
           {dungeon.tiles.map((row, y) =>
             row.map((tileType, x) => {
               const key = `${x},${y}`;
               const inFov = fov.has(key);
-              // Skip invisible wall tiles
               if (!inFov && tileType === "wall") return null;
 
-              const colors = tileColors[tileType];
+              const colors = TILE_COLORS[tileType];
               const opacity = inFov ? 1 : 0.45;
 
               return (
@@ -158,7 +156,6 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
             })
           )}
 
-          {/* Room markers */}
           {dungeon.rooms.map((room) => {
             const key = `${room.centerX},${room.centerY}`;
             const inFov = fov.has(key);
@@ -219,7 +216,6 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
             );
           })}
 
-          {/* Player token */}
           <circle
             cx={playerX * TILE_SIZE + TILE_SIZE / 2}
             cy={playerY * TILE_SIZE + TILE_SIZE / 2}
@@ -231,7 +227,6 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
         </g>
       </svg>
 
-      {/* Control buttons — bottom right */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
         <button
           onClick={resetZoom}
@@ -250,4 +245,4 @@ export const DungeonMapVTT: React.FC<DungeonMapVTTProps> = ({
       </div>
     </div>
   );
-};
+}
