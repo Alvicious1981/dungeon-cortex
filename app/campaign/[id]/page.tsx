@@ -339,6 +339,13 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   );
   const hasInventory = character.inventory.length > 0;
 
+  const dungeonCurrentNode =
+    explorationData?.location.type === "dungeon" && explorationData.location.seed
+      ? (explorationData.nodes.find(
+          (n) => n.index === explorationData!.initialCurrentNodeIndex
+        ) ?? null)
+      : null;
+
   return (
     <div
       className={`${cinzel.variable} ${crimsonPro.variable} min-h-screen`}
@@ -811,24 +818,17 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             )}
 
             {/* ── Dungeon VTT — visible when in a dungeon location with a seed and current node ── */}
-            {explorationData &&
-              explorationData.location.type === "dungeon" &&
-              explorationData.location.seed &&
-              (() => {
-                const dungeonNode = explorationData.nodes.find(
-                  (n) => n.index === explorationData.initialCurrentNodeIndex
-                );
-                return dungeonNode ? (
-                  <DungeonMapVTT
-                    seed={explorationData.location.seed}
-                    playerX={dungeonNode.x}
-                    playerY={dungeonNode.y}
-                    currentNodeIndex={explorationData.initialCurrentNodeIndex}
-                    visitedNodeIndices={explorationData.initialVisitedNodeIndices}
-                  />
-                ) : null;
-              })()
-            }
+            {dungeonCurrentNode && explorationData && (
+              <div className="w-full h-96">
+                <DungeonMapVTT
+                  seed={explorationData.location.seed!}
+                  playerX={dungeonCurrentNode.x}
+                  playerY={dungeonCurrentNode.y}
+                  currentNodeIndex={explorationData.initialCurrentNodeIndex}
+                  visitedNodeIndices={explorationData.initialVisitedNodeIndices}
+                />
+              </div>
+            )}
 
             {/* ── Wilderness VTT — visible when in Wilderness Mode ── */}
             {isWildernessMode && travelState && (
