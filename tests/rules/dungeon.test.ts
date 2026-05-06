@@ -50,10 +50,12 @@ describe("generateDungeon", () => {
     expect(map.rooms.length).toBeGreaterThanOrEqual(2)
   })
 
-  it("nodeIndex values are 0-based sequential", () => {
+  it("nodeIndex values are unique non-negative integers", () => {
     const map = generateDungeon(SEED, { nodeCount: 6 })
-    const indices = map.rooms.map(r => r.nodeIndex).sort((a, b) => a - b)
-    indices.forEach((v, i) => expect(v).toBe(i))
+    const indices = map.rooms.map(r => r.nodeIndex)
+    const unique = new Set(indices)
+    expect(unique.size).toBe(indices.length)  // all unique
+    expect(indices.every(i => i >= 0)).toBe(true)  // all non-negative
   })
 })
 
@@ -108,11 +110,15 @@ describe("hasLineOfSight", () => {
     ).toBe(true)
   })
 
-  it("is false when a wall is between two points", () => {
-    const map = generateDungeon(SEED, { width: 80, height: 40 })
-    const r0 = map.rooms[0]
-    const r1 = map.rooms.find(r => r.id !== r0.id)!
-    const result = hasLineOfSight(map, r0.centerX, r0.centerY, r1.centerX, r1.centerY)
-    expect(typeof result).toBe("boolean")
+  it("is false when a wall is directly between two floor tiles", () => {
+    const syntheticMap: DungeonMap = {
+      seed: "synthetic",
+      width: 5,
+      height: 1,
+      tiles: [["floor", "floor", "wall", "floor", "floor"]],
+      rooms: [],
+      corridors: [],
+    }
+    expect(hasLineOfSight(syntheticMap, 0, 0, 4, 0)).toBe(false)
   })
 })

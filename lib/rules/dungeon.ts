@@ -1,11 +1,5 @@
 export type TileType = "wall" | "floor" | "door"
 
-export interface DungeonTile {
-  x: number
-  y: number
-  type: TileType
-}
-
 export interface DungeonRoom {
   id: number
   x: number
