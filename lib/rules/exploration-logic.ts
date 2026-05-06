@@ -12,6 +12,7 @@
  */
 
 import { seededFloat, pickSeeded } from "@/lib/rules/generators";
+import type { DungeonMap } from "./dungeon";
 import {
   LOCATION_TEMPLATES,
   TURNS_PER_HOUR,
@@ -225,14 +226,30 @@ export function generateNodeGraph(
   return { nodes, edges };
 }
 
-export function generateLocationPayload(input: {
-  locationType: LocationType;
-  seed: string;
-}): LocationPayload {
+export function generateLocationPayload(
+  input: { locationType: LocationType; seed: string },
+  options?: { dungeonMap?: DungeonMap }
+): LocationPayload {
   const template = LOCATION_TEMPLATES[input.locationType];
   const name = generateLocationName(input.locationType, input.seed);
   const description = pickSeeded(`${input.seed}:desc`, template.descriptionPool);
-  const { nodes, edges } = generateNodeGraph(input.locationType, input.seed);
+  let { nodes, edges } = generateNodeGraph(input.locationType, input.seed);
+
+  if (options?.dungeonMap) {
+    const { rooms, width, height } = options.dungeonMap;
+    nodes = nodes.map((node, i) => {
+      const room = rooms[i];
+      return {
+        ...node,
+        x: room
+          ? Math.round((room.centerX / (width - 1)) * 5)
+          : node.x,
+        y: room
+          ? Math.round((room.centerY / (height - 1)) * 5)
+          : node.y,
+      };
+    });
+  }
 
   if (nodes.length < 2) {
     throw new Error(

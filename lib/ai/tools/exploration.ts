@@ -19,6 +19,7 @@ import {
 } from "@/lib/rules/exploration";
 import { EXPLORATION_XP } from "@/lib/rules/progression";
 import { seededFloat } from "@/lib/rules/generators";
+import { generateDungeon } from "@/lib/rules/dungeon";
 
 export function buildExplorationTools(campaignId: string) {
   return {
@@ -66,7 +67,15 @@ export function buildExplorationTools(campaignId: string) {
             });
           }
 
-          const payload = generateLocationPayload({ locationType, seed: resolvedSeed });
+          const dungeonMap =
+            locationType === "dungeon"
+              ? generateDungeon(resolvedSeed)
+              : undefined;
+
+          const payload = generateLocationPayload(
+            { locationType, seed: resolvedSeed },
+            { dungeonMap }
+          );
           const validated = LocationPayloadSchema.parse(payload);
 
           const result = await prisma.$transaction(async (tx) => {
