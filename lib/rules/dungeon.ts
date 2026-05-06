@@ -71,14 +71,12 @@ export function generateDungeon(
     nodeIndex: i,
   }))
 
-  // Mark door tiles
   for (const r of rawRooms) {
     r.getDoors((x: number, y: number) => {
       tiles[y][x] = "door"
     })
   }
 
-  // Build corridor adjacency from raw corridors
   const rawCorridors = digger.getCorridors()
   const corridors: Array<{ fromRoomId: number; toRoomId: number }> = []
 
@@ -91,18 +89,23 @@ export function generateDungeon(
     const endX: number = c._endX
     const endY: number = c._endY
 
-    const nearest = (px: number, py: number) =>
-      rooms.reduce(
+    const owningRoom = (px: number, py: number) => {
+      const owner = rooms.find(
+        (r) => px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height
+      )
+      if (owner) return { id: owner.id, dist: 0 }
+      return rooms.reduce(
         (best, room) => {
           const d = Math.abs(room.centerX - px) + Math.abs(room.centerY - py)
           return d < best.dist ? { id: room.id, dist: d } : best
         },
-        { id: 0, dist: Infinity }
+        { id: -1, dist: Infinity }
       )
+    }
 
-    const from = nearest(startX, startY)
-    const to = nearest(endX, endY)
-    if (from.id !== to.id) {
+    const from = owningRoom(startX, startY)
+    const to = owningRoom(endX, endY)
+    if (from.id !== to.id && from.id !== -1 && to.id !== -1) {
       corridors.push({ fromRoomId: from.id, toRoomId: to.id })
     }
   }
@@ -147,7 +150,7 @@ export function hasLineOfSight(
   x2: number,
   y2: number
 ): boolean {
-  // Bresenham's line algorithm — stop at first wall
+  // Bresenham line
   let x = x1
   let y = y1
   const dx = Math.abs(x2 - x1)
