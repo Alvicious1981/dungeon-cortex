@@ -1,17 +1,19 @@
 # Dungeon Cortex — Master Architecture Guide
 
-Status: Authoritative Source of Truth  
+Status: Authoritative Architecture Source of Truth  
 Effective Date: 2026-04-17  
 Scope: Milestone U consolidation slice and downstream implementation guardrails
 
 ## 1. Purpose
-This document resolves historical documentation-code drift and defines authoritative architectural law for Milestone U execution.
+This document resolves historical documentation-code drift and defines authoritative architectural law for Milestone U execution. Rules-system canon is delegated to `docs/DECISION_5E_SRD_API.md`, which establishes D&D 5e/SRD 2014 and `https://www.dnd5eapi.co/api` as the active mechanical/data boundary.
 
 When documents conflict, use this precedence order:
 1. Explicit user instruction in the active conversation.
-2. `MASTER_ARCH_GUIDE.md` (this file).
-3. `PROJECT_CONTEXT.md` (product baseline).
-4. Milestone specs and historical planning artifacts.
+2. `docs/DECISION_5E_SRD_API.md` (rules-system canon and SRD data-source authority).
+3. `MASTER_ARCH_GUIDE.md` (this file; architecture and system law authority).
+4. `PROJECT_CONTEXT.md` (product baseline).
+5. Compatible milestone specs and current implementation plans.
+6. Historical planning artifacts and reference extracts.
 
 ## 2. Consolidated Audit Outcome
 Audit date: 2026-04-17  
@@ -53,6 +55,13 @@ Current status: Core deterministic backend is functional, but integration contra
 ### LAW-05: Combat Conditions Are State Truth
 - `Combatant.conditions` is canonical for condition state.
 - Rendering, advantage/disadvantage derivation, and persistence flows must read from this backend state.
+
+### LAW-06: D&D 5e/SRD 2014 Is the Only Active Rules System
+- `docs/DECISION_5E_SRD_API.md` is the canonical rules-system decision for Dungeon Cortex.
+- D&D 5e/SRD 2014 is the only active mechanical rules baseline.
+- `https://www.dnd5eapi.co/api` is the primary external SRD data source; local SRD stores may only act as derived caches or adapters.
+- AD&D, OSR, retroclone mechanics, THAC0, descending Armor Class, AD&D saving throw categories, and 5e-to-retro conversion paths are non-authoritative and out of scope.
+- The backend remains the sole authority for mechanical legality, roll/DC resolution, state mutation, and persistence; AI narration must only describe outcomes already resolved by backend facts.
 
 ## 4. Current Architecture Truth Map
 
