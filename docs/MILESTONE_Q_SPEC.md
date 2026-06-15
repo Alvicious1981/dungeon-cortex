@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Obsolete historical milestone spec.** This document contains prior OSR/AD&D downtime and haven assumptions. It is retained for history, but is not authoritative for current implementation. The active rules canon is `docs/DECISION_5E_SRD_API.md`: D&D 5e/SRD 2014 only, with `https://www.dnd5eapi.co/api` as the primary external SRD source. Do not implement gold-for-XP, AD&D/OSR morale, loyalty, reaction, or downtime mechanics from this spec unless they are explicitly redesigned for D&D 5e/SRD 2014 compatibility.
+
 # Milestone Q: Haven & Downtime Engine
 
 ## 1. Vision & OSR/AD&D 1e Principles
