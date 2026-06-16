@@ -88,7 +88,7 @@ export const Dnd5eApiMonsterSchema = z
     wisdom: z.number(),
     charisma: z.number(),
     proficiencies: z.array(Dnd5eApiProficiencySchema).optional(),
-    senses: z.record(z.string(), z.string()),
+    senses: z.record(z.string(), z.union([z.string(), z.number()])),
     languages: z.string(),
     challenge_rating: z.number(),
     proficiency_bonus: z.number().optional(),
@@ -169,7 +169,7 @@ export interface SrdMonster {
   abilityScores: SrdMonsterAbilityScores;
   savingThrows: Record<string, number>;
   skills: Record<string, number>;
-  senses: Record<string, string>;
+  senses: Record<string, string | number>;
   languages: string;
   challengeRating: number;
   proficiencyBonus?: number;

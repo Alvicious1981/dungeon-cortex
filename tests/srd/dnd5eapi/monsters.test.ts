@@ -59,7 +59,7 @@ const goblinMonster = {
   ],
   senses: {
     darkvision: "60 ft.",
-    passive_perception: "12",
+    passive_perception: 12,
   },
   languages: "Common, Goblin",
   challenge_rating: 0.25,
@@ -182,6 +182,7 @@ describe("dnd5eapi monsters adapter", () => {
       { type: "armor", value: 15, desc: "leather armor, shield" },
     ]);
     expect(monster.speed).toEqual({ walk: "30 ft.", climb: "15 ft." });
+    expect(monster.senses).toEqual({ darkvision: "60 ft.", passive_perception: 12 });
   });
 
   it("normalizes challenge_rating, xp, proficiencies, traits, and actions", () => {
