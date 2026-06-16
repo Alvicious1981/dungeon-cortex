@@ -399,7 +399,8 @@ export async function queryMonsters(opts: MonsterQueryOptions): Promise<Monster[
   });
 
   // Project DB columns → MonsterSchema-compatible shape.
-  // MonsterSchema uses Open5e-style field names; we map our flat columns to them.
+  // This is transitional compatibility with legacy local field names; it does
+  // not make those snapshots authoritative over the canonical 5e SRD API.
   return rows
     .filter((r) => r.hitPoints !== null && r.armorClass !== null)
     .map((r): Monster => ({
@@ -436,8 +437,8 @@ export async function queryMonsters(opts: MonsterQueryOptions): Promise<Monster[
  * Returns a minimal set of monster stats needed to compute AC for a spawned
  * combatant. Used by `acFromMonsterData` in the encounter creation flow.
  *
- * Returns the Open5e-compatible `armor_class` array so existing helpers
- * don't need to change.
+ * Returns the legacy-compatible `armor_class` array so existing helpers
+ * do not need to change during the pending technical migration.
  */
 export function buildMonsterRawData(monster: Monster): Record<string, unknown> {
   return {
