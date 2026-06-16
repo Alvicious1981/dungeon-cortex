@@ -9,12 +9,12 @@ import {
 } from "@/lib/rules/npc";
 import { abilityModifier } from "@/lib/rules/dice";
 import {
-  ReactionRollInputSchema,
+  InitialDispositionInputSchema,
   SocialCheckInputSchema,
   GetRumorsInputSchema,
 } from "@/lib/rules/social";
 import {
-  rollReaction as rollReactionPure,
+  establishInitialDisposition as establishInitialDispositionPure,
   resolveSocialCheck,
   getRumorsPayload,
 } from "@/lib/rules/social-logic";
@@ -133,21 +133,28 @@ export function buildSocialTools(
         }
       },
     }),
-    rollReaction: tool({
+    establishInitialDisposition: tool({
       description:
-        "Perform the current legacy 2d6 reaction roll to determine an NPC's initial disposition " +
-        "toward the party when they are first approached. This mechanic is transitional " +
-        "and pending technical migration to the canonical 5e/SRD 2014 rules reference. " +
+        "Establish an NPC's first-contact disposition with the D&D 5e/SRD 2014-compatible backend d20 Charisma check. " +
         "MUST be called the FIRST TIME the party speaks to any NPC in a scene. " +
         "Do NOT call this if NPC.hasMetPlayer is true — use the persisted disposition instead. " +
-        "The roll result determines the NPC's opening attitude. " +
+        "The backend result determines the NPC's opening attitude and persists disposition, personalityTags, and hasMetPlayer. " +
         "The Narrator MUST voice the NPC using ONLY the returned dispositionBand and personality tags. " +
         "NEVER invent NPC attitudes, motivations, or secrets without calling this tool first. " +
         "Code is Law.",
-      inputSchema: ReactionRollInputSchema,
+      inputSchema: InitialDispositionInputSchema,
       execute: async ({ npcSeed, npcRole, charismaModifier }) => {
         try {
-          const result = rollReactionPure({ npcSeed, npcRole, charismaModifier });
+          const existingNPC = await prisma.nPC.findUnique({
+            where: { campaignId_seed: { campaignId, seed: npcSeed } },
+          });
+          if (existingNPC?.hasMetPlayer) {
+            return JSON.stringify({
+              error: "Initial disposition already established. Use the persisted NPC disposition instead.",
+            });
+          }
+
+          const result = establishInitialDispositionPure({ npcSeed, npcRole, charismaModifier });
           const statblock = generateNPC(npcSeed, npcRole as NPCRole);
 
           await prisma.nPC.upsert({
@@ -178,7 +185,7 @@ export function buildSocialTools(
 
           return JSON.stringify(result);
         } catch {
-          return JSON.stringify({ error: "Reaction roll failed mechanically. Narrate a moment of silence." });
+          return JSON.stringify({ error: "Initial disposition check failed mechanically. Narrate a moment of silence." });
         }
       },
     }),
@@ -196,15 +203,15 @@ export function buildSocialTools(
       inputSchema: SocialCheckInputSchema,
       execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
         try {
-          const result = await prisma.$transaction(async (tx) => {
+          const result = await prisma.$transaction(async (tx: typeof prisma) => {
             const npc = await tx.nPC.findUnique({
               where: { campaignId_seed: { campaignId, seed: npcSeed } },
             });
             if (!npc) {
-              throw new Error("NPC not found. Call rollReaction first to establish first contact.");
+              throw new Error("NPC not found. Call establishInitialDisposition first to establish first contact.");
             }
             if (!npc.hasMetPlayer) {
-              throw new Error("Call rollReaction before socialCheck — the party has not yet met this NPC.");
+              throw new Error("Call establishInitialDisposition before socialCheck — the party has not yet met this NPC.");
             }
 
             const campaignRec = await tx.campaign.findUnique({
