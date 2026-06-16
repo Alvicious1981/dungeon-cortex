@@ -19,7 +19,7 @@
 
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
-import type { GameLog } from "@/app/generated/prisma/client";
+import type { GameLog } from "@prisma/client";
 import { saveMemory } from "@/lib/memory/store";
 
 // ---------------------------------------------------------------------------

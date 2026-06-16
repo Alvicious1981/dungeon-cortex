@@ -45,7 +45,7 @@ import {
 import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
-import { Prisma } from "@/app/generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 import type { PartyInventoryState } from "@/lib/rules/exploration";
 

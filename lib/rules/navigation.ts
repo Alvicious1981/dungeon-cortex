@@ -8,7 +8,7 @@
  *   The AI narrator may only describe a move once this function returns success.
  */
 
-import { Prisma } from "@/app/generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import { generateNodeContent } from "@/lib/rules/generator";
 
 export interface NavigationResult {

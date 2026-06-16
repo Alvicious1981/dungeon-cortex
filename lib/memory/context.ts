@@ -14,7 +14,7 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
-import type { Prisma } from "@/app/generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 import { searchMemories } from "@/lib/memory/search";
 
 // ---------------------------------------------------------------------------

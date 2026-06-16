@@ -9,7 +9,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "seed": "tsx prisma/seed-srd.ts"
+    "seed": "tsx prisma/seed-srd.ts",
+    "generate": "prisma generate",
+    "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed-srd.ts"

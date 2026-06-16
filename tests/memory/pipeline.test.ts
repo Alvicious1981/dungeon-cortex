@@ -65,7 +65,7 @@ import { buildCampaignContext } from "@/lib/memory/context";
 import { generateEmbedding } from "@/lib/memory/embeddings";
 import { generateText } from "ai";
 import { prisma } from "@/lib/db/prisma";
-import type { GameLog } from "@/app/generated/prisma/client";
+import type { GameLog } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // Typed mock helpers

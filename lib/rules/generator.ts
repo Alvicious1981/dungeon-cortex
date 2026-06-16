@@ -8,7 +8,7 @@
  *   Populates "empty" nodes with features, monsters, or loot on first visit.
  */
 
-import { Prisma } from "@/app/generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import { seededFloat, pickSeeded } from "@/lib/rules/generators";
 import { filterMonsters } from "@/lib/rules/srd";
 import { generateLootPayload } from "@/lib/rules/loot";

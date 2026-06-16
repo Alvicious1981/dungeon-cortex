@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import TradeWindow from "./TradeWindow";
 import type { MerchantPayload, TradeResult } from "@/lib/rules/trade";
-import type { InventoryItem } from "@/app/generated/prisma/client";
+import type { InventoryItem } from "@prisma/client";
 import { executeTradeAction } from "@/app/actions/trade";
 
 export default function TradeOverlayController({ 
