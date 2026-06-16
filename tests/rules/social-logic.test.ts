@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as dice from "@/lib/rules/dice";
 import {
   generateNPCPersonality,
-  rollReaction,
+  establishInitialDisposition,
   computeSocialDC,
   resolveSocialCheck,
   getRumorsPayload,
@@ -59,42 +59,43 @@ describe("Social Logic Engine", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // rollReaction
+  // establishInitialDisposition
   // ---------------------------------------------------------------------------
 
-  describe("rollReaction", () => {
-    it("maps 2d6 to correct disposition bands (Hostile boundary)", () => {
-      mockedRollDie.mockReturnValueOnce(1).mockReturnValueOnce(1); // Total 2
-      const res = rollReaction({ npcSeed: "test", npcRole: "guard", charismaModifier: 0 });
+  describe("establishInitialDisposition", () => {
+    it("uses d20 and maps to Hostile boundary", () => {
+      mockedRollDie.mockReturnValueOnce(1); // d20 total 1
+      const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 0 });
       expect(res.dispositionBand).toBe("Hostile");
       expect(res.initialDisposition).toBe(-8);
+      expect(mockedRollDie).toHaveBeenCalledOnce();
+      expect(mockedRollDie).toHaveBeenCalledWith(20);
     });
 
-    it("maps 2d6 to correct disposition bands (Helpful boundary)", () => {
-      mockedRollDie.mockReturnValueOnce(6).mockReturnValueOnce(6); // Total 12
-      const res = rollReaction({ npcSeed: "test", npcRole: "guard", charismaModifier: 0 });
+    it("uses d20 and maps to Helpful boundary", () => {
+      mockedRollDie.mockReturnValueOnce(20); // d20 total 20
+      const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 0 });
       expect(res.dispositionBand).toBe("Helpful");
       expect(res.initialDisposition).toBe(8);
     });
 
     it("applies charisma modifier and clamps result", () => {
-      mockedRollDie.mockReturnValueOnce(1).mockReturnValueOnce(1); // Base 2
-      // 2 + 5 = 7 (Indifferent)
-      const res = rollReaction({ npcSeed: "test", npcRole: "guard", charismaModifier: 5 });
-      expect(res.modifiedTotal).toBe(7);
+      mockedRollDie.mockReturnValueOnce(5); // 5 + 5 = 10 (Indifferent)
+      const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 5 });
+      expect(res.total).toBe(10);
       expect(res.dispositionBand).toBe("Indifferent");
     });
     
-    it("clamps very high rolls to 14", () => {
-       mockedRollDie.mockReturnValueOnce(6).mockReturnValueOnce(6); // Base 12
-       const res = rollReaction({ npcSeed: "test", npcRole: "guard", charismaModifier: 5 });
-       expect(res.modifiedTotal).toBe(14);
+    it("clamps very high checks to 25", () => {
+       mockedRollDie.mockReturnValueOnce(20); // Base 20
+       const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 5 });
+       expect(res.total).toBe(25);
     });
 
-    it("clamps very low rolls to 2", () => {
-       mockedRollDie.mockReturnValueOnce(1).mockReturnValueOnce(1); // Base 2
-       const res = rollReaction({ npcSeed: "test", npcRole: "guard", charismaModifier: -5 });
-       expect(res.modifiedTotal).toBe(2);
+    it("clamps very low checks to 1", () => {
+       mockedRollDie.mockReturnValueOnce(1); // Base 1
+       const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: -5 });
+       expect(res.total).toBe(1);
     });
   });
 

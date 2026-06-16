@@ -12,8 +12,8 @@ import {
   DispositionBand, 
   DISPOSITION_BANDS,
   DefaultNPCSocialState,
-  ReactionRollInput,
-  ReactionRollResult,
+  InitialDispositionInput,
+  InitialDispositionResult,
   SocialCheckInput,
   SocialCheckResult,
   RumorPayload,
@@ -44,13 +44,13 @@ export function getDispositionBand(disposition: number): DispositionBand {
 }
 
 /**
- * Maps a modified 2d6 roll total to a DispositionBand.
+ * Maps a modified D&D 5e d20 ability check total to a DispositionBand.
  */
-function getBandFromRollTotal(total: number): DispositionBand {
-  if (total <= 3)  return "Hostile";
-  if (total <= 5)  return "Unfriendly";
-  if (total <= 8)  return "Indifferent";
-  if (total <= 11) return "Friendly";
+function getBandFromD20Total(total: number): DispositionBand {
+  if (total <= 5)  return "Hostile";
+  if (total <= 9)  return "Unfriendly";
+  if (total <= 14) return "Indifferent";
+  if (total <= 19) return "Friendly";
   return "Helpful";
 }
 
@@ -99,21 +99,19 @@ export function generateNPCPersonality(seed: string): NPCPersonality {
 }
 
 /**
- * Performs the AD&D 1e 2d6 Reaction Roll.
+ * Establishes first-contact disposition with a backend-owned D&D 5e d20
+ * Charisma ability check. The AI may narrate only this resolved result.
  */
-export function rollReaction(input: ReactionRollInput): ReactionRollResult {
-  const die1 = rollDie(6);
-  const die2 = rollDie(6);
-  const rawTotal = die1 + die2;
-  const modifiedTotal = clamp(rawTotal + input.charismaModifier, 2, 14);
-  const dispositionBand = getBandFromRollTotal(modifiedTotal);
+export function establishInitialDisposition(input: InitialDispositionInput): InitialDispositionResult {
+  const roll = rollDie(20);
+  const total = clamp(roll + input.charismaModifier, 1, 25);
+  const dispositionBand = getBandFromD20Total(total);
   const initialDisposition = DISPOSITION_BANDS[dispositionBand].initial;
   const personality = generateNPCPersonality(input.npcSeed);
 
   return {
-    dice: [die1, die2],
-    rawTotal,
-    modifiedTotal,
+    roll,
+    total,
     charismaModifier: input.charismaModifier,
     dispositionBand,
     initialDisposition,

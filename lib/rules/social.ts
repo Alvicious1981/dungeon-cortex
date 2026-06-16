@@ -16,15 +16,15 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 /**
- * The five reaction bands and their properties.
- * Adapted from OSR/AD&D 1e Reaction Roll.
+ * The five social disposition bands and their persisted seed values.
+ * Initial disposition is established by a backend-owned D&D 5e d20 ability check.
  */
 export const DISPOSITION_BANDS = {
-  Hostile:     { min: 2,  max: 3,        initial: -8 },
-  Unfriendly:  { min: 4,  max: 5,        initial: -4 },
-  Indifferent: { min: 6,  max: 8,        initial:  0 },
-  Friendly:    { min: 9,  max: 11,       initial:  4 },
-  Helpful:     { min: 12, max: Infinity,  initial:  8 },
+  Hostile:     { min: 1,  max: 5,        initial: -8 },
+  Unfriendly:  { min: 6,  max: 9,        initial: -4 },
+  Indifferent: { min: 10, max: 14,       initial:  0 },
+  Friendly:    { min: 15, max: 19,       initial:  4 },
+  Helpful:     { min: 20, max: Infinity, initial:  8 },
 } as const;
 
 export type DispositionBand = keyof typeof DISPOSITION_BANDS;
@@ -66,9 +66,9 @@ export interface DefaultNPCSocialState {
 // Tool Schemas
 // ---------------------------------------------------------------------------
 
-// --- ReactionRoll ---
+// --- InitialDisposition ---
 
-export const ReactionRollInputSchema = z
+export const InitialDispositionInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
     npcRole: z.enum(["guard", "bandit", "commoner"]),
@@ -76,12 +76,11 @@ export const ReactionRollInputSchema = z
   })
   .strict();
 
-export type ReactionRollInput = z.infer<typeof ReactionRollInputSchema>;
+export type InitialDispositionInput = z.infer<typeof InitialDispositionInputSchema>;
 
-export const ReactionRollResultSchema = z.object({
-  dice: z.tuple([z.number().int().min(1).max(6), z.number().int().min(1).max(6)]),
-  rawTotal: z.number().int(),
-  modifiedTotal: z.number().int(),
+export const InitialDispositionResultSchema = z.object({
+  roll: z.number().int().min(1).max(20),
+  total: z.number().int(),
   charismaModifier: z.number().int(),
   dispositionBand: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
   initialDisposition: z.number().int().min(-10).max(10),
@@ -92,7 +91,7 @@ export const ReactionRollResultSchema = z.object({
   }),
 });
 
-export type ReactionRollResult = z.infer<typeof ReactionRollResultSchema>;
+export type InitialDispositionResult = z.infer<typeof InitialDispositionResultSchema>;
 
 // --- SocialCheck ---
 

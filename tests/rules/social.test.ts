@@ -11,8 +11,8 @@
 import { describe, it, expect } from "vitest";
 import {
   NPCSocialStateSchema,
-  ReactionRollInputSchema,
-  ReactionRollResultSchema,
+  InitialDispositionInputSchema,
+  InitialDispositionResultSchema,
   SocialCheckInputSchema,
   SocialCheckResultSchema,
   GetRumorsInputSchema,
@@ -57,10 +57,10 @@ describe("NPCSocialStateSchema", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ReactionRollInputSchema
+// InitialDispositionInputSchema
 // ---------------------------------------------------------------------------
 
-describe("ReactionRollInputSchema", () => {
+describe("InitialDispositionInputSchema", () => {
   const valid = {
     npcSeed: "guard-99",
     npcRole: "guard" as const,
@@ -68,28 +68,27 @@ describe("ReactionRollInputSchema", () => {
   };
 
   it("parses valid input", () => {
-    expect(() => ReactionRollInputSchema.parse(valid)).not.toThrow();
+    expect(() => InitialDispositionInputSchema.parse(valid)).not.toThrow();
   });
 
   it("rejects out-of-range charismaModifier", () => {
-    expect(() => ReactionRollInputSchema.parse({ ...valid, charismaModifier: 6 })).toThrow();
-    expect(() => ReactionRollInputSchema.parse({ ...valid, charismaModifier: -6 })).toThrow();
+    expect(() => InitialDispositionInputSchema.parse({ ...valid, charismaModifier: 6 })).toThrow();
+    expect(() => InitialDispositionInputSchema.parse({ ...valid, charismaModifier: -6 })).toThrow();
   });
 
   it("rejects invalid npcRole", () => {
-    expect(() => ReactionRollInputSchema.parse({ ...valid, npcRole: "king" })).toThrow();
+    expect(() => InitialDispositionInputSchema.parse({ ...valid, npcRole: "king" })).toThrow();
   });
 });
 
 // ---------------------------------------------------------------------------
-// ReactionRollResultSchema
+// InitialDispositionResultSchema
 // ---------------------------------------------------------------------------
 
-describe("ReactionRollResultSchema", () => {
+describe("InitialDispositionResultSchema", () => {
   const valid = {
-    dice: [3, 4] as [number, number],
-    rawTotal: 7,
-    modifiedTotal: 9,
+    roll: 15,
+    total: 17,
     charismaModifier: 2,
     dispositionBand: "Friendly" as const,
     initialDisposition: 4,
@@ -101,15 +100,15 @@ describe("ReactionRollResultSchema", () => {
   };
 
   it("parses valid result", () => {
-    expect(() => ReactionRollResultSchema.parse(valid)).not.toThrow();
+    expect(() => InitialDispositionResultSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects invalid dice values", () => {
-    expect(() => ReactionRollResultSchema.parse({ ...valid, dice: [7, 7] })).toThrow();
+  it("rejects non-d20 roll values", () => {
+    expect(() => InitialDispositionResultSchema.parse({ ...valid, roll: 21 })).toThrow();
   });
 
   it("rejects invalid dispositionBand", () => {
-    expect(() => ReactionRollResultSchema.parse({ ...valid, dispositionBand: "Angry" })).toThrow();
+    expect(() => InitialDispositionResultSchema.parse({ ...valid, dispositionBand: "Angry" })).toThrow();
   });
 });
 

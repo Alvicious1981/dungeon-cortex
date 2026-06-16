@@ -153,14 +153,14 @@ describe("formatNPCContext", () => {
     expect(output).not.toContain("owe money to people");
   });
 
-  it("requires rollReaction for unmet NPCs", () => {
+  it("requires establishInitialDisposition for unmet NPCs", () => {
     const output = formatNPCContext({
       name: "Stranger",
       disposition: null,
       personalityTags: null,
       hasMetPlayer: false,
     });
-    expect(output).toContain("rollReaction");
+    expect(output).toContain("establishInitialDisposition");
   });
 });
 

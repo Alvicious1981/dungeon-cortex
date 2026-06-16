@@ -437,7 +437,7 @@ const DISPOSITION_ICONS: Record<DispositionBand, string> = {
  * Returns a "## 🎭 NPC" prompt section for the AI, grounding the narrator in
  * the NPC's persisted personality and current disposition.
  *
- * - Unmet NPC: instructs the AI to call `rollReaction` first.
+ * - Unmet NPC: instructs the AI to call `establishInitialDisposition` first.
  * - Met NPC: injects disposition band, icon, motivation, and distinctive trait.
  *   The secret is intentionally withheld from the narrator prompt to prevent
  *   premature disclosure — it is revealed only at Helpful disposition.
@@ -446,7 +446,7 @@ const DISPOSITION_ICONS: Record<DispositionBand, string> = {
  */
 export function formatNPCContext(npc: ActiveNPC): string {
   if (!npc.hasMetPlayer) {
-    return `## 🎭 NPC: ${npc.name}\n*(Not yet met — call rollReaction before first interaction.)*`;
+    return `## 🎭 NPC: ${npc.name}\n*(Not yet met — call establishInitialDisposition before first interaction.)*`;
   }
 
   const band = getDispositionBand(npc.disposition ?? 0);
