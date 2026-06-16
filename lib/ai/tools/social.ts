@@ -135,8 +135,9 @@ export function buildSocialTools(
     }),
     rollReaction: tool({
       description:
-        "Perform the 2d6 AD&D 1e Reaction Roll to determine an NPC's initial disposition " +
-        "toward the party when they are first approached. " +
+        "Perform the current legacy 2d6 reaction roll to determine an NPC's initial disposition " +
+        "toward the party when they are first approached. This mechanic is transitional " +
+        "and pending technical migration to the canonical 5e/SRD 2014 rules reference. " +
         "MUST be called the FIRST TIME the party speaks to any NPC in a scene. " +
         "Do NOT call this if NPC.hasMetPlayer is true — use the persisted disposition instead. " +
         "The roll result determines the NPC's opening attitude. " +

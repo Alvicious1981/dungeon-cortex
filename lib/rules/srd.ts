@@ -1,7 +1,11 @@
 /**
  * lib/rules/srd.ts
  *
- * Local SRD data layer — Spanish 5e SRD (Magical20-ai/5e-database-spanish).
+ * Local SRD data layer — Spanish 5e SRD snapshot.
+ *
+ * Canonical rules/data authority is docs/DECISION_5E_SRD_API.md and
+ * https://www.dnd5eapi.co/api. Bundled local data is historical/derived and
+ * transitional until the technical migration is completed.
  *
  * Validates and indexes the bundled JSON at module load time using Zod.
  * Invalid records are silently skipped so a single malformed entry never
@@ -114,7 +118,9 @@ export const MonsterSchema = z.object({
   size: z.string().optional(),
   type: z.string().optional(),
   alignment: z.string().optional(),
-  // armor_class may be an array of objects (Open5e) or a flat number (older sources)
+  // Transitional compatibility: armor_class may be an array of objects from
+  // historical derived snapshots or a flat number from older local sources.
+  // Canonical source remains https://www.dnd5eapi.co/api.
   armor_class: z
     .array(z.object({ type: z.string().optional(), value: z.number() }))
     .optional(),

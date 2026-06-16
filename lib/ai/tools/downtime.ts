@@ -11,8 +11,8 @@ export function buildDowntimeTools(campaignId: string) {
   return {
     resolveDowntime: tool({
     description:
-      "Resolve haven downtime mechanically: living expenses, gold-to-XP conversion, and retainer morale updates. " +
-      "Use this when the party rests in a haven, pays upkeep, or deposits gold for XP. " +
+      "Resolve the current legacy haven downtime mechanics: living expenses, transitional gold-to-XP conversion, and retainer morale updates. " +
+      "Use this when the party rests in a haven, pays upkeep, or deposits gold for XP while this subsystem awaits technical migration. " +
       "NEVER narrate gold, XP, or morale changes before this tool confirms them.",
     inputSchema: ResolveDowntimeInputSchema,
     execute: async ({

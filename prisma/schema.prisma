@@ -240,7 +240,7 @@ model NPC {
   traits               Json?
   /// Current disposition toward the party. Range: −10 (Hostile) to +10 (Helpful).
   /// Set by rollReaction on first meeting; updated by socialCheck on social actions.
-  /// Null for NPCs the party has never spoken to (reaction roll pending).
+  /// Null for NPCs the party has never spoken to (legacy reaction roll pending).
   disposition          Int?
   /// Personality Tags generated deterministically from the seed.
   /// JSON object: { motivation: string, secret: string, distinctiveTrait: string }
@@ -248,7 +248,7 @@ model NPC {
   /// Never null after first meeting; null for legacy/unmet NPCs.
   personalityTags      Json?
   /// True once the party has formally met this NPC (rollReaction has fired).
-  /// Prevents duplicate reaction rolls on subsequent encounters.
+  /// Prevents duplicate legacy reaction rolls on subsequent encounters.
   hasMetPlayer         Boolean  @default(false)
   knownRumors          String[] @default([])
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
@@ -484,7 +484,8 @@ model LocationEdge {
   @@index([locationId])
 }
 
-/// Tracks the campaign's absolute temporal state for the OSR Exploration Time Engine.
+/// Tracks the campaign's absolute temporal state for the exploration-time engine.
+/// Legacy subsystem pending technical migration to the canonical 5e/SRD 2014 rules reference.
 /// One record per campaign. totalTurns is monotonically increasing — never decremented.
 /// All mutations occur inside prisma.$transaction — no partial writes.
 model CampaignTime {
@@ -521,7 +522,8 @@ model CampaignTime {
   campaign Campaign @relation(fields: [campaignId], references: [id])
 }
 
-/// Tracks consumable exploration resources for the OSR Exploration Time Engine.
+/// Tracks consumable exploration resources for the exploration-time engine.
+/// Legacy subsystem pending technical migration to the canonical 5e/SRD 2014 rules reference.
 /// One record per campaign. Quantities are non-negative integers — never fractional.
 /// The AI narrator MUST NOT mutate this table directly.
 model PartyInventory {
@@ -671,7 +673,8 @@ model Haven {
   @@index([campaignId])
 }
 
-/// A hired NPC companion that demands wages and maintains morale.
+/// A hired NPC companion that demands wages and maintains legacy morale state.
+/// Morale mechanics are pending technical migration to the canonical 5e/SRD 2014 rules reference.
 model Retainer {
   id           String   @id @default(cuid())
   campaignId   String
@@ -679,7 +682,7 @@ model Retainer {
   class        String
   level        Int      @default(1)
   wage         Int      @default(5)
-  loyaltyScore Int      @default(7) // 2d6 scale, 7 is average
+  loyaltyScore Int      @default(7) // Legacy 2d6 scale, 7 is average; pending technical migration.
   moraleState  String   @default("confident")
   createdAt    DateTime @default(now())
 
