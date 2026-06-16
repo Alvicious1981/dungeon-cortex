@@ -7,7 +7,7 @@ import {
   type Dnd5eApiResource,
 } from "./schemas";
 
-export const DEFAULT_DND5E_API_BASE_URL = "https://www.dnd5eapi.co/api";
+export const DEFAULT_DND5E_API_BASE_URL = "https://www.dnd5eapi.co/api/2014";
 export const DEFAULT_DND5E_API_TIMEOUT_MS = 10_000;
 
 export type Dnd5eApiFetch = typeof fetch;
@@ -53,7 +53,7 @@ export class Dnd5eApiClientError extends Error {
 
 export interface Dnd5eApiClient {
   getIndex(endpoint: string): Promise<Dnd5eApiIndex>;
-  getResource<TResource extends Dnd5eApiResource = Dnd5eApiResource>(
+  getResource<TResource = Dnd5eApiResource>(
     pathOrUrl: string,
     schema?: ZodSchema<TResource>,
   ): Promise<TResource>;
@@ -79,10 +79,56 @@ export function createDnd5eApiClient(
       controller.abort();
     }, timeoutMs);
 
-    let response: Response;
     try {
-      response = await fetchImpl(url, { signal: controller.signal });
+      const response = await fetchImpl(url, { signal: controller.signal });
+
+      if (!response.ok) {
+        throw new Dnd5eApiClientError(
+          `D&D 5e API request failed: ${response.status} ${response.statusText}`,
+          {
+            kind: "http",
+            url,
+            status: response.status,
+            statusText: response.statusText,
+          },
+        );
+      }
+
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        if (didTimeout || isAbortError(error)) {
+          throw new Dnd5eApiClientError(`D&D 5e API request timed out: ${url}`, {
+            kind: "timeout",
+            url,
+            cause: error,
+          });
+        }
+
+        throw new Dnd5eApiClientError(`D&D 5e API returned invalid JSON: ${url}`, {
+          kind: "invalid-json",
+          url,
+          cause: error,
+        });
+      }
+
+      try {
+        return schema.parse(payload);
+      } catch (error) {
+        if (error instanceof ZodError) {
+          throw new Dnd5eApiClientError(
+            `D&D 5e API returned an unexpected response shape: ${url}`,
+            { kind: "invalid-shape", url, cause: error },
+          );
+        }
+        throw error;
+      }
     } catch (error) {
+      if (error instanceof Dnd5eApiClientError) {
+        throw error;
+      }
+
       if (didTimeout || isAbortError(error)) {
         throw new Dnd5eApiClientError(`D&D 5e API request timed out: ${url}`, {
           kind: "timeout",
@@ -94,48 +140,13 @@ export function createDnd5eApiClient(
     } finally {
       clearTimeout(timeout);
     }
-
-    if (!response.ok) {
-      throw new Dnd5eApiClientError(
-        `D&D 5e API request failed: ${response.status} ${response.statusText}`,
-        {
-          kind: "http",
-          url,
-          status: response.status,
-          statusText: response.statusText,
-        },
-      );
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch (error) {
-      throw new Dnd5eApiClientError(`D&D 5e API returned invalid JSON: ${url}`, {
-        kind: "invalid-json",
-        url,
-        cause: error,
-      });
-    }
-
-    try {
-      return schema.parse(payload);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        throw new Dnd5eApiClientError(
-          `D&D 5e API returned an unexpected response shape: ${url}`,
-          { kind: "invalid-shape", url, cause: error },
-        );
-      }
-      throw error;
-    }
   }
 
   return {
     getIndex(endpoint) {
       return request(endpoint, Dnd5eApiIndexSchema);
     },
-    getResource<TResource extends Dnd5eApiResource = Dnd5eApiResource>(
+    getResource<TResource = Dnd5eApiResource>(
       pathOrUrl: string,
       schema?: ZodSchema<TResource>,
     ) {
@@ -156,7 +167,13 @@ function toRequestUrl(pathOrUrl: string, baseUrl: string): string {
     return pathOrUrl;
   }
 
+  const base = new URL(baseUrl);
   const path = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
+
+  if (path.startsWith("/api/2014") || path.startsWith("/api")) {
+    return `${base.origin}${path}`;
+  }
+
   return `${baseUrl}${path}`;
 }
 
