@@ -28,7 +28,7 @@ import type {
   PipelineCombatant,
   PipelineEncounterState,
 } from "@/lib/rules/combat-pipeline";
-import type { Prisma } from "@/app/generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { SingleTargetConsequence } from "@/lib/events/game-events";
 
 // ---------------------------------------------------------------------------

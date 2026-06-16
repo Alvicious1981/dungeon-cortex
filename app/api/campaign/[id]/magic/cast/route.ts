@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { isSpellSlots, hasAvailableSlot, consumeSlot } from "@/lib/rules/magic";
-import type { Prisma } from "@/app/generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 
 interface RouteContext {
   params: Promise<{ id: string }>;

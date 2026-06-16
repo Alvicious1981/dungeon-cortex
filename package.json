@@ -9,13 +9,15 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "seed": "tsx prisma/seed-srd.ts"
+    "seed": "tsx prisma/seed-srd.ts",
+    "generate": "prisma generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed-srd.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.50",
+    "@prisma/client": "^6.19.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
     "ai": "^6.0.145",
@@ -29,7 +31,6 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@prisma/client": "^6.19.2",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",

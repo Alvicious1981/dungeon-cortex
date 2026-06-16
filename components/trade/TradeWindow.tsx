@@ -2,7 +2,7 @@
 
 import React, { memo, useEffect, useId, useState } from "react";
 import type { MerchantPayload } from "@/lib/rules/trade";
-import type { InventoryItem } from "@/app/generated/prisma/client";
+import type { InventoryItem } from "@prisma/client";
 
 // Re-using same rarity style logic as SpoilsOfWar
 const RARITY_STYLE: Record<string, { color: string; border: string; bg: string; glow?: string }> = {

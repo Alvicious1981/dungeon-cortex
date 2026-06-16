@@ -4,7 +4,7 @@ import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { roll } from "@/lib/rules/dice";
 import { abilityModifier } from "@/lib/rules/dice";
 import { isSpellSlots, restoreAllSlots } from "@/lib/rules/magic";
-import type { Prisma } from "@/app/generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 
 interface RestBody {
   type: "long" | "short";
