@@ -32,8 +32,16 @@ import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
 import { buildDowntimeTools } from "@/lib/ai/tools/downtime";
 import type { LevelUpPayload } from "@/lib/rules/progression";
 import type { MerchantPayload } from "@/lib/rules/trade";
+import type { CombatNarrativeContext } from "@/lib/narrative/combat-narrative-types";
+import { buildNarrativePrompt } from "@/lib/narrative/prompt-builder";
+import { validateNarrativeText } from "@/lib/narrative/narrative-validator";
+import { generateFallbackProse } from "@/lib/narrative/fallback-prose";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface StreamNarrativeOptions {
+  mockNarrativeText?: string;
+}
 
 export interface NarrativeStream {
   /** Token-by-token async iterable — consume to stream to the client. */
@@ -91,6 +99,8 @@ function buildTools(
 export async function streamNarrative(
   campaignId: string,
   playerInput: string,
+  narrativeContext?: CombatNarrativeContext,
+  options?: StreamNarrativeOptions,
 ): Promise<NarrativeStream> {
   // Shared promise that resolves once we know whether a level-up occurred.
   // The onLevelUp callback resolves it with the payload; the text-completion
@@ -108,7 +118,17 @@ export async function streamNarrative(
   // ─── MOCK TEMPORAL PARA TESTING LOCAL ───────────────────────────────────────
   // Para evitar bloqueos por falta de OPENAI_API_KEY. 
   // Retorna una narrativa estática determinista.
-  const mockContent = "El héroe realiza su acción con determinación en el campo de batalla (MODO MOCK).";
+  let mockContent = "El héroe realiza su acción con determinación en el campo de batalla (MODO MOCK).";
+  if (options?.mockNarrativeText && (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development")) {
+    mockContent = options.mockNarrativeText;
+  }
+
+  if (narrativeContext) {
+    const validation = validateNarrativeText(mockContent, narrativeContext);
+    if (!validation.ok) {
+      mockContent = generateFallbackProse(narrativeContext);
+    }
+  }
   
   // Resolvemos los payloads de herramientas como null para que no queden colgando
   resolveLevelUp(null);
@@ -125,12 +145,19 @@ export async function streamNarrative(
 
   /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
   const context = await buildCampaignContext(campaignId);
-  const system = formatSystemPrompt(context);
+  let system = formatSystemPrompt(context);
+  let prompt = playerInput;
+
+  if (narrativeContext) {
+    const safetyPrompt = buildNarrativePrompt(narrativeContext);
+    system = system + "\n\n" + safetyPrompt.system;
+    prompt = playerInput + "\n\nResolved Facts for this action:\n" + safetyPrompt.user;
+  }
 
   const result = streamText({
     model: openai("gpt-4o-mini"),
     system,
-    prompt: playerInput,
+    prompt,
     stopWhen: stepCountIs(5),
     tools: buildTools(campaignId, {
       onLevelUp: (payload) => resolveLevelUp(payload),
@@ -138,10 +165,31 @@ export async function streamNarrative(
     }),
   });
 
+  // If narrativeContext exists, we buffer and validate the result.text before yielding/resolving.
+  let finalNarrativeTextPromise: Promise<string>;
+  let finalNarrativeTextStream: AsyncIterableStream<string>;
+
+  if (narrativeContext) {
+    finalNarrativeTextPromise = result.text.then((fullText) => {
+      const validation = validateNarrativeText(fullText, narrativeContext);
+      return validation.ok ? fullText : generateFallbackProse(narrativeContext);
+    }).catch(() => {
+      return generateFallbackProse(narrativeContext);
+    });
+
+    finalNarrativeTextStream = (async function* () {
+      const verifiedText = await finalNarrativeTextPromise;
+      yield verifiedText;
+    })() as any;
+  } else {
+    finalNarrativeTextPromise = result.text;
+    finalNarrativeTextStream = result.textStream;
+  }
+
   // Fallback: if the text stream ends without a level-up tool call, resolve null.
   // Promise.resolve wraps the PromiseLike so we can chain .catch().
   // A second resolveLevelUp call after onLevelUp fires is a no-op (Promises resolve once).
-  Promise.resolve(result.text).then(() => {
+  Promise.resolve(finalNarrativeTextPromise).then(() => {
     resolveLevelUp(null);
     resolveMerchant(null);
   }).catch(() => {
@@ -150,8 +198,8 @@ export async function streamNarrative(
   });
 
   return {
-    textStream: result.textStream,
-    textPromise: result.text,
+    textStream: finalNarrativeTextStream,
+    textPromise: finalNarrativeTextPromise,
     levelUpPayload,
     merchantPayload,
   };

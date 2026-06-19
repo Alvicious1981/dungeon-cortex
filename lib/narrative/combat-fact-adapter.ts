@@ -1,0 +1,211 @@
+import { GameEvent } from '../events/game-events';
+import { CombatNarrativeContext, NarrativeFact } from './combat-narrative-types';
+
+/**
+ * Helper to compare two facts for exact equality.
+ * Deduplication is strictly limited to identical facts (same type, description, and payload).
+ */
+function areFactsEqual(a: NarrativeFact, b: NarrativeFact): boolean {
+  if (a.type !== b.type) return false;
+  if (a.description !== b.description) return false;
+
+  const payloadA = a.payload || {};
+  const payloadB = b.payload || {};
+  const keysA = Object.keys(payloadA);
+  const keysB = Object.keys(payloadB);
+
+  if (keysA.length !== keysB.length) return false;
+
+  return keysA.every(key => payloadA[key] === payloadB[key]);
+}
+
+/**
+ * Deterministically adapts game events and resolved consequences from the backend
+ * into a safe, 5e-compliant narrative context for description.
+ *
+ * Rules:
+ * - D&D 5e/SRD 2014 only. No legacy terminology or mechanics.
+ * - Prioritizes targets[] array over flat legacy fields.
+ * - Does not invent facts, rolls, or outcomes.
+ * - Does not infer or calculate hpBefore. It is copied ONLY if explicitly present.
+ */
+export function adaptCombatEventsToNarrativeContext(
+  events: GameEvent[]
+): CombatNarrativeContext {
+  const facts: NarrativeFact[] = [];
+  let actor: CombatNarrativeContext['actor'] = undefined;
+  const targets: NonNullable<CombatNarrativeContext['targets']> = [];
+
+  // Helper to add fact only if it is not an exact duplicate of an already added fact.
+  // LIMITACIÓN DE DEDUPLICACIÓN: Debido a la falta de IDs únicos de eventos en el
+  // SSE stream, la deduplicación se limita a hechos exactamente idénticos (mismo tipo,
+  // descripción y payload). Múltiples ataques idénticos (mismo daño y objetivo) en la
+  // misma ráfaga de eventos se unificarán. Esto evita duplicados cruzados entre
+  // COMBAT_CONSEQUENCE y DAMAGE_DEALT pero puede agrupar ataques idénticos legítimos.
+  const addFact = (fact: NarrativeFact) => {
+    if (!facts.some(f => areFactsEqual(f, fact))) {
+      facts.push(fact);
+    }
+  };
+
+  for (const event of events) {
+    if (event.type === 'COMBAT_CONSEQUENCE') {
+      const payload = event.payload || {};
+      const attackerName = typeof payload.attackerName === 'string' ? payload.attackerName : '';
+
+      if (attackerName) {
+        actor = {
+          id: '',
+          name: attackerName,
+          isPlayer: true
+        };
+      }
+
+      const rawTargets = Array.isArray(payload.targets) ? payload.targets : [];
+      if (rawTargets.length > 0) {
+        for (const t of rawTargets) {
+          const targetName = typeof t.targetName === 'string' ? t.targetName : '';
+          const targetId = typeof t.targetId === 'string' ? t.targetId : '';
+          const damage = typeof t.damage === 'number' ? t.damage : 0;
+          const hpAfter = typeof t.hpAfter === 'number' ? t.hpAfter : 0;
+          
+          // Copy hpBefore ONLY if it explicitly comes from the backend payload. No calculations allowed.
+          const hpBefore = typeof t.hpBefore === 'number' ? t.hpBefore : (typeof t.hp_before === 'number' ? t.hp_before : undefined);
+
+          const isCrit = !!t.isCrit;
+          const isFumble = !!t.isFumble;
+          const isKill = !!t.isKill;
+          const conditionsApplied = Array.isArray(t.conditionsApplied) ? t.conditionsApplied : [];
+
+          // Add target metadata to context
+          if (!targets.some(item => item.id === targetId)) {
+            const targetMetadata: NonNullable<CombatNarrativeContext['targets']>[number] = {
+              id: targetId,
+              name: targetName,
+              isPlayer: false,
+              hpAfter,
+              ...(hpBefore !== undefined ? { hpBefore } : {})
+            };
+            targets.push(targetMetadata);
+          }
+
+          // Add narrative facts
+          if (damage > 0) {
+            addFact({
+              type: 'attack_hit',
+              description: `Attack hit on ${targetName}`,
+              payload: { targetName }
+            });
+            addFact({
+              type: 'damage_confirmed',
+              description: `Damage confirmed: ${damage} to ${targetName}`,
+              payload: { damageAmount: damage, targetName }
+            });
+          } else {
+            addFact({
+              type: 'attack_miss',
+              description: `Attack missed ${targetName}`,
+              payload: { targetName }
+            });
+          }
+
+          if (isCrit) {
+            addFact({
+              type: 'critical_hit',
+              description: `Critical hit on ${targetName}`,
+              payload: { targetName }
+            });
+          }
+
+          if (isFumble) {
+            addFact({
+              type: 'critical_miss',
+              description: `Critical miss targeting ${targetName}`,
+              payload: { targetName }
+            });
+          }
+
+          for (const cond of conditionsApplied) {
+            addFact({
+              type: 'condition_applied',
+              description: `Condition ${cond} applied to ${targetName}`,
+              payload: { conditionName: cond, targetName }
+            });
+          }
+
+          if (isKill) {
+            addFact({
+              type: 'enemy_defeated',
+              description: `${targetName} was defeated`,
+              payload: { targetName }
+            });
+          }
+        }
+      }
+    } else if (event.type === 'CRITICAL_HIT') {
+      const payload = event.payload || {};
+      const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+      addFact({
+        type: 'critical_hit',
+        description: `Critical hit recorded${targetName ? ` on ${targetName}` : ''}`,
+        payload: { targetName }
+      });
+    } else if (event.type === 'CRITICAL_MISS') {
+      const payload = event.payload || {};
+      const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+      addFact({
+        type: 'critical_miss',
+        description: `Critical miss recorded${targetName ? ` targeting ${targetName}` : ''}`,
+        payload: { targetName }
+      });
+    } else if (event.type === 'DAMAGE_DEALT') {
+      const payload = event.payload || {};
+      const damage = typeof payload.damage === 'number' ? payload.damage : 0;
+      const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+
+      addFact({
+        type: 'attack_hit',
+        description: `Attack hit${targetName ? ` on ${targetName}` : ''}`,
+        payload: { targetName }
+      });
+      addFact({
+        type: 'damage_confirmed',
+        description: `Damage confirmed: ${damage}${targetName ? ` to ${targetName}` : ''}`,
+        payload: { damageAmount: damage, targetName }
+      });
+    } else if (event.type === 'ENEMY_DEFEATED') {
+      const payload = event.payload || {};
+      const targetName = typeof payload.name === 'string' ? payload.name : '';
+      if (targetName) {
+        addFact({
+          type: 'enemy_defeated',
+          description: `${targetName} was defeated`,
+          payload: { targetName }
+        });
+      }
+    } else if (event.type === 'HEALING_RECEIVED') {
+      const payload = event.payload || {};
+      const amount = typeof payload.amount === 'number' ? payload.amount : 0;
+      const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+      addFact({
+        type: 'healing_confirmed',
+        description: `Healing received: ${amount}${targetName ? ` by ${targetName}` : ''}`,
+        payload: { healingAmount: amount, targetName }
+      });
+    } else if (event.type === 'CONCENTRATION_BROKEN') {
+      const payload = event.payload || {};
+      const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+      addFact({
+        type: 'concentration_broken',
+        description: `Concentration broken${targetName ? ` for ${targetName}` : ''}`,
+        payload: { targetName }
+      });
+    }
+  }
+
+  return {
+    facts,
+    actor,
+    targets
+  };
+}

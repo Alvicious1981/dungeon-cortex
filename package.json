@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "seed": "tsx prisma/seed-srd.ts",
-    "generate": "prisma generate"
+    "generate": "prisma generate",
+    "check-retro": "tsx scripts/check-retro-jargon.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed-srd.ts"
