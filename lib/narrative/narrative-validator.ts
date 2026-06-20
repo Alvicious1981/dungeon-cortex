@@ -90,7 +90,7 @@ export function validateNarrativeText(
   }
 
   // 5. Muerte no confirmada
-  const deathWords = /\b(?:muere|dies|slain|killed|muerto|defeated|derrotado|cae\s+muerto|morir|die|slay)\b/i;
+  const deathWords = /\b(?:muere|dies|slain|killed|muerto|defeated|derrotad[oa]|cae\s+muerto|morir|die|slay)\b/i;
   if (deathWords.test(text)) {
     const hasDefeatedFact = context.facts.some(f => f.type === 'enemy_defeated');
     if (!hasDefeatedFact) {
@@ -109,14 +109,14 @@ export function validateNarrativeText(
   const hitPhrases = /(?:alcanza|impacta|hits|hit\b|conecta|golpea|golpe|corta)/i;
   const missPhrases = /(?:falla|misses|miss\b|corta\s+el\s+aire)/i;
 
-  if (hasMiss && hitPhrases.test(text)) {
+  if (hasMiss && hitPhrases.test(text) && !/corta\s+el\s+aire/i.test(text)) {
     issues.push({
       code: 'hit_miss_contradiction',
       message: 'Text describes an impact, but the backend resolved a miss.',
       severity: 'error'
     });
   }
-  if (hasHit && missPhrases.test(text) && !/falla\s+el\s+golpe/i.test(text)) {
+  if (hasHit && missPhrases.test(text) && !/falla\s+el\s+golpe|corta\s+el\s+aire/i.test(text)) {
     issues.push({
       code: 'hit_miss_contradiction',
       message: 'Text describes a miss, but the backend resolved a hit.',

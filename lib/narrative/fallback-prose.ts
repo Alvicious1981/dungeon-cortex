@@ -1,4 +1,53 @@
-import { CombatNarrativeContext } from './combat-narrative-types';
+import { CombatFacts, CombatNarrativeContext, NarrativeFact } from './combat-narrative-types';
+
+function isCombatFacts(input: CombatNarrativeContext | CombatFacts): input is CombatFacts {
+  return !('facts' in input);
+}
+
+function normalizeFallbackInput(input: CombatNarrativeContext | CombatFacts): CombatNarrativeContext {
+  if (!isCombatFacts(input)) {
+    return input;
+  }
+
+  const facts: NarrativeFact[] = [];
+
+  if (input.damage > 0) {
+    facts.push({ type: 'attack_hit', description: 'Attack hit', payload: { targetName: input.defenderName } });
+    facts.push({
+      type: 'damage_confirmed',
+      description: 'Damage confirmed',
+      payload: { damageAmount: input.damage, targetName: input.defenderName }
+    });
+  } else {
+    facts.push({ type: 'attack_miss', description: 'Attack miss', payload: { targetName: input.defenderName } });
+  }
+
+  if (input.isCrit) {
+    facts.push({ type: 'critical_hit', description: 'Critical hit', payload: { targetName: input.defenderName } });
+  }
+
+  if (input.isFumble) {
+    facts.push({ type: 'critical_miss', description: 'Critical miss', payload: { targetName: input.defenderName } });
+  }
+
+  if (input.isKill) {
+    facts.push({ type: 'enemy_defeated', description: 'Enemy defeated', payload: { targetName: input.defenderName } });
+  }
+
+  for (const conditionName of input.conditionsApplied) {
+    facts.push({
+      type: 'condition_applied',
+      description: 'Condition applied',
+      payload: { conditionName, targetName: input.defenderName }
+    });
+  }
+
+  return {
+    facts,
+    actor: { id: '', name: input.attackerName, isPlayer: true },
+    targets: [{ id: '', name: input.defenderName, isPlayer: false, hpAfter: input.hpAfter, hpBefore: input.hpBefore }]
+  };
+}
 
 /**
  * Deterministically generates safe, qualitative fallback descriptions in Spanish
@@ -11,9 +60,10 @@ import { CombatNarrativeContext } from './combat-narrative-types';
  * - No retro jargon or forbidden terms.
  */
 export function generateFallbackProse(
-  context: CombatNarrativeContext
+  input: CombatNarrativeContext | CombatFacts
 ): string {
   const parts: string[] = [];
+  const context = normalizeFallbackInput(input);
   const facts = context.facts || [];
 
   const hasCritHit = facts.some(f => f.type === 'critical_hit');
