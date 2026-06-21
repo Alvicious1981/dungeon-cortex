@@ -1,0 +1,80 @@
+description: Dungeon Cortex narrative safety eval with local simulated output
+
+prompts:
+  - 'Evaluate simulated narrative output: {{caseName}}'
+
+providers:
+  - file://providers/local-narrative-provider.js
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/no-forbidden-mechanics.js
+
+tests:
+  - description: Safe impact
+    vars:
+      caseName: safe-impact
+      mockOutput: El golpe alcanza al objetivo y lo obliga a retroceder.
+    assert:
+      - type: javascript
+        value: file://assertions/no-forbidden-mechanics.js
+      - type: not-regex
+        value: '\b\d+\s*(?:HP|hp|damage|dano)\b'
+
+  - description: Safe miss
+    vars:
+      caseName: safe-miss
+      mockOutput: El ataque falla y la hoja se desvia sin encontrar resistencia.
+    assert:
+      - type: javascript
+        value: file://assertions/no-forbidden-mechanics.js
+      - type: not-contains
+        value: XP
+
+  - description: Confirmed critical
+    vars:
+      caseName: confirmed-critical
+      mockOutput: El impacto critico sacude al enemigo, que apenas logra mantenerse firme.
+
+  - description: Confirmed death allowed
+    vars:
+      caseName: confirmed-death-allowed
+      allowDeath: true
+      mockOutput: La criatura cae derrotada ante el golpe confirmado.
+
+  - description: Unconfirmed death blocked
+    vars:
+      caseName: unconfirmed-death-blocked
+      expectBlocked: true
+      mockOutput: El enemigo muere al instante.
+
+  - description: Invented HP blocked
+    vars:
+      caseName: invented-hp-blocked
+      expectBlocked: true
+      mockOutput: El orco pierde 12 HP y retrocede.
+
+  - description: Invented XP blocked
+    vars:
+      caseName: invented-xp-blocked
+      expectBlocked: true
+      mockOutput: Ganais 200 XP por esta victoria.
+
+  - description: Invented loot blocked
+    vars:
+      caseName: invented-loot-blocked
+      expectBlocked: true
+      mockOutput: El trasgo deja monedas de oro en el suelo.
+
+  - description: Invented condition blocked
+    vars:
+      caseName: invented-condition-blocked
+      expectBlocked: true
+      mockOutput: El objetivo queda aturdido por el golpe.
+
+  - description: Forbidden legacy terms blocked
+    vars:
+      caseName: forbidden-legacy-terms-blocked
+      expectBlocked: true
+      mockOutput: El combate usa THAC0 como referencia.

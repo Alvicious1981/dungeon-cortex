@@ -115,35 +115,36 @@ export async function streamNarrative(
     resolveMerchant = resolve;
   });
 
-  // ─── MOCK TEMPORAL PARA TESTING LOCAL ───────────────────────────────────────
-  // Para evitar bloqueos por falta de OPENAI_API_KEY. 
-  // Retorna una narrativa estática determinista.
-  let mockContent = "El héroe realiza su acción con determinación en el campo de batalla (MODO MOCK).";
-  if (options?.mockNarrativeText && (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development")) {
-    mockContent = options.mockNarrativeText;
-  }
+  const useMock = (process.env.NODE_ENV !== "test" && !process.env.OPENAI_API_KEY) ||
+                  (process.env.NODE_ENV === "test" && options?.mockNarrativeText !== undefined);
 
-  if (narrativeContext) {
-    const validation = validateNarrativeText(mockContent, narrativeContext);
-    if (!validation.ok) {
-      mockContent = generateFallbackProse(narrativeContext);
+  if (useMock) {
+    let mockContent = "El héroe realiza su acción con determinación en el campo de batalla (MODO MOCK).";
+    if (options?.mockNarrativeText && process.env.NODE_ENV === "test") {
+      mockContent = options.mockNarrativeText;
     }
+
+    if (narrativeContext) {
+      const validation = validateNarrativeText(mockContent, narrativeContext);
+      if (!validation.ok) {
+        mockContent = generateFallbackProse(narrativeContext);
+      }
+    }
+    
+    // Resolvemos los payloads de herramientas como null para que no queden colgando
+    resolveLevelUp(null);
+    resolveMerchant(null);
+
+    return {
+      textStream: (async function* () {
+        yield mockContent;
+      })() as any,
+      textPromise: Promise.resolve(mockContent),
+      levelUpPayload: Promise.resolve(null),
+      merchantPayload: Promise.resolve(null),
+    };
   }
-  
-  // Resolvemos los payloads de herramientas como null para que no queden colgando
-  resolveLevelUp(null);
-  resolveMerchant(null);
 
-  return {
-    textStream: (async function* () {
-      yield mockContent;
-    })() as any,
-    textPromise: Promise.resolve(mockContent),
-    levelUpPayload: Promise.resolve(null),
-    merchantPayload: Promise.resolve(null),
-  };
-
-  /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
   const context = await buildCampaignContext(campaignId);
   let system = formatSystemPrompt(context);
   let prompt = playerInput;
@@ -170,7 +171,7 @@ export async function streamNarrative(
   let finalNarrativeTextStream: AsyncIterableStream<string>;
 
   if (narrativeContext) {
-    finalNarrativeTextPromise = result.text.then((fullText) => {
+    finalNarrativeTextPromise = Promise.resolve(result.text).then((fullText) => {
       const validation = validateNarrativeText(fullText, narrativeContext);
       return validation.ok ? fullText : generateFallbackProse(narrativeContext);
     }).catch(() => {
@@ -182,7 +183,7 @@ export async function streamNarrative(
       yield verifiedText;
     })() as any;
   } else {
-    finalNarrativeTextPromise = result.text;
+    finalNarrativeTextPromise = Promise.resolve(result.text);
     finalNarrativeTextStream = result.textStream;
   }
 
@@ -203,5 +204,4 @@ export async function streamNarrative(
     levelUpPayload,
     merchantPayload,
   };
-  */
 }

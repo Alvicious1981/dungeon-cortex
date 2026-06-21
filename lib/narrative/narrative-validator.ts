@@ -78,8 +78,8 @@ export function validateNarrativeText(
   }
 
   // 4. Reject any numerical HP, damage, or healing mentions in the text
-  const numericHpDamageRegex = /\b\d+\s*(?:hp|hit\s*points|puntos\s+de\s+vida|puntos\s+de\s+golpe|daño|damage|vida|healing|curación|cura)\b/i;
-  const verbNumericHpDamageRegex = /\b(?:lose|loses|lost|pierde|perdió|deal|deals|dealt|hace|hizo|recibe|recibió|queda\s+con|has|have|left|queda|heal|heals|healed|cura|curó)\s+\d+\b/i;
+  const numericHpDamageRegex = /\b\d+\s*(?:de\s+)?(?:hp|hit\s*points|puntos\s+de\s+vida|puntos\s+de\s+golpe|daño|damage|vida|healing|curación|cura)\b/i;
+  const verbNumericHpDamageRegex = /\b(?:lose|loses|lost|pierde|perdió|deal|deals|dealt|hace|hizo|recibe|recibió|queda\s+con|has|have|left|queda|heal|heals|healed|cura|curó|inflige|inflict|inflicts|recupera|recuperó)\s+\d+\b/i;
 
   if (numericHpDamageRegex.test(text) || verbNumericHpDamageRegex.test(text)) {
     issues.push({
@@ -106,8 +106,8 @@ export function validateNarrativeText(
   const hasMiss = context.facts.some(f => f.type === 'attack_miss');
   const hasHit = context.facts.some(f => f.type === 'attack_hit');
 
-  const hitPhrases = /(?:alcanza|impacta|hits|hit\b|conecta|golpea|golpe|corta)/i;
-  const missPhrases = /(?:falla|misses|miss\b|corta\s+el\s+aire)/i;
+  const hitPhrases = /(?:alcanza|impacta|hits|hit\b|conecta|golpea|golpe|\bcorta(?!\s+(?:el\s+)?aire\b)\b|\bcut(?:s)?(?!\s+(?:the\s+)?air\b)\b)/i;
+  const missPhrases = /(?:falla|misses|miss\b|corta\s+(?:el\s+)?aire|cut(?:s)?\s+(?:the\s+)?air)/i;
 
   if (hasMiss && hitPhrases.test(text) && !/corta\s+el\s+aire/i.test(text)) {
     issues.push({

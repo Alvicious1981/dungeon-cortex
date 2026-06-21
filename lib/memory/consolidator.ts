@@ -69,23 +69,25 @@ export async function summarizeAndStore(
   try {
     const logBlock = buildLogBlock(logs);
 
-    // ─── MOCK TEMPORAL PARA TESTING LOCAL ─────────────────────────────────────
-    // Para evitar bloqueos por falta de OPENAI_API_KEY.
-    const summary = "Resumen de memoria (MODO MOCK).";
+    const useMock = process.env.NODE_ENV !== "test" && !process.env.OPENAI_API_KEY;
+    let summary = "";
 
-    /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
-    const { text: summary } = await generateText({
-      model: openai("gpt-4o-mini"),
-      system: [
-        "You are a clinical record-keeper for a tabletop RPG campaign.",
-        "Summarize the following sequence of game events in one concise paragraph.",
-        "Focus strictly on: locations visited, mechanical outcomes (damage dealt, items used, spells cast, HP changes), and decisions made.",
-        "Do not use dialogue, flowery prose, or embellishment.",
-        "Write in third-person past tense. Be brief and factual.",
-      ].join(" "),
-      prompt: logBlock,
-    });
-    */
+    if (useMock) {
+      summary = "Resumen de memoria (MODO MOCK).";
+    } else {
+      const result = await generateText({
+        model: openai("gpt-4o-mini"),
+        system: [
+          "You are a clinical record-keeper for a tabletop RPG campaign.",
+          "Summarize the following sequence of game events in one concise paragraph.",
+          "Focus strictly on: locations visited, mechanical outcomes (damage dealt, items used, spells cast, HP changes), and decisions made.",
+          "Do not use dialogue, flowery prose, or embellishment.",
+          "Write in third-person past tense. Be brief and factual.",
+        ].join(" "),
+        prompt: logBlock,
+      });
+      summary = result.text;
+    }
 
     if (!summary.trim()) {
       console.error("[consolidator] LLM returned empty summary — skipping memory write.");
