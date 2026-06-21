@@ -203,7 +203,7 @@ export function buildSocialTools(
       inputSchema: SocialCheckInputSchema,
       execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
         try {
-          const result = await prisma.$transaction(async (tx: typeof prisma) => {
+          const result = await prisma.$transaction(async (tx) => {
             const npc = await tx.nPC.findUnique({
               where: { campaignId_seed: { campaignId, seed: npcSeed } },
             });

@@ -375,7 +375,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             xp: character.xp,
             stats: character.stats,
             spellSlots: character.spellSlots,
-            knownSpells: character.knownSpells,
             concentrationSpellId: character.concentrationSpellId,
           },
           inventory: character.inventory.map((i) => ({

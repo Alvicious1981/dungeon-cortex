@@ -164,8 +164,9 @@ describe('Narrative Safety - Negative Controls (TDD)', () => {
     it('should approve safe diegetic narration without mechanical numbers', () => {
       const narration1 = 'El golpe alcanza al goblin y lo hace retroceder.';
       const narration2 = 'El ataque falla y la hoja corta el aire.';
+      const missFacts = { ...baseFacts, damage: 0 };
       expect(validateNarration(narration1, baseFacts).isValid).toBe(true);
-      expect(validateNarration(narration2, baseFacts).isValid).toBe(true);
+      expect(validateNarration(narration2, missFacts).isValid).toBe(true);
     });
 
     it('should approve target defeat narration ONLY when confirmed by backend', () => {
@@ -184,7 +185,7 @@ describe('Narrative Safety - Negative Controls (TDD)', () => {
 
   describe('Deterministic Fallback Integrity', () => {
     it('should guarantee that fallback prose does not contain forbidden terminology', () => {
-      const fallbackText = generateFallbackProse(baseFacts);
+      const fallbackText = generateFallbackProse(convertCombatFactsToContext(baseFacts));
       const validation = validateNarration(fallbackText, baseFacts);
       expect(validation.isValid).toBe(true);
     });

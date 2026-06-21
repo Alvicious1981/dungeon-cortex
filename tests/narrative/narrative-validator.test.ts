@@ -123,6 +123,12 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(validateNarrativeText(textHit, hitContext).ok).toBe(true);
     expect(validateNarrativeText(textMiss, missContext).ok).toBe(true);
     expect(validateNarrativeText(textHitEN, hitContext).ok).toBe(true);
+
+    // English/Spanish miss controls for "cuts/corta"
+    expect(validateNarrativeText('El ataque falla y la hoja corta el aire.', missContext).ok).toBe(true);
+    expect(validateNarrativeText('The blade cuts the air.', missContext).ok).toBe(true);
+    expect(validateNarrativeText('La hoja corta al goblin.', missContext).ok).toBe(false);
+    expect(validateNarrativeText('The blade cuts the goblin.', missContext).ok).toBe(false);
   });
 
   it('should reject forbidden legacy terms', () => {

@@ -13,7 +13,6 @@ interface CharacterSheetSource {
     xp: number;
     stats: unknown;
     spellSlots?: unknown;
-    knownSpells?: unknown;
     concentrationSpellId?: string | null;
   };
   inventory: Array<{

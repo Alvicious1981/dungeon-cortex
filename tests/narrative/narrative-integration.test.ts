@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { adaptCombatEventsToNarrativeContext } from '../../lib/narrative/combat-fact-adapter';
 import { buildNarrativePrompt } from '../../lib/narrative/prompt-builder';
 import { validateNarrativeText } from '../../lib/narrative/narrative-validator';
@@ -269,18 +269,28 @@ describe('Narrative Integration Tests (Fase 8B.1)', () => {
     }
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   // 9. streamNarrative Integration
   describe('streamNarrative Integration', () => {
-    it('should pass and return valid output in streamNarrative', async () => {
+    it('should pass and return valid output in streamNarrative when NODE_ENV is test', async () => {
+      vi.stubEnv('NODE_ENV', 'test');
       const events: GameEvent[] = [
         createMockConsequenceEvent('Hero', [
           { targetName: 'Goblin', targetId: 'g-1', damage: 8, hpAfter: 12 }
         ])
       ];
       const context = adaptCombatEventsToNarrativeContext(events);
+      const playerInput = 'Ataco al goblin';
+      
+      // Assert playerInput does not contain internal control signals
+      expect(playerInput).not.toContain('__TEST_MOCK_RESPONSE__');
+
       const stream = await streamNarrative(
         'campaign-1', 
-        'Ataco al goblin', 
+        playerInput, 
         context, 
         { mockNarrativeText: 'El héroe golpea con furia al goblin.' }
       );
@@ -289,21 +299,53 @@ describe('Narrative Integration Tests (Fase 8B.1)', () => {
       expect(fullText).toBe('El héroe golpea con furia al goblin.');
     });
 
-    it('should trigger fallback in streamNarrative if mock response contains forbidden numbers', async () => {
+    it('should ignore mockNarrativeText in streamNarrative when NODE_ENV is development', async () => {
+      vi.stubEnv('NODE_ENV', 'development');
       const events: GameEvent[] = [
         createMockConsequenceEvent('Hero', [
           { targetName: 'Goblin', targetId: 'g-1', damage: 8, hpAfter: 12 }
         ])
       ];
       const context = adaptCombatEventsToNarrativeContext(events);
+      const playerInput = 'Ataco al goblin';
+
+      // Assert playerInput does not contain internal control signals
+      expect(playerInput).not.toContain('__TEST_MOCK_RESPONSE__');
+
       const stream = await streamNarrative(
         'campaign-1', 
-        'Ataco al goblin', 
+        playerInput, 
+        context, 
+        { mockNarrativeText: 'El héroe golpea con furia al goblin.' }
+      );
+      
+      const fullText = await stream.textPromise;
+      // Should ignore the mockNarrativeText and use the default mock behavior
+      expect(fullText).toBe('El héroe realiza su acción con determinación en el campo de batalla (MODO MOCK).');
+    });
+
+    it('should still validate mockNarrativeText in test environment and trigger fallback if invalid', async () => {
+      vi.stubEnv('NODE_ENV', 'test');
+      const events: GameEvent[] = [
+        createMockConsequenceEvent('Hero', [
+          { targetName: 'Goblin', targetId: 'g-1', damage: 8, hpAfter: 12 }
+        ])
+      ];
+      const context = adaptCombatEventsToNarrativeContext(events);
+      const playerInput = 'Ataco al goblin';
+
+      // Assert playerInput does not contain internal control signals
+      expect(playerInput).not.toContain('__TEST_MOCK_RESPONSE__');
+
+      const stream = await streamNarrative(
+        'campaign-1', 
+        playerInput, 
         context, 
         { mockNarrativeText: 'El héroe inflige 8 de daño al goblin.' }
       );
       
       const fullText = await stream.textPromise;
+      // Since it contains '8' (damage), it should fail validateNarrativeText and use fallback
       expect(fullText).toBe(generateFallbackProse(context));
       expect(fullText).not.toContain('8');
     });

@@ -33,6 +33,7 @@ import {
   executeCombatAction,
   type PipelineCombatant,
 } from "@/lib/rules/combat-pipeline";
+import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact-adapter";
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
@@ -769,7 +770,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   // ── State is now safely mutated.  Start the narrative stream. ────────────────
 
-  const { textStream, textPromise, levelUpPayload, merchantPayload } = await streamNarrative(campaignId, trimmedAction);
+  const narrativeContext = adaptCombatEventsToNarrativeContext(gameEvents);
+  const { textStream, textPromise, levelUpPayload, merchantPayload } = await streamNarrative(
+    campaignId,
+    trimmedAction,
+    narrativeContext.facts.length > 0 ? narrativeContext : undefined
+  );
 
   // After the stream body is fully read by the client, persist the full
   // narrative text and run memory consolidation.
