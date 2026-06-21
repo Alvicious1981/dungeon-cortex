@@ -4,14 +4,17 @@
  * Vercel AI SDK tool: manageEquipment
  *
  * Architecture contract ("Code is Law"):
- *   This tool is the sole authority for gear state changes.
- *   The AI narrator only voices the outcome of the equipment change.
+ *   The backend equipment service is the authority for gear state changes.
+ *   The AI tool requests the action and returns resolved facts for narration.
  */
 
 import { tool } from "ai";
 import { z } from "zod";
-import { prisma } from "@/lib/db/prisma";
-import { equipItem, ManageEquipmentInputSchema } from "@/lib/rules/inventory";
+import { ManageEquipmentInputSchema } from "@/lib/rules/inventory";
+import {
+  EquipmentServiceError,
+  equipCharacterItem,
+} from "@/lib/rules/equipment-service";
 import {
   generateTavernName,
   generateMundaneLoot,
@@ -72,43 +75,22 @@ export function buildWorldTools(campaignId: string) {
       inputSchema: ManageEquipmentInputSchema,
       execute: async ({ characterId, itemId, targetSlot }) => {
         try {
-          const rawItems = await prisma.inventoryItem.findMany({
-            where: { characterId },
-            select: {
-              id: true,
-              characterId: true,
-              name: true,
-              type: true,
-              quantity: true,
-              properties: true,
-              equippedSlot: true,
-            },
-          });
-
-          const updated = equipItem(itemId, targetSlot, rawItems);
-
-          // Persist only items whose equippedSlot changed.
-          const changed = updated.filter(
-            (item, i) => item.equippedSlot !== rawItems[i].equippedSlot
-          );
-          await Promise.all(
-            changed.map((item) =>
-              prisma.inventoryItem.update({
-                where: { id: item.id },
-                data: { equippedSlot: item.equippedSlot ?? null },
-              })
-            )
-          );
-
-          const equippedItem = updated.find((i) => i.id === itemId);
-          return JSON.stringify({
-            ok: true,
+          const result = await equipCharacterItem({
+            campaignId,
+            characterId,
             itemId,
             targetSlot,
-            itemName: equippedItem?.name ?? itemId,
+          });
+
+          return JSON.stringify({
+            ok: true,
+            itemId: result.itemId,
+            targetSlot: result.targetSlot,
+            itemName: result.itemName,
+            facts: result.facts,
           });
         } catch (e) {
-          if (e instanceof RangeError) {
+          if (e instanceof EquipmentServiceError) {
             return JSON.stringify({ error: e.message });
           }
           return JSON.stringify({ error: "Equipment update failed mechanically." });
