@@ -21,6 +21,7 @@
     "@prisma/client": "^6.19.2",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
+    "@tanstack/react-query": "^5.101.0",
     "ai": "^6.0.145",
     "lucide-react": "^1.8.0",
     "next": "15.3.9",
