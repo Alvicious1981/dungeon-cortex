@@ -24,6 +24,8 @@ import {
   buildMerchantPayload,
   type MerchantPayload,
 } from "@/lib/rules/trade";
+import { resolveTradeTransaction } from "@/lib/rules/trade-service";
+
 
 export function buildSocialTools(
   campaignId: string,
@@ -326,93 +328,34 @@ export function buildSocialTools(
       inputSchema: TradeActionSchema,
       execute: async ({ action, itemIndex, inventoryItemId, quantity, npcSeed, archetype }) => {
         try {
-          const result = await prisma.$transaction(async (tx) => {
-            const campaign = await tx.campaign.findUnique({
-              where: { id: campaignId },
-              include: { character: { include: { inventory: true } } },
-            });
-            if (!campaign) throw new Error("Campaign not found.");
-
-            const merchantPayload = buildMerchantPayload(archetype, npcSeed);
-
-            if (action === "buy") {
-              if (itemIndex === undefined) throw new Error("Missing itemIndex for buy.");
-              const mItem = merchantPayload.inventory[itemIndex];
-              if (!mItem) throw new Error("Item not found in merchant inventory.");
-              
-              const totalCost = mItem.buyPriceGP * quantity;
-              if (campaign.gold < totalCost) {
-                throw new Error(`Insufficient gold. Needs ${totalCost}, has ${campaign.gold}.`);
-              }
-
-              const newCampaign = await tx.campaign.update({
-                where: { id: campaignId },
-                data: { gold: { decrement: totalCost } },
-              });
-
-              const existing = campaign.character.inventory.find(i => i.name === mItem.name && i.type === mItem.type);
-              if (existing) {
-                await tx.inventoryItem.update({
-                  where: { id: existing.id },
-                  data: { quantity: { increment: quantity } }
-                });
-              } else {
-                await tx.inventoryItem.create({
-                  data: {
-                    characterId: campaign.characterId,
-                    name: mItem.name,
-                    type: mItem.type,
-                    quantity,
-                    properties: mItem.properties as object,
-                  },
-                });
-              }
-
-              await tx.gameLog.create({
-                data: {
-                  campaignId: campaignId,
-                  role: "system",
-                  content: `💰 Trade: Purchased ${quantity}x ${mItem.name} for ${totalCost} GP from ${merchantPayload.name}.`,
-                }
-              });
-
-              return { ok: true, action: "buy", itemName: mItem.name, totalCost, newGoldBalance: newCampaign.gold };
-            } else {
-              if (!inventoryItemId) throw new Error("Missing inventoryItemId for sell.");
-              const pItem = campaign.character.inventory.find(i => i.id === inventoryItemId);
-              if (!pItem) throw new Error("Item not found in character inventory.");
-              if (pItem.quantity < quantity) throw new Error("Insufficient quantity to sell.");
-
-              const properties = pItem.properties as Record<string, unknown>;
-              const baseValueGP = typeof properties.valueGP === "number" ? properties.valueGP : 0;
-              const sellPriceGP = Math.max(1, Math.floor(baseValueGP * merchantPayload.sellModifier));
-              const totalRevenue = sellPriceGP * quantity;
-
-              const newCampaign = await tx.campaign.update({
-                where: { id: campaignId },
-                data: { gold: { increment: totalRevenue } },
-              });
-
-              if (pItem.quantity === quantity) {
-                await tx.inventoryItem.delete({ where: { id: pItem.id } });
-              } else {
-                await tx.inventoryItem.update({
-                  where: { id: pItem.id },
-                  data: { quantity: { decrement: quantity } },
-                });
-              }
-
-              await tx.gameLog.create({
-                data: {
-                  campaignId: campaignId,
-                  role: "system",
-                  content: `💰 Trade: Sold ${quantity}x ${pItem.name} to ${merchantPayload.name} for ${totalRevenue} GP.`,
-                }
-              });
-
-              return { ok: true, action: "sell", itemName: pItem.name, totalRevenue, newGoldBalance: newCampaign.gold };
-            }
+          const campaign = await prisma.campaign.findUnique({
+            where: { id: campaignId },
+            select: { characterId: true },
           });
+          if (!campaign) throw new Error("Campaign not found.");
+
+          const merchantPayload = buildMerchantPayload(archetype, npcSeed);
+          const result =
+            action === "buy"
+              ? await resolveTradeTransaction({
+                  campaignId,
+                  characterId: campaign.characterId,
+                  npcId: npcSeed,
+                  operation: "buy",
+                  itemDescriptor: getMerchantItemDescriptor(merchantPayload, itemIndex),
+                  price: getMerchantItemPrice(merchantPayload, itemIndex),
+                  quantity,
+                })
+              : await resolveTradeTransaction({
+                  campaignId,
+                  characterId: campaign.characterId,
+                  npcId: npcSeed,
+                  operation: "sell",
+                  itemId: inventoryItemId,
+                  price: 0,
+                  quantity,
+                  sellModifier: merchantPayload.sellModifier,
+                });
           return JSON.stringify(result);
         } catch (error: unknown) {
           return JSON.stringify({ error: error instanceof Error ? error.message : "Trade execution failed mechanically." });
@@ -420,4 +363,25 @@ export function buildSocialTools(
       },
     }),
   };
+}
+function getMerchantItemDescriptor(payload: MerchantPayload, itemIndex: number | undefined) {
+  if (itemIndex === undefined) throw new Error("Missing itemIndex for buy.");
+
+  const item = payload.inventory[itemIndex];
+  if (!item) throw new Error("Item not found in merchant inventory.");
+
+  return {
+    name: item.name,
+    type: item.type,
+    properties: item.properties,
+  };
+}
+
+function getMerchantItemPrice(payload: MerchantPayload, itemIndex: number | undefined) {
+  if (itemIndex === undefined) throw new Error("Missing itemIndex for buy.");
+
+  const item = payload.inventory[itemIndex];
+  if (!item) throw new Error("Item not found in merchant inventory.");
+
+  return item.buyPriceGP;
 }
