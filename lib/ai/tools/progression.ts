@@ -1,7 +1,6 @@
 import { tool } from "ai";
 import { prisma } from "@/lib/db/prisma";
 import {
-  computeXPAward,
   buildLevelUpPayload,
   TriggerLevelUpInputSchema,
   LevelUpPayloadSchema,
@@ -9,6 +8,7 @@ import {
   UpdateQuestStatusInputSchema,
   type LevelUpPayload,
 } from "@/lib/rules/progression";
+import { applyExperienceAward } from "@/lib/rules/progression-service";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { generateQuest, GenerateAndTrackQuestInputSchema } from "@/lib/rules/quests";
 import { seededFloat } from "@/lib/rules/generators";
@@ -77,41 +77,25 @@ export function buildProgressionTools(
     }),
     awardXP: tool({
       description:
-        "Award experience points to the player character for narrative achievements — " +
-        "defeating enemies, completing objectives, clever problem-solving, or exceptional roleplay. " +
-        "YOU HAVE AUTHORITY to decide when and how much XP to award; do not wait to be asked. " +
-        "The tool detects level-up automatically and returns whether one occurred. " +
-        "When leveledUp is true, narrate the level-up as a significant moment.",
+        "Request an experience award for a resolved player-character achievement. " +
+        "The backend validates and persists XP and level state, then returns structured facts. " +
+        "Use the returned facts only to describe already resolved progression.",
       inputSchema: AwardXPInputSchema,
       execute: async ({ characterId, amount, reason }) => {
         try {
-          const character = await prisma.character.findUnique({
-            where: { id: characterId },
-            select: { xp: true, level: true },
+          const result = await applyExperienceAward({
+            campaignId,
+            characterId,
+            xpAmount: amount,
+            reason,
+            source: "awardXP",
           });
-          if (!character) return JSON.stringify({ error: "Character not found." });
-
-          const { newXP, newLevel, leveledUp } = computeXPAward(
-            character.xp,
-            character.level,
-            amount
-          );
-
-          await prisma.character.update({
-            where: { id: characterId },
-            data: {
-              xp: newXP,
-              ...(leveledUp && { level: newLevel }),
-            },
-          });
-
-          return JSON.stringify({ ok: true, newXP, newLevel, leveledUp, reason });
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "XP award failed mechanically." });
         }
       },
     }),
-
     triggerLevelUp: tool({
       description:
         "Resolve the mechanical effects of a character level-up. " +
