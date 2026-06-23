@@ -1,5 +1,4 @@
 import { tool } from "ai";
-import { prisma } from "@/lib/db/prisma";
 import {
   TriggerLevelUpInputSchema,
   AwardXPInputSchema,
@@ -8,8 +7,11 @@ import {
 } from "@/lib/rules/progression";
 import { applyExperienceAward } from "@/lib/rules/progression-service";
 import { applyLevelUp } from "@/lib/rules/level-up-service";
-import { generateQuest, GenerateAndTrackQuestInputSchema } from "@/lib/rules/quests";
-import { seededFloat } from "@/lib/rules/generators";
+import { GenerateAndTrackQuestInputSchema } from "@/lib/rules/quests";
+import {
+  createTrackedQuest,
+  updateQuestStatus as updateTrackedQuestStatus,
+} from "@/lib/rules/quest-service";
 
 export function buildProgressionTools(
   campaignId: string,
@@ -18,12 +20,17 @@ export function buildProgressionTools(
   return {
     updateQuestStatus: tool({
       description:
-        "Mark a quest as 'completed' or 'failed' when the narrative outcome definitively resolves it. The quest ID is provided in the system prompt under ## Active Quests. ONLY call this when the player has unambiguously succeeded or failed an objective — never speculatively.",
+        "Mark a quest as 'completed' or 'failed' after the backend-resolved outcome definitively settles it. The quest ID is provided in the system prompt under ## Active Quests. ONLY call this when the player has unambiguously succeeded or failed an objective - never speculatively.",
       inputSchema: UpdateQuestStatusInputSchema,
       execute: async ({ questId, status }) => {
         try {
-          await prisma.quest.update({ where: { id: questId }, data: { status } });
-          return JSON.stringify({ ok: true, questId, status });
+          const result = await updateTrackedQuestStatus({
+            campaignId,
+            questId,
+            status,
+            reason: "ai_tool_updateQuestStatus",
+          });
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "Quest update failed mechanically." });
         }
@@ -35,39 +42,17 @@ export function buildProgressionTools(
         "Generate a new procedural quest and persist it to the campaign database. " +
         "Use this when the player inspects a bounty board, asks an NPC for work, " +
         "hears a rumor at a tavern, or otherwise seeks a new objective. " +
-        "The tool returns the full quest details — title, hook, location, objective, and reward — " +
-        "which the narrator MUST use verbatim when presenting the quest to the player. " +
+        "The tool returns backend-resolved quest details: title, hook, location, objective, and reward. " +
         "NEVER invent quest details without calling this tool first.",
       inputSchema: GenerateAndTrackQuestInputSchema,
       execute: async ({ giverId }) => {
         try {
-          const seedKey = `${campaignId}:quest:${giverId ?? "anon"}`;
-          const seed = Math.floor(seededFloat(seedKey) * Number.MAX_SAFE_INTEGER);
-          const questData = generateQuest(seed, giverId);
-
-          const quest = await prisma.quest.create({
-            data: {
-              campaignId,
-              title:       questData.title,
-              description: questData.description,
-              status:      "active",
-              giverId:     questData.giverId ?? null,
-              location:    questData.location,
-              hook:        questData.hook,
-              objective:   questData.objective,
-              reward:      questData.reward,
-            },
+          const result = await createTrackedQuest({
+            campaignId,
+            context: "ai_tool_generateAndTrackQuest",
+            giverId,
           });
-
-          return JSON.stringify({
-            ok:        true,
-            questId:   quest.id,
-            title:     questData.title,
-            hook:      questData.hook,
-            location:  questData.location,
-            objective: questData.objective,
-            reward:    questData.reward,
-          });
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "Quest generation failed mechanically." });
         }
