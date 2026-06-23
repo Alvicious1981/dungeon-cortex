@@ -25,6 +25,11 @@ import {
   type MerchantPayload,
 } from "@/lib/rules/trade";
 import { resolveTradeTransaction } from "@/lib/rules/trade-service";
+import {
+  establishInitialNpcDisposition,
+  trackNpcState,
+  type NpcDescriptor,
+} from "@/lib/rules/npc-service";
 
 
 export function buildSocialTools(
@@ -57,27 +62,24 @@ export function buildSocialTools(
       execute: async ({ seed, role, notes, hp }) => {
         try {
           const statblock = generateNPC(seed, role as NPCRole);
-          await prisma.nPC.upsert({
-            where: { campaignId_seed: { campaignId, seed } },
-            create: {
-              campaignId,
+          const result = await trackNpcState({
+            campaignId,
+            npcSeed: seed,
+            role,
+            descriptor: {
               seed,
               role,
               name: statblock.name,
               maxHp: statblock.maxHp,
               hp: hp ?? statblock.hp,
               ac: statblock.ac,
-              abilityScores: statblock.abilityScores as unknown as object,
+              abilityScores: statblock.abilityScores,
               notes: notes ?? "",
             },
-            update: {
-              ...(notes !== undefined && { notes }),
-              ...(hp !== undefined && { hp }),
-            },
           });
-          return JSON.stringify({ ok: true, seed, name: statblock.name });
-        } catch {
-          return JSON.stringify({ error: "NPC tracking failed mechanically." });
+          return JSON.stringify(result);
+        } catch (err: unknown) {
+          return JSON.stringify({ error: err instanceof Error ? err.message : "NPC tracking failed mechanically." });
         }
       },
     }),
@@ -147,47 +149,33 @@ export function buildSocialTools(
       inputSchema: InitialDispositionInputSchema,
       execute: async ({ npcSeed, npcRole, charismaModifier }) => {
         try {
-          const existingNPC = await prisma.nPC.findUnique({
-            where: { campaignId_seed: { campaignId, seed: npcSeed } },
-          });
-          if (existingNPC?.hasMetPlayer) {
-            return JSON.stringify({
-              error: "Initial disposition already established. Use the persisted NPC disposition instead.",
-            });
-          }
-
           const result = establishInitialDispositionPure({ npcSeed, npcRole, charismaModifier });
           const statblock = generateNPC(npcSeed, npcRole as NPCRole);
+          const descriptor: NpcDescriptor = {
+            seed: npcSeed,
+            role: npcRole,
+            name: statblock.name,
+            maxHp: statblock.maxHp,
+            hp: statblock.hp,
+            ac: statblock.ac,
+            race: statblock.race,
+            profession: statblock.profession,
+            alignment: statblock.alignment,
+            abilityScores: statblock.abilityScores,
+            traits: statblock.traits,
+          };
 
-          await prisma.nPC.upsert({
-            where: { campaignId_seed: { campaignId, seed: npcSeed } },
-            create: {
-              campaignId,
-              seed:         npcSeed,
-              role:         npcRole,
-              name:         statblock.name,
-              maxHp:        statblock.maxHp,
-              hp:           statblock.hp,
-              ac:           statblock.ac,
-              race:         statblock.race,
-              profession:   statblock.profession,
-              alignment:    statblock.alignment,
-              abilityScores: statblock.abilityScores as object,
-              traits:       statblock.traits as object,
-              disposition:  result.initialDisposition,
-              personalityTags: result.personality as object,
-              hasMetPlayer: true,
-            },
-            update: {
-              disposition:     result.initialDisposition,
-              personalityTags: result.personality as object,
-              hasMetPlayer:    true,
-            },
+          await establishInitialNpcDisposition({
+            campaignId,
+            npcSeed,
+            disposition: result.initialDisposition,
+            personalityTags: result.personality,
+            descriptor,
           });
 
           return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Initial disposition check failed mechanically. Narrate a moment of silence." });
+        } catch (err: unknown) {
+          return JSON.stringify({ error: err instanceof Error ? err.message : "Initial disposition check failed mechanically." });
         }
       },
     }),
