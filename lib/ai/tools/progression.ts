@@ -1,15 +1,13 @@
 import { tool } from "ai";
 import { prisma } from "@/lib/db/prisma";
 import {
-  buildLevelUpPayload,
   TriggerLevelUpInputSchema,
-  LevelUpPayloadSchema,
   AwardXPInputSchema,
   UpdateQuestStatusInputSchema,
   type LevelUpPayload,
 } from "@/lib/rules/progression";
 import { applyExperienceAward } from "@/lib/rules/progression-service";
-import type { CharacterClass } from "@/lib/rules/proficiency";
+import { applyLevelUp } from "@/lib/rules/level-up-service";
 import { generateQuest, GenerateAndTrackQuestInputSchema } from "@/lib/rules/quests";
 import { seededFloat } from "@/lib/rules/generators";
 
@@ -98,54 +96,25 @@ export function buildProgressionTools(
     }),
     triggerLevelUp: tool({
       description:
-        "Resolve the mechanical effects of a character level-up. " +
+        "Request backend resolution for the physical effects of a character level-up. " +
         "MUST be called immediately after `awardXP` returns `leveledUp: true`. " +
-        "Rolls the class-specific hit die + CON modifier to determine HP gained, " +
-        "updates maxHp, hp, level, and hit dice in the database, " +
-        "and returns the full LevelUpPayload for narration. " +
-        "NEVER invent HP increases, stat changes, or level-up effects without calling this tool. " +
+        "The backend validates XP and persisted level state, updates HP and hit dice, " +
+        "and returns structured level-up facts for narration. " +
+        "NEVER invent HP increases, stat changes, or level-up effects without backend facts. " +
         "Code is Law.",
       inputSchema: TriggerLevelUpInputSchema,
       execute: async ({ characterId, useAverage }) => {
         try {
-          const character = await prisma.character.findUnique({
-            where: { id: characterId },
-            select: { class: true, level: true, maxHp: true, hp: true, stats: true, hitDiceTotal: true },
-          });
-          if (!character) return JSON.stringify({ error: "Character not found." });
-
-          // Safely extract CON from the stats JSON blob.
-          const stats = character.stats as Record<string, number> | null;
-          const con = typeof stats?.CON === "number" ? stats.CON : 10;
-          const conModifier = Math.floor((con - 10) / 2);
-
-          const payload = buildLevelUpPayload({
+          const result = await applyLevelUp({
+            campaignId,
             characterId,
-            className: character.class as CharacterClass,
-            previousLevel: character.level - 1,
-            newLevel: character.level,
-            currentMaxHp: character.maxHp,
-            conModifier,
             useAverage,
+            source: "triggerLevelUp",
           });
 
-          // Validate — belt-and-suspenders before any DB write.
-          LevelUpPayloadSchema.parse(payload);
+          callbacks?.onLevelUp?.(result);
 
-          await prisma.character.update({
-            where: { id: characterId },
-            data: {
-              maxHp:             payload.newMaxHp,
-              hp:                payload.newMaxHp,  // full heal on level-up
-              hitDiceTotal:      payload.newHitDiceTotal,
-              hitDiceRemaining:  payload.newHitDiceTotal,  // reset remaining on level-up
-            },
-          });
-
-          // Notify the stream so the client receives the payload as an SSE frame.
-          callbacks?.onLevelUp?.(payload);
-
-          return JSON.stringify(payload);
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "Level-up resolution failed mechanically." });
         }
