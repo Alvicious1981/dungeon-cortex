@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { createTrackedQuest, QuestServiceError } from "@/lib/rules/quest-service";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -51,16 +52,23 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   const err = await validateCampaignOwnership(campaignId, user.id);
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 
-  const quest = await prisma.quest.create({
-    data: {
+  try {
+    const result = await createTrackedQuest({
       campaignId,
-      title: body.title.trim(),
-      description: body.description.trim(),
-      status: "active",
-    },
-  });
+      descriptor: {
+        title: body.title.trim(),
+        description: body.description.trim(),
+      },
+    });
 
-  return NextResponse.json(quest, { status: 201 });
+    return NextResponse.json(result.quest, { status: 201 });
+  } catch (e) {
+    if (e instanceof QuestServiceError) {
+      const status = e.code === "INVALID_QUEST_PAYLOAD" ? 400 : 404;
+      return NextResponse.json({ error: e.message }, { status });
+    }
+    throw e;
+  }
 }
 
 /**
