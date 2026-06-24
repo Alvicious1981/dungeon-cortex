@@ -7,7 +7,6 @@ import {
   type NPCRole,
   type AbilityScores,
 } from "@/lib/rules/npc";
-import { abilityModifier } from "@/lib/rules/dice";
 import {
   InitialDispositionInputSchema,
   SocialCheckInputSchema,
@@ -15,9 +14,9 @@ import {
 } from "@/lib/rules/social";
 import {
   establishInitialDisposition as establishInitialDispositionPure,
-  resolveSocialCheck,
   getRumorsPayload,
 } from "@/lib/rules/social-logic";
+import { resolveSocialCheck } from "@/lib/rules/social-service";
 import {
   GenerateMerchantInputSchema,
   TradeActionSchema,
@@ -193,49 +192,12 @@ export function buildSocialTools(
       inputSchema: SocialCheckInputSchema,
       execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
         try {
-          const result = await prisma.$transaction(async (tx) => {
-            const npc = await tx.nPC.findUnique({
-              where: { campaignId_seed: { campaignId, seed: npcSeed } },
-            });
-            if (!npc) {
-              throw new Error("NPC not found. Call establishInitialDisposition first to establish first contact.");
-            }
-            if (!npc.hasMetPlayer) {
-              throw new Error("Call establishInitialDisposition before socialCheck — the party has not yet met this NPC.");
-            }
-
-            const campaignRec = await tx.campaign.findUnique({
-              where: { id: campaignId },
-              select: { characterId: true },
-            });
-            if (!campaignRec) {
-              throw new Error("Campaign not found.");
-            }
-
-            const character = await tx.character.findUnique({
-              where: { id: campaignRec.characterId },
-              select: { stats: true },
-            });
-            if (!character) {
-              throw new Error("Character not found.");
-            }
-            const stats = character.stats as Record<string, number> | null;
-            const cha = typeof stats?.CHA === "number" ? stats.CHA : 10;
-            const charismaModifier = abilityModifier(cha);
-
-            const currentDisposition = npc.disposition ?? 0;
-            const socialResult = resolveSocialCheck(
-              { npcSeed, approach, dispositionDelta, intent },
-              charismaModifier,
-              currentDisposition,
-            );
-
-            await tx.nPC.update({
-              where: { campaignId_seed: { campaignId, seed: npcSeed } },
-              data: { disposition: socialResult.dispositionAfter },
-            });
-
-            return socialResult;
+          const result = await resolveSocialCheck({
+            campaignId,
+            npcSeed,
+            approach,
+            dispositionDelta,
+            intent,
           });
 
           return JSON.stringify(result);
@@ -373,3 +335,4 @@ function getMerchantItemPrice(payload: MerchantPayload, itemIndex: number | unde
 
   return item.buyPriceGP;
 }
+
