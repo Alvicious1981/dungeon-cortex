@@ -6,7 +6,6 @@ import {
   ExplorationTurnInputSchema,
   LocationPayloadSchema,
   generateLocationPayload,
-  canMoveToNode,
   advanceTurn,
   consumeResources,
   checkRandomEncounter,
@@ -14,10 +13,8 @@ import {
   REST_INTERVAL_TURNS,
   type CampaignTimeState,
   type PartyInventoryState,
-  type EdgePayload,
-  type PassageType,
 } from "@/lib/rules/exploration";
-import { EXPLORATION_XP } from "@/lib/rules/progression";
+import { moveCampaignToNode, NavigationServiceError } from "@/lib/rules/navigation-service";
 import { seededFloat } from "@/lib/rules/generators";
 import { generateDungeon } from "@/lib/rules/dungeon";
 
@@ -162,157 +159,32 @@ export function buildExplorationTools(campaignId: string) {
       inputSchema: MoveToNodeInputSchema,
       execute: async ({ targetNodeIndex }) => {
         try {
-          const campaign = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            select: { currentLocationId: true, currentNodeId: true },
+          const result = await moveCampaignToNode({
+            campaignId,
+            toNodeIndex: targetNodeIndex,
           });
-
-          if (!campaign?.currentLocationId) {
-            return JSON.stringify({
-              error: "No active location. Call generateLocation first.",
-            });
-          }
-
-          const location = await prisma.location.findUnique({
-            where: { id: campaign.currentLocationId },
-            include: {
-              nodes: { orderBy: { index: "asc" } },
-              edges: true,
-            },
-          });
-
-          if (!location) {
-            return JSON.stringify({ error: "Active location not found in database." });
-          }
-
-          const nodeById = new Map(location.nodes.map((n) => [n.id, n]));
-
-          const edges: EdgePayload[] = location.edges.map((e) => ({
-            fromIndex: nodeById.get(e.fromNodeId)?.index ?? 0,
-            toIndex: nodeById.get(e.toNodeId)?.index ?? 0,
-            passageType: e.passageType as PassageType,
-          }));
-
-          const currentDbNode = campaign.currentNodeId
-            ? nodeById.get(campaign.currentNodeId)
-            : null;
-
-          if (!currentDbNode) {
-            return JSON.stringify({ error: "Current node not found." });
-          }
-
-          if (!canMoveToNode(currentDbNode.index, targetNodeIndex, edges)) {
-            return JSON.stringify({
-              error: `Node ${targetNodeIndex} is not adjacent to current node ${currentDbNode.index}.`,
-              currentNodeIndex: currentDbNode.index,
-              targetNodeIndex,
-            });
-          }
-
-          const targetDbNode = location.nodes.find((n) => n.index === targetNodeIndex);
-          if (!targetDbNode) {
-            return JSON.stringify({ error: `Node index ${targetNodeIndex} not found in location.` });
-          }
-
-          const connectingEdge = edges.find(
-            (e) =>
-              (e.fromIndex === currentDbNode.index && e.toIndex === targetNodeIndex) ||
-              (e.fromIndex === targetNodeIndex && e.toIndex === currentDbNode.index)
-          );
-
-          if (connectingEdge?.passageType === "locked") {
-            return JSON.stringify({
-              error: "The passage is locked. A key, lockpick check, or force is required.",
-              passageType: "locked",
-            });
-          }
-          if (connectingEdge?.passageType === "hidden") {
-            return JSON.stringify({
-              error: "The passage is hidden. A Search or Perception check is required to find it.",
-              passageType: "hidden",
-            });
-          }
-
-          await prisma.campaign.update({
-            where: { id: campaignId },
-            data: { currentNodeId: targetDbNode.id },
-          });
-
-          const adjacentNodes = edges
-            .filter(
-              (e) =>
-                e.fromIndex === targetNodeIndex || e.toIndex === targetNodeIndex
-            )
-            .map((e) => {
-              const adjIndex =
-                e.fromIndex === targetNodeIndex ? e.toIndex : e.fromIndex;
-              const adjDbNode = location.nodes.find((n) => n.index === adjIndex);
-              return adjDbNode
-                ? {
-                    index: adjDbNode.index,
-                    name: adjDbNode.name,
-                    feature: adjDbNode.feature,
-                    passageType: e.passageType,
-                  }
-                : null;
-            })
-            .filter((n): n is NonNullable<typeof n> => n !== null);
-
-          const explorationXPHints: Array<{ event: string; amount: number; reason: string }> = [];
-          explorationXPHints.push({
-            event: "node_discovery",
-            amount: EXPLORATION_XP.node_discovery,
-            reason: `First visit to ${targetDbNode.name}`,
-          });
-
-          if (targetDbNode.feature === "hazard") {
-            explorationXPHints.push({
-              event: "hazard_survived",
-              amount: EXPLORATION_XP.hazard_survived,
-              reason: `Survived the hazard in ${targetDbNode.name}`,
-            });
-          } else if (targetDbNode.feature === "exit") {
-            explorationXPHints.push({
-              event: "exit_reached",
-              amount: EXPLORATION_XP.exit_reached,
-              reason: `Reached the exit at ${targetDbNode.name}`,
-            });
-          } else if (targetDbNode.feature === "treasure") {
-            explorationXPHints.push({
-              event: "treasure_found",
-              amount: EXPLORATION_XP.treasure_found,
-              reason: `Discovered treasure in ${targetDbNode.name}`,
-            });
-          } else if (targetDbNode.feature === "quest_hook") {
-            explorationXPHints.push({
-              event: "quest_hook_found",
-              amount: EXPLORATION_XP.quest_hook_found,
-              reason: `Found a quest hook in ${targetDbNode.name}`,
-            });
-          }
 
           return JSON.stringify({
             ok: true,
-            targetNode: {
-              index: targetDbNode.index,
-              name: targetDbNode.name,
-              description: targetDbNode.description,
-              feature: targetDbNode.feature,
-              npcSeed: targetDbNode.npcSeed,
-              featureData: targetDbNode.featureData,
-              x: targetDbNode.x,
-              y: targetDbNode.y,
-            },
-            adjacentNodes,
-            passageType: connectingEdge?.passageType ?? "open",
-            explorationXPHints,
+            targetNode: result.targetNode,
+            adjacentNodes: result.adjacentNodes,
+            passageType: result.passageType,
+            explorationXPHints: result.explorationXPHints,
+            facts: result.facts,
           });
-        } catch {
+        } catch (error) {
+          if (error instanceof NavigationServiceError) {
+            return JSON.stringify({
+              error: error.message,
+              code: error.code,
+              ...error.details,
+            });
+          }
+
           return JSON.stringify({ error: "Movement failed mechanically." });
         }
       },
     }),
-
     executeExplorationTurn: tool({
       description:
         "Advance the dungeon clock by one exploration turn (10 minutes) for the given action. " +
