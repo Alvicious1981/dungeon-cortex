@@ -14,10 +14,8 @@ import {
 } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
 import { executeCombatAction } from "@/lib/rules/combat-pipeline";
-import {
-  GenerateLootInputSchema,
-  generateLootPayload,
-} from "@/lib/rules/loot";
+import { GenerateLootInputSchema } from "@/lib/rules/loot";
+import { grantLoot } from "@/lib/rules/loot-service";
 import { queryMonsters, buildMonsterRawData } from "@/lib/ai/tools/srd-lookup";
 
 export function buildCombatTools(campaignId: string) {
@@ -272,50 +270,18 @@ export function buildCombatTools(campaignId: string) {
       inputSchema: GenerateLootInputSchema,
       execute: async ({ encounterId, tensionScore }) => {
         try {
-          const encounter = await prisma.encounter.findUnique({
-            where: { id: encounterId },
-            include: { combatants: true },
-          });
-          if (!encounter) {
-            return JSON.stringify({ error: "Encounter not found." });
-          }
-
-          const campaign = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            select: { characterId: true },
-          });
-          if (!campaign) {
-            return JSON.stringify({ error: "Campaign not found." });
-          }
-
-          const enemies = encounter.combatants.filter((c) => !c.isPlayer);
-          const payload = generateLootPayload({
+          const result = await grantLoot({
+            campaignId,
+            encounterId,
             tensionScore,
-            enemyCount: enemies.length,
-            avgCR: 1,
-            seed: encounterId,
+            source: "generateLoot",
           });
 
-          const allItems = [...payload.mundaneItems, ...payload.magicItems];
-          await prisma.$transaction([
-            prisma.campaign.update({
-              where: { id: campaignId },
-              data: { gold: { increment: payload.gold } },
-            }),
-            ...allItems.map((item) =>
-              prisma.inventoryItem.create({
-                data: {
-                  characterId: campaign.characterId,
-                  name: item.name,
-                  type: item.type,
-                  quantity: 1,
-                  properties: item.properties as object,
-                },
-              })
-            ),
-          ]);
-
-          return JSON.stringify({ ok: true, ...payload });
+          return JSON.stringify({
+            ok: true,
+            ...(result.loot ?? { gold: result.gold, items: result.items }),
+            facts: result.facts,
+          });
         } catch {
           return JSON.stringify({ error: "Loot generation failed mechanically." });
         }
