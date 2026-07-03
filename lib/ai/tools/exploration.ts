@@ -4,8 +4,6 @@ import {
   GenerateLocationInputSchema,
   MoveToNodeInputSchema,
   ExplorationTurnInputSchema,
-  LocationPayloadSchema,
-  generateLocationPayload,
   advanceTurn,
   consumeResources,
   checkRandomEncounter,
@@ -14,9 +12,8 @@ import {
   type CampaignTimeState,
   type PartyInventoryState,
 } from "@/lib/rules/exploration";
+import { generateExplorationLocation } from "@/lib/rules/exploration-service";
 import { moveCampaignToNode, NavigationServiceError } from "@/lib/rules/navigation-service";
-import { seededFloat } from "@/lib/rules/generators";
-import { generateDungeon } from "@/lib/rules/dungeon";
 
 export function buildExplorationTools(campaignId: string) {
   return {
@@ -31,118 +28,14 @@ export function buildExplorationTools(campaignId: string) {
       inputSchema: GenerateLocationInputSchema,
       execute: async ({ locationType, seed, parentLocationId }) => {
         try {
-          const resolvedSeed = seed ?? String(Math.floor(seededFloat(`${campaignId}:loc`) * Number.MAX_SAFE_INTEGER));
-
-          const existing = await prisma.location.findUnique({
-            where: { campaignId_seed: { campaignId, seed: resolvedSeed } },
-            include: {
-              nodes: { orderBy: { index: "asc" } },
-              edges: true,
-            },
-          });
-          if (existing) {
-            const nodeById = new Map(existing.nodes.map((n) => [n.id, n]));
-            return JSON.stringify({
-              ok: true,
-              idempotent: true,
-              locationId: existing.id,
-              name: existing.name,
-              type: existing.type,
-              description: existing.description,
-              seed: existing.seed,
-              entryNodeIndex: 0,
-              nodes: existing.nodes.map((n) => ({
-                index: n.index, name: n.name, description: n.description,
-                feature: n.feature, npcSeed: n.npcSeed, featureData: n.featureData,
-                x: n.x, y: n.y,
-              })),
-              edges: existing.edges.map((e) => ({
-                fromIndex: nodeById.get(e.fromNodeId)?.index ?? 0,
-                toIndex: nodeById.get(e.toNodeId)?.index ?? 0,
-                passageType: e.passageType,
-              })),
-            });
-          }
-
-          const dungeonMap =
-            locationType === "dungeon"
-              ? generateDungeon(resolvedSeed)
-              : undefined;
-
-          const payload = generateLocationPayload(
-            { locationType, seed: resolvedSeed },
-            { dungeonMap }
-          );
-          const validated = LocationPayloadSchema.parse(payload);
-
-          const result = await prisma.$transaction(async (tx) => {
-            const loc = await tx.location.create({
-              data: {
-                campaignId,
-                seed: resolvedSeed,
-                type: validated.type,
-                name: validated.name,
-                description: validated.description,
-                parentId: parentLocationId ?? null,
-              },
-            });
-
-            const createdNodes = await Promise.all(
-              validated.nodes.map((node) =>
-                tx.locationNode.create({
-                  data: {
-                    locationId: loc.id,
-                    index: node.index,
-                    name: node.name,
-                    description: node.description,
-                    feature: node.feature,
-                    npcSeed: node.npcSeed,
-                    featureData: node.featureData as object,
-                    x: node.x,
-                    y: node.y,
-                  },
-                })
-              )
-            );
-
-            const nodeIdByIndex = new Map(createdNodes.map((n) => [n.index, n.id]));
-
-            await Promise.all(
-              validated.edges.map((edge) => {
-                const fromNodeId = nodeIdByIndex.get(edge.fromIndex);
-                const toNodeId = nodeIdByIndex.get(edge.toIndex);
-                if (!fromNodeId || !toNodeId) {
-                  throw new Error(`Edge references unknown node index: ${edge.fromIndex}→${edge.toIndex}`);
-                }
-                return tx.locationEdge.create({
-                  data: {
-                    locationId: loc.id,
-                    fromNodeId,
-                    toNodeId,
-                    passageType: edge.passageType,
-                  },
-                });
-              })
-            );
-
-            const entryNodeId = nodeIdByIndex.get(validated.entryNodeIndex);
-            await tx.campaign.update({
-              where: { id: campaignId },
-              data: {
-                currentLocationId: loc.id,
-                currentNodeId: entryNodeId,
-              },
-            });
-
-            return { locationId: loc.id, entryNodeId };
+          const result = await generateExplorationLocation({
+            campaignId,
+            locationType,
+            seed,
+            parentLocationId,
           });
 
-          return JSON.stringify({
-            ok: true,
-            locationId: result.locationId,
-            entryNodeId: result.entryNodeId,
-            ...validated,
-          });
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "Location generation failed mechanically." });
         }
