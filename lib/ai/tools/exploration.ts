@@ -1,18 +1,11 @@
 import { tool } from "ai";
-import { prisma } from "@/lib/db/prisma";
 import {
   GenerateLocationInputSchema,
   MoveToNodeInputSchema,
   ExplorationTurnInputSchema,
-  advanceTurn,
-  consumeResources,
-  checkRandomEncounter,
-  applyRest,
-  REST_INTERVAL_TURNS,
-  type CampaignTimeState,
-  type PartyInventoryState,
 } from "@/lib/rules/exploration";
 import { generateExplorationLocation } from "@/lib/rules/exploration-service";
+import { resolveExplorationTurn } from "@/lib/rules/exploration-turn-service";
 import { moveCampaignToNode, NavigationServiceError } from "@/lib/rules/navigation-service";
 
 export function buildExplorationTools(campaignId: string) {
@@ -92,119 +85,12 @@ export function buildExplorationTools(campaignId: string) {
       inputSchema: ExplorationTurnInputSchema,
       execute: async ({ action, turnsToAdvance }) => {
         try {
-          const [campaignRec, campaignTime, partyInventory] = await Promise.all([
-            prisma.campaign.findUnique({
-              where: { id: campaignId },
-              select: { characterId: true },
-            }),
-            prisma.campaignTime.findUnique({ where: { campaignId } }),
-            prisma.partyInventory.findUnique({ where: { campaignId } }),
-          ]);
-
-          if (!campaignRec) {
-            return JSON.stringify({ error: "Campaign not found." });
-          }
-
-          const activeEncounter = await prisma.encounter.findFirst({
-            where: { campaignId, status: "active" },
-            select: { combatants: { where: { isPlayer: true }, select: { id: true } } },
+          const result = await resolveExplorationTurn({
+            campaignId,
+            turnAction: action,
+            turnsToAdvance,
           });
-          const partySize = activeEncounter?.combatants.length ?? 1;
-
-          const currentTime: CampaignTimeState = campaignTime ?? {
-            totalTurns: 0,
-            totalHours: 0,
-            totalDays: 0,
-            turnsSinceRest: 0,
-            turnsSinceEncounterCheck: 0,
-            turnsSinceRation: 0,
-          };
-          const currentInventory: PartyInventoryState = partyInventory
-            ? {
-                torches:                   partyInventory.torches,
-                oilFlasks:                 partyInventory.oilFlasks,
-                rations:                   partyInventory.rations,
-                activeLightSource:         partyInventory.activeLightSource as "torch" | "lantern" | "none",
-                lightSourceTurnsRemaining: partyInventory.lightSourceTurnsRemaining,
-              }
-            : {
-                torches: 0,
-                oilFlasks: 0,
-                rations: 0,
-                activeLightSource: "none",
-                lightSourceTurnsRemaining: 0,
-              };
-
-          if (action === "rest") {
-            const nextTime = applyRest(currentTime);
-            await prisma.campaignTime.upsert({
-              where: { campaignId },
-              create: { campaignId, ...nextTime },
-              update: nextTime,
-            });
-            return JSON.stringify({
-              action: "rest",
-              turnsAdvanced: 0,
-              totalTurns: nextTime.totalTurns,
-              totalHours: nextTime.totalHours,
-              restRequired: false,
-              encounter: null,
-              lightSource: currentInventory.activeLightSource,
-              lightSourceTurnsLeft: currentInventory.lightSourceTurnsRemaining,
-              lightExpired: false,
-              rationsDepleted: false,
-              warnings: ["The party rests for one turn. The rest cycle has been reset."],
-            });
-          }
-
-          const restAlreadyOverdue = currentTime.turnsSinceRest >= REST_INTERVAL_TURNS;
-          const turnResult = advanceTurn(currentTime, turnsToAdvance);
-
-          if (restAlreadyOverdue && turnResult.restRequired) {
-            await prisma.character.update({
-              where: { id: campaignRec.characterId },
-              data: { exhaustionLevel: { increment: 1 } },
-            });
-          }
-
-          const resourceResult = consumeResources(currentInventory, {
-            rationConsumptionDue: turnResult.rationConsumptionDue,
-            partySize,
-          });
-
-          let encounter: { triggered: boolean; roll: number } | null = null;
-          if (turnResult.encounterCheckDue || action === "loud") {
-            const enc = checkRandomEncounter(action === "loud");
-            encounter = { triggered: enc.triggered, roll: enc.roll };
-          }
-
-          await prisma.$transaction([
-            prisma.campaignTime.upsert({
-              where: { campaignId },
-              create: { campaignId, ...turnResult.next },
-              update: turnResult.next,
-            }),
-            prisma.partyInventory.upsert({
-              where: { campaignId },
-              create: { campaignId, ...resourceResult.next },
-              update: resourceResult.next,
-            }),
-          ]);
-
-          return JSON.stringify({
-            action,
-            turnsAdvanced:      turnResult.turnsAdvanced,
-            totalTurns:         turnResult.next.totalTurns,
-            totalHours:         turnResult.next.totalHours,
-            restRequired:       turnResult.restRequired,
-            exhaustionApplied:  restAlreadyOverdue && turnResult.restRequired,
-            encounter,
-            lightSource:        resourceResult.next.activeLightSource,
-            lightSourceTurnsLeft: resourceResult.next.lightSourceTurnsRemaining,
-            lightExpired:       resourceResult.lightExpired,
-            rationsDepleted:    resourceResult.rationsDepleted,
-            warnings:           resourceResult.warnings,
-          });
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "Exploration turn failed mechanically. The moment hangs suspended." });
         }
@@ -212,3 +98,4 @@ export function buildExplorationTools(campaignId: string) {
     }),
   };
 }
+
