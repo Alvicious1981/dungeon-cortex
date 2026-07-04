@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/prisma";
 
 export type NpcServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
+  | "CAMPAIGN_OWNERSHIP_MISMATCH"
   | "NPC_NOT_FOUND"
   | "NPC_OWNERSHIP_MISMATCH"
   | "INVALID_NPC_PAYLOAD"
@@ -20,6 +21,7 @@ export class NpcServiceError extends Error {
 
 interface NpcCampaignRecord {
   id: string;
+  userId?: string;
 }
 
 interface NpcRecord {
@@ -43,6 +45,7 @@ interface NpcRecord {
 }
 
 export interface NpcDescriptor {
+  campaignId?: string;
   seed?: string;
   role: string;
   name: string;
@@ -122,6 +125,17 @@ export interface TrackMerchantStateInput {
   db?: NpcDb;
 }
 
+export interface UpsertGeneratedNpcInput {
+  campaignId: string;
+  userId?: string;
+  npcSeed?: string;
+  role?: string;
+  descriptor: NpcDescriptor;
+  disposition?: number;
+  tx?: NpcDb;
+  db?: NpcDb;
+}
+
 export interface NpcStateFacts {
   type: "npc_state_tracked";
   campaignId: string;
@@ -149,6 +163,21 @@ export interface InitialNpcDispositionFacts {
   seed: string;
   disposition: number;
   hasMetPlayer: boolean;
+}
+
+export interface GeneratedNpcFacts {
+  type: "generated_npc_upserted";
+  campaignId: string;
+  npcId: string;
+  seed: string;
+  name: string;
+  race?: string | null;
+  profession?: string | null;
+  alignment?: string | null;
+  abilityScores?: unknown;
+  traits?: unknown;
+  created: boolean;
+  updated: boolean;
 }
 
 export interface TrackNpcStateResult {
@@ -182,11 +211,29 @@ export interface EstablishInitialNpcDispositionResult {
   facts: InitialNpcDispositionFacts;
 }
 
+export interface UpsertGeneratedNpcResult {
+  ok: true;
+  campaignId: string;
+  npcId: string;
+  seed: string;
+  name: string;
+  race?: string | null;
+  profession?: string | null;
+  alignment?: string | null;
+  abilityScores?: unknown;
+  traits?: unknown;
+  created: boolean;
+  updated: boolean;
+  npc: NpcRecord;
+  facts: GeneratedNpcFacts;
+}
+
 function resolveDb(
   input:
     | TrackNpcStateInput
     | TrackMerchantStateInput
     | EstablishInitialNpcDispositionInput
+    | UpsertGeneratedNpcInput
 ): NpcDb {
   return input.tx ?? input.db ?? (prisma as unknown as NpcDb);
 }
@@ -209,6 +256,33 @@ async function assertCampaignExists(db: NpcDb, campaignId: string): Promise<void
   }
 }
 
+async function assertGeneratedNpcCampaignAccess(
+  db: NpcDb,
+  input: UpsertGeneratedNpcInput
+): Promise<void> {
+  if (input.campaignId.trim().length === 0) {
+    throw new NpcServiceError("CAMPAIGN_NOT_FOUND", "Campaign not found.");
+  }
+
+  const campaign = await db.campaign.findUnique({
+    where: { id: input.campaignId },
+    select: { id: true, userId: true },
+  });
+
+  if (campaign === null) {
+    throw new NpcServiceError(
+      "CAMPAIGN_NOT_FOUND",
+      `Campaign not found: ${input.campaignId}`
+    );
+  }
+
+  if (input.userId && campaign?.userId && campaign.userId !== input.userId) {
+    throw new NpcServiceError(
+      "CAMPAIGN_OWNERSHIP_MISMATCH",
+      `Campaign ${input.campaignId} does not belong to user ${input.userId}.`
+    );
+  }
+}
 function assertValidDisposition(disposition: number): void {
   if (!Number.isInteger(disposition) || disposition < -10 || disposition > 10) {
     throw new NpcServiceError(
@@ -309,6 +383,17 @@ function assertNpcOwnership(npc: NpcRecord, campaignId: string): void {
   }
 }
 
+function assertDescriptorCampaignOwnership(
+  descriptor: NpcDescriptor,
+  campaignId: string
+): void {
+  if (descriptor.campaignId && descriptor.campaignId !== campaignId) {
+    throw new NpcServiceError(
+      "NPC_OWNERSHIP_MISMATCH",
+      `Generated NPC payload does not belong to campaign ${campaignId}.`
+    );
+  }
+}
 function assertInitialDispositionIsAvailable(npc: NpcRecord): void {
   if (npc.hasMetPlayer) {
     throw new NpcServiceError(
@@ -359,6 +444,118 @@ function baseNpcUpdateData(
   };
 }
 
+function generatedNpcUpdateData(
+  descriptor: ReturnType<typeof validateDescriptor>,
+  input: UpsertGeneratedNpcInput
+): Record<string, unknown> {
+  return {
+    ...(descriptor.notes !== undefined && { notes: descriptor.notes }),
+    ...(descriptor.race !== undefined && { race: descriptor.race }),
+    ...(descriptor.profession !== undefined && { profession: descriptor.profession }),
+    ...(descriptor.alignment !== undefined && { alignment: descriptor.alignment }),
+    ...(descriptor.abilityScores !== undefined && { abilityScores: descriptor.abilityScores }),
+    ...(descriptor.traits !== undefined && { traits: descriptor.traits }),
+    ...(input.disposition !== undefined && { disposition: input.disposition }),
+  };
+}
+
+function generatedNpcExtraData(input: UpsertGeneratedNpcInput): Record<string, unknown> {
+  return {
+    ...(input.disposition !== undefined && { disposition: input.disposition }),
+  };
+}
+
+async function maybeFindNpcBySeed(
+  db: NpcDb,
+  campaignId: string,
+  seed: string
+): Promise<NpcRecord | null | undefined> {
+  if (typeof db.nPC.findUnique !== "function") return undefined;
+  return findNpcBySeed(db, campaignId, seed);
+}
+
+export async function upsertGeneratedNpc(
+  input: UpsertGeneratedNpcInput
+): Promise<UpsertGeneratedNpcResult> {
+  const db = resolveDb(input);
+  await assertGeneratedNpcCampaignAccess(db, input);
+  assertDescriptorCampaignOwnership(input.descriptor, input.campaignId);
+
+  if (input.disposition !== undefined) {
+    assertValidDisposition(input.disposition);
+  }
+
+  const descriptor = validateDescriptor(
+    input.descriptor,
+    input.npcSeed,
+    input.role
+  );
+  const existing = await maybeFindNpcBySeed(db, input.campaignId, descriptor.seed);
+  const created = !existing;
+  const npc = await db.nPC.upsert({
+    where: {
+      campaignId_seed: {
+        campaignId: input.campaignId,
+        seed: descriptor.seed,
+      },
+    },
+    create: baseNpcCreateData(
+      input.campaignId,
+      descriptor,
+      generatedNpcExtraData(input)
+    ),
+    update: generatedNpcUpdateData(descriptor, input),
+  });
+
+  return buildGeneratedNpcResult(input.campaignId, npc, descriptor, created);
+}
+
+function buildGeneratedNpcResult(
+  campaignId: string,
+  npc: NpcRecord,
+  descriptor: ReturnType<typeof validateDescriptor>,
+  created: boolean
+): UpsertGeneratedNpcResult {
+  const npcId = npc.id ?? descriptor.seed;
+  const seed = npc.seed ?? descriptor.seed;
+  const name = npc.name ?? descriptor.name;
+  const race = npc.race ?? descriptor.race;
+  const profession = npc.profession ?? descriptor.profession;
+  const alignment = npc.alignment ?? descriptor.alignment;
+  const abilityScores = npc.abilityScores ?? descriptor.abilityScores;
+  const traits = npc.traits ?? descriptor.traits;
+  const facts: GeneratedNpcFacts = {
+    type: "generated_npc_upserted",
+    campaignId,
+    npcId,
+    seed,
+    name,
+    race,
+    profession,
+    alignment,
+    abilityScores,
+    traits,
+    created,
+    updated: !created,
+  };
+
+  return {
+    ok: true,
+    campaignId,
+    npcId,
+    seed,
+    name,
+    race,
+    profession,
+    alignment,
+    abilityScores,
+    traits,
+    created,
+    updated: !created,
+    npc,
+    facts,
+  };
+}
 export async function trackNpcState(
   input: TrackNpcStateInput
 ): Promise<TrackNpcStateResult> {

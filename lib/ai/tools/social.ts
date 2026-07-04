@@ -27,6 +27,7 @@ import { resolveTradeTransaction } from "@/lib/rules/trade-service";
 import {
   establishInitialNpcDisposition,
   trackNpcState,
+  upsertGeneratedNpc,
   type NpcDescriptor,
 } from "@/lib/rules/npc-service";
 
@@ -95,41 +96,34 @@ export function buildSocialTools(
       execute: async ({ seed, role, notes }) => {
         try {
           const statblock = generateNPC(seed, role as NPCRole);
-          await prisma.nPC.upsert({
-            where: { campaignId_seed: { campaignId, seed } },
-            create: {
-              campaignId,
+          const result = await upsertGeneratedNpc({
+            campaignId,
+            npcSeed: seed,
+            role,
+            descriptor: {
               seed,
               role,
-              name:         statblock.name,
-              maxHp:        statblock.maxHp,
-              hp:           statblock.hp,
-              ac:           statblock.ac,
-              notes:        notes ?? "",
-              race:         statblock.race,
-              profession:   statblock.profession,
-              alignment:    statblock.alignment,
-              abilityScores: statblock.abilityScores as object,
-              traits:       statblock.traits as object,
-            },
-            update: {
-              // Always refresh rich fields — pure function guarantees consistency.
-              race:         statblock.race,
-              profession:   statblock.profession,
-              alignment:    statblock.alignment,
-              abilityScores: statblock.abilityScores as object,
-              traits:       statblock.traits as object,
-              ...(notes !== undefined && { notes }),
+              name: statblock.name,
+              maxHp: statblock.maxHp,
+              hp: statblock.hp,
+              ac: statblock.ac,
+              notes,
+              race: statblock.race,
+              profession: statblock.profession,
+              alignment: statblock.alignment,
+              abilityScores: statblock.abilityScores,
+              traits: statblock.traits,
             },
           });
           return JSON.stringify({
-            ok:          true,
-            seed,
-            name:        statblock.name,
-            race:        statblock.race,
-            profession:  statblock.profession,
-            alignment:   statblock.alignment,
-            traits:      statblock.traits,
+            ok: result.ok,
+            seed: result.seed,
+            name: result.name,
+            race: result.race,
+            profession: result.profession,
+            alignment: result.alignment,
+            traits: result.traits,
+            facts: result.facts,
           });
         } catch {
           return JSON.stringify({ error: "NPC generation failed mechanically." });
