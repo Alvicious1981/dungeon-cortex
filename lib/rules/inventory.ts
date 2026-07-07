@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getEquipmentInfo } from "@/lib/ai/tools/srd-lookup";
+import { getEquipmentInfo } from "@/lib/rules/srd-equipment-lookup";
 /**
  * lib/rules/inventory.ts
  *
