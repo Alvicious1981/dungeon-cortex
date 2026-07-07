@@ -1,0 +1,202 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { spawnCombatEncounter } from "@/lib/rules/encounter-service";
+import type { Monster } from "@/lib/rules/srd";
+
+const wolf: Monster = {
+  index: "wolf",
+  name: "Wolf",
+  hit_points: 11,
+  armor_class: [{ type: "natural", value: 13 }],
+  type: "beast",
+  challenge_rating: 0.25,
+  dexterity: 12,
+};
+
+function mockRandom(values: number[]): void {
+  let index = 0;
+  vi.spyOn(Math, "random").mockImplementation(() => values[index++] ?? 0.5);
+}
+
+function createDb(options?: {
+  campaign?: null | {
+    character: {
+      id: string;
+      name: string;
+      hp: number;
+      maxHp: number;
+      stats: unknown;
+      inventory: Array<{ type: string; properties: unknown }>;
+    };
+  };
+  activeEncounter?: null | { id: string };
+}) {
+  const campaign =
+    options?.campaign === undefined
+      ? {
+          character: {
+            id: "char-1",
+            name: "Aldric",
+            hp: 18,
+            maxHp: 20,
+            stats: { DEX: 14 },
+            inventory: [
+              {
+                type: "armor",
+                properties: { baseAC: 11, addDexModifier: true },
+              },
+            ],
+          },
+        }
+      : options.campaign;
+  const activeEncounter = options?.activeEncounter ?? null;
+
+  const db = {
+    campaign: {
+      findUnique: vi.fn(async () => campaign),
+    },
+    encounter: {
+      findFirst: vi.fn(async () => activeEncounter),
+      create: vi.fn(async ({ data }) => ({
+        id: "enc-1",
+        combatants: data.combatants.create
+          .map((combatant: { name: string; initiativeTotal: number; isPlayer: boolean }) => ({
+            name: combatant.name,
+            initiativeTotal: combatant.initiativeTotal,
+            isPlayer: combatant.isPlayer,
+          }))
+          .sort(
+            (
+              a: { initiativeTotal: number },
+              b: { initiativeTotal: number }
+            ) => b.initiativeTotal - a.initiativeTotal
+          ),
+      })),
+    },
+  };
+
+  return db;
+}
+
+describe("spawnCombatEncounter service contract", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("loads campaign state, builds the encounter, persists combatants, and returns serializable facts", async () => {
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [wolf]);
+    mockRandom([0.9, 0.2]);
+
+    const result = await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      theme: "beast",
+      db,
+      queryMonsters,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      encounterId: "enc-1",
+      enemies: [{ name: "Wolf", cr: 0.25, hp: 11 }],
+      adjustedXP: 50,
+      initiativeOrder: [
+        { name: "Aldric", initiative: 21, isPlayer: true },
+        { name: "Wolf", initiative: 6, isPlayer: false },
+      ],
+    });
+    expect(() => JSON.stringify(result)).not.toThrow();
+    expect(db.campaign.findUnique).toHaveBeenCalledWith({
+      where: { id: "campaign-1" },
+      include: { character: { include: { inventory: true } } },
+    });
+    expect(db.encounter.findFirst).toHaveBeenCalledWith({
+      where: { campaignId: "campaign-1", status: "active" },
+    });
+    expect(queryMonsters).toHaveBeenCalledWith({
+      type: "beast",
+      maxCR: 0.5,
+      limit: 30,
+    });
+    expect(db.encounter.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "campaign-1",
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
+        combatants: {
+          create: [
+            {
+              name: "Aldric",
+              isPlayer: true,
+              hp: 18,
+              maxHp: 20,
+              ac: 13,
+              initiativeTotal: 21,
+            },
+            {
+              name: "Wolf",
+              isPlayer: false,
+              hp: 11,
+              maxHp: 11,
+              ac: 13,
+              initiativeTotal: 6,
+            },
+          ],
+        },
+      },
+      include: { combatants: { orderBy: { initiativeTotal: "desc" } } },
+    });
+  });
+
+  it("returns an active-encounter error before querying monsters or creating records", async () => {
+    const db = createDb({ activeEncounter: { id: "enc-active" } });
+    const queryMonsters = vi.fn(async () => [wolf]);
+
+    const result = await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      db,
+      queryMonsters,
+    });
+
+    expect(result).toEqual({
+      error: "An active encounter already exists.",
+      encounterId: "enc-active",
+    });
+    expect(queryMonsters).not.toHaveBeenCalled();
+    expect(db.encounter.create).not.toHaveBeenCalled();
+  });
+
+  it("returns a campaign-not-found error before checking encounters", async () => {
+    const db = createDb({ campaign: null });
+    const queryMonsters = vi.fn(async () => [wolf]);
+
+    const result = await spawnCombatEncounter({
+      campaignId: "missing-campaign",
+      targetCR: 0.25,
+      db,
+      queryMonsters,
+    });
+
+    expect(result).toEqual({ error: "Campaign not found." });
+    expect(db.encounter.findFirst).not.toHaveBeenCalled();
+    expect(queryMonsters).not.toHaveBeenCalled();
+  });
+
+  it("returns a no-suitable-monsters error without creating an encounter", async () => {
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => []);
+
+    const result = await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      theme: "undead",
+      db,
+      queryMonsters,
+    });
+
+    expect(result).toEqual({
+      error: "No suitable monsters found for this encounter configuration.",
+    });
+    expect(db.encounter.create).not.toHaveBeenCalled();
+  });
+});

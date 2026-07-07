@@ -1,20 +1,10 @@
 import { tool } from "ai";
-import { prisma } from "@/lib/db/prisma";
-import {
-  buildEncounter,
-  xpForCR,
-  encounterMultiplier,
-  SpawnEncounterInputSchema,
-} from "@/lib/rules/encounters";
-import {
-  rollInitiative, acFromMonsterData, acFromInventory,
-  ResolveAttackInputSchema,
-} from "@/lib/rules/combat";
-import { abilityModifier } from "@/lib/rules/dice";
+import { SpawnEncounterInputSchema } from "@/lib/rules/encounters";
+import { ResolveAttackInputSchema } from "@/lib/rules/combat";
 import { CombatServiceError, resolveCombatAttack } from "@/lib/rules/combat-service";
+import { spawnCombatEncounter } from "@/lib/rules/encounter-service";
 import { GenerateLootInputSchema } from "@/lib/rules/loot";
 import { grantLoot } from "@/lib/rules/loot-service";
-import { queryMonsters, buildMonsterRawData } from "@/lib/ai/tools/srd-lookup";
 
 export function buildCombatTools(campaignId: string) {
   return {
@@ -29,123 +19,13 @@ export function buildCombatTools(campaignId: string) {
       inputSchema: SpawnEncounterInputSchema,
       execute: async ({ targetCR, theme }) => {
         try {
-          const campaign = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            include: { character: { include: { inventory: true } } },
-          });
-          if (!campaign) return JSON.stringify({ error: "Campaign not found." });
-
-          // Guard: only one active encounter at a time
-          const existing = await prisma.encounter.findFirst({
-            where: { campaignId, status: "active" },
-          });
-          if (existing) {
-            return JSON.stringify({
-              error: "An active encounter already exists.",
-              encounterId: existing.id,
-            });
-          }
-
-          // Query monsters from DB using typed columns (broad pool for budget math).
-          // queryMonsters returns pre-shaped Monster[] — no secondary parsing needed.
-          const typedMonsters = await queryMonsters({
-            type: theme,
-            maxCR: targetCR === 0 ? 1 : Math.min(targetCR * 2, 30),
-            limit: 30,
+          const result = await spawnCombatEncounter({
+            campaignId,
+            targetCR,
+            theme,
           });
 
-          const selectedMonsters = buildEncounter(targetCR, typedMonsters, theme);
-
-          if (selectedMonsters.length === 0) {
-            return JSON.stringify({
-              error: "No suitable monsters found for this encounter configuration.",
-            });
-          }
-
-          // Derive player stats for initiative and AC
-          const stats = campaign.character.stats as Record<string, number>;
-          const playerDexMod = abilityModifier(stats.DEX ?? 10);
-          const playerAC = acFromInventory(campaign.character.inventory, playerDexMod);
-
-          // Build initiative inputs: player first, then each selected enemy
-          const initiativeInputs = [
-            {
-              id: `player-${campaign.character.id}`,
-              name: campaign.character.name,
-              dexModifier: playerDexMod,
-            },
-            ...selectedMonsters.map((m, i) => ({
-              id: `enemy-${i}`,
-              name: m.name,
-              dexModifier: abilityModifier(m.dexterity ?? 10),
-            })),
-          ];
-
-          const { order } = rollInitiative(initiativeInputs);
-
-          // Map initiative order back to full combatant data.
-          // buildMonsterRawData converts Monster → armor_class-array shape for acFromMonsterData.
-          const combatantData = order.map((entry) => {
-            const isPlayer = entry.id.startsWith("player-");
-            if (isPlayer) {
-              return {
-                name: campaign.character.name,
-                isPlayer: true,
-                hp: campaign.character.hp,
-                maxHp: campaign.character.maxHp,
-                ac: playerAC,
-                initiativeTotal: entry.initiative,
-              };
-            }
-            const idx = parseInt(entry.id.replace("enemy-", ""), 10);
-            const monster = selectedMonsters[idx]!;
-            return {
-              name: monster.name,
-              isPlayer: false,
-              hp: monster.hit_points,
-              maxHp: monster.hit_points,
-              ac: acFromMonsterData(buildMonsterRawData(monster)),
-              initiativeTotal: entry.initiative,
-            };
-          });
-
-          const encounter = await prisma.encounter.create({
-            data: {
-              campaignId,
-              status: "active",
-              round: 1,
-              currentTurnIndex: 0,
-              combatants: { create: combatantData },
-            },
-            include: {
-              combatants: { orderBy: { initiativeTotal: "desc" } },
-            },
-          });
-
-          // Compute encounter XP summary for the narrator
-          const rawXP = selectedMonsters.reduce(
-            (sum, m) => sum + xpForCR(m.challenge_rating ?? 0),
-            0
-          );
-          const adjustedXP = Math.round(
-            rawXP * encounterMultiplier(selectedMonsters.length)
-          );
-
-          return JSON.stringify({
-            ok: true,
-            encounterId: encounter.id,
-            enemies: selectedMonsters.map((m) => ({
-              name: m.name,
-              cr: m.challenge_rating ?? 0,
-              hp: m.hit_points,
-            })),
-            adjustedXP,
-            initiativeOrder: encounter.combatants.map((c) => ({
-              name: c.name,
-              initiative: c.initiativeTotal,
-              isPlayer: c.isPlayer,
-            })),
-          });
+          return JSON.stringify(result);
         } catch {
           return JSON.stringify({ error: "Encounter spawning failed mechanically." });
         }

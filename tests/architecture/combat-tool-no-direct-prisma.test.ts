@@ -42,8 +42,8 @@ function extractBalancedBlock(source: string, openBraceIndex: number): string {
   return "";
 }
 
-function extractResolveAttackExecuteBody(source: string): string {
-  const toolStart = source.indexOf("resolveAttack: tool({");
+function extractToolExecuteBody(source: string, toolName: string): string {
+  const toolStart = source.indexOf(`${toolName}: tool({`);
   if (toolStart === -1) return "";
 
   const executeStart = source.indexOf("execute: async", toolStart);
@@ -58,8 +58,46 @@ function extractResolveAttackExecuteBody(source: string): string {
   return extractBalancedBlock(source, bodyStart);
 }
 
+describe("spawnEncounter architecture: AI tool must delegate encounter spawning", () => {
+  const spawnEncounterBody = extractToolExecuteBody(combatToolSource, "spawnEncounter");
+
+  it("extracts only the executable spawnEncounter body", () => {
+    expect(combatToolSource).toContain("spawnEncounter: tool({");
+    expect(combatToolSource).toContain("resolveAttack: tool({");
+    expect(combatToolSource).toContain("generateLoot: tool({");
+    expect(spawnEncounterBody).toContain("spawnCombatEncounter");
+    expect(spawnEncounterBody).not.toContain("resolveCombatAttack");
+    expect(spawnEncounterBody).not.toContain("grantLoot");
+  });
+
+  it("delegates to the backend encounter service", () => {
+    expect(combatToolSource).toMatch(
+      /from\s*["']@\/lib\/rules\/encounter-service["']/
+    );
+    expect(spawnEncounterBody).toMatch(/\bspawnCombatEncounter\s*\(/);
+    expect(spawnEncounterBody).toMatch(/\bJSON\.stringify\s*\(\s*result\s*\)/);
+  });
+
+  it("does not use Prisma directly inside spawnEncounter", () => {
+    expect(spawnEncounterBody).not.toMatch(/\bprisma\./);
+    expect(spawnEncounterBody).not.toMatch(/\bprisma\s+as\s+any\b/);
+  });
+
+  it("does not own encounter mechanics inside spawnEncounter", () => {
+    expect(spawnEncounterBody).not.toMatch(/\bqueryMonsters\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bbuildEncounter\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\brollInitiative\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bacFromInventory\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bacFromMonsterData\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bbuildMonsterRawData\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bxpForCR\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bencounterMultiplier\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bencounter\.create\s*\(/);
+  });
+});
+
 describe("resolveAttack architecture: AI tool must delegate combat resolution", () => {
-  const resolveAttackBody = extractResolveAttackExecuteBody(combatToolSource);
+  const resolveAttackBody = extractToolExecuteBody(combatToolSource, "resolveAttack");
 
   it("extracts only the executable resolveAttack body", () => {
     expect(combatToolSource).toContain("spawnEncounter: tool({");
