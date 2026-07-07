@@ -8,12 +8,10 @@ import {
 } from "@/lib/rules/encounters";
 import {
   rollInitiative, acFromMonsterData, acFromInventory,
-  deriveCombatBeat, extractConditions,
   ResolveAttackInputSchema,
-  type EncounterSnapshot,
 } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
-import { executeCombatAction } from "@/lib/rules/combat-pipeline";
+import { CombatServiceError, resolveCombatAttack } from "@/lib/rules/combat-service";
 import { GenerateLootInputSchema } from "@/lib/rules/loot";
 import { grantLoot } from "@/lib/rules/loot-service";
 import { queryMonsters, buildMonsterRawData } from "@/lib/ai/tools/srd-lookup";
@@ -166,94 +164,21 @@ export function buildCombatTools(campaignId: string) {
       inputSchema: ResolveAttackInputSchema,
       execute: async ({ attackerId, targetId, weaponDamageDice, attackModifier, damageType }) => {
         try {
-          const encounter = await prisma.encounter.findFirst({
-            where: { campaignId, status: "active" },
-            include: { combatants: true },
-          });
-          if (!encounter) {
-            return JSON.stringify({ error: "No active encounter found." });
-          }
-
-          const attacker = encounter.combatants.find((c) => c.id === attackerId);
-          const defender = encounter.combatants.find((c) => c.id === targetId);
-          if (!defender) {
-            return JSON.stringify({ error: `Target combatant '${targetId}' not found in encounter.` });
-          }
-
-          const campaign = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            select: { characterId: true },
+          const result = await resolveCombatAttack({
+            campaignId,
+            attackerId,
+            targetId,
+            weaponDamageDice,
+            attackModifier,
+            damageType,
           });
 
-          const enemyCombatants = encounter.combatants.filter((c) => !c.isPlayer);
-          const encStatus: "active" | "resolved" | "fled" =
-            encounter.status === "active" ? "active" : "resolved";
-          const snapshot: EncounterSnapshot = {
-            round: encounter.round,
-            totalDamageDealt: encounter.totalDamageDealt,
-            status: encStatus,
-            currentBeat: "opening",
-            defenderId: targetId,
-            combatants: encounter.combatants.map((c) => ({
-              id: c.id,
-              isPlayer: c.isPlayer,
-              hp: c.hp,
-              maxHp: c.maxHp,
-              hpBeforeThisTurn: c.hp, // approximation — no per-turn history yet
-              isBoss: !c.isPlayer && enemyCombatants.length === 1,
-            })),
-          };
-
-          const attackOutcome = await executeCombatAction(
-            {
-              actionType: "attack",
-              encounter: {
-                id: encounter.id,
-                round: encounter.round,
-                currentTurnIndex: encounter.currentTurnIndex,
-                totalDamageDealt: encounter.totalDamageDealt,
-                status: encStatus,
-                combatants: encounter.combatants as any[],
-              },
-              actorId: attackerId,
-              actorName: attacker?.name ?? attackerId,
-              actorConditions: extractConditions(attacker?.conditions),
-              targetCombatants: [defender as any],
-              weaponName: weaponDamageDice,
-              weaponDice: weaponDamageDice,
-              damageType,
-              attackModifier,
-              flatDamageBonus: 0,
-              playerCharacterId: campaign?.characterId,
-              collectEvents: false,
-            },
-            prisma as any
-          );
-
-          if (attackOutcome.totalDamageDealt > 0) {
-            await prisma.encounter.update({
-              where: { id: encounter.id },
-              data: { totalDamageDealt: { increment: attackOutcome.totalDamageDealt } },
-            });
+          return JSON.stringify(result);
+        } catch (error) {
+          if (error instanceof CombatServiceError) {
+            return JSON.stringify({ error: error.message });
           }
 
-          const consequences = attackOutcome.consequenceDetails?.[0];
-          if (!consequences) {
-            return JSON.stringify({ error: "Attack resolution failed mechanically." });
-          }
-
-          // Re-derive beat with corrected totalDamageDealt (post-roll)
-          const correctedTotal =
-            snapshot.totalDamageDealt + consequences.combat_facts.damage;
-          const finalBeat = deriveCombatBeat(
-            { ...snapshot, totalDamageDealt: correctedTotal },
-            consequences.combat_facts
-          );
-          const finalConsequences = { ...consequences, combat_beat: finalBeat };
-
-          // Persist HP change and encounter-wide damage total only when damage was dealt.
-          return JSON.stringify({ ok: true, ...finalConsequences });
-        } catch {
           return JSON.stringify({ error: "Attack resolution failed mechanically." });
         }
       },
