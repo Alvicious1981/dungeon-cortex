@@ -36,6 +36,38 @@ Example:
 Fix the combat consequence rendering bug. Stay within components/combat and lib/events unless you find a documented contract mismatch. Run pnpm typecheck and relevant tests before reporting completion.
 ```
 
+## Prompt templates
+
+### Documentation task
+
+```text
+Read AGENTS.md and the documentation files relevant to this task. Audit the requested docs for accuracy, consistency, navigability, and clarity. Do not edit files until you provide findings and an implementation plan.
+```
+
+### Small bug fix
+
+```text
+Read AGENTS.md and inspect the relevant code. Identify the smallest safe fix. Do not change unrelated files. Run pnpm typecheck and the most relevant test before reporting completion.
+```
+
+### Backend rules task
+
+```text
+Read AGENTS.md, docs/DECISION_5E_SRD_API.md, MASTER_ARCH_GUIDE.md, and relevant rule modules. Preserve backend mechanical authority and D&D 5e/SRD 2014 canon. Propose a plan before edits.
+```
+
+### API or event-contract task
+
+```text
+Read AGENTS.md, docs/API.md, MASTER_ARCH_GUIDE.md, lib/events/game-events.ts, and the relevant route or consumer. Identify the current contract before proposing edits. Run pnpm typecheck and pnpm build when appropriate.
+```
+
+### QA review
+
+```text
+Review the recent changes against AGENTS.md, package.json scripts, and the relevant source-of-truth docs. Report risks, missing tests, and any documentation-code drift. Do not edit files.
+```
+
 ## When to use a new Codex task
 
 Start a new task when:

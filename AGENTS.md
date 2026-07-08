@@ -63,6 +63,18 @@ Use the smallest relevant check:
 - `pnpm test:e2e` — UI flow or end-to-end behavior.
 - `pnpm check-retro` — rules-canon or documentation changes involving D&D terminology.
 
+## Validation by change type
+
+| Change type | Minimum validation |
+| --- | --- |
+| Documentation only | Manual review; `pnpm check-retro` if rules terminology changed. |
+| TypeScript types or shared contracts | `pnpm typecheck` |
+| Rules/backend utilities | `pnpm test` |
+| API routes or app-wide changes | `pnpm typecheck` and `pnpm build` |
+| UI flow changes | `pnpm test:e2e` when feasible |
+| D&D canon/rules terminology | `pnpm check-retro` |
+| Dependency changes | `pnpm install`, relevant tests, and lockfile review |
+
 ## Commands requiring explicit approval
 
 Ask before running commands that:
