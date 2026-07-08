@@ -1,77 +1,102 @@
-# AGENTS.md - Dungeon Cortex Codex Instructions
+# AGENTS.md — Dungeon Cortex Codex Instructions
 
-## 1. Canon de Dungeon Cortex
+This is the primary operating guide for Codex in this repository.
 
-- Dungeon Cortex usa exclusivamente D&D 5e/SRD 2014.
-- `dnd5eapi.co` es la fuente primaria de reglas y datos SRD.
-- El backend es autoritativo para legalidad, tiradas, DCs, dano, recursos, condiciones, estado y persistencia.
-- La IA solo puede narrar hechos ya resueltos por el backend.
-- Esta prohibido introducir AD&D, OSR, THAC0, AC descendente, salvaciones retro, moral OSR o XP por oro.
+## First read
 
-## 2. Reglas de edicion
+Before planning non-trivial work, Codex must read:
 
-- No tocar reglas, combate, eventos ni pipeline salvo que la tarea lo autorice explicitamente.
-- No modificar `.env`, secretos, configuracion de despliegue ni base de datos.
-- No instalar dependencias sin autorizacion explicita.
-- No abrir PR ni hacer commits salvo autorizacion explicita.
-- No modificar lockfiles salvo que la tarea autorice explicitamente instalar, actualizar o retirar dependencias.
+1. `docs/DECISION_5E_SRD_API.md`
+2. `MASTER_ARCH_GUIDE.md`
+3. `PROJECT_CONTEXT.md`
+4. `package.json`
+5. The code files directly related to the task
 
-## 3. Gestor de paquetes
+Do not rely on historical milestone notes, old planning documents, or comments alone to determine current implementation truth.
 
-- Usar el gestor detectado en el repo.
-- Si existe `pnpm-lock.yaml`, usar `pnpm`.
-- No mezclar `npm`, `yarn`, `pnpm` o `bun`.
+## Source of truth order
 
-## 4. Comandos seguros de verificacion
+When documents conflict, use this order:
 
-Antes de ejecutar scripts, Codex debe comprobar `package.json` para confirmar que existen.
+1. Explicit user instruction in the active task.
+2. `docs/DECISION_5E_SRD_API.md` for rules-system and SRD data-source authority.
+3. `MASTER_ARCH_GUIDE.md` for architecture and system law.
+4. `PROJECT_CONTEXT.md` for product vision and scope.
+5. Current implementation and tests.
+6. Historical documents and archived references.
 
-- `pnpm typecheck`
-- `pnpm test`
-- `pnpm lint`
-- `pnpm run check-retro`
+If repository reality differs from documentation, report the mismatch before proposing changes.
 
-## 5. Comandos prohibidos salvo autorizacion explicita
+## Project canon
 
-- `rm -rf`
-- `git reset --hard`
-- `git clean -fdx`
-- Borrar carpetas completas.
-- Modificar `.env` o secretos.
-- Instalar, actualizar o retirar dependencias.
-- Ejecutar migraciones Prisma.
-- Cambiar configuracion de despliegue.
-- Ejecutar seeds o scripts que modifiquen base de datos.
+- Dungeon Cortex uses D&D 5e/SRD 2014 only.
+- `https://www.dnd5eapi.co/api` is the canonical external SRD data source.
+- Backend code is authoritative for legality, rolls, DCs, damage, resources, conditions, state, persistence, and deterministic events.
+- AI narration may only describe facts already resolved by backend code.
+- Do not introduce AD&D, OSR, THAC0, descending Armor Class, AD&D saving throw categories, morale as an OSR authority system, or gold-for-XP as active mechanics.
 
-## 6. Politica para integrar nuevas librerias
+## Editing rules
 
-Cada nueva libreria debe integrarse en una tarea separada. Cada tarea debe indicar:
+- Do not touch rules, combat, events, persistence, migrations, or action pipelines unless the task explicitly authorizes it.
+- Do not modify `.env`, secrets, deployment configuration, or production credentials.
+- Do not install, update, or remove dependencies unless the task explicitly authorizes it.
+- Do not modify lockfiles unless dependency changes are explicitly authorized.
+- Do not create commits, branches, tags, deployments, or pull requests unless the user explicitly asks.
+- Keep changes small, reviewable, and tied to the requested task.
 
-- dependencia exacta;
-- archivos afectados;
-- tests;
-- comandos de verificacion;
-- rollback;
-- riesgos.
+## Package manager
 
-No se debe instalar ninguna libreria si la tarea no autoriza expresamente esa integracion.
+- Use the package manager detected in the repository.
+- If `pnpm-lock.yaml` exists, use `pnpm`.
+- Do not mix `npm`, `yarn`, `pnpm`, or `bun`.
 
-## 7. Orden recomendado de integraciones
+## Safe validation commands
 
-1. MSW
-2. ts-pattern
-3. TanStack Query
-4. Playwright
-5. Promptfoo
+Before running a script, confirm it exists in `package.json`.
 
-## 8. Reglas de revision
+Use the smallest relevant check:
 
-Al finalizar cada tarea, Codex debe entregar:
+- `pnpm typecheck` — TypeScript and contract changes.
+- `pnpm test` — rules, backend, utilities, and regression checks.
+- `pnpm build` — broad app, route, or framework changes.
+- `pnpm lint` — lint checks when relevant.
+- `pnpm test:e2e` — UI flow or end-to-end behavior.
+- `pnpm check-retro` — rules-canon or documentation changes involving D&D terminology.
 
-- archivos creados o modificados;
-- resultado de `git status --short`;
-- resultado de `git diff --stat`;
-- comandos ejecutados;
-- resultado de los comandos;
-- riesgos pendientes;
-- confirmacion de que no toco archivos prohibidos.
+## Commands requiring explicit approval
+
+Ask before running commands that:
+
+- remove files or folders,
+- reset or clean Git state,
+- install, update, or remove dependencies,
+- run database migrations,
+- run seed scripts that modify data,
+- change deployment configuration,
+- push to GitHub,
+- deploy the app.
+
+## Work style
+
+For non-trivial tasks, Codex should:
+
+1. Inspect the current implementation.
+2. Summarize the real state.
+3. Identify files likely to change.
+4. Explain risks.
+5. Propose the smallest safe plan.
+6. Apply changes only within the requested scope.
+7. Validate with relevant commands.
+8. Report results clearly.
+
+## Completion report
+
+At the end of each task, Codex must report:
+
+- files created or modified,
+- what changed,
+- commands executed,
+- command results,
+- remaining risks,
+- whether prohibited files or operations were avoided,
+- recommended next step.
