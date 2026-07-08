@@ -10,6 +10,16 @@ This repository is prepared for controlled development with Codex.
 
 Use Codex for implementation, documentation updates, audits, and small validated refactors. Complex work should start with a truth check and a short plan before edits.
 
+## Quick links
+
+- Codex instructions: `AGENTS.md`
+- Codex operator workflow: `docs/CODEX_WORKFLOW.md`
+- Contribution workflow: `CONTRIBUTING.md`
+- API overview: `docs/API.md`
+- Rules-system decision: `docs/DECISION_5E_SRD_API.md`
+- Architecture guide: `MASTER_ARCH_GUIDE.md`
+- Product context: `PROJECT_CONTEXT.md`
+
 ## Quick start
 
 ### Requirements
@@ -19,7 +29,7 @@ Use Codex for implementation, documentation updates, audits, and small validated
 - PostgreSQL
 - Git
 
-### Install
+### Install for a human local setup
 
 ```bash
 pnpm install
@@ -36,20 +46,21 @@ The local app should open at:
 http://localhost:3000
 ```
 
+### Important note for Codex
+
+Codex must not run migrations, seed scripts, dependency changes, or data-changing setup commands unless the active task explicitly authorizes them. For agent-driven work, ask Codex to explain why the command is needed before approving it.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` and fill the local values before running the app.
 
-Required for local development:
-
-- `DATABASE_URL`
-- `DIRECT_URL`
-- `DEV_USER_ID`
-
-Optional in local development:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+| Variable | Required in local dev | Required in production | Purpose |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | Yes | Main PostgreSQL connection string used by Prisma. |
+| `DIRECT_URL` | Yes | Usually yes | Direct database connection used by Prisma workflows. |
+| `DEV_USER_ID` | Yes for local no-auth dev | No | Local development user fallback. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Optional if `DEV_USER_ID` is set | Yes if Supabase Auth is enabled | Public Supabase project URL. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional if `DEV_USER_ID` is set | Yes if Supabase Auth is enabled | Public Supabase anon key. |
 
 Never commit real `.env` values, API keys, database credentials, or production secrets.
 
@@ -70,6 +81,59 @@ pnpm lint
 pnpm test:e2e
 pnpm check-retro
 ```
+
+For the full validation matrix by change type, see `CONTRIBUTING.md`.
+
+## Troubleshooting
+
+### `pnpm install` fails
+
+Check that Node.js 20+ and pnpm are installed:
+
+```bash
+node --version
+pnpm --version
+```
+
+### Database connection fails
+
+Confirm that PostgreSQL is running and that `.env` contains valid local values:
+
+```text
+DATABASE_URL=
+DIRECT_URL=
+DEV_USER_ID=
+```
+
+### Prisma client errors
+
+Regenerate the Prisma client:
+
+```bash
+pnpm generate
+```
+
+Then retry the failing command.
+
+### Migrations fail
+
+Confirm the local database exists and that `DATABASE_URL` points to it. For agent-driven work, do not run migrations unless the active task explicitly authorizes database changes.
+
+### Port 3000 is already in use
+
+Stop the existing process or run the app on another port according to your local Next.js setup.
+
+### Validation fails
+
+Run the smallest relevant command first:
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Report the failing command, the error summary, and the smallest proposed fix.
 
 ## Working with Codex
 
