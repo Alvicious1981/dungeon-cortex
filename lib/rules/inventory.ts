@@ -3,17 +3,18 @@ import { getEquipmentInfo } from "@/lib/rules/srd-equipment-lookup";
 /**
  * lib/rules/inventory.ts
  *
- * Foundational rules module for inventory items (Milestone C — Magic and state depth).
+ * Foundational rules module for inventory items.
  *
- * Mirrors the InventoryItem Prisma model. The `properties` JSON field carries a
- * type-specific payload; the interfaces below are the canonical shapes for each
- * `type` discriminant ("weapon" | "armor" | "consumable" | "spell" | "misc").
+ * The `properties` JSON field carries a type-specific payload. The interfaces
+ * below document the local structural shapes used by pure rules helpers for
+ * each `type` discriminant ("weapon" | "armor" | "consumable" | "spell" | "misc").
  */
 
 // ---------------------------------------------------------------------------
-// Local mirror of the Prisma InventoryItem model
-// Replace with `import type { InventoryItem } from '../../app/generated/prisma'`
-// once `pnpm prisma generate` has been run.
+// Local inventory shape used by pure rules helpers.
+// Keep synchronized with the Prisma InventoryItem model and API route payloads.
+// Prefer importing generated Prisma types only when doing so does not couple
+// pure rules helpers to database runtime concerns.
 // ---------------------------------------------------------------------------
 
 export interface InventoryItem {
@@ -317,11 +318,11 @@ export async function addItem(
 // ---------------------------------------------------------------------------
 
 /**
- * Stub: validates that an InventoryItem has the required fields for its type.
- * Returns true if the item is structurally sound; false otherwise.
+ * Performs structural validation for inventory items by type.
  *
- * TODO (Milestone C): expand each branch with full rules validation
- * (e.g. valid dice notation via dice.ts, legal damage types from 5e constants).
+ * This is not a complete D&D 5e rules validator. It only verifies the minimum
+ * fields required for local inventory operations. Full SRD validation should be
+ * handled by SRD lookup/adapters and dedicated rule tests.
  */
 export function validateItem(item: InventoryItem): boolean {
   if (!item.id || !item.characterId || !item.name) return false;

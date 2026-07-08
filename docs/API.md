@@ -9,6 +9,20 @@ This document summarizes the main API surface for contributors and Codex.
 - AI narration must only describe outcomes already resolved by backend facts.
 - The frontend renders state and collects intent; it does not resolve authoritative mechanics.
 
+## Related implementation files
+
+- `app/api/campaign/[id]/action/route.ts`
+- `lib/events/game-events.ts`
+- `lib/rules/combat-pipeline.ts`
+- `lib/narrative/combat-fact-adapter.ts`
+- `MASTER_ARCH_GUIDE.md`
+
+## Documented vs undocumented routes
+
+This document currently covers the main campaign action route only.
+
+Additional API routes should be added here when their contracts become stable. If a route changes request fields, response shape, SSE frames, or error semantics, update this document in the same PR.
+
 ## Streaming contract
 
 The main action route emits Server-Sent Events.
@@ -30,6 +44,15 @@ Frame categories:
 | `merchant` | Optional merchant payload. |
 | `done` | Stream completion marker. |
 
+Pseudo-flow:
+
+```text
+backend event frame
+narration text frame
+optional payload frame
+completion frame
+```
+
 ## `POST /api/campaign/[id]/action`
 
 Handles player actions, deterministic gates, state mutation, game events, and narration streaming.
@@ -50,6 +73,23 @@ The route supports deterministic macro actions that bypass LLM intent parsing fo
 - `Attack`
 - `End Turn`
 - `Move`
+
+### Non-streaming action exception
+
+`/roll` commands are handled as a quick non-streaming response.
+
+Example user action:
+
+```text
+/roll 1d20+5
+```
+
+Expected behavior:
+
+- validate dice notation;
+- persist the user action;
+- persist the system roll result;
+- return a JSON status response.
 
 ### Natural language actions
 
