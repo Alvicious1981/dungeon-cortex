@@ -27,7 +27,7 @@ No task in UI slices may begin until all backend gates in Phases 1-3 are closed.
 2. Ensure per-target save success/failure drives deterministic damage and condition application.
 3. Persist condition outcomes to `Combatant.conditions` inside transaction boundaries.
 4. Enforce concentration replacement and concentration-break flows atomically.
-5. Ensure concentration saving throw DC is authoritative (`max(10, floor(damage / 2))`.
+5. Ensure concentration saving throw DC is authoritative (`max(10, floor(damage / 2))`).
 
 ### Exit Criteria
 
