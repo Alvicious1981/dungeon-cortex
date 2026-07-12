@@ -59,8 +59,9 @@ Copy `.env.example` to `.env` and fill the local values before running the app.
 | `DATABASE_URL` | Yes | Yes | Main PostgreSQL connection string used by Prisma. |
 | `DIRECT_URL` | Yes | Usually yes | Direct database connection used by Prisma workflows. |
 | `DEV_USER_ID` | Yes for local no-auth dev | No | Local development user fallback. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Optional if `DEV_USER_ID` is set | Yes if Supabase Auth is enabled | Public Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional if `DEV_USER_ID` is set | Yes if Supabase Auth is enabled | Public Supabase anon key. |
+| `OPENAI_API_KEY` | Optional; app uses mock narration without it | Yes | Enables real AI DM narration and authenticated embedding requests. |
+| `NEXT_PUBLIC_SUPABASE_URL` | No; transitional until real auth exists | No; inactive until real Supabase Auth wiring exists | Public Supabase project URL reserved for future auth wiring. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | No; transitional until real auth exists | No; inactive until real Supabase Auth wiring exists | Public Supabase anon key reserved for future auth wiring. |
 
 Never commit real `.env` values, API keys, database credentials, or production secrets.
 
