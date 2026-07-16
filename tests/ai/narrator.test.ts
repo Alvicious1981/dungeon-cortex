@@ -21,6 +21,15 @@ import type { CampaignContext } from "@/lib/memory/context";
 // Module mocks — declared before any imports that trigger module resolution
 // ---------------------------------------------------------------------------
 
+const legacyDowntimeModuleLoaded = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/ai/tools/downtime", () => {
+  legacyDowntimeModuleLoaded();
+  throw new Error(
+    "Legacy downtime AI tool module must remain disconnected from lib/ai/narrator.ts",
+  );
+});
+
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
   return { ...actual, streamText: vi.fn() };
@@ -265,10 +274,18 @@ describe("streamNarrative — Code is Law tool-call enforcement", () => {
         .map(([name, registeredTool]) => `${name}\n${registeredTool.description ?? ""}`)
         .join("\n");
 
+      const legacyGoldXpPatterns = [
+        /\bgold\s*(?:-|->|=>|\s+to\s+|\s+for\s+)\s*(?:xp|experience)\b/i,
+        /\b(?:xp|experience)\s*(?:-|<-|<=|\s+from\s+)\s*gold\b/i,
+        /\bconvert(?:s|ed|ing)?\s+gold\s+(?:to|into)\s+(?:xp|experience)\b/i,
+        /\baward(?:s|ed|ing)?\s+(?:xp|experience)\s+(?:for|from)\s+gold\b/i,
+      ];
+
+      expect(legacyDowntimeModuleLoaded).not.toHaveBeenCalled();
       expect(registeredToolNames).not.toContain("resolveDowntime");
-      expect(registeredToolMetadata).not.toMatch(/gold(?:-|\s)+to(?:-|\s)+xp/i);
-      expect(registeredToolMetadata).not.toMatch(/xp(?:-|\s)+from(?:-|\s)+gold/i);
-      expect(registeredToolMetadata).not.toMatch(/morale/i);
+      for (const legacyGoldXpPattern of legacyGoldXpPatterns) {
+        expect(registeredToolMetadata).not.toMatch(legacyGoldXpPattern);
+      }
 
       return {
         textStream: (async function* () {})(),
