@@ -255,6 +255,32 @@ beforeEach(() => {
 
 describe("streamNarrative — Code is Law tool-call enforcement", () => {
 
+  it("does not expose legacy downtime mechanics to the narrator", async () => {
+    mockStreamText.mockImplementationOnce(((params: any) => {
+      const registeredTools = Object.entries(params.tools) as Array<
+        [string, { description?: string }]
+      >;
+      const registeredToolNames = registeredTools.map(([name]) => name);
+      const registeredToolMetadata = registeredTools
+        .map(([name, registeredTool]) => `${name}\n${registeredTool.description ?? ""}`)
+        .join("\n");
+
+      expect(registeredToolNames).not.toContain("resolveDowntime");
+      expect(registeredToolMetadata).not.toMatch(/gold(?:-|\s)+to(?:-|\s)+xp/i);
+      expect(registeredToolMetadata).not.toMatch(/xp(?:-|\s)+from(?:-|\s)+gold/i);
+      expect(registeredToolMetadata).not.toMatch(/morale/i);
+
+      return {
+        textStream: (async function* () {})(),
+        text: Promise.resolve("The road remains quiet."),
+      } as any;
+    }) as any);
+
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "I make camp for the night.");
+
+    await expect(textPromise).resolves.toBe("The road remains quiet.");
+  });
+
   it("calls getSpellInfo when the LLM chooses to look up a spell", async () => {
     // Arrange: mock spell lookup returning real-looking SRD data
     mockGetSpellInfo.mockResolvedValue(
