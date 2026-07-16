@@ -225,6 +225,21 @@ const mockComputeConsequences = vi.mocked(computeConsequences);
 const mockDeriveCombatBeat = vi.mocked(deriveCombatBeat);
 const mockGenerateLootPayload = vi.mocked(generateLootPayload);
 
+const LEGACY_GOLD_XP_PATTERNS = [
+  /\bgold\s*(?:->|=>)\s*(?:xp|experience)\b/i,
+  /\b(?:xp|experience)\s*(?:<-|<=)\s*gold\b/i,
+  /\bgold[\s-]+(?:to|for)[\s-]+(?:xp|experience)\b/i,
+  /\b(?:xp|experience)[\s-]+from[\s-]+gold\b/i,
+  /\bconvert(?:s|ed|ing)?\s+gold\s+(?:to|into)\s+(?:xp|experience)\b/i,
+  /\baward(?:s|ed|ing)?\s+(?:xp|experience)\s+(?:for|from)\s+gold\b/i,
+];
+
+const LEGACY_OSR_MORALE_PATTERNS = [
+  /\bretainer[\s-]+morale\b/i,
+  /\bmorale[\s-]+(?:check|checks|roll|rolls|score|scores|update|updates|modifier|modifiers|system|mechanic|mechanics)\b/i,
+  /\b(?:check|checks|roll|rolls|resolve|resolves|update|updates|adjust|adjusts|modify|modifies|track|tracks|set|sets)[\w\s-]{0,32}\bmorale\b/i,
+];
+
 /** Deterministic consequence fixture — always a hit, 5 slashing to chest. */
 const MOCK_CONSEQUENCES = {
   combat_facts: {
@@ -274,17 +289,13 @@ describe("streamNarrative — Code is Law tool-call enforcement", () => {
         .map(([name, registeredTool]) => `${name}\n${registeredTool.description ?? ""}`)
         .join("\n");
 
-      const legacyGoldXpPatterns = [
-        /\bgold\s*(?:-|->|=>|\s+to\s+|\s+for\s+)\s*(?:xp|experience)\b/i,
-        /\b(?:xp|experience)\s*(?:-|<-|<=|\s+from\s+)\s*gold\b/i,
-        /\bconvert(?:s|ed|ing)?\s+gold\s+(?:to|into)\s+(?:xp|experience)\b/i,
-        /\baward(?:s|ed|ing)?\s+(?:xp|experience)\s+(?:for|from)\s+gold\b/i,
-      ];
-
       expect(legacyDowntimeModuleLoaded).not.toHaveBeenCalled();
       expect(registeredToolNames).not.toContain("resolveDowntime");
-      for (const legacyGoldXpPattern of legacyGoldXpPatterns) {
+      for (const legacyGoldXpPattern of LEGACY_GOLD_XP_PATTERNS) {
         expect(registeredToolMetadata).not.toMatch(legacyGoldXpPattern);
+      }
+      for (const legacyOsrMoralePattern of LEGACY_OSR_MORALE_PATTERNS) {
+        expect(registeredToolMetadata).not.toMatch(legacyOsrMoralePattern);
       }
 
       return {
@@ -296,6 +307,38 @@ describe("streamNarrative — Code is Law tool-call enforcement", () => {
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "I make camp for the night.");
 
     await expect(textPromise).resolves.toBe("The road remains quiet.");
+  });
+
+  it("keeps legacy downtime phrase guards precise", () => {
+    const legacyGoldXpMetadata = [
+      "resolveDowntime\ngold-to-XP conversion",
+      "resolveDowntime\nXP-from-gold awards",
+      "award XP for gold spent during downtime",
+      "convert gold into experience",
+    ];
+    const legacyMoraleMetadata = [
+      "resolveDowntime\nretainer morale updates",
+      "resolveDowntime\nmorale check",
+      "roll morale for retainers",
+      "track morale score",
+    ];
+    const allowedMetadata = [
+      "setSceneTone\nThe defenders' morale rises after a speech.",
+      "describeChoice\nA moral choice about recovered gold.",
+      "awardXP\nAward XP for defeating the necromancer.",
+      "generateLoot\nAward gold after an encounter.",
+    ];
+
+    for (const metadata of legacyGoldXpMetadata) {
+      expect(LEGACY_GOLD_XP_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(true);
+    }
+    for (const metadata of legacyMoraleMetadata) {
+      expect(LEGACY_OSR_MORALE_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(true);
+    }
+    for (const metadata of allowedMetadata) {
+      expect(LEGACY_GOLD_XP_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(false);
+      expect(LEGACY_OSR_MORALE_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(false);
+    }
   });
 
   it("calls getSpellInfo when the LLM chooses to look up a spell", async () => {
