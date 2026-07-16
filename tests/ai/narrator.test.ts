@@ -21,6 +21,15 @@ import type { CampaignContext } from "@/lib/memory/context";
 // Module mocks — declared before any imports that trigger module resolution
 // ---------------------------------------------------------------------------
 
+const legacyDowntimeModuleLoaded = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/ai/tools/downtime", () => {
+  legacyDowntimeModuleLoaded();
+  throw new Error(
+    "Legacy downtime AI tool module must remain disconnected from lib/ai/narrator.ts",
+  );
+});
+
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
   return { ...actual, streamText: vi.fn() };
@@ -216,6 +225,21 @@ const mockComputeConsequences = vi.mocked(computeConsequences);
 const mockDeriveCombatBeat = vi.mocked(deriveCombatBeat);
 const mockGenerateLootPayload = vi.mocked(generateLootPayload);
 
+const LEGACY_GOLD_XP_PATTERNS = [
+  /\bgold\s*(?:->|=>)\s*(?:xp|experience)\b/i,
+  /\b(?:xp|experience)\s*(?:<-|<=)\s*gold\b/i,
+  /\bgold[\s-]+(?:to|for)[\s-]+(?:xp|experience)\b/i,
+  /\b(?:xp|experience)[\s-]+from[\s-]+gold\b/i,
+  /\bconvert(?:s|ed|ing)?\s+gold\s+(?:to|into)\s+(?:xp|experience)\b/i,
+  /\baward(?:s|ed|ing)?\s+(?:xp|experience)\s+(?:for|from)\s+gold\b/i,
+];
+
+const LEGACY_OSR_MORALE_PATTERNS = [
+  /\bretainer[\s-]+morale\b/i,
+  /\bmorale[\s-]+(?:check|checks|roll|rolls|score|scores|update|updates|modifier|modifiers|system|mechanic|mechanics)\b/i,
+  /\b(?:check|checks|roll|rolls|resolve|resolves|update|updates|adjust|adjusts|modify|modifies|track|tracks|set|sets)[\w\s-]{0,32}\bmorale\b/i,
+];
+
 /** Deterministic consequence fixture — always a hit, 5 slashing to chest. */
 const MOCK_CONSEQUENCES = {
   combat_facts: {
@@ -254,6 +278,68 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("streamNarrative — Code is Law tool-call enforcement", () => {
+
+  it("does not expose legacy downtime mechanics to the narrator", async () => {
+    mockStreamText.mockImplementationOnce(((params: any) => {
+      const registeredTools = Object.entries(params.tools) as Array<
+        [string, { description?: string }]
+      >;
+      const registeredToolNames = registeredTools.map(([name]) => name);
+      const registeredToolMetadata = registeredTools
+        .map(([name, registeredTool]) => `${name}\n${registeredTool.description ?? ""}`)
+        .join("\n");
+
+      expect(legacyDowntimeModuleLoaded).not.toHaveBeenCalled();
+      expect(registeredToolNames).not.toContain("resolveDowntime");
+      for (const legacyGoldXpPattern of LEGACY_GOLD_XP_PATTERNS) {
+        expect(registeredToolMetadata).not.toMatch(legacyGoldXpPattern);
+      }
+      for (const legacyOsrMoralePattern of LEGACY_OSR_MORALE_PATTERNS) {
+        expect(registeredToolMetadata).not.toMatch(legacyOsrMoralePattern);
+      }
+
+      return {
+        textStream: (async function* () {})(),
+        text: Promise.resolve("The road remains quiet."),
+      } as any;
+    }) as any);
+
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "I make camp for the night.");
+
+    await expect(textPromise).resolves.toBe("The road remains quiet.");
+  });
+
+  it("keeps legacy downtime phrase guards precise", () => {
+    const legacyGoldXpMetadata = [
+      "resolveDowntime\ngold-to-XP conversion",
+      "resolveDowntime\nXP-from-gold awards",
+      "award XP for gold spent during downtime",
+      "convert gold into experience",
+    ];
+    const legacyMoraleMetadata = [
+      "resolveDowntime\nretainer morale updates",
+      "resolveDowntime\nmorale check",
+      "roll morale for retainers",
+      "track morale score",
+    ];
+    const allowedMetadata = [
+      "setSceneTone\nThe defenders' morale rises after a speech.",
+      "describeChoice\nA moral choice about recovered gold.",
+      "awardXP\nAward XP for defeating the necromancer.",
+      "generateLoot\nAward gold after an encounter.",
+    ];
+
+    for (const metadata of legacyGoldXpMetadata) {
+      expect(LEGACY_GOLD_XP_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(true);
+    }
+    for (const metadata of legacyMoraleMetadata) {
+      expect(LEGACY_OSR_MORALE_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(true);
+    }
+    for (const metadata of allowedMetadata) {
+      expect(LEGACY_GOLD_XP_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(false);
+      expect(LEGACY_OSR_MORALE_PATTERNS.some((pattern) => pattern.test(metadata))).toBe(false);
+    }
+  });
 
   it("calls getSpellInfo when the LLM chooses to look up a spell", async () => {
     // Arrange: mock spell lookup returning real-looking SRD data

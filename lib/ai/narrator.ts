@@ -29,7 +29,6 @@ import { buildExplorationTools } from "@/lib/ai/tools/exploration";
 import { buildWorldTools } from "@/lib/ai/tools/world";
 import { buildInventoryTools } from "@/lib/ai/tools/inventory";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
-import { buildDowntimeTools } from "@/lib/ai/tools/downtime";
 import type { LevelUpPayload } from "@/lib/rules/progression";
 import type { MerchantPayload } from "@/lib/rules/trade";
 import type { CombatNarrativeContext } from "@/lib/narrative/combat-narrative-types";
@@ -80,7 +79,6 @@ function buildTools(
     ...buildWorldTools(campaignId),
     ...buildSrdTools(),
     ...buildInventoryTools(campaignId),
-    ...buildDowntimeTools(campaignId),
   };
 }
 
