@@ -130,7 +130,7 @@ export async function executeTradeAction(
 
     revalidatePath(`/campaign/${campaignId}`);
     return result;
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       success: false,
       action,
@@ -138,7 +138,7 @@ export async function executeTradeAction(
       quantity,
       goldDelta: 0,
       newGoldBalance: 0,
-      error: error.message || "Trade failed.",
+      error: error instanceof Error ? error.message : "Trade failed.",
     };
   }
 }

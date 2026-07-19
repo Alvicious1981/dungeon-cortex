@@ -367,13 +367,14 @@ export default memo(function TradeWindow({
                     let baseValue = 0;
                     let itemRarity = "mundane";
                     if (item.properties && typeof item.properties === "object") {
-                      if ("valueGP" in item.properties) {
-                        baseValue = Number((item.properties as any).valueGP) || 0;
+                      const properties = item.properties as Record<string, unknown>;
+                      if ("valueGP" in properties) {
+                        baseValue = Number(properties.valueGP) || 0;
                       }
-                      if ("_rarity" in item.properties) {
-                        itemRarity = String((item.properties as any)._rarity);
-                      } else if ("rarity" in item.properties) {
-                        itemRarity = String((item.properties as any).rarity);
+                      if ("_rarity" in properties) {
+                        itemRarity = String(properties._rarity);
+                      } else if ("rarity" in properties) {
+                        itemRarity = String(properties.rarity);
                       }
                     }
                     const sellPrice = Math.max(1, Math.floor(baseValue * merchant.sellModifier));
