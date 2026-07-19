@@ -30,7 +30,14 @@ export async function generateNodeContent(
   });
 
   // Only populate if the node is still marked as "empty" and hasn't been generated yet
-  if (!node || node.feature !== "empty" || (node.featureData as any)?.generated) {
+  const existingFeatureData =
+    node?.featureData &&
+    typeof node.featureData === "object" &&
+    !Array.isArray(node.featureData)
+      ? (node.featureData as Record<string, unknown>)
+      : null;
+
+  if (!node || node.feature !== "empty" || existingFeatureData?.generated) {
     return;
   }
 
@@ -39,7 +46,7 @@ export async function generateNodeContent(
 
   let feature = "empty";
   let description = node.description;
-  let featureData: any = { generated: true };
+  let featureData: Record<string, unknown> = { generated: true };
 
   if (roll < 0.6) {
     // 60% chance: Atmospheric Empty Room

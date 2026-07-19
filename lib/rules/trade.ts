@@ -229,17 +229,33 @@ export function computeSellPrice(baseValueGP: number, archetype: MerchantArchety
 
 const RARITY_ORDER: LootRarity[] = ["mundane", "uncommon", "rare", "very_rare", "legendary"];
 
+interface MerchantTableItem {
+  name: string;
+  description: string;
+  type: ItemType;
+  properties?: Record<string, unknown>;
+  valueGP: number;
+}
+
+type MerchantCandidate = MerchantTableItem & { _rarity: LootRarity };
+
+const merchantLootTables = lootTables as unknown as Record<
+  LootRarity,
+  MerchantTableItem[]
+>;
+
 export function generateMerchantInventory(archetype: MerchantArchetype, seed: string): TradeItem[] {
   const config = ARCHETYPE_CONFIGS[archetype];
   const maxRarityIndex = RARITY_ORDER.indexOf(config.maxRarity);
   
-  let allowedItems: any[] = [];
+  let allowedItems: MerchantCandidate[] = [];
   for (let i = 0; i <= maxRarityIndex; i++) {
-    const table = (lootTables as any)[RARITY_ORDER[i]] || [];
-    const filtered = table.filter((item: any) => config.preferredTypes.includes(item.type));
-    
-    // Attach rarity
-    filtered.forEach((item: any) => item._rarity = RARITY_ORDER[i]);
+    const rarity = RARITY_ORDER[i];
+    const table = merchantLootTables[rarity] ?? [];
+    const filtered = table
+      .filter((item) => config.preferredTypes.includes(item.type))
+      .map((item) => ({ ...item, _rarity: rarity }));
+
     allowedItems = allowedItems.concat(filtered);
   }
 

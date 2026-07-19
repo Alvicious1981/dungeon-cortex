@@ -430,7 +430,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      let effect: unknown = undefined;
+      let effect: Awaited<ReturnType<typeof getSpellInfo>> = null;
       let saveDC: number | undefined = undefined;
 
       if (intent.spellName) {
@@ -475,7 +475,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           targetCombatants: targets,
           spellName: intent.spellName,
           spellLevel: intent.spellLevel,
-          spellEffect: effect,
+          spellEffect: effect ?? undefined,
           spellSaveDC: saveDC,
           rawSpellSlots: rawSlots,
           playerCharacterId: context.character.id,
