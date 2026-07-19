@@ -5,7 +5,6 @@ import {
   GenerateNPCInputSchema,
   TrackNPCInputSchema,
   type NPCRole,
-  type AbilityScores,
 } from "@/lib/rules/npc";
 import {
   InitialDispositionInputSchema,
@@ -329,4 +328,3 @@ function getMerchantItemPrice(payload: MerchantPayload, itemIndex: number | unde
 
   return item.buyPriceGP;
 }
-

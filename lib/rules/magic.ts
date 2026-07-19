@@ -362,7 +362,6 @@ export function resolveSpellEffect(
   if (dmg) {
     const bySlot = dmg.damage_at_slot_level as Record<string, string> | undefined;
     if (bySlot) {
-      const key = String(slotLevel);
       // Fall back to the lowest available tier if exact slot level is missing
       const keys = Object.keys(bySlot).map(Number).sort((a, b) => a - b);
       const bestKey = keys.includes(slotLevel) ? slotLevel : (keys[0] ?? slotLevel);
