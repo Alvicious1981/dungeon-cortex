@@ -22,7 +22,7 @@ interface Props {
   characterId: string;
 }
 
-export default function DialogueOverlayController({ campaignId, characterId }: Props) {
+export default function DialogueOverlayController({ characterId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [npc, setNpc] = useState<DialogueOpenPayload | null>(null);
   const [narrationText, setNarrationText] = useState("");

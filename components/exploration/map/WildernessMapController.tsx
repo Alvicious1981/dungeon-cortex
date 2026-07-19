@@ -30,7 +30,7 @@ export const WildernessMapController: React.FC<WildernessMapControllerProps> = (
           className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 hover:border-blue-500/50 transition-all group font-cinzel tracking-widest uppercase text-sm"
         >
           <MapIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
-          Consult The Cartographer's Map
+          Consult The Cartographer&apos;s Map
         </button>
       </div>
 

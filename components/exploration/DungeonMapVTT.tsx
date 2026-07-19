@@ -104,8 +104,6 @@ export function DungeonMapVTT({
 
   const visitedSet = new Set(visitedNodeIndices);
 
-  const tileS = TILE_SIZE * zoom;
-
   if (!isReady || !dungeon) {
     return (
       <div className="relative w-full h-full bg-[#060606] rounded-lg border border-amber-900/30 flex items-center justify-center">

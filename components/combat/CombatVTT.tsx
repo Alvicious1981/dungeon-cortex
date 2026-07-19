@@ -19,8 +19,8 @@
  *   • Never performs state mutations — display only.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CombatConsequencePayload, LootGeneratedPayload } from "@/lib/events/game-events";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CombatConsequencePayload } from "@/lib/events/game-events";
 import type { LootPayload } from "@/lib/rules/loot";
 
 // Extracted Components & Logic

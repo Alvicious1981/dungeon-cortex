@@ -308,10 +308,6 @@ function applyVisualEffect(event: GameEvent) {
 
 // ─── Custom event types ───────────────────────────────────────────────────────
 
-interface DungeonActionStartEvent extends Event {
-  type: "dungeon-action-start";
-}
-
 interface DungeonGameEvent extends CustomEvent {
   type: "dungeon-game-event";
   detail: { event: GameEvent };
@@ -363,7 +359,7 @@ export default function GameEventHandler({ inCombat }: Props) {
 
   // Wire up global event bus — runs once, uses refs for current state
   useEffect(() => {
-    function onActionStart(_e: DungeonActionStartEvent) {
+    function onActionStart() {
       if (!audioCtxRef.current) {
         const ctx = new AudioContext();
         audioCtxRef.current = ctx;
