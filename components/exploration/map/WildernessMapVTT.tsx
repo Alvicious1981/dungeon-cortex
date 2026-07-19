@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useEffectEvent } from "react";
 import { HexTile } from "./HexTile";
 import { Move, Map as MapIcon, Compass } from "lucide-react";
 import { cubeToPixel } from "../../../lib/rules/hex-grid";
@@ -32,8 +32,7 @@ export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
   const dragStart = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize view to party position
-  useEffect(() => {
+  const centerViewOnParty = useEffectEvent(() => {
     if (containerRef.current) {
       const { x, y } = cubeToPixel(currentQ, currentR, 50);
       const rect = containerRef.current.getBoundingClientRect();
@@ -42,7 +41,12 @@ export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
         y: rect.height / 2 - y * zoom,
       });
     }
-  }, [currentQ, currentR]);
+  });
+
+  // Initialize view to party position
+  useEffect(() => {
+    centerViewOnParty();
+  }, [centerViewOnParty, currentQ, currentR]);
 
   // Event Handlers
   const handleMouseDown = (e: React.MouseEvent) => {
