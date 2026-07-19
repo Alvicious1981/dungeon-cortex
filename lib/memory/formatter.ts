@@ -15,6 +15,7 @@
 
 import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import type { Monster } from "@/lib/rules/srd";
+import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
@@ -173,7 +174,17 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
       const constraints: string[] = [];
       if (m.damage_immunities?.length) constraints.push(`Immune: ${m.damage_immunities.join(", ")}`);
       if (m.damage_resistances?.length) constraints.push(`Resist: ${m.damage_resistances.join(", ")}`);
-      if (m.condition_immunities?.length) constraints.push(`Cond Immune: ${m.condition_immunities.map((c: any) => typeof c === "string" ? c : c.name).join(", ")}`);
+      if (m.condition_immunities?.length) {
+        constraints.push(
+          `Cond Immune: ${m.condition_immunities
+            .map((condition: unknown) =>
+              typeof condition === "string"
+                ? condition
+                : (condition as { name: string }).name
+            )
+            .join(", ")}`
+        );
+      }
       const constraintStr = constraints.length > 0 ? ` | ${constraints.join(" | ")}` : "";
       mechanicalSummary = `AC: ${ac}${constraintStr}, `;
     } else {
@@ -261,7 +272,12 @@ function formatQuests(quests: CampaignContext["quests"]): string {
  *
  * @pure
  */
-export function formatShopNode(merchantPayload: any, partyGold: number): string {
+type FormattedMerchantPayload = MerchantPayload & { label?: string };
+
+export function formatShopNode(
+  merchantPayload: FormattedMerchantPayload | null | undefined,
+  partyGold: number
+): string {
   if (!merchantPayload) return "";
 
   const label = "label" in merchantPayload ? merchantPayload.label : merchantPayload.archetype;
@@ -336,9 +352,15 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
 
 
 
-  if (currentNode?.feature === "shop" && (currentNode as any).merchantPayload) {
+  const merchantPayload = (
+    currentNode as (typeof currentNode & {
+      merchantPayload?: FormattedMerchantPayload;
+    })
+  )?.merchantPayload;
+
+  if (currentNode?.feature === "shop" && merchantPayload) {
     lines.push("");
-    lines.push(formatShopNode((currentNode as any).merchantPayload, partyGold));
+    lines.push(formatShopNode(merchantPayload, partyGold));
   }
 
   return lines.join("\n");

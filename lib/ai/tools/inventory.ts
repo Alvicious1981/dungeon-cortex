@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import {
   ConsumableServiceError,
-  useConsumableItem,
+  useConsumableItem as consumeInventoryItem,
 } from "@/lib/rules/consumable-service";
 import { UseConsumableInputSchema } from "@/lib/rules/inventory";
 
@@ -12,7 +12,7 @@ export function buildInventoryTools(campaignId: string) {
       inputSchema: UseConsumableInputSchema,
       execute: async ({ characterId, itemName }) => {
         try {
-          const result = await useConsumableItem({
+          const result = await consumeInventoryItem({
             campaignId,
             characterId,
             itemName,

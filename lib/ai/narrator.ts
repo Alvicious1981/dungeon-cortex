@@ -136,7 +136,7 @@ export async function streamNarrative(
     return {
       textStream: (async function* () {
         yield mockContent;
-      })() as any,
+      })() as unknown as AsyncIterableStream<string>,
       textPromise: Promise.resolve(mockContent),
       levelUpPayload: Promise.resolve(null),
       merchantPayload: Promise.resolve(null),
@@ -179,7 +179,7 @@ export async function streamNarrative(
     finalNarrativeTextStream = (async function* () {
       const verifiedText = await finalNarrativeTextPromise;
       yield verifiedText;
-    })() as any;
+    })() as unknown as AsyncIterableStream<string>;
   } else {
     finalNarrativeTextPromise = Promise.resolve(result.text);
     finalNarrativeTextStream = result.textStream;
