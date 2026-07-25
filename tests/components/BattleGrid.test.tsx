@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import BattleGrid from "@/components/combat/BattleGrid";
 
@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("BattleGrid", () => {
+  afterEach(() => vi.restoreAllMocks());
   const combatants = [
     {
       id: "pc-1",
@@ -63,5 +64,22 @@ describe("BattleGrid", () => {
       gridColumn: "3 / span 2",
       gridRow: "4 / span 2",
     });
+  });
+  it("previews keyboard movement and submits the same backend Move intent on Enter", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    render(<BattleGrid campaignId="camp-123" combatants={combatants} activeCombatantId="pc-1" />);
+
+    fireEvent.keyDown(screen.getByLabelText("Aldric token at 1,2"), { key: "ArrowRight" });
+    const preview = screen.getByLabelText("Aldric token at 2,2");
+    expect(screen.getByRole("status")).toHaveTextContent("Enter to confirm");
+    fireEvent.keyDown(preview, { key: "Enter" });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/campaign/camp-123/action",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "Move", targetX: 2, targetY: 2 }),
+      })
+    ));
   });
 });

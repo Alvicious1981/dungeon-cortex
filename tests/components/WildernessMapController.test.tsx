@@ -44,4 +44,17 @@ describe("WildernessMapController", () => {
     
     expect(screen.queryByTestId("wilderness-map-vtt")).toBeNull();
   });
+  it("closes with Escape and restores focus to the map trigger", () => {
+    render(<WildernessMapController hexes={mockHexes} currentQ={0} currentR={0} />);
+    const trigger = screen.getByRole("button", { name: /Consult The Cartographer's Map/i });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "World Map" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close Map" })).toHaveFocus();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "World Map" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
 });

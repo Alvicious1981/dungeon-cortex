@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import type { PointerEvent, WheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent, WheelEvent } from "react";
 import { useDungeon } from "../../lib/hooks/useDungeon";
 import type { TileType } from "../../lib/rules/dungeon";
 
 const TILE_SIZE = 16;
-
 const TILE_COLORS: Record<TileType, { fill: string; stroke: string }> = {
   floor: { fill: "#2a1f1a", stroke: "#3d2f28" },
   wall: { fill: "#0d0d0d", stroke: "#1a1a1a" },
@@ -22,224 +21,109 @@ export interface DungeonMapVTTProps {
   onNodeClick?: (nodeIndex: number) => void;
 }
 
-export function DungeonMapVTT({
-  seed,
-  playerX,
-  playerY,
-  currentNodeIndex,
-  visitedNodeIndices,
-  onNodeClick,
-}: DungeonMapVTTProps) {
+export function DungeonMapVTT({ seed, playerX, playerY, currentNodeIndex, visitedNodeIndices, onNodeClick }: DungeonMapVTTProps) {
   const { dungeon, fov, isReady } = useDungeon(seed, playerX, playerY);
-
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
   const centeredRef = useRef(false);
 
-  // Center on player when dungeon first becomes ready
   useEffect(() => {
     if (isReady && !centeredRef.current && svgRef.current) {
       centeredRef.current = true;
       const rect = svgRef.current.getBoundingClientRect();
-      const tileS = TILE_SIZE * zoom;
-      setOffset({
-        x: rect.width / 2 - playerX * tileS - tileS / 2,
-        y: rect.height / 2 - playerY * tileS - tileS / 2,
-      });
+      const tileSize = TILE_SIZE * zoom;
+      setOffset({ x: rect.width / 2 - playerX * tileSize - tileSize / 2, y: rect.height / 2 - playerY * tileSize - tileSize / 2 });
     }
   }, [isReady, playerX, playerY, zoom]);
 
-  // Pointer capture drag pattern
-  const handlePointerDown = useCallback(
-    (e: PointerEvent<SVGSVGElement>) => {
-      isDragging.current = true;
-      dragStart.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
-      (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
-    },
-    [offset]
-  );
+  const handlePointerDown = useCallback((event: PointerEvent<SVGSVGElement>) => {
+    isDragging.current = true;
+    dragStart.current = { x: event.clientX - offset.x, y: event.clientY - offset.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [offset]);
 
-  const handlePointerMove = useCallback(
-    (e: PointerEvent<SVGSVGElement>) => {
-      if (!isDragging.current) return;
-      setOffset({
-        x: e.clientX - dragStart.current.x,
-        y: e.clientY - dragStart.current.y,
-      });
-    },
-    []
-  );
-
-  const handlePointerUp = useCallback(() => {
-    isDragging.current = false;
+  const handlePointerMove = useCallback((event: PointerEvent<SVGSVGElement>) => {
+    if (!isDragging.current) return;
+    setOffset({ x: event.clientX - dragStart.current.x, y: event.clientY - dragStart.current.y });
   }, []);
 
-  const handleWheel = useCallback(
-    (e: WheelEvent) => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoom((prev) => Math.min(Math.max(prev * delta, 0.2), 4));
-    },
-    []
-  );
+  const handlePointerUp = useCallback(() => { isDragging.current = false; }, []);
+  const adjustZoom = useCallback((factor: number) => setZoom((previous) => Math.min(Math.max(previous * factor, 0.2), 4)), []);
+  const handleWheel = useCallback((event: WheelEvent) => { event.preventDefault(); adjustZoom(event.deltaY > 0 ? 0.9 : 1.1); }, [adjustZoom]);
 
   const centerOnPlayer = useCallback(() => {
-    if (svgRef.current) {
-      const rect = svgRef.current.getBoundingClientRect();
-      const tileS = TILE_SIZE * zoom;
-      setOffset({
-        x: rect.width / 2 - playerX * tileS - tileS / 2,
-        y: rect.height / 2 - playerY * tileS - tileS / 2,
-      });
-    }
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const tileSize = TILE_SIZE * zoom;
+    setOffset({ x: rect.width / 2 - playerX * tileSize - tileSize / 2, y: rect.height / 2 - playerY * tileSize - tileSize / 2 });
   }, [playerX, playerY, zoom]);
 
-  const resetZoom = useCallback(() => {
-    setZoom(1);
-  }, []);
+  const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const pan = event.shiftKey ? 80 : 32;
+    const movements: Record<string, { x: number; y: number }> = {
+      ArrowLeft: { x: pan, y: 0 }, ArrowRight: { x: -pan, y: 0 }, ArrowUp: { x: 0, y: pan }, ArrowDown: { x: 0, y: -pan },
+    };
+    const movement = movements[event.key];
+    if (movement) {
+      event.preventDefault();
+      setOffset((previous) => ({ x: previous.x + movement.x, y: previous.y + movement.y }));
+    } else if (event.key === "+" || event.key === "=") {
+      event.preventDefault(); adjustZoom(1.15);
+    } else if (event.key === "-") {
+      event.preventDefault(); adjustZoom(0.85);
+    } else if (event.key === "Home") {
+      event.preventDefault(); centerOnPlayer();
+    }
+  }, [adjustZoom, centerOnPlayer]);
 
   const visitedSet = new Set(visitedNodeIndices);
 
   if (!isReady || !dungeon) {
-    return (
-      <div className="relative w-full h-full bg-[#060606] rounded-lg border border-amber-900/30 flex items-center justify-center">
-        <span className="text-amber-500/70 text-sm font-medium tracking-widest animate-pulse">
-          Conjuring dungeon…
-        </span>
-      </div>
-    );
+    return <div role="status" className="relative flex h-full w-full items-center justify-center rounded-sm border border-amber-900/30 bg-[#060606]"><span className="animate-pulse text-sm font-medium tracking-widest text-amber-500/70 motion-reduce:animate-none">Conjuring dungeon…</span></div>;
   }
 
   return (
-    <div className="relative w-full h-full bg-[#060606] rounded-lg border border-amber-900/30 overflow-hidden">
-      <svg
-        ref={svgRef}
-        width="100%"
-        height="100%"
-        className="block cursor-grab active:cursor-grabbing"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        onWheel={handleWheel}
-        style={{ touchAction: "none" }}
-      >
+    <div role="region" aria-label={`Dungeon map. Player at grid position ${playerX}, ${playerY}.`} tabIndex={0} onKeyDown={handleKeyDown} className="relative h-full w-full overflow-hidden rounded-sm border border-amber-900/30 bg-[#060606]">
+      <p className="sr-only">Use arrow keys to pan, plus and minus to zoom, and Home to center the player.</p>
+      <svg ref={svgRef} aria-hidden="true" width="100%" height="100%" className="block cursor-grab active:cursor-grabbing" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onWheel={handleWheel} style={{ touchAction: "none" }}>
         <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
-          {dungeon.tiles.map((row, y) =>
-            row.map((tileType, x) => {
-              const key = `${x},${y}`;
-              const inFov = fov.has(key);
-              if (!inFov && tileType === "wall") return null;
-
-              const colors = TILE_COLORS[tileType];
-              const opacity = inFov ? 1 : 0.45;
-
-              return (
-                <rect
-                  key={key}
-                  x={x * TILE_SIZE}
-                  y={y * TILE_SIZE}
-                  width={TILE_SIZE}
-                  height={TILE_SIZE}
-                  fill={colors.fill}
-                  stroke={colors.stroke}
-                  strokeWidth={0.5}
-                  opacity={opacity}
-                />
-              );
-            })
-          )}
+          {dungeon.tiles.map((row, y) => row.map((tileType, x) => {
+            const key = `${x},${y}`;
+            const inFov = fov.has(key);
+            if (!inFov && tileType === "wall") return null;
+            const colors = TILE_COLORS[tileType];
+            return <rect key={key} x={x * TILE_SIZE} y={y * TILE_SIZE} width={TILE_SIZE} height={TILE_SIZE} fill={colors.fill} stroke={colors.stroke} strokeWidth={0.5} opacity={inFov ? 1 : 0.45} />;
+          }))}
 
           {dungeon.rooms.map((room) => {
-            const key = `${room.centerX},${room.centerY}`;
-            const inFov = fov.has(key);
+            const inFov = fov.has(`${room.centerX},${room.centerY}`);
             const isVisited = visitedSet.has(room.nodeIndex);
             const isActive = room.nodeIndex === currentNodeIndex;
-
-            // Skip rooms not in FOV and not visited
             if (!inFov && !isVisited) return null;
-
             const cx = room.centerX * TILE_SIZE + TILE_SIZE / 2;
             const cy = room.centerY * TILE_SIZE + TILE_SIZE / 2;
-
-            let fill: string;
-            let stroke: string;
-            let strokeWidth = 1.5;
-
-            if (isActive) {
-              fill = "#d97706";
-              stroke = "#fbbf24";
-              strokeWidth = 2;
-            } else if (isVisited) {
-              fill = "#78350f";
-              stroke = "#7c3f00";
-            } else {
-              // In FOV but not visited
-              fill = "#3b1f0a";
-              stroke = "#7c3f00";
-            }
-
+            const fill = isActive ? "#d97706" : isVisited ? "#78350f" : "#3b1f0a";
+            const stroke = isActive ? "#fbbf24" : "#7c3f00";
             return (
-              <g
-                key={`room-${room.id}`}
-                onClick={() => onNodeClick?.(room.nodeIndex)}
-                style={{ cursor: onNodeClick ? "pointer" : "default" }}
-              >
-                {/* Dashed orbit ring for active room */}
-                {isActive && (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={8}
-                    fill="none"
-                    stroke="#fbbf24"
-                    strokeWidth={1}
-                    strokeDasharray="3 2"
-                    opacity={0.7}
-                  />
-                )}
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={5}
-                  fill={fill}
-                  stroke={stroke}
-                  strokeWidth={strokeWidth}
-                />
+              <g key={`room-${room.id}`} onClick={() => onNodeClick?.(room.nodeIndex)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+                {isActive && <circle cx={cx} cy={cy} r={8} fill="none" stroke="#fbbf24" strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />}
+                <circle cx={cx} cy={cy} r={5} fill={fill} stroke={stroke} strokeWidth={isActive ? 2 : 1.5} />
               </g>
             );
           })}
 
-          <circle
-            cx={playerX * TILE_SIZE + TILE_SIZE / 2}
-            cy={playerY * TILE_SIZE + TILE_SIZE / 2}
-            r={5}
-            fill="#1e40af"
-            stroke="#93c5fd"
-            strokeWidth={1.5}
-          />
+          <circle cx={playerX * TILE_SIZE + TILE_SIZE / 2} cy={playerY * TILE_SIZE + TILE_SIZE / 2} r={5} fill="#4f46e5" stroke="#c4b5fd" strokeWidth={1.5} />
         </g>
       </svg>
 
-      <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
-        <button
-          onClick={resetZoom}
-          className="px-2 py-1 bg-black/60 backdrop-blur-md rounded border border-amber-900/40 text-amber-400/80 text-xs font-mono hover:bg-amber-900/20 transition-colors"
-          title="Reset zoom to 1:1"
-        >
-          1:1
-        </button>
-        <button
-          onClick={centerOnPlayer}
-          className="px-2 py-1 bg-black/60 backdrop-blur-md rounded border border-amber-900/40 text-amber-400/80 text-xs font-mono hover:bg-amber-900/20 transition-colors"
-          title="Center on player"
-        >
-          Center
-        </button>
+      <div className="absolute bottom-4 right-4 z-10 flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={() => adjustZoom(0.85)} className="flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-amber-900/40 bg-black/70 px-3 text-amber-200 hover:bg-amber-900/30" aria-label="Zoom out">−</button>
+        <button type="button" onClick={() => adjustZoom(1.15)} className="flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-amber-900/40 bg-black/70 px-3 text-amber-200 hover:bg-amber-900/30" aria-label="Zoom in">+</button>
+        <button type="button" onClick={() => setZoom(1)} className="min-h-11 rounded-sm border border-amber-900/40 bg-black/70 px-3 font-mono text-xs text-amber-200 hover:bg-amber-900/30" aria-label="Reset zoom to one to one">1:1</button>
+        <button type="button" onClick={centerOnPlayer} className="min-h-11 rounded-sm border border-amber-900/40 bg-black/70 px-3 font-mono text-xs text-amber-200 hover:bg-amber-900/30">Center</button>
       </div>
     </div>
   );

@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import { HexTile } from "./HexTile";
-import { Move, Map as MapIcon, Compass } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Compass, Crosshair, Minus, Plus } from "lucide-react";
 import { cubeToPixel } from "../../../lib/rules/hex-grid";
+import { HexTile } from "./HexTile";
 
 export interface WildernessHex {
   q: number;
@@ -20,140 +20,112 @@ export interface WildernessMapVTTProps {
   currentR: number;
 }
 
-export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
-  hexes,
-  currentQ,
-  currentR,
-}) => {
-  // Viewport state
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 3;
+
+export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({ hexes, currentQ, currentR }) => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef(1);
-  const [isDragging, setIsDragging] = useState(false);
+  const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Initialize view to party position
-  useEffect(() => {
-    if (containerRef.current) {
-      const { x, y } = cubeToPixel(currentQ, currentR, 50);
-      const rect = containerRef.current.getBoundingClientRect();
-      setOffset({
-        x: rect.width / 2 - x * zoomRef.current,
-        y: rect.height / 2 - y * zoomRef.current,
-      });
-    }
-  }, [currentQ, currentR]);
-
-  // Event Handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    setOffset({
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y,
-    });
-  };
-
-  const handleMouseUp = () => setIsDragging(false);
-
-  const handleWheel = (e: React.WheelEvent) => {
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom((prev) => {
-      const nextZoom = Math.min(Math.max(prev * delta, 0.2), 3);
-      zoomRef.current = nextZoom;
-      return nextZoom;
-    });
-  };
-
   const { x: partyX, y: partyY } = cubeToPixel(currentQ, currentR, 50);
+
+  const centerOnParty = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    setOffset({
+      x: rect.width / 2 - partyX * zoomRef.current,
+      y: rect.height / 2 - partyY * zoomRef.current,
+    });
+  }, [partyX, partyY]);
+
+  useEffect(() => {
+    centerOnParty();
+  }, [centerOnParty]);
+
+  const adjustZoom = useCallback((factor: number) => {
+    setZoom((previous) => {
+      const next = Math.min(Math.max(previous * factor, MIN_ZOOM), MAX_ZOOM);
+      zoomRef.current = next;
+      return next;
+    });
+  }, []);
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    isDragging.current = true;
+    dragStart.current = { x: event.clientX - offset.x, y: event.clientY - offset.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!isDragging.current) return;
+    setOffset({ x: event.clientX - dragStart.current.x, y: event.clientY - dragStart.current.y });
+  }
+
+  function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    isDragging.current = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const pan = event.shiftKey ? 80 : 32;
+    const movement: Record<string, { x: number; y: number }> = {
+      ArrowLeft: { x: pan, y: 0 }, ArrowRight: { x: -pan, y: 0 }, ArrowUp: { x: 0, y: pan }, ArrowDown: { x: 0, y: -pan },
+    };
+    if (movement[event.key]) {
+      event.preventDefault();
+      const delta = movement[event.key];
+      setOffset((previous) => ({ x: previous.x + delta.x, y: previous.y + delta.y }));
+    } else if (event.key === "+" || event.key === "=") {
+      event.preventDefault(); adjustZoom(1.15);
+    } else if (event.key === "-") {
+      event.preventDefault(); adjustZoom(0.85);
+    } else if (event.key === "Home") {
+      event.preventDefault(); centerOnParty();
+    }
+  }
+
+  const discoveredCount = hexes.filter((hex) => hex.discovered).length;
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-[#1a1c1e] overflow-hidden cursor-grab active:cursor-grabbing"
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onWheel={handleWheel}
+      role="region"
+      aria-label={`Wilderness map. Party at hex ${currentQ}, ${currentR}. ${discoveredCount} discovered hexes.`}
+      tabIndex={0}
+      className="relative h-full w-full cursor-grab overflow-hidden bg-[#101018] active:cursor-grabbing"
+      style={{ touchAction: "none" }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onWheel={(event) => adjustZoom(event.deltaY > 0 ? 0.9 : 1.1)}
+      onKeyDown={handleKeyDown}
     >
-      {/* Background Grid Pattern (Optional flourish) */}
-      <div className="absolute inset-0 opacity-5 pointer-events-none bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:20px_20px]" />
-
-      <svg width="100%" height="100%" className="block">
-        <defs>
-          <filter id="hex-glow">
-            <feGaussianBlur stdDeviation="2" result="blur" />
-            <feComposite in="SourceGraphic" in2="blur" operator="over" />
-          </filter>
-        </defs>
-
+      <p className="sr-only">Use arrow keys to pan, plus and minus to zoom, and Home to center the party.</p>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(#fff_1px,transparent_1px)] opacity-5 [background-size:20px_20px]" />
+      <svg aria-hidden="true" width="100%" height="100%" className="block">
+        <defs><filter id="hex-glow"><feGaussianBlur stdDeviation="2" result="blur" /><feComposite in="SourceGraphic" in2="blur" operator="over" /></filter></defs>
         <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`} className="vtt-viewport">
-          {/* Render Hexes */}
-          {hexes.map((hex) => (
-            <HexTile
-              key={`${hex.q},${hex.r}`}
-              {...hex}
-              size={50}
-            />
-          ))}
-
-          {/* Party Marker */}
+          {hexes.map((hex) => <HexTile key={`${hex.q},${hex.r}`} {...hex} size={50} />)}
           <g transform={`translate(${partyX}, ${partyY})`} className="party-marker">
-            <circle
-              r="12"
-              fill="rgba(59, 130, 246, 0.5)"
-              className="animate-pulse"
-              style={{ filter: "url(#hex-glow)" }}
-            />
-            <Compass className="w-6 h-6 text-blue-400 -translate-x-3 -translate-y-3 drop-shadow-lg" />
+            <circle r="12" fill="rgba(99, 102, 241, 0.55)" style={{ filter: "url(#hex-glow)" }} />
+            <Compass className="h-6 w-6 -translate-x-3 -translate-y-3 text-violet-200 drop-shadow-lg" />
           </g>
         </g>
       </svg>
 
-      {/* Mini Controls overlay */}
-      <div className="absolute bottom-4 right-4 flex flex-col gap-2">
-        <button 
-          onClick={() => {
-            zoomRef.current = 1;
-            setZoom(1);
-          }}
-          className="p-2 bg-black/50 backdrop-blur-md rounded-lg border border-white/20 text-white hover:bg-white/10 transition-colors"
-          title="Reset Zoom"
-        >
-          <MapIcon className="w-5 h-5" />
-        </button>
-        <button 
-          onClick={() => {
-            if (containerRef.current) {
-              const rect = containerRef.current.getBoundingClientRect();
-              setOffset({
-                x: rect.width / 2 - partyX * zoom,
-                y: rect.height / 2 - partyY * zoom,
-              });
-            }
-          }}
-          className="p-2 bg-black/50 backdrop-blur-md rounded-lg border border-white/20 text-white hover:bg-white/10 transition-colors"
-          title="Center on Party"
-        >
-          <Move className="w-5 h-5" />
-        </button>
+      <div className="absolute bottom-4 right-4 flex gap-2" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" onClick={() => adjustZoom(0.85)} className="flex h-11 w-11 items-center justify-center rounded-sm border border-white/20 bg-black/70 text-white hover:bg-white/10" aria-label="Zoom out"><Minus aria-hidden="true" size={18} /></button>
+        <button type="button" onClick={() => adjustZoom(1.15)} className="flex h-11 w-11 items-center justify-center rounded-sm border border-white/20 bg-black/70 text-white hover:bg-white/10" aria-label="Zoom in"><Plus aria-hidden="true" size={18} /></button>
+        <button type="button" onClick={centerOnParty} className="flex h-11 w-11 items-center justify-center rounded-sm border border-white/20 bg-black/70 text-white hover:bg-white/10" aria-label="Center on party"><Crosshair aria-hidden="true" size={18} /></button>
       </div>
 
-      {/* Legend / Info */}
-      <div className="absolute top-4 left-4 p-3 bg-black/60 backdrop-blur-xl rounded-lg border border-white/10 pointer-events-none">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-white/60 mb-2">Wilderness Map</h3>
-        <div className="flex items-center gap-3 text-sm text-white/90">
-          <span className="flex items-center gap-1.5">
-            <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-            Party Location ({currentQ}, {currentR})
-          </span>
-        </div>
+      <div className="pointer-events-none absolute left-4 top-4 rounded-sm border border-white/10 bg-black/70 p-3 backdrop-blur-xl">
+        <h3 className="text-xs font-bold uppercase tracking-widest text-white/60">Wilderness Map</h3>
+        <p className="mt-1 text-sm text-white/90">Party location ({currentQ}, {currentR})</p>
       </div>
     </div>
   );
