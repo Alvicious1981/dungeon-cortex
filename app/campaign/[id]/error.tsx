@@ -2,71 +2,33 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { CircleAlert, RotateCcw } from "lucide-react";
 
-export default function CampaignError({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string };
-  reset: () => void;
-}) {
+export default function CampaignError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error("Campaign Segment Error Boundary caught:", error);
   }, [error]);
 
   return (
-    <div 
-      className="flex-1 flex items-center justify-center p-4 bg-neutral-950/80"
-      style={{ fontFamily: "var(--font-crimson), serif" }}
-    >
-      <div 
-        className="w-full max-w-lg p-6 rounded border space-y-4"
-        style={{
-          background: "rgba(18, 12, 12, 0.95)",
-          borderColor: "rgba(220, 38, 38, 0.2)",
-          boxShadow: "0 4px 20px rgba(220, 38, 38, 0.1)"
-        }}
-      >
+    <main className="dc-atmosphere flex min-h-screen items-center justify-center p-4 text-[#e2d9c5]">
+      <section role="alert" aria-labelledby="campaign-error-title" className="dc-panel w-full max-w-lg space-y-5 rounded-sm p-6 sm:p-8">
         <div className="flex items-center gap-3">
-          <span className="text-2xl" aria-hidden="true">🔮</span>
-          <h2 
-            className="text-lg font-bold uppercase tracking-wider text-red-400"
-            style={{ fontFamily: "var(--font-cinzel), serif" }}
-          >
-            Chronicle Interrupted
-          </h2>
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-red-400/35 bg-red-950/40 text-red-300">
+            <CircleAlert aria-hidden="true" size={22} />
+          </span>
+          <div>
+            <p className="dc-kicker text-red-300">Recoverable interruption</p>
+            <h2 id="campaign-error-title" className="dc-heading mt-1 text-xl font-bold text-red-200">Chronicle Interrupted</h2>
+          </div>
         </div>
-        
-        <p className="text-sm text-red-200/80 leading-relaxed">
-          The connection to this campaign&#39;s thread of fate has been severed. A sudden arcane interference or temporal anomaly prevents further scrying into this adventure.
-        </p>
-
-        <div className="pt-2 flex gap-3 text-sm font-semibold tracking-wide uppercase" style={{ fontFamily: "var(--font-cinzel), serif" }}>
-          <button
-            onClick={() => reset()}
-            className="flex-1 py-2 px-4 rounded transition-colors"
-            style={{
-              background: "rgba(220,38,38,0.1)",
-              color: "#FCA5A5",
-              border: "1px solid rgba(220,38,38,0.3)"
-            }}
-          >
-            Recast Spell (Retry)
+        <p className="dc-copy text-base leading-7 text-[#cbbda5]">This campaign could not be read safely. Retry the request, or return to the Hall of Records; no local rule result is fabricated while the chronicle is unavailable.</p>
+        <div className="grid gap-3 pt-1 sm:grid-cols-2">
+          <button type="button" onClick={reset} className="dc-button-primary rounded-sm px-4 py-3 text-sm">
+            <RotateCcw aria-hidden="true" className="mr-2" size={17} /> Retry
           </button>
-          
-          <Link
-            href="/"
-            className="flex-1 py-2 px-4 text-center rounded transition-colors"
-            style={{
-              background: "rgba(255,255,255,0.05)",
-              color: "#D4D4D4",
-              border: "1px solid rgba(255,255,255,0.1)"
-            }}
-          >
-            Leave Campaign
-          </Link>
+          <Link href="/" className="flex min-h-11 items-center justify-center rounded-sm border border-[#4a405b] bg-[#15121e] px-4 py-3 text-center text-sm font-semibold text-[#d2c6a8] hover:border-[#79688e]">Leave campaign</Link>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
