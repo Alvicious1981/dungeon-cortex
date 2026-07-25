@@ -117,4 +117,34 @@ describe("social AI tools", () => {
       data: { disposition: 6 },
     });
   });
+  it("getRumors resolves persisted social context outside the AI tool", async () => {
+    prismaMock.nPC.findUnique.mockResolvedValueOnce({
+      id: "npc-1",
+      name: "Bert",
+      disposition: 5,
+    });
+    prismaMock.campaign.findUnique.mockResolvedValueOnce({
+      id: "campaign-1",
+      currentLocationId: "location-1",
+    });
+    prismaMock.locationNode.findMany.mockResolvedValueOnce([
+      {
+        id: "node-1",
+        name: "Old Shrine",
+        feature: "treasure",
+        description: "A sealed shrine stands beyond the road.",
+      },
+    ]);
+
+    const tools = buildSocialTools("campaign-1") as any;
+    const raw = await tools.getRumors.execute({ npcSeed: "bert" });
+    const result = JSON.parse(raw);
+
+    expect(result.npcName).toBe("Bert");
+    expect(result.rumors).toHaveLength(1);
+    expect(prismaMock.locationNode.findMany).toHaveBeenCalledWith({
+      where: { locationId: "location-1" },
+      select: { id: true, name: true, feature: true, description: true },
+    });
+  });
 });

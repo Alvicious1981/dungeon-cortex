@@ -148,6 +148,23 @@ function resolveDb(input: ResolveTradeTransactionInput): TradeDb {
   return input.tx ?? input.db ?? (prisma as unknown as TradeDb);
 }
 
+export async function getCampaignCharacterIdForTrade(
+  campaignId: string
+): Promise<string> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { characterId: true },
+  });
+  if (!campaign) {
+    throw new TradeServiceError(
+      "CAMPAIGN_NOT_FOUND",
+      `Campaign not found: ${campaignId}`
+    );
+  }
+
+  return campaign.characterId;
+}
+
 function assertOperation(operation: string): asserts operation is TradeOperation {
   if (operation !== "buy" && operation !== "sell") {
     throw new TradeServiceError(

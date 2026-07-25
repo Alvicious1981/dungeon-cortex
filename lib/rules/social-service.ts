@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier, d20Check } from "@/lib/rules/dice";
-import type { SocialCheckResult } from "@/lib/rules/social";
-import { computeSocialDC, getDispositionBand } from "@/lib/rules/social-logic";
+import type { RumorPayload, SocialCheckResult } from "@/lib/rules/social";
+import {
+  computeSocialDC,
+  getDispositionBand,
+  getRumorsPayload,
+} from "@/lib/rules/social-logic";
 
 export type SocialApproach = "persuade" | "intimidate" | "deceive";
 
@@ -12,6 +16,7 @@ export type SocialServiceErrorCode =
   | "NPC_NOT_FOUND"
   | "NPC_OWNERSHIP_MISMATCH"
   | "NPC_NOT_MET"
+  | "LOCATION_NOT_FOUND"
   | "INVALID_SOCIAL_APPROACH"
   | "INVALID_DISPOSITION_DELTA"
   | "INVALID_ROLL"
@@ -30,6 +35,7 @@ export class SocialServiceError extends Error {
 interface SocialCampaignRecord {
   id: string;
   characterId?: string;
+  currentLocationId?: string | null;
 }
 
 interface SocialCharacterRecord {
@@ -45,6 +51,13 @@ interface SocialNpcRecord {
   name?: string;
   disposition?: number | null;
   hasMetPlayer?: boolean;
+}
+
+interface SocialLocationNodeRecord {
+  id: string;
+  name: string;
+  feature: string;
+  description: string;
 }
 
 interface SocialDb {
@@ -71,6 +84,12 @@ interface SocialDb {
       data: { disposition: number };
     }): Promise<SocialNpcRecord>;
   };
+  locationNode: {
+    findMany(args: {
+      where: { locationId: string };
+      select: Record<string, boolean>;
+    }): Promise<SocialLocationNodeRecord[]>;
+  };
 }
 
 export interface ResolveSocialCheckInput {
@@ -83,6 +102,13 @@ export interface ResolveSocialCheckInput {
   dispositionDelta?: number;
   roll?: number;
   dc?: number;
+  tx?: SocialDb;
+  db?: SocialDb;
+}
+
+export interface ResolveRumorsInput {
+  campaignId: string;
+  npcSeed: string;
   tx?: SocialDb;
   db?: SocialDb;
 }
@@ -115,8 +141,56 @@ export type ResolveSocialCheckResult = SocialCheckResult & {
   facts: SocialCheckFacts;
 };
 
-function resolveDb(input: ResolveSocialCheckInput): SocialDb {
+function resolveDb(input: { tx?: SocialDb; db?: SocialDb }): SocialDb {
   return input.tx ?? input.db ?? (prisma as unknown as SocialDb);
+}
+
+export async function resolveRumors(
+  input: ResolveRumorsInput
+): Promise<RumorPayload> {
+  const db = resolveDb(input);
+  const npc = await db.nPC.findUnique({
+    where: {
+      campaignId_seed: {
+        campaignId: input.campaignId,
+        seed: input.npcSeed,
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      disposition: true,
+    },
+  });
+  if (!npc) {
+    throw new SocialServiceError(
+      "NPC_NOT_FOUND",
+      "NPC not found. Cannot retrieve rumors."
+    );
+  }
+
+  const campaign = await db.campaign.findUnique({
+    where: { id: input.campaignId },
+    select: { id: true, currentLocationId: true },
+  });
+  if (!campaign?.currentLocationId) {
+    throw new SocialServiceError(
+      "LOCATION_NOT_FOUND",
+      "No active location — explore a location first."
+    );
+  }
+
+  const nodes = await db.locationNode.findMany({
+    where: { locationId: campaign.currentLocationId },
+    select: { id: true, name: true, feature: true, description: true },
+  });
+
+  return getRumorsPayload(
+    input.npcSeed,
+    npc.name ?? input.npcSeed,
+    npc.disposition ?? 0,
+    nodes
+  );
 }
 
 function assertApproach(approach: string): asserts approach is SocialApproach {

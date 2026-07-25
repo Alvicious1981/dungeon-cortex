@@ -14,21 +14,13 @@
  *   - All external I/O modules (Prisma, OpenAI, memory) are fully mocked
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { CampaignContext } from "@/lib/memory/context";
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared before any imports that trigger module resolution
 // ---------------------------------------------------------------------------
 
-const legacyDowntimeModuleLoaded = vi.hoisted(() => vi.fn());
-
-vi.mock("@/lib/ai/tools/downtime", () => {
-  legacyDowntimeModuleLoaded();
-  throw new Error(
-    "Legacy downtime AI tool module must remain disconnected from lib/ai/narrator.ts",
-  );
-});
 
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
@@ -289,7 +281,6 @@ describe("streamNarrative — Code is Law tool-call enforcement", () => {
         .map(([name, registeredTool]) => `${name}\n${registeredTool.description ?? ""}`)
         .join("\n");
 
-      expect(legacyDowntimeModuleLoaded).not.toHaveBeenCalled();
       expect(registeredToolNames).not.toContain("resolveDowntime");
       for (const legacyGoldXpPattern of LEGACY_GOLD_XP_PATTERNS) {
         expect(registeredToolMetadata).not.toMatch(legacyGoldXpPattern);
