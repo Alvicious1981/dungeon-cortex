@@ -1,8 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #070710;
+  --foreground: #e2d9c5;
+  --surface: #0c0c16;
+  --surface-elevated: #15121e;
+  --surface-soft: #1c1728;
+  --border: #3b3150;
+  --text-muted: #a39478;
+  --gold: #e8c84a;
+  --action: #f59e0b;
+  --arcane: #a78bfa;
+  --danger: #f87171;
+  --success: #4ade80;
+  --focus: #fbbf24;
 }
 
 @theme inline {
@@ -12,17 +23,11 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  min-width: 320px;
 }
 
 @keyframes consequence-appear {
@@ -59,4 +64,32 @@ body {
 
 .animate-critical-hit {
   animation: critical-hit-impact 200ms ease-in-out;
+}
+
+::selection { background: color-mix(in srgb, var(--gold) 32%, transparent); color: #fff7df; }
+:where(a, button, input, select, textarea, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.dc-atmosphere { isolation: isolate; position: relative; background-color: var(--background); }
+.dc-atmosphere::before {
+  background: linear-gradient(180deg, rgb(7 7 16 / 42%), rgb(7 7 16 / 88%)), image-set(url("/assets/atmosphere/chronicle-tabletop-wide.webp") type("image/webp"));
+  background-position: center; background-size: cover; content: ""; inset: 0; pointer-events: none; position: fixed; z-index: -2;
+}
+.dc-atmosphere::after {
+  background: radial-gradient(circle at 50% 12%, rgb(167 139 250 / 9%), transparent 36rem), linear-gradient(90deg, rgb(7 7 16 / 72%), transparent 36%, transparent 64%, rgb(7 7 16 / 72%));
+  content: ""; inset: 0; pointer-events: none; position: fixed; z-index: -1;
+}
+.dc-panel { background: linear-gradient(145deg, rgb(21 18 30 / 96%), rgb(10 9 18 / 96%)); border: 1px solid color-mix(in srgb, var(--border) 82%, var(--gold)); box-shadow: 0 24px 80px rgb(0 0 0 / 38%), inset 0 1px 0 rgb(255 255 255 / 4%); }
+.dc-kicker { color: var(--gold); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; }
+.dc-heading { font-family: Georgia, "Times New Roman", serif; letter-spacing: 0.035em; text-wrap: balance; }
+.dc-copy { color: #d2c6a8; font-family: Georgia, "Times New Roman", serif; }
+.dc-button-primary { align-items: center; background: linear-gradient(180deg, #d29a26, #9b6217); border: 1px solid #f1cf6b; box-shadow: 0 8px 30px rgb(245 158 11 / 16%), inset 0 1px 0 rgb(255 255 255 / 30%); color: #100c07; cursor: pointer; display: inline-flex; font-weight: 800; justify-content: center; min-height: 2.75rem; transition: filter 160ms ease, transform 160ms ease; }
+.dc-button-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
+.dc-button-primary:disabled { cursor: not-allowed; filter: grayscale(0.55); opacity: 0.58; transform: none; }
+.dc-field { background: rgb(7 7 16 / 86%); border: 1px solid var(--border); color: var(--foreground); min-height: 2.75rem; transition: border-color 160ms ease; }
+.dc-field:hover { border-color: #655478; }
+.dc-field:focus { border-color: var(--gold); outline: none; }
+@media (max-width: 639px) {
+  .dc-atmosphere::before { background-image: linear-gradient(180deg, rgb(7 7 16 / 38%), rgb(7 7 16 / 90%)), image-set(url("/assets/atmosphere/chronicle-tabletop-portrait.webp") type("image/webp")); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
