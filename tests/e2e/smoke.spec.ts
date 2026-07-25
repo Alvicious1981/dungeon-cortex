@@ -4,9 +4,9 @@ test("loads the app and renders character creation without submitting", async ({
   await page.goto("/");
 
   await expect(page).toHaveTitle(/Dungeon Cortex/i);
-  await expect(page.getByRole("heading", { name: "Dungeon Cortex" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Your choices shape the story/i })).toBeVisible();
 
-  const startLink = page.getByRole("link", { name: "Start your adventure" });
+  const startLink = page.getByRole("link", { name: "Forge your hero" });
   await expect(startLink).toBeVisible();
   await expect(startLink).toHaveAttribute("href", "/character/create");
 
@@ -32,7 +32,7 @@ test("keeps onboarding usable across desktop, laptop, tablet and mobile", async 
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto("/");
 
-    const startLink = page.getByRole("link", { name: "Start your adventure" });
+    const startLink = page.getByRole("link", { name: "Forge your hero" });
     await expect(startLink, `${viewport.name}: start link`).toBeVisible();
     const startBox = await startLink.boundingBox();
     expect(startBox?.height, `${viewport.name}: start target`).toBeGreaterThanOrEqual(44);
@@ -55,7 +55,7 @@ test("keeps onboarding usable across desktop, laptop, tablet and mobile", async 
 test("respects reduced motion in the global interaction system", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  const transitionDuration = await page.getByRole("link", { name: "Start your adventure" }).evaluate(
+  const transitionDuration = await page.getByRole("link", { name: "Forge your hero" }).evaluate(
     (element) => getComputedStyle(element).transitionDuration
   );
   expect(Number.parseFloat(transitionDuration)).toBeLessThanOrEqual(0.00001);
