@@ -64,18 +64,23 @@ export default function CharacterCreationForm({ races, classes }: Props) {
 
   async function createCampaign(characterId: string) {
     setStep("creating-campaign");
-    const response = await fetch("/api/campaign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ characterId, title: `${name.trim()}'s Chronicle` }),
-    });
-    const data = await readResponse(response);
-    if (!response.ok || !data.id) {
+    try {
+      const response = await fetch("/api/campaign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ characterId, title: `${name.trim()}'s Chronicle` }),
+      });
+      const data = await readResponse(response);
+      if (!response.ok || !data.id) {
+        setStep("campaign-error");
+        setError(data.error ?? "Your hero was saved, but the chronicle could not be opened.");
+        return;
+      }
+      router.push(`/campaign/${data.id}`);
+    } catch {
       setStep("campaign-error");
-      setError(data.error ?? "Your hero was saved, but the chronicle could not be opened.");
-      return;
+      setError("Your hero is safe, but the chronicle is still unreachable. Try opening it again.");
     }
-    router.push(`/campaign/${data.id}`);
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -104,12 +109,8 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       setCreatedCharacterId(data.id);
       await createCampaign(data.id);
     } catch {
-      setStep(createdCharacterId ? "campaign-error" : "idle");
-      setError(
-        createdCharacterId
-          ? "Your hero is safe, but the chronicle is still unreachable. Try opening it again."
-          : "The archive is unreachable. Check your connection and try again."
-      );
+      setStep("idle");
+      setError("The archive is unreachable. Check your connection and try again.");
     }
   }
 
