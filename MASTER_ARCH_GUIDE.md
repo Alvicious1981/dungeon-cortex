@@ -98,38 +98,27 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 
 This registry defines deprecated fields and legacy logic paths to remove during cleanup after migration safety checks.
 
-### 5.1 Deprecated consequence flat fields
+### 5.1 Deprecated consequence flat fields — Removed 2026-07-25
 
-- `CombatConsequencePayload.targetId`
-- `CombatConsequencePayload.targetName`
-- `CombatConsequencePayload.damage`
-- `CombatConsequencePayload.hpAfter`
-- `CombatConsequencePayload.targetMaxHp`
-- `CombatConsequencePayload.isCrit`
-- `CombatConsequencePayload.isFumble`
-- `CombatConsequencePayload.naturalRoll`
-- `CombatConsequencePayload.isKill`
-- `CombatConsequencePayload.hitLocation`
-- `CombatConsequencePayload.narrativeTags`
+The deprecated flat members were removed from `CombatConsequencePayload`. The strict consequence event now contains only `attackerName` and complete `targets[]` entries.
 
-### 5.2 Legacy UI update paths
+### 5.2 Legacy UI update paths — Resolved 2026-07-25
 
-- `components/combat/CombatHUDController.tsx`: single-target update via `payload.targetId` / `payload.hpAfter`.
-- `components/combat/ConsequenceLog.tsx`: entry model assumes flat fields and direct `entry.narrativeTags` usage.
-- `components/combat/CombatVTT.tsx`: log ingestion currently accepts shape without enforcing targets-array-first rendering model.
+- `CombatHUDController`, `ConsequenceLog`, and `CombatVTT` consume `targets[]` directly.
+- Multi-target HP and condition feedback is applied locally before the authoritative refresh.
+- No flat-field fallback or `as CombatConsequencePayload` cast remains in active consumers.
 
-### 5.3 Legacy/duplicate action pathways
+### 5.3 Legacy/duplicate action pathways — Resolved 2026-07-25
 
-- `components/combat/MacroDeck.tsx`: non-SSE action path with immediate refresh and no streamed deterministic event handling.
-- Parallel client action handlers with overlapping responsibilities (`ActionInput` and `CombatHUDController`) require contract unification.
+- `ActionInput` owns the only campaign-action SSE fetch and frame parser.
+- Combat HUD, macro deck, initiative, tactical movement, exploration, and dialogue clients use the correlated request lifecycle in `lib/events/action-transport.ts`.
+- Combat quick controls expose only backend-resolved `Attack` and `End Turn` actions.
 
-### 5.4 Legacy route logic and drift debt
+### 5.4 Legacy route logic and drift debt — Resolved 2026-07-25
 
-- Any `as CombatConsequencePayload` casts that bypass structural safety for consequence payloads.
-- Placeholder consequence construction that does not derive complete canonical fields per target.
-- Event/type contract drift where frames are typed but never emitted in active route flows.
-- Unused imports and duplicated helper logic identified in audits.
-
+- The duplicate encounter-turn mutation endpoint returns HTTP 410 with migration guidance.
+- Turn-spending attack, spell, item, and explicit end-turn branches use the canonical finalizer and emit `TURN_ADVANCE` or `ROUND_ADVANCE` when the encounter remains active.
+- Spell mechanics no longer depend on an AI-layer lookup helper; the backend SRD service returns source-traceable resolved effects.
 ## 6. Backend-First Execution Policy
 
 No UI-first implementation is allowed for rules-critical completion. Recommended sequence:

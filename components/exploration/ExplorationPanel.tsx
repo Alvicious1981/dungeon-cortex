@@ -7,9 +7,8 @@
  *
  * Responsibilities:
  *   1. Holds currentNodeIndex and visitedNodeIndices in React state.
- *   2. On move: optimistically updates state, fires a POST to the action
- *      endpoint (which triggers the narrator's moveToNode tool), drains
- *      the SSE stream, then calls router.refresh() to sync server state.
+ *   2. On move: optimistically updates state and requests the shared action
+ *      transport consumed by ActionInput.
  *   3. If the server state diverges from the optimistic state (e.g. a
  *      locked door was impassable), the props update on refresh and state
  *      snaps back to the server truth.
@@ -17,7 +16,14 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import {
+  DUNGEON_ACTION_END,
+  DUNGEON_ACTION_ERROR,
+  createDungeonActionRequestId,
+  requestDungeonAction,
+  type DungeonActionErrorDetail,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 import ExplorationMap from "./ExplorationMap";
 import NodeDetail from "./NodeDetail";
 import type { ContextExplorationNode, ContextExplorationEdge } from "@/lib/memory/context";
@@ -25,7 +31,6 @@ import type { ContextExplorationNode, ContextExplorationEdge } from "@/lib/memor
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export interface ExplorationPanelProps {
-  campaignId: string;
   location: { id: string; name: string; type: string; description: string };
   nodes: ContextExplorationNode[];
   edges: ContextExplorationEdge[];
@@ -36,15 +41,12 @@ export interface ExplorationPanelProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ExplorationPanel({
-  campaignId,
   location,
   nodes,
   edges,
   initialCurrentNodeIndex,
   initialVisitedNodeIndices,
 }: ExplorationPanelProps) {
-  const router = useRouter();
-
   const [currentNodeIndex, setCurrentNodeIndex] = useState(initialCurrentNodeIndex);
   const [visitedNodeIndices, setVisitedNodeIndices] = useState<number[]>(initialVisitedNodeIndices);
   const [isMoving, setIsMoving] = useState(false);
@@ -81,57 +83,58 @@ export default function ExplorationPanel({
   // Prevent concurrent moves with a ref (state updates are async)
   const movingRef = useRef(false);
 
-  async function handleMoveToNode(targetIndex: number) {
+  const pendingMove = useRef<{
+    requestId: string;
+    previousNodeIndex: number;
+    previousVisitedNodeIndices: number[];
+  } | null>(null);
+
+  useEffect(() => {
+    function handleActionError(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionErrorDetail>).detail;
+      const pending = pendingMove.current;
+      if (!pending || detail.requestId !== pending.requestId) return;
+      setCurrentNodeIndex(pending.previousNodeIndex);
+      setVisitedNodeIndices(pending.previousVisitedNodeIndices);
+    }
+
+    function handleActionEnd(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionRequestDetail>).detail;
+      if (detail.requestId !== pendingMove.current?.requestId) return;
+      pendingMove.current = null;
+      movingRef.current = false;
+      setIsMoving(false);
+    }
+
+    window.addEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+    window.addEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    return () => {
+      window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+      window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    };
+  }, []);
+
+  function handleMoveToNode(targetIndex: number) {
     if (movingRef.current) return;
     const targetNode = nodeByIndex.get(targetIndex);
     if (!targetNode) return;
 
+    const requestId = createDungeonActionRequestId();
+    pendingMove.current = {
+      requestId,
+      previousNodeIndex: currentNodeIndex,
+      previousVisitedNodeIndices: visitedNodeIndices,
+    };
     movingRef.current = true;
     setIsMoving(true);
-
-    // Optimistic update — player sees the move immediately
-    const prevIndex = currentNodeIndex;
     setCurrentNodeIndex(targetIndex);
-    setVisitedNodeIndices((prev) =>
-      prev.includes(targetIndex) ? prev : [...prev, targetIndex],
+    setVisitedNodeIndices((previous) =>
+      previous.includes(targetIndex) ? previous : [...previous, targetIndex]
     );
-
-    try {
-      const res = await fetch(`/api/campaign/${campaignId}/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: `move to ${targetNode.name}` }),
-      });
-
-      if (!res.ok || !res.body) {
-        // Network error — revert optimistic state
-        setCurrentNodeIndex(prevIndex);
-        return;
-      }
-
-      // Drain the SSE stream (the narrative appears in the chronicle via
-      // router.refresh(), not here — we just wait for the stream to end)
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        // Stop early once we see the "done" sentinel frame
-        if (buf.includes('"t":"done"')) break;
-      }
-    } catch {
-      // On any error, revert so state is consistent with the server
-      setCurrentNodeIndex(prevIndex);
-    } finally {
-      movingRef.current = false;
-      setIsMoving(false);
-      // Refresh the Server Component tree so the chronicle and
-      // character panel pick up any state mutations from the narrator
-      router.refresh();
-    }
+    requestDungeonAction(
+      { action: `move to ${targetNode.name}` },
+      requestId
+    );
   }
 
   if (!currentNode) {

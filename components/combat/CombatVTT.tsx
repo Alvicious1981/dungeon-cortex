@@ -20,7 +20,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CombatConsequencePayload } from "@/lib/events/game-events";
+import type {
+  CombatConsequencePayload,
+  GameEvent,
+} from "@/lib/events/game-events";
 import type { LootPayload } from "@/lib/rules/loot";
 
 // Extracted Components & Logic
@@ -78,11 +81,11 @@ export default function CombatVTT({ encounter }: Props) {
 
   useEffect(() => {
     function onGameEvent(e: Event) {
-      const ev = (e as CustomEvent<{ event: { type: string; payload: unknown } }>).detail.event;
+      const ev = (e as CustomEvent<{ event: GameEvent }>).detail.event;
       if (ev.type === "COMBAT_CONSEQUENCE") {
         setConsequences((prev) =>
           [
-            { key: nextConsequenceKey.current++, payload: ev.payload as CombatConsequencePayload },
+            { key: nextConsequenceKey.current++, payload: ev.payload },
             ...prev,
           ].slice(0, 8)
         );

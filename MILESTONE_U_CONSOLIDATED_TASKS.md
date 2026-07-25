@@ -1,8 +1,20 @@
 # MILESTONE_U_CONSOLIDATED_TASKS
 
-Status: Definitive Execution Plan  
-Date: 2026-04-17  
-Mode: Backend-First (UI work gated until backend completion)
+Status: Completed
+Planned: 2026-04-17
+Completed: 2026-07-25
+Mode: Backend-First
+
+## Completion Record
+
+Milestone U closed on 2026-07-25 against current code and tests:
+
+- `COMBAT_CONSEQUENCE.payload.targets[]` is the sole typed consequence truth; deprecated flat fields and UI fallbacks were removed.
+- Spell saves, save-dependent damage, conditions, concentration start/replacement/break, and turn advancement resolve in backend transactions.
+- Cached spell mechanics are derived from SRD payloads through `lib/rules/spell-resolution-service.ts`, with explicit dnd5eapi source endpoints and explicit cache-miss failure.
+- `ActionInput` is the sole campaign-action SSE consumer. Combat, initiative, tactical movement, exploration, macro, and dialogue controls submit correlated requests through `lib/events/action-transport.ts`.
+- The parallel encounter-turn mutation route is explicitly sunset with HTTP 410 and a migration instruction.
+- Regression coverage includes multi-target UI sync, targets-only events, 5e advantage/disadvantage neutralization, Spell Save DC, concentration DC, save outcomes, cantrip scaling/resource use, turn events, and shared client transport.
 
 ## 0. Mission Contract
 

@@ -28,10 +28,14 @@ export function deriveBeat(
   round: number
 ): BeatKey {
   if (entries.length === 0) return "opening";
-  const hasKill  = entries.some((e) => e.isKill);
-  const hasCrit  = entries.some((e) => e.isCrit);
-  const last     = entries[0];
-  if (last?.isKill || hasKill) return "aftermath";
+  const hasKill = entries.some((entry) =>
+    entry.targets.some((target) => target.isKill)
+  );
+  const hasCrit = entries.some((entry) =>
+    entry.targets.some((target) => target.isCrit)
+  );
+  const latestHasKill = entries[0]?.targets.some((target) => target.isKill);
+  if (latestHasKill || hasKill) return "aftermath";
   if (hasCrit && round >= 3) return "climax";
   if (hasCrit || round >= 2) return "turning_point";
   return "first_blood";
@@ -50,22 +54,7 @@ export const ConsequenceEntry = memo(function ConsequenceEntry({
   index: number;
 }) {
   const isNew = index === 0;
-  const targets = entry.targets && entry.targets.length > 0
-    ? entry.targets
-    : [{
-        targetId: entry.targetId,
-        targetName: entry.targetName,
-        damage: entry.damage,
-        hpAfter: entry.hpAfter,
-        targetMaxHp: entry.targetMaxHp,
-        isKill: entry.isKill,
-        isCrit: entry.isCrit,
-        isFumble: entry.isFumble,
-        hitLocation: entry.hitLocation || "body",
-        narrativeTags: entry.narrativeTags || [],
-        naturalRoll: entry.naturalRoll || 10,
-        conditionsApplied: [],
-      }];
+  const targets = entry.targets;
 
   const overallCrit = targets.some(t => t.isCrit);
   const overallKill = targets.some(t => t.isKill);

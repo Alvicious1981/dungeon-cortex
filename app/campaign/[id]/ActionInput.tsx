@@ -19,9 +19,17 @@
  * failures fall through to a generic message.
  */
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
+import {
+  DUNGEON_ACTION_REQUEST,
+  createDungeonActionRequestId,
+  dispatchDungeonActionEnd,
+  dispatchDungeonActionError,
+  dispatchDungeonActionStart,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 
 interface Props {
   campaignId: string;
@@ -34,16 +42,12 @@ interface Props {
   }>;
 }
 
-interface ActionPayload {
-  action: string;
-  targetIds?: string[];
-}
-
 export default function ActionInput({ campaignId, selectableTargets = [] }: Props) {
   const router = useRouter();
   const [action, setAction] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   /** null  = idle; ""    = events received, waiting for first token;
    *  string = partial or complete optimistic narrative text           */
@@ -57,9 +61,12 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
   async function handleSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault();
     const pendingAction = action.trim();
-    if (!pendingAction || submitting) return;
+    if (!pendingAction || submittingRef.current) return;
     setAction("");
-    await executeAction({ action: pendingAction, targetIds: selectedTargetIds });
+    await executeAction({
+      requestId: createDungeonActionRequestId(),
+      request: { action: pendingAction, targetIds: selectedTargetIds },
+    });
   }
 
   useEffect(() => {
@@ -78,34 +85,34 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
     );
   }
 
-  const executeAction = useCallback(async (payload: ActionPayload) => {
-    const pendingAction = payload.action.trim();
-    const targetIds = payload.targetIds ?? [];
+  const executeAction = useCallback(async (detail: DungeonActionRequestDetail) => {
+    const pendingAction = detail.request.action.trim();
+    const request = { ...detail.request, action: pendingAction };
 
+    submittingRef.current = true;
     setError(null);
     setSubmitting(true);
     setStreamingText("");
     setStreamError(null);
-
-    // ── User-gesture chain: warm up AudioContext in GameEventHandler ──────────
-    window.dispatchEvent(new CustomEvent("dungeon-action-start"));
+    dispatchDungeonActionStart({ ...detail, request });
 
     try {
       const res = await fetch(`/api/campaign/${campaignId}/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: pendingAction, targetIds }),
+        body: JSON.stringify(request),
       });
 
-      // 4xx / 5xx: read JSON error body (same shape as before)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}) as Record<string, unknown>);
-        setError((data as { error?: string }).error ?? `Error ${res.status}`);
+        const errorMessage =
+          (data as { error?: string }).error ?? `Error ${res.status}`;
+        setError(errorMessage);
         setStreamingText(null);
+        dispatchDungeonActionError({ ...detail, request, error: errorMessage });
         return;
       }
 
-      // ── Consume SSE stream ────────────────────────────────────────────────
       if (!res.body) {
         setStreamingText(null);
         router.refresh();
@@ -122,10 +129,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
         if (streamDone) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // SSE frames are separated by double newlines
         const frames = buffer.split("\n\n");
-        // Keep the last (possibly incomplete) chunk in the buffer
         buffer = frames.pop() ?? "";
 
         for (const frame of frames) {
@@ -141,69 +145,85 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
           }
 
           if (parsed.t === "evt") {
-            // Phase 1: deterministic game event — forward to GameEventHandler
             window.dispatchEvent(
               new CustomEvent("dungeon-game-event", { detail: { event: parsed.e } })
             );
           } else if (parsed.t === "txt") {
-            // Phase 2: narrative token — append to optimistic bubble
             setStreamingText((prev) => (prev ?? "") + parsed.d);
-            // Forward to DialogueOverlayController if it's listening
             window.dispatchEvent(
               new CustomEvent("dungeon-token", { detail: { chunk: parsed.d } })
             );
           } else if (parsed.t === "level_up") {
-            // Phase 2.5: level-up resolved — forward payload to AscensionOverlay
             window.dispatchEvent(
               new CustomEvent("dungeon-level-up", { detail: parsed.payload })
             );
           } else if (parsed.t === "merchant") {
-            // Phase 2.5: trade initiated — forward payload to TradeOverlayController
             window.dispatchEvent(
               new CustomEvent("dungeon-merchant", { detail: parsed.payload })
             );
           } else if (parsed.t === "dialogue_open") {
-            // Phase 2.5: dialogue initiated — forward payload to DialogueOverlayController
             window.dispatchEvent(
               new CustomEvent("dungeon-dialogue-open", { detail: parsed.payload })
             );
           } else if (parsed.t === "dialogue_update") {
-            // Phase 2.5: disposition update — forward payload to DialogueOverlayController
             window.dispatchEvent(
-              new CustomEvent("dungeon-dialogue-update", { detail: { disposition: parsed.disposition } })
+              new CustomEvent("dungeon-dialogue-update", {
+                detail: { disposition: parsed.disposition },
+              })
             );
           } else if (parsed.t === "done") {
-            // Phase 3: stream complete
             done = true;
             break;
           }
         }
       }
 
-      // Clear optimistic bubble and sync server state
       setStreamingText(null);
       router.refresh();
     } catch {
-      // Network failure or stream interrupted
-      setStreamError("The connection to the Dungeon Master was severed. Please refresh or try your action again.");
+      const errorMessage =
+        "The connection to the Dungeon Master was severed. Please refresh or try your action again.";
+      setStreamError(errorMessage);
+      dispatchDungeonActionError({ ...detail, request, error: errorMessage });
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
-      window.dispatchEvent(new CustomEvent("dungeon-action-end"));
+      dispatchDungeonActionEnd({ ...detail, request });
     }
   }, [campaignId, router]);
 
-  // Allow external triggers (e.g. from DialogueOverlay)
   useEffect(() => {
-    function handleRemote(e: Event) {
-      const customEvent = e as CustomEvent<ActionPayload>;
-      const { action: remoteText, targetIds } = customEvent.detail;
-      if (remoteText && !submitting) {
-        executeAction({ action: remoteText, targetIds });
+    function handleRequestedAction(event: Event) {
+      const { detail } = event as CustomEvent<DungeonActionRequestDetail>;
+      if (!detail?.request.action.trim()) return;
+
+      if (submittingRef.current) {
+        const errorMessage = "Another action is already being resolved.";
+        dispatchDungeonActionError({ ...detail, error: errorMessage });
+        dispatchDungeonActionEnd(detail);
+        return;
       }
+
+      const targetAwareDetail =
+        detail.request.action.trim() === "Attack" &&
+        detail.request.targetIds === undefined &&
+        selectedTargetIds.length > 0
+          ? {
+              ...detail,
+              request: {
+                ...detail.request,
+                targetIds: selectedTargetIds,
+              },
+            }
+          : detail;
+
+      void executeAction(targetAwareDetail);
     }
-    window.addEventListener("dungeon-remote-action", handleRemote);
-    return () => window.removeEventListener("dungeon-remote-action", handleRemote);
-  }, [executeAction, submitting]);
+
+    window.addEventListener(DUNGEON_ACTION_REQUEST, handleRequestedAction);
+    return () =>
+      window.removeEventListener(DUNGEON_ACTION_REQUEST, handleRequestedAction);
+  }, [executeAction, selectedTargetIds]);
 
   return (
     <div className="space-y-3">

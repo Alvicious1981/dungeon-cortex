@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/session";
 import { NextRequest } from "next/server";
 import { buildCampaignContext } from "@/lib/memory/context";
+import { parseIntent } from "@/lib/ai/intent";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -18,9 +19,11 @@ vi.mock("next/server", async (importActual) => {
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     campaign: { findUnique: vi.fn() },
-    gameLog: { create: vi.fn() },
+    gameLog: { create: vi.fn(), count: vi.fn(() => 1), findMany: vi.fn() },
     encounter: { update: vi.fn() },
     combatant: { findMany: vi.fn(), update: vi.fn() },
+    inventoryItem: { delete: vi.fn(), update: vi.fn() },
+    character: { findUnique: vi.fn(), update: vi.fn() },
     $transaction: vi.fn(async (cb) => cb(prisma)),
   },
 }));
@@ -34,6 +37,10 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/memory/context", () => ({
   buildCampaignContext: vi.fn(),
+}));
+
+vi.mock("@/lib/ai/intent", () => ({
+  parseIntent: vi.fn(),
 }));
 
 vi.mock("@/lib/rules/combat", async (importActual) => {
@@ -113,6 +120,66 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(prisma.encounter.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "enc_123" }
     }));
+  });
+
+  it("advances the turn when an item is used during combat", async () => {
+    const combatants = [
+      { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: [], concentrationSpellId: null },
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 10, maxHp: 10, conditions: [], concentrationSpellId: null },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1",
+        name: "Hero",
+        class: "fighter",
+        level: 1,
+        stats: { STR: 10 },
+        spellSlots: null,
+        concentrationSpellId: null,
+        inventory: [
+          {
+            id: "item-1",
+            name: "Antitoxin",
+            type: "consumable",
+            quantity: 1,
+            properties: {},
+          },
+        ],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: {
+        id: "enc_123",
+        currentTurnIndex: 0,
+        round: 1,
+        totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (parseIntent as any).mockResolvedValue({
+      actionType: "use_item",
+      targetName: "Antitoxin",
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const req = new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action: "Use Antitoxin" }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
+    const stream = await res.text();
+
+    expect(prisma.inventoryItem.delete).toHaveBeenCalledWith({
+      where: { id: "item-1" },
+    });
+    expect(prisma.encounter.update).toHaveBeenCalledWith({
+      where: { id: "enc_123" },
+      data: { currentTurnIndex: 1, round: 1 },
+    });
+    expect(stream).toContain('"type":"TURN_ADVANCE"');
   });
 
   it("falls back to auto-targeting if targetIds is missing", async () => {

@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import {
+  DUNGEON_ACTION_END,
+  DUNGEON_ACTION_ERROR,
+  createDungeonActionRequestId,
+  requestDungeonAction,
+  type DungeonActionErrorDetail,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 
 const GRID_SIZE = 10;
 type Position = { x: number; y: number };
@@ -12,7 +19,7 @@ export interface BattleGridCombatant {
   id: string; name: string; isPlayer: boolean; hp: number; maxHp: number; ac: number; x: number; y: number; size: string;
 }
 
-interface BattleGridProps { campaignId: string; combatants: BattleGridCombatant[]; activeCombatantId?: string; }
+interface BattleGridProps { combatants: BattleGridCombatant[]; activeCombatantId?: string; }
 
 function sizeToSquares(size: string): number {
   switch (size) { case "Large": return 2; case "Huge": return 3; case "Gargantuan": return 4; default: return 1; }
@@ -23,8 +30,7 @@ function initials(name: string): string {
   return parts.length === 1 ? parts[0]!.slice(0, 2).toUpperCase() : `${parts[0]![0]}${parts[parts.length - 1]![0]}`.toUpperCase();
 }
 
-export default function BattleGrid({ campaignId, combatants, activeCombatantId }: BattleGridProps) {
-  const router = useRouter();
+export default function BattleGrid({ combatants, activeCombatantId }: BattleGridProps) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const [positions, setPositions] = useState<Record<string, Position>>({});
   const [dragId, setDragId] = useState<string | null>(null);
@@ -33,6 +39,11 @@ export default function BattleGrid({ campaignId, combatants, activeCombatantId }
   const [keyboardMove, setKeyboardMove] = useState<KeyboardMove | null>(null);
   const [movePending, setMovePending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingMove = useRef<{
+    requestId: string;
+    combatantId: string;
+    origin: Position;
+  } | null>(null);
 
   const combatantById = useMemo(() => new Map(combatants.map((combatant) => [combatant.id, combatant])), [combatants]);
 
@@ -59,32 +70,46 @@ export default function BattleGrid({ campaignId, combatants, activeCombatantId }
     };
   }
 
-  const commitMove = useCallback(async (id: string, origin: Position, destination: Position) => {
+  const commitMove = useCallback((id: string, origin: Position, destination: Position) => {
     if (origin.x === destination.x && origin.y === destination.y) return;
+    const requestId = createDungeonActionRequestId();
+    pendingMove.current = { requestId, combatantId: id, origin };
     setError(null);
     setKeyboardMove(null);
     setPositions((previous) => ({ ...previous, [id]: destination }));
     setMovePending(true);
-    try {
-      const response = await fetch(`/api/campaign/${campaignId}/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "Move", targetX: destination.x, targetY: destination.y }),
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        setPositions((previous) => ({ ...previous, [id]: origin }));
-        setError(payload.error ?? "Movement failed.");
-        return;
-      }
-      router.refresh();
-    } catch {
-      setPositions((previous) => ({ ...previous, [id]: origin }));
-      setError("Network error while moving.");
-    } finally {
+    requestDungeonAction(
+      { action: "Move", targetX: destination.x, targetY: destination.y },
+      requestId
+    );
+  }, []);
+
+  useEffect(() => {
+    function handleActionError(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionErrorDetail>).detail;
+      const pending = pendingMove.current;
+      if (!pending || detail.requestId !== pending.requestId) return;
+      setPositions((previous) => ({
+        ...previous,
+        [pending.combatantId]: pending.origin,
+      }));
+      setError(detail.error);
+    }
+
+    function handleActionEnd(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionRequestDetail>).detail;
+      if (detail.requestId !== pendingMove.current?.requestId) return;
+      pendingMove.current = null;
       setMovePending(false);
     }
-  }, [campaignId, router]);
+
+    window.addEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+    window.addEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    return () => {
+      window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+      window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    };
+  }, []);
 
   useEffect(() => {
     if (!dragId) return;

@@ -23,6 +23,7 @@ import {
   extractConditions,
   applyCondition,
   removeCondition,
+  resolveConcentrationCheck,
 } from "@/lib/rules/combat";
 import type {
   CombatFacts,
@@ -34,6 +35,16 @@ import type {
 describe("combat rules", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("resolveConcentrationCheck", () => {
+    it("uses max(10, floor(damage / 2)) for the authoritative DC", () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.99);
+
+      expect(resolveConcentrationCheck(20, 0).dc).toBe(10);
+      expect(resolveConcentrationCheck(22, 0).dc).toBe(11);
+      expect(resolveConcentrationCheck(40, 0).dc).toBe(20);
+    });
   });
 
   describe("rollInitiative", () => {

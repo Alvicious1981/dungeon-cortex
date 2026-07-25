@@ -169,8 +169,14 @@ describe('Narrative Prompt Builder Tests (Fase 7A/7B.1)', () => {
               targetName: 'Orc',
               targetId: 'orc-1',
               damage: 12,
-              hpAfter: 18,
+              naturalRoll: 20,
               isCrit: true,
+              isFumble: false,
+              hitLocation: 'chest',
+              narrativeTags: ['critical_hit'],
+              hpAfter: 18,
+              targetMaxHp: 30,
+              isKill: false,
               conditionsApplied: ['Prone']
             }
           ]

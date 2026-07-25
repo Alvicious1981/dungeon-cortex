@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type {
+  CombatConsequenceEvent,
   CombatConsequencePayload,
   GameEvent,
   SingleTargetConsequence,
@@ -54,6 +55,7 @@ interface PipelineSpellEffect {
   damageType?: string | null;
   hasSavingThrow?: boolean;
   saveAbility?: string | null;
+  saveDamage?: "half" | "none";
   condition?: string | null;
   concentration?: boolean;
 }
@@ -94,6 +96,7 @@ export interface CombatActionPayload {
   healingBonus?: number;
 
   playerCharacterId?: string;
+  actorConcentrationSpellId?: string | null;
   collectEvents?: boolean;
 }
 
@@ -122,27 +125,15 @@ export interface FinalizeTurnResult {
 export function buildCombatConsequenceEvent(input: {
   attackerName: string;
   targets: SingleTargetConsequence[];
-}): GameEvent {
-  const first = input.targets[0];
+}): CombatConsequenceEvent {
   const payload: CombatConsequencePayload = {
     attackerName: input.attackerName,
     targets: input.targets,
-    targetId: first?.targetId ?? "",
-    targetName: first?.targetName ?? "",
-    damage: first?.damage ?? 0,
-    hpAfter: first?.hpAfter ?? 0,
-    targetMaxHp: first?.targetMaxHp ?? 0,
-    isCrit: first?.isCrit ?? false,
-    isFumble: first?.isFumble ?? false,
-    naturalRoll: first?.naturalRoll ?? 0,
-    isKill: first?.isKill ?? false,
-    hitLocation: first?.hitLocation,
-    narrativeTags: first?.narrativeTags ?? [],
   };
 
   return {
     type: "COMBAT_CONSEQUENCE",
-    payload: payload as Record<string, unknown>,
+    payload,
   };
 }
 
@@ -168,21 +159,28 @@ export async function executeCombatAction(
   const enemyCombatants = encounter.combatants.filter((c) => !c.isPlayer);
 
   // RESOURCE DRAIN
-  if (actionType === "cast_spell" && payload.spellLevel !== undefined && payload.rawSpellSlots) {
-    const updatedSlots = consumeSlot(
-      payload.rawSpellSlots as SpellSlots,
-      payload.spellLevel
-    );
-    if (playerCharacterId) {
-      await tx.character.update({
-        where: { id: playerCharacterId },
-        data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
-      });
+  if (actionType === "cast_spell" && payload.spellLevel !== undefined) {
+    const consumesSlot = payload.spellLevel > 0;
+    if (consumesSlot && payload.rawSpellSlots) {
+      const updatedSlots = consumeSlot(
+        payload.rawSpellSlots as SpellSlots,
+        payload.spellLevel
+      );
+      if (playerCharacterId) {
+        await tx.character.update({
+          where: { id: playerCharacterId },
+          data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
+        });
+      }
     }
     if (collectEvents) {
       events.push({
         type: "SPELL_CAST",
-        payload: { spellLevel: payload.spellLevel, spellName: payload.spellName ?? null },
+        payload: {
+          spellLevel: payload.spellLevel,
+          spellName: payload.spellName ?? null,
+          slotConsumed: consumesSlot,
+        },
       });
     }
   } else if (actionType === "use_item" && payload.itemId && payload.itemQuantity !== undefined) {
@@ -196,14 +194,46 @@ export async function executeCombatAction(
     }
   }
 
-  // CONCENTRATION START
+  // CONCENTRATION START / REPLACEMENT
   if (actionType === "cast_spell" && payload.spellName && payload.spellEffect?.concentration && playerCharacterId) {
+    const actorCombatant = encounter.combatants.find(
+      (combatant) => combatant.id === payload.actorId && combatant.isPlayer
+    );
+    const previousSpell =
+      payload.actorConcentrationSpellId || actorCombatant?.concentrationSpellId;
+
+    if (previousSpell && collectEvents) {
+      events.push({
+        type: "CONCENTRATION_BROKEN",
+        payload: {
+          targetName: actorName,
+          spellName: previousSpell,
+          reason: "replaced",
+        },
+      });
+    }
+
     await tx.character.update({
       where: { id: playerCharacterId },
-      data: { concentrationSpellId: payload.spellName }
+      data: { concentrationSpellId: payload.spellName },
     });
+
+    if (actorCombatant) {
+      await tx.combatant.update({
+        where: { id: actorCombatant.id },
+        data: { concentrationSpellId: payload.spellName },
+      });
+    }
+
     if (collectEvents) {
-      events.push({ type: "CONCENTRATION_STARTED", payload: { spellName: payload.spellName } });
+      events.push({
+        type: "CONCENTRATION_STARTED",
+        payload: {
+          targetName: actorName,
+          spellName: payload.spellName,
+          replacedSpellName: previousSpell ?? null,
+        },
+      });
     }
   }
 
@@ -317,12 +347,16 @@ export async function executeCombatAction(
         const targetMod = abilityModifier(targetStats[effect.saveAbility] ?? 10);
         const saveResult = resolveSavingThrow(targetMod, payload.spellSaveDC);
         saved = saveResult.success;
-        saveRoll = saveResult.total;
+        saveRoll = saveResult.roll;
         naturalRoll = saveRoll;
         
         if (effect.dice) {
           const diceTotal = roll(effect.dice).total;
-          damage = saved ? Math.floor(diceTotal / 2) : diceTotal;
+          damage = saved
+            ? effect.saveDamage === "none"
+              ? 0
+              : Math.floor(diceTotal / 2)
+            : diceTotal;
         }
       } else if (effect.dice && effect.type !== "healing") {
         damage = roll(effect.dice).total;

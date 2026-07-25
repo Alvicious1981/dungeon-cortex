@@ -1,8 +1,12 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
 import React from 'react';
+import {
+  DUNGEON_ACTION_REQUEST,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -36,7 +40,6 @@ describe("InitiativeTracker Smoke Test", () => {
       <InitiativeTracker
         entries={mockEntries}
         activeId="c1"
-        campaignId="camp-123"
       />
     );
 
@@ -52,11 +55,23 @@ describe("InitiativeTracker Smoke Test", () => {
     expect(screen.getByRole("button", { name: "Next Turn" })).toBeInTheDocument();
   });
 
+  it("requests canonical End Turn through the shared action transport", () => {
+    const requestListener = vi.fn();
+    window.addEventListener(DUNGEON_ACTION_REQUEST, requestListener);
+    render(<InitiativeTracker entries={mockEntries} activeId="c1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next Turn" }));
+
+    expect(requestListener).toHaveBeenCalledTimes(1);
+    const event = requestListener.mock.calls[0]?.[0] as CustomEvent<DungeonActionRequestDetail>;
+    expect(event.detail.request).toEqual({ action: "End Turn" });
+    window.removeEventListener(DUNGEON_ACTION_REQUEST, requestListener);
+  });
+
   it("renders empty state correctly", () => {
     render(
       <InitiativeTracker
         entries={[]}
-        campaignId="camp-123"
       />
     );
 
