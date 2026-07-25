@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { WildernessMapVTT } from "../../components/exploration/map/WildernessMapVTT";
 import React from "react";
 
@@ -67,5 +67,14 @@ describe("WildernessMapVTT Component", () => {
     
     const partyMarker = document.querySelector(".party-marker");
     expect(partyMarker).toBeDefined();
+  });
+  it("provides keyboard instructions and pans with arrow keys", () => {
+    render(<WildernessMapVTT hexes={mockHexes} currentQ={0} currentR={0} />);
+    const region = screen.getByRole("region", { name: /Wilderness map/i });
+    expect(screen.getByText(/Use arrow keys to pan/i)).toBeInTheDocument();
+    const viewport = document.querySelector(".vtt-viewport");
+    const before = viewport?.getAttribute("transform");
+    fireEvent.keyDown(region, { key: "ArrowRight" });
+    expect(viewport?.getAttribute("transform")).not.toBe(before);
   });
 });

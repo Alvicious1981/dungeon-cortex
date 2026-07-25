@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { User, X } from "lucide-react";
 import CharacterSheetVTT, { type CharacterSheetProps } from "./CharacterSheetVTT";
 import { type ItemType } from "@/lib/rules/inventory";
+import { useModalFocus } from "@/lib/hooks/useModalFocus";
 
 interface CharacterSheetControllerProps {
   character: {
@@ -45,8 +46,12 @@ function formatModifier(mod: number): string {
 
 export default function CharacterSheetController({ character, inventory }: CharacterSheetControllerProps) {
   const [isOpen, setIsOpen] = useState(false);
-
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeSheet = useCallback(() => setIsOpen(false), []);
   const toggleSheet = useCallback(() => setIsOpen(prev => !prev), []);
+  useModalFocus({ open: isOpen, onClose: closeSheet, dialogRef, initialFocusRef: closeRef, returnFocusRef: triggerRef });
 
   // ─── Data Mapping ───────────────────────────────────────────────────────────
   
@@ -140,8 +145,10 @@ export default function CharacterSheetController({ character, inventory }: Chara
     <>
       {/* Floating Toggle Button */}
       <button
+        ref={triggerRef}
+        type="button"
         onClick={toggleSheet}
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-110 active:scale-95"
+        className="fixed bottom-20 right-4 z-40 lg:bottom-6 lg:right-6 flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-110 active:scale-95"
         style={{
           background: "linear-gradient(135deg, #B38B2D 0%, #8A6510 100%)",
           border: "2px solid rgba(232,200,74,0.4)",
@@ -158,7 +165,12 @@ export default function CharacterSheetController({ character, inventory }: Chara
 
       {/* Overlay Sheet */}
       {isOpen && (
-        <div 
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="character-sheet-dialog-title"
+          tabIndex={-1}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
           style={{ background: "rgba(5,5,10,0.85)", backdropFilter: "blur(8px)" }}
         >
@@ -169,11 +181,14 @@ export default function CharacterSheetController({ character, inventory }: Chara
               border: "1px solid rgba(179,139,45,0.3)",
             }}
           >
+            <h2 id="character-sheet-dialog-title" className="sr-only">Character sheet for {character.name}</h2>
             {/* Close button inside modal */}
             <button
-              onClick={() => setIsOpen(false)}
+              ref={closeRef}
+              type="button"
+              onClick={closeSheet}
               className="absolute top-4 right-4 z-[60] p-2 rounded-full hover:bg-neutral-800 transition-colors"
-              aria-label="Close modal"
+              aria-label="Close character sheet"
             >
               <X className="h-6 w-6 text-neutral-400" />
             </button>
