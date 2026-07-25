@@ -1,5 +1,4 @@
 import { tool } from "ai";
-import { prisma } from "@/lib/db/prisma";
 import {
   generateNPC,
   GenerateNPCInputSchema,
@@ -13,16 +12,22 @@ import {
 } from "@/lib/rules/social";
 import {
   establishInitialDisposition as establishInitialDispositionPure,
-  getRumorsPayload,
 } from "@/lib/rules/social-logic";
-import { resolveSocialCheck } from "@/lib/rules/social-service";
+import {
+  resolveRumors,
+  resolveSocialCheck,
+  SocialServiceError,
+} from "@/lib/rules/social-service";
 import {
   GenerateMerchantInputSchema,
   TradeActionSchema,
   buildMerchantPayload,
   type MerchantPayload,
 } from "@/lib/rules/trade";
-import { resolveTradeTransaction } from "@/lib/rules/trade-service";
+import {
+  getCampaignCharacterIdForTrade,
+  resolveTradeTransaction,
+} from "@/lib/rules/trade-service";
 import {
   establishInitialNpcDisposition,
   trackNpcState,
@@ -214,31 +219,19 @@ export function buildSocialTools(
       inputSchema: GetRumorsInputSchema,
       execute: async ({ npcSeed }) => {
         try {
-          const npc = await prisma.nPC.findUnique({
-            where: { campaignId_seed: { campaignId, seed: npcSeed } },
+          const payload = await resolveRumors({
+            campaignId,
+            npcSeed,
           });
-          if (!npc) {
-            return JSON.stringify({ error: "NPC not found. Cannot retrieve rumors." });
-          }
-
-          const campaign = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            select: { currentLocationId: true },
-          });
-          if (!campaign?.currentLocationId) {
-            return JSON.stringify({ error: "No active location — explore a location first." });
-          }
-
-          const nodes = await prisma.locationNode.findMany({
-            where: { locationId: campaign.currentLocationId },
-            select: { id: true, name: true, feature: true, description: true },
-          });
-
-          const payload = getRumorsPayload(npcSeed, npc.name, npc.disposition ?? 0, nodes);
 
           return JSON.stringify(payload);
-        } catch {
-          return JSON.stringify({ error: "Rumor retrieval failed mechanically. The NPC goes quiet." });
+        } catch (error: unknown) {
+          return JSON.stringify({
+            error:
+              error instanceof SocialServiceError
+                ? error.message
+                : "Rumor retrieval failed mechanically. The NPC goes quiet.",
+          });
         }
       },
     }),
@@ -271,18 +264,14 @@ export function buildSocialTools(
       inputSchema: TradeActionSchema,
       execute: async ({ action, itemIndex, inventoryItemId, quantity, npcSeed, archetype }) => {
         try {
-          const campaign = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            select: { characterId: true },
-          });
-          if (!campaign) throw new Error("Campaign not found.");
+          const characterId = await getCampaignCharacterIdForTrade(campaignId);
 
           const merchantPayload = buildMerchantPayload(archetype, npcSeed);
           const result =
             action === "buy"
               ? await resolveTradeTransaction({
                   campaignId,
-                  characterId: campaign.characterId,
+                  characterId,
                   npcId: npcSeed,
                   operation: "buy",
                   itemDescriptor: getMerchantItemDescriptor(merchantPayload, itemIndex),
@@ -291,7 +280,7 @@ export function buildSocialTools(
                 })
               : await resolveTradeTransaction({
                   campaignId,
-                  characterId: campaign.characterId,
+                  characterId,
                   npcId: npcSeed,
                   operation: "sell",
                   itemId: inventoryItemId,

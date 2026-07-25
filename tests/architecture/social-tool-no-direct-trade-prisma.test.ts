@@ -16,13 +16,19 @@ function extractExecuteTradeSource(source: string): string {
 describe("AI tools architecture: executeTrade must not own trade persistence", () => {
   const executeTradeSource = extractExecuteTradeSource(socialToolSource);
 
+  it("does not import prisma into the social AI tool", () => {
+    expect(socialToolSource).not.toMatch(
+      /import\s*{\s*prisma\s*}\s*from\s*["']@\/lib\/db\/prisma["']/
+    );
+  });
+
   it("contains the executeTrade tool under test", () => {
     expect(executeTradeSource).toContain("executeTrade");
   });
 
   it("delegates executeTrade to the authoritative trade service", () => {
     expect(socialToolSource).toMatch(
-      /import\s*{\s*resolveTradeTransaction\s*}\s*from\s*["']@\/lib\/rules\/trade-service["']/
+      /import\s*{[^}]*\bresolveTradeTransaction\b[^}]*}\s*from\s*["']@\/lib\/rules\/trade-service["']/
     );
     expect(executeTradeSource).toMatch(/\bresolveTradeTransaction\s*\(/);
   });
