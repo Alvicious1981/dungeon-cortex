@@ -133,7 +133,11 @@ export default function BattleGrid({ campaignId, combatants, activeCombatantId }
       const maxStart = GRID_SIZE - sizeToSquares(combatant.size);
       const destination = { x: clamp(current.x + delta.x, 0, maxStart), y: clamp(current.y + delta.y, 0, maxStart) };
       setPositions((previous) => ({ ...previous, [combatant.id]: destination }));
-      setKeyboardMove({ id: combatant.id, origin, destination });
+      if (destination.x === origin.x && destination.y === origin.y) {
+        setKeyboardMove(null);
+      } else {
+        setKeyboardMove({ id: combatant.id, origin, destination });
+      }
       setError(null);
     } else if (event.key === "Enter" && keyboardMove?.id === combatant.id) {
       event.preventDefault();
