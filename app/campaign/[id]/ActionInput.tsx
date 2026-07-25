@@ -294,6 +294,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
 
       {/* ── Input form ────────────────────────────────────────────────────── */}
       <form onSubmit={handleSubmit} className="space-y-3">
+        <p className="dc-kicker">Declare your intent</p>
         {aliveHostileTargets.length > 0 && (
           <fieldset className="rounded-md border border-neutral-700/80 bg-neutral-900/60 px-3 py-2">
             <legend
@@ -344,12 +345,12 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             disabled={submitting}
             maxLength={500}
             placeholder="What do you do?"
-            className="flex-1 min-h-[44px] rounded-md bg-neutral-800 border border-neutral-700 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+            className="dc-field min-h-12 flex-1 rounded-sm px-3 py-2 text-sm placeholder:text-[#675c4a] disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={submitting || !action.trim()}
-            className="rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors cursor-pointer"
+            className="dc-button-primary min-w-20 rounded-sm px-4 py-3 text-sm uppercase tracking-wider"
           >
             {submitting ? "…" : "Act"}
           </button>

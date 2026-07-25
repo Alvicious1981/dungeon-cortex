@@ -224,7 +224,7 @@ export default function MacroDeck({ campaignId, inCombat }: Props) {
               onClick={() => void handleAction(actionText)}
               aria-label={actionText}
               aria-busy={isThisLoading}
-              className="group relative flex min-h-[44px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-3 text-center motion-safe:transition-all motion-safe:duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group relative flex min-h-[44px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-sm px-2 py-3 text-center motion-safe:transition-all motion-safe:duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
               style={{
                 background: isThisLoading
                   ? "rgba(20,16,30,0.95)"
