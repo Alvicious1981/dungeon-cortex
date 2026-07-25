@@ -15,8 +15,6 @@
  *   - The caller is responsible for acting on the returned type.
  */
 
-import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { getSpellInfo, type SpellEffect } from "@/lib/ai/tools/srd-lookup";
 
@@ -97,6 +95,9 @@ export async function parseIntent(
   playerInput: string,
   systemContext: string
 ): Promise<Intent> {
+  void playerInput;
+  void systemContext;
+
   // ─── MOCK TEMPORAL PARA TESTING LOCAL ───────────────────────────────────────
   // Para evitar bloqueos por falta de OPENAI_API_KEY.
   // Clasifica todas las acciones como "general" por defecto.

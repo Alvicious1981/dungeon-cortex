@@ -263,7 +263,7 @@ export async function addItem(
   }
 
   let type: ItemType = "misc";
-  let properties: any = {};
+  let properties: Record<string, unknown> = {};
 
   if (info.weaponCategory) {
     type = "weapon";

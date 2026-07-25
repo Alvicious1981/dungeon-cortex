@@ -231,7 +231,7 @@ async function findItem(
   return null;
 }
 
-async function useConsumableItemInTransaction(
+async function consumeItemInTransaction(
   db: ConsumableDb,
   input: UseConsumableItemInput
 ): Promise<UseConsumableItemResult> {
@@ -332,8 +332,8 @@ export async function useConsumableItem(
   const db = resolveDb(input);
 
   if (input.tx || !db.$transaction) {
-    return useConsumableItemInTransaction(db, input);
+    return consumeItemInTransaction(db, input);
   }
 
-  return db.$transaction((tx) => useConsumableItemInTransaction(tx, input));
+  return db.$transaction((tx) => consumeItemInTransaction(tx, input));
 }

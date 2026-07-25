@@ -241,7 +241,7 @@ export default function DialogueOverlay({
                   <div>
                     <h3 className="text-[10px] font-bold text-amber-700 uppercase tracking-[0.2em] mb-2">Motivation</h3>
                     <p className="text-sm italic text-amber-200/70 border-l-2 border-amber-900/30 pl-3">
-                      "{npc.personalityTags.motivation}"
+                      &quot;{npc.personalityTags.motivation}&quot;
                     </p>
                   </div>
                   <div>

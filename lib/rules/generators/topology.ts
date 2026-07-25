@@ -13,7 +13,7 @@ export function generateDungeonGrid(seed: string, width: number, height: number,
 
   // 1. Initial random fill based on deterministic seed
   for (let y = 0; y < height; y++) {
-    let row: CellType[] = [];
+    const row: CellType[] = [];
     for (let x = 0; x < width; x++) {
       if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
         row.push('wall'); // Boundaries are always walls
@@ -27,9 +27,9 @@ export function generateDungeonGrid(seed: string, width: number, height: number,
 
   // 2. Cellular Automata smoothing rules
   for (let i = 0; i < iterations; i++) {
-    let newGrid: Grid = [];
+    const newGrid: Grid = [];
     for (let y = 0; y < height; y++) {
-      let newRow: CellType[] = [];
+      const newRow: CellType[] = [];
       for (let x = 0; x < width; x++) {
         if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
           newRow.push('wall');

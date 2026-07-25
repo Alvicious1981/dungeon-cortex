@@ -13,14 +13,6 @@ export type LootRarity =
   | "very_rare"  // Powerful magical items
   | "legendary"; // Campaign-defining artifacts (tension ≥ 0.95 only)
 
-const RARITY_ORDER: LootRarity[] = [
-  "mundane",
-  "uncommon",
-  "rare",
-  "very_rare",
-  "legendary",
-];
-
 // ---------------------------------------------------------------------------
 // Input schema — for the `generateLoot` AI tool
 // ---------------------------------------------------------------------------

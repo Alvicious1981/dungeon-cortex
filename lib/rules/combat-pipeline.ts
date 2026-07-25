@@ -16,13 +16,14 @@ import {
   deriveNarrativeTags,
   applyCondition,
   resolveSavingThrow,
+  DAMAGE_TYPES,
   type CombatConsequences,
   type DamageType,
   type EncounterSnapshot,
   type CombatFacts,
   type HitLocation,
 } from "@/lib/rules/combat";
-import { consumeSlot } from "@/lib/rules/magic";
+import { consumeSlot, type SpellSlots } from "@/lib/rules/magic";
 
 export interface PipelineCombatant {
   id: string;
@@ -47,6 +48,22 @@ export interface PipelineEncounterState {
 
 export type CombatActionType = "attack" | "cast_spell" | "use_item";
 
+interface PipelineSpellEffect {
+  type: "damage" | "healing" | "utility";
+  dice?: string | null;
+  damageType?: string | null;
+  hasSavingThrow?: boolean;
+  saveAbility?: string | null;
+  condition?: string | null;
+  concentration?: boolean;
+}
+
+function normalizeDamageType(value: string | null | undefined): DamageType {
+  return DAMAGE_TYPES.includes(value as DamageType)
+    ? (value as DamageType)
+    : "force";
+}
+
 export interface CombatActionPayload {
   actionType: CombatActionType;
   encounter: PipelineEncounterState;
@@ -65,7 +82,7 @@ export interface CombatActionPayload {
   // Spell data
   spellName?: string;
   spellLevel?: number;
-  spellEffect?: any;
+  spellEffect?: PipelineSpellEffect;
   spellSaveDC?: number;
   rawSpellSlots?: unknown;
 
@@ -152,7 +169,10 @@ export async function executeCombatAction(
 
   // RESOURCE DRAIN
   if (actionType === "cast_spell" && payload.spellLevel !== undefined && payload.rawSpellSlots) {
-    const updatedSlots = consumeSlot(payload.rawSpellSlots as any, payload.spellLevel);
+    const updatedSlots = consumeSlot(
+      payload.rawSpellSlots as SpellSlots,
+      payload.spellLevel
+    );
     if (playerCharacterId) {
       await tx.character.update({
         where: { id: playerCharacterId },
@@ -315,7 +335,7 @@ export async function executeCombatAction(
           defender: target.name,
           weapon: payload.spellName || "Spell",
           damage,
-          damage_type: effect.damageType || "force",
+          damage_type: normalizeDamageType(effect.damageType),
           hp_before: target.hp,
           hp_after: Math.max(0, target.hp - damage),
           maxHp: target.maxHp,

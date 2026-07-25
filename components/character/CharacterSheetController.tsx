@@ -15,8 +15,8 @@ interface CharacterSheetControllerProps {
     hp: number;
     maxHp: number;
     xp: number;
-    stats: any; // Json
-    spellSlots?: any; // Json
+    stats: unknown; // Json
+    spellSlots?: unknown; // Json
   };
   inventory: Array<{
     id: string;
@@ -25,8 +25,14 @@ interface CharacterSheetControllerProps {
     quantity: number;
     equipped?: boolean;
     equippedSlot?: string | null;
-    properties: any; // Json
+    properties: unknown; // Json
   }>;
+}
+
+interface CharacterWeaponProperties {
+  damageDice?: string;
+  damageType?: string;
+  properties?: string[];
 }
 
 function getModifier(score: number): number {
@@ -107,7 +113,7 @@ export default function CharacterSheetController({ character, inventory }: Chara
       { label: "Persuasion", value: formatModifier(getModifier(stats.CHA)) },
     ],
     attacks: inventory.filter(i => i.type === "weapon").map(w => {
-      const props = w.properties as any;
+      const props = w.properties as CharacterWeaponProperties;
       const isFinesse = (props.properties as string[])?.includes("finesse");
       const attackMod = isFinesse ? Math.max(getModifier(stats.STR), getModifier(stats.DEX)) : getModifier(stats.STR);
       

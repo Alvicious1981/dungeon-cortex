@@ -60,7 +60,7 @@ export default function ExplorationPanel({
   const adjacentNodes: Array<{ node: ContextExplorationNode; passageType: string }> = [];
   for (const edge of edges) {
     let neighborIndex: number | null = null;
-    let passageType = edge.passageType;
+    const passageType = edge.passageType;
 
     if (edge.fromIndex === currentNodeIndex) {
       neighborIndex = edge.toIndex;

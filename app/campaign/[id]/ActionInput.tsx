@@ -19,7 +19,7 @@
  * failures fall through to a generic message.
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
 
@@ -49,7 +49,6 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
    *  string = partial or complete optimistic narrative text           */
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [lastRemoteAction, setLastRemoteAction] = useState<string | null>(null);
   const aliveHostileTargets = useMemo(
     () => selectableTargets.filter((target) => !target.isPlayer && target.hp > 0),
     [selectableTargets]
@@ -71,20 +70,6 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
     });
   }, [aliveHostileTargets]);
 
-  // Allow external triggers (e.g. from DialogueOverlay)
-  useEffect(() => {
-    function handleRemote(e: Event) {
-      const customEvent = e as CustomEvent<ActionPayload>;
-      const { action: remoteText, targetIds } = customEvent.detail;
-      if (remoteText && !submitting) {
-        setLastRemoteAction(remoteText);
-        executeAction({ action: remoteText, targetIds });
-      }
-    }
-    window.addEventListener("dungeon-remote-action", handleRemote);
-    return () => window.removeEventListener("dungeon-remote-action", handleRemote);
-  }, [submitting]);
-
   function toggleTarget(targetId: string) {
     setSelectedTargetIds((current) =>
       current.includes(targetId)
@@ -93,7 +78,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
     );
   }
 
-  async function executeAction(payload: ActionPayload) {
+  const executeAction = useCallback(async (payload: ActionPayload) => {
     const pendingAction = payload.action.trim();
     const targetIds = payload.targetIds ?? [];
 
@@ -205,7 +190,20 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
       setSubmitting(false);
       window.dispatchEvent(new CustomEvent("dungeon-action-end"));
     }
-  }
+  }, [campaignId, router]);
+
+  // Allow external triggers (e.g. from DialogueOverlay)
+  useEffect(() => {
+    function handleRemote(e: Event) {
+      const customEvent = e as CustomEvent<ActionPayload>;
+      const { action: remoteText, targetIds } = customEvent.detail;
+      if (remoteText && !submitting) {
+        executeAction({ action: remoteText, targetIds });
+      }
+    }
+    window.addEventListener("dungeon-remote-action", handleRemote);
+    return () => window.removeEventListener("dungeon-remote-action", handleRemote);
+  }, [executeAction, submitting]);
 
   return (
     <div className="space-y-3">

@@ -28,6 +28,7 @@ export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
   // Viewport state
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,8 +39,8 @@ export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
       const { x, y } = cubeToPixel(currentQ, currentR, 50);
       const rect = containerRef.current.getBoundingClientRect();
       setOffset({
-        x: rect.width / 2 - x * zoom,
-        y: rect.height / 2 - y * zoom,
+        x: rect.width / 2 - x * zoomRef.current,
+        y: rect.height / 2 - y * zoomRef.current,
       });
     }
   }, [currentQ, currentR]);
@@ -62,7 +63,11 @@ export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
 
   const handleWheel = (e: React.WheelEvent) => {
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom((prev) => Math.min(Math.max(prev * delta, 0.2), 3));
+    setZoom((prev) => {
+      const nextZoom = Math.min(Math.max(prev * delta, 0.2), 3);
+      zoomRef.current = nextZoom;
+      return nextZoom;
+    });
   };
 
   const { x: partyX, y: partyY } = cubeToPixel(currentQ, currentR, 50);
@@ -114,7 +119,10 @@ export const WildernessMapVTT: React.FC<WildernessMapVTTProps> = ({
       {/* Mini Controls overlay */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-2">
         <button 
-          onClick={() => setZoom(1)}
+          onClick={() => {
+            zoomRef.current = 1;
+            setZoom(1);
+          }}
           className="p-2 bg-black/50 backdrop-blur-md rounded-lg border border-white/20 text-white hover:bg-white/10 transition-colors"
           title="Reset Zoom"
         >

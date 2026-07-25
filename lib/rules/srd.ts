@@ -17,6 +17,7 @@
 import { z } from "zod";
 import rawSpells from "@/data/srd-es/spells.json";
 import rawEquipment from "@/data/srd-es/equipment.json";
+import rawMonsters from "@/data/srd-es/monsters.json";
 
 // ─── Shared sub-schemas ───────────────────────────────────────────────────────
 
@@ -172,17 +173,6 @@ const armors: Armor[] = (rawEquipment as unknown[]).flatMap((entry) => {
   const r = ArmorSchema.safeParse(entry);
   return r.success ? [r.data] : [];
 });
-
-// monsters.json is fetched at runtime because it may not exist at build time
-// (it requires a manual data-acquisition step). Once committed, this can be
-// converted to a static import matching rawSpells / rawEquipment above.
-let rawMonsters: unknown[] = [];
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  rawMonsters = require("@/data/srd-es/monsters.json") as unknown[];
-} catch {
-  // monsters.json not yet present — getMonster() returns null for all queries
-}
 
 const monsters: Monster[] = rawMonsters.flatMap((entry) => {
   const r = MonsterSchema.safeParse(entry);

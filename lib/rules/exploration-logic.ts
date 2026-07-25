@@ -233,7 +233,9 @@ export function generateLocationPayload(
   const template = LOCATION_TEMPLATES[input.locationType];
   const name = generateLocationName(input.locationType, input.seed);
   const description = pickSeeded(`${input.seed}:desc`, template.descriptionPool);
-  let { nodes, edges } = generateNodeGraph(input.locationType, input.seed);
+  const generatedGraph = generateNodeGraph(input.locationType, input.seed);
+  let { nodes } = generatedGraph;
+  const { edges } = generatedGraph;
 
   if (options?.dungeonMap) {
     const { rooms, width, height } = options.dungeonMap;

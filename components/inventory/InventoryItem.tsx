@@ -10,7 +10,7 @@ export interface InventoryItemProps {
   append: (message: { role: "user" | "assistant"; content: string }) => void;
 }
 
-export function InventoryItem({ id, name, imageUrl, append }: InventoryItemProps) {
+export function InventoryItem({ name, imageUrl, append }: InventoryItemProps) {
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 

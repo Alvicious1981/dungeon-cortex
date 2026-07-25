@@ -7,9 +7,6 @@ import {
   Home, 
   Castle, 
   Sun, 
-  Trees, 
-  Mountain, 
-  Waves, 
   Skull 
 } from "lucide-react";
 
