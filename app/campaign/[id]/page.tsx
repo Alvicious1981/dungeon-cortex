@@ -26,10 +26,9 @@ import { WildernessMapController } from "@/components/exploration/map/Wilderness
 import WildernessHUD from "@/components/exploration/WildernessHUD";
 import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
-import CharacterSheetSidebar from "@/components/character/sheet/CharacterSheetSidebar";
-import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
+import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -348,7 +347,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   return (
     <div
-      className={`${cinzel.variable} ${crimsonPro.variable} min-h-screen`}
+      className={`${cinzel.variable} ${crimsonPro.variable} dc-atmosphere min-h-screen pb-20 lg:pb-0`}
       style={{ background: "#070710", color: "#E2D9C5" }}
     >
       {/* Ascension Overlay — self-wiring, listens for dungeon-level-up events */}
@@ -360,34 +359,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       
       {/* Detailed Character Sheet — Floating toggle (mobile / expanded view) */}
       <CharacterSheetController character={character} inventory={character.inventory} />
-
-      {/* Persistent left sidebar — visible on lg+, hidden on mobile (CharacterSheetController takes over there) */}
-      <CharacterSheetSidebar
-        viewModel={buildSheetViewModel({
-          character: {
-            id: character.id,
-            name: character.name,
-            race: character.race,
-            class: character.class,
-            level: character.level,
-            hp: character.hp,
-            maxHp: character.maxHp,
-            xp: character.xp,
-            stats: character.stats,
-            spellSlots: character.spellSlots,
-            concentrationSpellId: character.concentrationSpellId,
-          },
-          inventory: character.inventory.map((i) => ({
-            id: i.id,
-            name: i.name,
-            type: i.type,
-            quantity: i.quantity,
-            equippedSlot: i.equippedSlot ?? null,
-            properties: i.properties,
-          })),
-        })}
-        className="fixed left-0 top-0 z-20 hidden lg:flex"
-      />
 
       {/* Wilderness HUD — Only visible in Wilderness Mode */}
       {isWildernessMode && travelState && (
@@ -420,7 +391,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       />
 
       <main
-        className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:ml-80 lg:mr-0 lg:max-w-none xl:ml-96 xl:max-w-6xl xl:mx-auto"
+        className="relative z-10 mx-auto max-w-[100rem] px-3 py-5 sm:px-5 sm:py-7 xl:px-8"
         id="main-content"
       >
         {activeEncounter && (
@@ -480,13 +451,14 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         {/* ════════════════
             MAIN GRID
         ════════════════ */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[296px_1fr_256px]">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)_300px] xl:gap-6">
 
           {/* ════════════════════════════════════
               LEFT COLUMN — Character Status Panel
           ════════════════════════════════════ */}
           <aside
-            className="space-y-4"
+            id="character"
+            className="order-3 scroll-mt-20 space-y-4 lg:order-1"
             aria-label="Character status"
           >
 
@@ -802,8 +774,22 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           {/* ════════════════════════════════════
               CENTRE — Chronicle + Action
           ════════════════════════════════════ */}
-          <div className="min-w-0 space-y-5">
+          <div className="order-1 min-w-0 space-y-5 lg:order-2">
 
+            <section id="scene" aria-labelledby="scene-heading" className="scroll-mt-20 overflow-hidden rounded-sm border border-[#4a3b24] bg-[#090811] shadow-2xl">
+              <header className="flex items-center justify-between border-b border-[#3b3150] bg-[#15121e]/95 px-4 py-3">
+                <div>
+                  <p className="dc-kicker">Tactical viewport</p>
+                  <h2 id="scene-heading" className="dc-heading mt-1 text-lg font-bold text-[#eadcab]">The Living Scene</h2>
+                </div>
+                <span className="rounded-full border border-[#4f4264] px-2 py-1 text-[10px] uppercase tracking-wider text-[#a78bfa]">Backend verified</span>
+              </header>
+              <div className="relative min-h-56 bg-[linear-gradient(rgba(7,7,16,.42),rgba(7,7,16,.72)),url('/assets/atmosphere/tactical-table-idle.webp')] bg-cover bg-center p-3 sm:p-4">
+                {!explorationData && !isWildernessMode && !activeEncounter && (
+                  <div className="flex min-h-56 items-center justify-center text-center">
+                    <p className="dc-copy max-w-sm rounded-sm bg-[#070710]/80 px-5 py-4 text-sm italic">The scene is carried by the chronicle until a tactical location is revealed.</p>
+                  </div>
+                )}
             {/* ── Exploration map — visible when campaign has an active location ── */}
             {explorationData && (
               <ExplorationPanel
@@ -864,7 +850,10 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               />
             )}
 
-            <section aria-label="Adventure chronicle" id="chronicle">
+              </div>
+            </section>
+
+            <section aria-label="Adventure chronicle" id="chronicle" className="dc-panel scroll-mt-20 rounded-sm p-4 sm:p-5">
               <p
                 className="mb-3 text-[10px] uppercase tracking-[0.3em]"
                 style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
@@ -943,26 +932,28 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               )}
             </section>
 
-            <MacroDeck campaignId={campaign.id} inCombat={!!activeEncounter} />
-            <ActionInput
-              campaignId={campaign.id}
-              selectableTargets={
-                activeEncounter?.combatants.map((c) => ({
-                  id: c.id,
-                  name: c.name,
-                  hp: c.hp,
-                  maxHp: c.maxHp,
-                  isPlayer: c.isPlayer,
-                })) ?? []
-              }
-            />
+            <section id="commands" aria-label="Command deck" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-sm border border-[#4a3b24] bg-[#090811]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
+              <MacroDeck campaignId={campaign.id} inCombat={!!activeEncounter} />
+              <ActionInput
+                campaignId={campaign.id}
+                selectableTargets={
+                  activeEncounter?.combatants.map((c) => ({
+                    id: c.id,
+                    name: c.name,
+                    hp: c.hp,
+                    maxHp: c.maxHp,
+                    isPlayer: c.isPlayer,
+                  })) ?? []
+                }
+              />
+            </section>
 
           </div>
 
           {/* ════════════════════════════════════
               RIGHT COLUMN — Combat + Memory
           ════════════════════════════════════ */}
-          <aside aria-label="Combat tracker, quest log and memory journal" className="space-y-4">
+          <aside id="journal" aria-label="Combat tracker, quest log and memory journal" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}
@@ -1001,6 +992,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             Return to Hall of Records
           </Link>
         </nav>
+
+        <CampaignMobileNav />
 
         {/* GameEventHandler renders the mute toggle + wires Web Audio + visual FX */}
         <GameEventHandler inCombat={!!activeEncounter} />
