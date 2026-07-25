@@ -82,4 +82,15 @@ describe("BattleGrid", () => {
       })
     ));
   });
+
+  it("clears the keyboard preview when the token returns to its origin", () => {
+    render(<BattleGrid campaignId="camp-123" combatants={combatants} activeCombatantId="pc-1" />);
+
+    fireEvent.keyDown(screen.getByLabelText("Aldric token at 1,2"), { key: "ArrowRight" });
+    expect(screen.getByRole("status")).toHaveTextContent("Enter to confirm");
+
+    fireEvent.keyDown(screen.getByLabelText("Aldric token at 2,2"), { key: "ArrowLeft" });
+    expect(screen.getByLabelText("Aldric token at 1,2")).toBeInTheDocument();
+    expect(screen.queryByText(/Preview/)).not.toBeInTheDocument();
+  });
 });
