@@ -99,11 +99,11 @@ The AI must not:
 
 ## 8. Existing contradiction cleanup
 
-### Legacy downtime containment
+### Legacy downtime removal
 
-The legacy downtime tool in `lib/ai/tools/downtime.ts` is intentionally disconnected from the AI narrator. It remains quarantined only to keep this containment change small and must not be registered, imported, or invoked by `lib/ai/narrator.ts`.
+The incompatible legacy downtime AI tool and its rules module have been removed. They must not be recreated, registered, imported, or invoked by `lib/ai/narrator.ts` or any other production path.
 
-This is not a compatible downtime implementation. Replacing it remains pending and must use D&D 5e/SRD 2014 mechanics, deterministic backend resolution, and persistence outside the AI layer before any resolved facts are offered for narration.
+Any future downtime implementation must use D&D 5e/SRD 2014 mechanics, deterministic backend resolution, and persistence outside the AI layer before any resolved facts are offered for narration.
 
 The following areas must be reviewed and either rewritten or marked obsolete:
 
