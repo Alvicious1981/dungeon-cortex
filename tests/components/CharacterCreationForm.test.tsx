@@ -50,4 +50,23 @@ describe("CharacterCreationForm", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/character")).toHaveLength(1);
   });
+
+  it("keeps the saved hero and offers a campaign retry after a network failure", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "hero-1" }), { status: 201 }))
+      .mockRejectedValueOnce(new TypeError("Network unavailable"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "campaign-3" }), { status: 201 }));
+
+    render(<CharacterCreationForm races={races} classes={classes} />);
+    fireEvent.change(screen.getByLabelText("Character Name"), { target: { value: "Mira" } });
+    fireEvent.click(screen.getByRole("button", { name: "Begin Adventure" }));
+
+    const retry = await screen.findByRole("button", { name: "Retry opening chronicle" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Your hero is safe");
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/campaign/campaign-3"));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/character")).toHaveLength(1);
+  });
 });
