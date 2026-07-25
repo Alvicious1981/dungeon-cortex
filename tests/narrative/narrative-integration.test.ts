@@ -36,24 +36,11 @@ describe('Narrative Integration Tests (Fase 8B.1)', () => {
           isFumble: !!t.isFumble,
           hitLocation: 'chest',
           narrativeTags: t.damage > 0 ? ['slashing', 'hit'] : ['miss'],
-          hp_before: t.hpBefore ?? (t.hpAfter + t.damage),
-          hpBefore: t.hpBefore ?? (t.hpAfter + t.damage),
           hpAfter: t.hpAfter,
           targetMaxHp: 30,
           isKill: !!t.isKill,
           conditionsApplied: t.conditionsApplied ?? []
-        })),
-        // Flat legacy fields for backward compatibility
-        targetId: targets[0]?.targetId ?? '',
-        targetName: targets[0]?.targetName ?? '',
-        damage: targets[0]?.damage ?? 0,
-        hpAfter: targets[0]?.hpAfter ?? 0,
-        targetMaxHp: 30,
-        isCrit: !!targets[0]?.isCrit,
-        isFumble: !!targets[0]?.isFumble,
-        naturalRoll: targets[0]?.isCrit ? 20 : (targets[0]?.isFumble ? 1 : 10),
-        isKill: !!targets[0]?.isKill,
-        narrativeTags: targets[0]?.damage > 0 ? ['slashing', 'hit'] : ['miss']
+        }))
       }
     };
   };

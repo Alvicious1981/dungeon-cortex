@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import DialogueOverlay from "./DialogueOverlay";
 import type { DialogueOpenPayload } from "@/lib/events/game-events";
+import { requestDungeonAction } from "@/lib/events/action-transport";
 
 /**
  * DialogueOverlayController.tsx — Milestone N: Slice 3
@@ -84,7 +85,7 @@ export default function DialogueOverlayController({ characterId }: Props) {
   if (!isOpen || !npc) return null;
 
   const dispatchAction = (text: string) => {
-    window.dispatchEvent(new CustomEvent("dungeon-remote-action", { detail: { action: text } }));
+    requestDungeonAction({ action: text });
   };
 
   const handleSocialIntent = (approach: "persuade" | "intimidate" | "deceive") => {

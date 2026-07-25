@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import {
+  DUNGEON_ACTION_END,
+  DUNGEON_ACTION_ERROR,
+  createDungeonActionRequestId,
+  requestDungeonAction,
+  type DungeonActionErrorDetail,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Props {
-  campaignId: string;
   inCombat: boolean;
 }
 
@@ -14,10 +20,13 @@ interface Props {
 
 const COMBAT_ACTIONS = [
   "Atacar con arma",
-  "Lanzar conjuro",
-  "Usar poción",
-  "Esquivar",
+  "Finalizar turno",
 ] as const;
+
+const COMBAT_ACTION_REQUESTS: Record<string, string> = {
+  "Atacar con arma": "Attack",
+  "Finalizar turno": "End Turn",
+};
 
 const EXPLORATION_ACTIONS = [
   "Buscar trampas",
@@ -65,40 +74,13 @@ const ACTION_META: Record<string, ActionMeta> = {
       </SvgIcon>
     ),
   },
-  "Lanzar conjuro": {
-    accent: "#C4B5FD",
-    icon: (
-      <SvgIcon>
-        {/* 4-pointed sparkle */}
-        <line x1="8" y1="2" x2="8" y2="5" />
-        <line x1="8" y1="11" x2="8" y2="14" />
-        <line x1="2" y1="8" x2="5" y2="8" />
-        <line x1="11" y1="8" x2="14" y2="8" />
-        <line x1="4.1" y1="4.1" x2="6.2" y2="6.2" />
-        <line x1="9.8" y1="9.8" x2="11.9" y2="11.9" />
-        <line x1="11.9" y1="4.1" x2="9.8" y2="6.2" />
-        <line x1="6.2" y1="9.8" x2="4.1" y2="11.9" />
-      </SvgIcon>
-    ),
-  },
-  "Usar poción": {
-    accent: "#86EFAC",
-    icon: (
-      <SvgIcon>
-        {/* Flask */}
-        <path d="M6 2h4" />
-        <path d="M7 2v3.5L3.5 11A2 2 0 005.3 14h5.4a2 2 0 001.8-3L9 5.5V2" />
-        <line x1="5" y1="10" x2="8" y2="12" />
-      </SvgIcon>
-    ),
-  },
-  "Esquivar": {
+  "Finalizar turno": {
     accent: "#93C5FD",
     icon: (
       <SvgIcon>
-        {/* Shield */}
-        <path d="M8 2L3 4.5V9a5 5 0 005 5 5 5 0 005-5V4.5L8 2z" />
-        <polyline points="5.5,8 7,9.5 10.5,6" />
+        {/* Flag */}
+        <line x1="4" y1="2" x2="4" y2="14" />
+        <path d="M4 3h7l-1.5 2L11 7H4" />
       </SvgIcon>
     ),
   },
@@ -146,37 +128,48 @@ const ACTION_META: Record<string, ActionMeta> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function MacroDeck({ campaignId, inCombat }: Props) {
-  const router = useRouter();
+export default function MacroDeck({ inCombat }: Props) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const pendingRequestId = useRef<string | null>(null);
 
   const actions = inCombat ? COMBAT_ACTIONS : EXPLORATION_ACTIONS;
   const isAnyLoading = loadingAction !== null;
 
-  async function handleAction(actionText: string) {
+  useEffect(() => {
+    function handleActionError(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionErrorDetail>).detail;
+      if (detail.requestId === pendingRequestId.current) {
+        setError(detail.error);
+      }
+    }
+
+    function handleActionEnd(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionRequestDetail>).detail;
+      if (detail.requestId === pendingRequestId.current) {
+        pendingRequestId.current = null;
+        setLoadingAction(null);
+      }
+    }
+
+    window.addEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+    window.addEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    return () => {
+      window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+      window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    };
+  }, []);
+
+  function handleAction(actionText: string) {
     if (isAnyLoading) return;
+    const requestId = createDungeonActionRequestId();
+    pendingRequestId.current = requestId;
     setError(null);
     setLoadingAction(actionText);
-    try {
-      const res = await fetch(`/api/campaign/${campaignId}/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: actionText }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string };
-        setError(data.error ?? `Error ${res.status}`);
-        return;
-      }
-
-      router.refresh();
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setLoadingAction(null);
-    }
+    requestDungeonAction(
+      { action: COMBAT_ACTION_REQUESTS[actionText] ?? actionText },
+      requestId
+    );
   }
 
   const sectionLabel = inCombat ? "Combat actions" : "Exploration actions";

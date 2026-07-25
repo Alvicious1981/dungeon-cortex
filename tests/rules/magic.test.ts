@@ -9,10 +9,19 @@ import {
   spellSlotsForLevel,
   breakConcentration,
   beginConcentration,
+  calculateSpellSaveDC,
   SpellSlots,
 } from "@/lib/rules/magic";
 
 describe("magic rules", () => {
+  describe("calculateSpellSaveDC", () => {
+    it("uses the 5e formula 8 + ability modifier + proficiency bonus", () => {
+      expect(calculateSpellSaveDC(3, 2)).toBe(13);
+      expect(calculateSpellSaveDC(5, 6)).toBe(19);
+      expect(calculateSpellSaveDC(-1, 2)).toBe(9);
+    });
+  });
+
   describe("isSpellSlots", () => {
     it("returns true for valid SpellSlots object", () => {
       const valid: SpellSlots = {

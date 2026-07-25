@@ -12,9 +12,11 @@ import {
   spellcastingAbility,
   calculateProficiency, calculateSpellSaveDC 
 } from "@/lib/rules/magic";
-import { getSpellInfo } from "@/lib/ai/tools/srd-lookup";
 import {
-  advanceTurn,
+  resolveCachedSpell,
+  type ResolvedSpellEffect,
+} from "@/lib/rules/spell-resolution-service";
+import {
   extractConditions,
   type DamageType,
 } from "@/lib/rules/combat";
@@ -67,36 +69,6 @@ const encoder = new TextEncoder();
 
 function sseFrame(frame: ActionStreamFrame): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
-}
-
-/**
- * Standardized helper to advance turn and emit required SSE events.
- */
-async function emitTurnAdvance(
-  tx: Prisma.TransactionClient,
-  encounterId: string,
-  currentTurnIndex: number,
-  round: number,
-  combatantCount: number,
-  gameEvents: GameEvent[]
-) {
-  const { nextTurnIndex, nextRound, roundAdvanced } = advanceTurn({
-    currentTurnIndex,
-    round,
-    combatantCount,
-  });
-
-  await tx.encounter.update({
-    where: { id: encounterId },
-    data: { currentTurnIndex: nextTurnIndex, round: nextRound },
-  });
-
-  gameEvents.push({
-    type: roundAdvanced ? "ROUND_ADVANCE" : "TURN_ADVANCE",
-    payload: { nextTurnIndex, nextRound },
-  });
-
-  return { nextTurnIndex, nextRound, roundAdvanced };
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -206,20 +178,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     if (trimmedAction === "End Turn") {
-      const allCombatants = await prisma.combatant.findMany({
-        where: { encounterId: context.activeEncounter.id },
-        orderBy: { initiativeTotal: "desc" },
-      });
-
       await prisma.$transaction(async (tx) => {
-        await emitTurnAdvance(
-          tx,
-          context.activeEncounter!.id,
-          context.activeEncounter!.currentTurnIndex,
-          context.activeEncounter!.round,
-          allCombatants.length,
-          gameEvents
-        );
+        const finalizeOutcome = await finalizeEncounterTurn({
+          tx: tx as Prisma.TransactionClient,
+          encounterId: context.activeEncounter!.id,
+          currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+          round: context.activeEncounter!.round,
+        });
+        gameEvents.push(...finalizeOutcome.events);
       });
     }
 
@@ -414,36 +380,58 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     // ── Gate: cast_spell ────────────────────────────────────────────────────────
     if (intent.actionType === "cast_spell" && intent.spellLevel !== undefined) {
-      const rawSlots = context.character.spellSlots;
+      if (!intent.spellName) {
+        return NextResponse.json(
+          { error: "An exact spell name is required for backend resolution." },
+          { status: 400 }
+        );
+      }
 
-      if (!isSpellSlots(rawSlots)) {
+      const rawSlots = context.character.spellSlots;
+      const usesSpellSlot = intent.spellLevel > 0;
+
+      if (usesSpellSlot && !isSpellSlots(rawSlots)) {
         return NextResponse.json(
           { error: "This character has no spellcasting ability." },
           { status: 400 }
         );
       }
 
-      if (intent.spellLevel !== undefined && !hasAvailableSlot(rawSlots, intent.spellLevel)) {
+      if (
+        usesSpellSlot &&
+        isSpellSlots(rawSlots) &&
+        !hasAvailableSlot(rawSlots, intent.spellLevel)
+      ) {
         return NextResponse.json(
           { error: `No available spell slots remaining at level ${intent.spellLevel}.` },
           { status: 400 }
         );
       }
 
-      let effect: Awaited<ReturnType<typeof getSpellInfo>> = null;
+      let effect: ResolvedSpellEffect | null = null;
       let saveDC: number | undefined = undefined;
 
-      if (intent.spellName) {
-        const spellEffect = await getSpellInfo(intent.spellName);
-        if (spellEffect) {
-          const charStats = context.character.stats as Record<string, number>;
-          const spellAbilityKey = spellcastingAbility(context.character.class);
-          const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
-          const profBonus = calculateProficiency(context.character.level);
-          saveDC = calculateSpellSaveDC(abilityMod, profBonus);
+      {
+        const charStats = context.character.stats as Record<string, number>;
+        const spellAbilityKey = spellcastingAbility(context.character.class);
+        const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
+        const profBonus = calculateProficiency(context.character.level);
+        const spellEffect = await resolveCachedSpell({
+          query: intent.spellName,
+          slotLevel: intent.spellLevel,
+          spellcastingMod: abilityMod,
+          characterLevel: context.character.level,
+        });
 
-          effect = spellEffect;
+        if (!spellEffect) {
+          return NextResponse.json(
+            { error: `Spell "${intent.spellName}" is unavailable in the SRD cache.` },
+            { status: 400 }
+          );
         }
+
+        saveDC = calculateSpellSaveDC(abilityMod, profBonus);
+        effect = spellEffect;
       }
 
       let targets: ContextCombatant[] = [];
@@ -477,8 +465,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           spellLevel: intent.spellLevel,
           spellEffect: effect ?? undefined,
           spellSaveDC: saveDC,
-          rawSpellSlots: rawSlots,
+          rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
           playerCharacterId: context.character.id,
+          actorConcentrationSpellId: context.character.concentrationSpellId,
         }, tx as Prisma.TransactionClient);
 
         gameEvents.push(...spellOutcome.events);
@@ -544,6 +533,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         }, tx as Prisma.TransactionClient);
 
         gameEvents.push(...itemOutcome.events);
+
+        if (context.activeEncounter) {
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: tx as Prisma.TransactionClient,
+            encounterId: context.activeEncounter.id,
+            currentTurnIndex: context.activeEncounter.currentTurnIndex,
+            round: context.activeEncounter.round,
+          });
+          gameEvents.push(...finalizeOutcome.events);
+        }
       });
     }
 
@@ -578,7 +577,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       gameEvents.push({
         type: "EQUIP_ITEM",
         payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
-      } as GameEvent);
+      });
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
@@ -704,7 +703,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         gameEvents.push({
           type: "REST_COMPLETED",
           payload: eventPayload,
-        } as GameEvent);
+        });
       });
     }
 
@@ -734,7 +733,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
                gameEvents.push({
                  type: "EXPLORATION_WARNING",
                  payload: { warnings: consumeResult.warnings },
-               } as GameEvent);
+               });
              }
           }
         }
@@ -764,7 +763,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           targetNodeId: moveResult.targetNodeId,
           passageType: moveResult.passageType 
         },
-      } as GameEvent);
+      });
     }
   }
 

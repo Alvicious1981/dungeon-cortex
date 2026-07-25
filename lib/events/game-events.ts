@@ -83,43 +83,29 @@ export interface SingleTargetConsequence {
 export interface CombatConsequencePayload {
   attackerName: string;
   targets: SingleTargetConsequence[];
-
-  // ── Legacy Flat Fields (Backward Compatibility for Slice 2) ────────────────
-  // These allow the existing VTT UI to function while targeting is refactored.
-  // In Slice 3, the UI should be updated to iterate over targets[].
-  
-  /** @deprecated Use targets[0].targetId */
-  targetId: string;
-  /** @deprecated Use targets[0].targetName */
-  targetName: string;
-  /** @deprecated Use targets[0].damage */
-  damage: number;
-  /** @deprecated Use targets[0].hpAfter */
-  hpAfter: number;
-  /** @deprecated Use targets[0].targetMaxHp */
-  targetMaxHp: number;
-  /** @deprecated Use targets[0].isCrit */
-  isCrit: boolean;
-  /** @deprecated Use targets[0].isFumble */
-  isFumble: boolean;
-  /** @deprecated Use targets[0].naturalRoll */
-  naturalRoll: number;
-  /** @deprecated Use targets[0].isKill */
-  isKill: boolean;
-  /** @deprecated Use targets[0].hitLocation */
-  hitLocation?: string;
-  /** @deprecated Use targets[0].narrativeTags */
-  narrativeTags: string[];
-
-  // Index signature to satisfy Record<string, unknown> in GameEvent
-  [key: string]: unknown;
 }
 
-export interface GameEvent {
-  type: GameEventType;
-  /** Contextual data for UI/audio — shape varies per event type. */
-  payload: Record<string, unknown>;
+export interface CombatConsequenceEvent {
+  type: "COMBAT_CONSEQUENCE";
+  payload: CombatConsequencePayload;
 }
+
+type StandardGameEventType = Exclude<GameEventType, "COMBAT_CONSEQUENCE">;
+
+export type StandardGameEvent = {
+  [Type in StandardGameEventType]: {
+    type: Type;
+    /** Contextual data for UI/audio — shape varies by event type. */
+    payload: Record<string, unknown>;
+  };
+}[StandardGameEventType];
+
+/**
+ * Consequence events are structurally strict so producers and consumers cannot
+ * bypass the canonical targets[] contract. Other event payloads remain open
+ * while their individual contracts are migrated incrementally.
+ */
+export type GameEvent = CombatConsequenceEvent | StandardGameEvent;
 
 // ─── SSE wire protocol ───────────────────────────────────────────────────────
 

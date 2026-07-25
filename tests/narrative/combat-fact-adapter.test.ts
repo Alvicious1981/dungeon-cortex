@@ -1,7 +1,32 @@
 import { describe, it, expect } from 'vitest';
 import { adaptCombatEventsToNarrativeContext } from '../../lib/narrative/combat-fact-adapter';
-import { GameEvent } from '../../lib/events/game-events';
+import {
+  GameEvent,
+  SingleTargetConsequence,
+} from '../../lib/events/game-events';
 import { CombatNarrativeContext, NarrativeFact } from '../../lib/narrative/combat-narrative-types';
+
+function buildTarget(
+  overrides: Pick<SingleTargetConsequence, 'targetId' | 'targetName'> &
+    Partial<SingleTargetConsequence>
+): SingleTargetConsequence {
+  const { targetId, targetName, ...optionalOverrides } = overrides;
+  return {
+    targetId,
+    targetName,
+    damage: 0,
+    naturalRoll: 10,
+    isCrit: false,
+    isFumble: false,
+    hitLocation: 'chest',
+    narrativeTags: [],
+    hpAfter: 10,
+    targetMaxHp: 10,
+    isKill: false,
+    conditionsApplied: [],
+    ...optionalOverrides,
+  };
+}
 
 describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
   
@@ -349,17 +374,7 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
               conditionsApplied: [],
               narrativeTags: []
             }
-          ],
-          targetId: 'goblin-a',
-          targetName: 'Goblin A',
-          damage: 4,
-          hpAfter: 6,
-          targetMaxHp: 10,
-          isCrit: false,
-          isFumble: false,
-          naturalRoll: 16,
-          isKill: false,
-          narrativeTags: []
+          ]
         }
       }
     ];
@@ -389,40 +404,18 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         payload: {
           attackerName: 'Hero',
           targets: [
-            {
+            buildTarget({
               targetName: 'Goblin',
               targetId: 'goblin-1',
               damage: 6,
               hpAfter: 9
-            }
+            })
           ]
         }
       }
     ];
     const context = adaptCombatEventsToNarrativeContext(events);
     expect(context.targets?.[0].hpBefore).toBeUndefined();
-  });
-
-  it('should preserve hpBefore when it is explicitly provided by the backend', () => {
-    const events: GameEvent[] = [
-      {
-        type: 'COMBAT_CONSEQUENCE',
-        payload: {
-          attackerName: 'Hero',
-          targets: [
-            {
-              targetName: 'Goblin',
-              targetId: 'goblin-1',
-              damage: 6,
-              hpAfter: 9,
-              hpBefore: 15
-            }
-          ]
-        }
-      }
-    ];
-    const context = adaptCombatEventsToNarrativeContext(events);
-    expect(context.targets?.[0].hpBefore).toBe(15);
   });
 
   it('should not deduplicate distinct facts on the same target', () => {
@@ -432,12 +425,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         payload: {
           attackerName: 'Hero',
           targets: [
-            {
+            buildTarget({
               targetName: 'Goblin',
               targetId: 'goblin-1',
               damage: 4,
               hpAfter: 11
-            }
+            })
           ]
         }
       },
@@ -464,12 +457,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         payload: {
           attackerName: 'Hero',
           targets: [
-            {
+            buildTarget({
               targetName: 'Goblin',
               targetId: 'goblin-1',
               damage: 6,
               hpAfter: 9
-            }
+            })
           ]
         }
       },

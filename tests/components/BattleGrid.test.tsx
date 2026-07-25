@@ -3,6 +3,10 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import BattleGrid from "@/components/combat/BattleGrid";
+import {
+  DUNGEON_ACTION_REQUEST,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -40,7 +44,6 @@ describe("BattleGrid", () => {
   it("renders a 10x10 tactical grid", () => {
     render(
       <BattleGrid
-        campaignId="camp-123"
         combatants={combatants}
         activeCombatantId="pc-1"
       />
@@ -54,7 +57,6 @@ describe("BattleGrid", () => {
   it("renders Large tokens as 2x2", () => {
     render(
       <BattleGrid
-        campaignId="camp-123"
         combatants={combatants}
       />
     );
@@ -65,26 +67,28 @@ describe("BattleGrid", () => {
       gridRow: "4 / span 2",
     });
   });
-  it("previews keyboard movement and submits the same backend Move intent on Enter", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
-    render(<BattleGrid campaignId="camp-123" combatants={combatants} activeCombatantId="pc-1" />);
+  it("previews keyboard movement and requests the canonical Move action on Enter", async () => {
+    const requestListener = vi.fn();
+    window.addEventListener(DUNGEON_ACTION_REQUEST, requestListener);
+    render(<BattleGrid combatants={combatants} activeCombatantId="pc-1" />);
 
     fireEvent.keyDown(screen.getByLabelText("Aldric token at 1,2"), { key: "ArrowRight" });
     const preview = screen.getByLabelText("Aldric token at 2,2");
     expect(screen.getByRole("status")).toHaveTextContent("Enter to confirm");
     fireEvent.keyDown(preview, { key: "Enter" });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/campaign/camp-123/action",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ action: "Move", targetX: 2, targetY: 2 }),
-      })
-    ));
+    await waitFor(() => expect(requestListener).toHaveBeenCalledTimes(1));
+    const event = requestListener.mock.calls[0]?.[0] as CustomEvent<DungeonActionRequestDetail>;
+    expect(event.detail.request).toEqual({
+      action: "Move",
+      targetX: 2,
+      targetY: 2,
+    });
+    window.removeEventListener(DUNGEON_ACTION_REQUEST, requestListener);
   });
 
   it("clears the keyboard preview when the token returns to its origin", () => {
-    render(<BattleGrid campaignId="camp-123" combatants={combatants} activeCombatantId="pc-1" />);
+    render(<BattleGrid combatants={combatants} activeCombatantId="pc-1" />);
 
     fireEvent.keyDown(screen.getByLabelText("Aldric token at 1,2"), { key: "ArrowRight" });
     expect(screen.getByRole("status")).toHaveTextContent("Enter to confirm");

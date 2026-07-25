@@ -396,7 +396,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       >
         {activeEncounter && (
           <CombatHUDController
-            campaignId={campaign.id}
             activeTurnIndex={activeEncounter.currentTurnIndex}
             combatants={activeEncounter.combatants.map((c) => ({
               id: c.id,
@@ -793,7 +792,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             {/* ── Exploration map — visible when campaign has an active location ── */}
             {explorationData && (
               <ExplorationPanel
-                campaignId={explorationData.campaignId}
                 location={explorationData.location}
                 nodes={explorationData.nodes}
                 edges={explorationData.edges}
@@ -834,7 +832,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             {/* Legacy zone-based combat map removed in Phase 1.5. */}
             {activeEncounter && (
               <BattleGrid
-                campaignId={campaign.id}
                 activeCombatantId={activeCombatantId}
                 combatants={activeEncounter.combatants.map((c) => ({
                   id: c.id,
@@ -933,7 +930,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             </section>
 
             <section id="commands" aria-label="Command deck" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-sm border border-[#4a3b24] bg-[#090811]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
-              <MacroDeck campaignId={campaign.id} inCombat={!!activeEncounter} />
+              <MacroDeck inCombat={!!activeEncounter} />
               <ActionInput
                 campaignId={campaign.id}
                 selectableTargets={
@@ -957,7 +954,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}
-              campaignId={campaign.id}
             />
             <QuestTracker quests={quests} />
             <NPCRoster npcs={npcs} />

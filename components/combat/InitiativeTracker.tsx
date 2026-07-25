@@ -1,20 +1,26 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import type { InitiativeEntry } from "@/lib/rules/combat";
+import {
+  DUNGEON_ACTION_END,
+  DUNGEON_ACTION_ERROR,
+  createDungeonActionRequestId,
+  requestDungeonAction,
+  type DungeonActionErrorDetail,
+  type DungeonActionRequestDetail,
+} from "@/lib/events/action-transport";
 
 interface Props {
   entries: InitiativeEntry[];
   /** id of the combatant whose turn it currently is, if combat is active. */
   activeId?: string;
-  campaignId: string;
 }
 
-export default function InitiativeTracker({ entries, activeId, campaignId }: Props) {
-  const router = useRouter();
+export default function InitiativeTracker({ entries, activeId }: Props) {
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingRequestId = useRef<string | null>(null);
 
   // Fire ENCOUNTER_START exactly once when the component first mounts with combatants.
   // The ref persists across router.refresh() re-renders (component stays mounted).
@@ -31,38 +37,37 @@ export default function InitiativeTracker({ entries, activeId, campaignId }: Pro
     }
   }, [entries]);
 
-  async function handleNextTurn() {
+  useEffect(() => {
+    function handleActionError(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionErrorDetail>).detail;
+      if (detail.requestId === pendingRequestId.current) {
+        setError(detail.error);
+      }
+    }
+
+    function handleActionEnd(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionRequestDetail>).detail;
+      if (detail.requestId === pendingRequestId.current) {
+        pendingRequestId.current = null;
+        setAdvancing(false);
+      }
+    }
+
+    window.addEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+    window.addEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    return () => {
+      window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+      window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    };
+  }, []);
+
+  function handleNextTurn() {
+    if (advancing) return;
+    const requestId = createDungeonActionRequestId();
+    pendingRequestId.current = requestId;
     setError(null);
     setAdvancing(true);
-    try {
-      const res = await fetch(`/api/campaign/${campaignId}/encounter/turn`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError((data as { error?: string }).error ?? "Failed to advance turn.");
-        return;
-      }
-
-      // Dispatch ROUND_ADVANCE or TURN_ADVANCE based on API response before refreshing.
-      const data = await res.json() as { isNewRound: boolean };
-      window.dispatchEvent(
-        new CustomEvent("dungeon-game-event", {
-          detail: {
-            event: {
-              type: data.isNewRound ? "ROUND_ADVANCE" : "TURN_ADVANCE",
-              payload: {},
-            },
-          },
-        }),
-      );
-
-      router.refresh();
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setAdvancing(false);
-    }
+    requestDungeonAction({ action: "End Turn" }, requestId);
   }
 
   if (entries.length === 0) {

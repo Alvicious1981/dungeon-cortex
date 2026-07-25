@@ -6,20 +6,12 @@ import {
   ArrowDown,
   EyeOff,
   Flag,
-  Flame,
   FlaskConical,
   Ghost,
   Hand,
-  HandHelping,
   Link2,
   MoonStar,
-  Package,
-  Search,
-  Shield,
-  Sparkles,
   Sword,
-  Timer,
-  Zap,
   ZapOff,
 } from "lucide-react";
 
@@ -33,6 +25,7 @@ export interface CombatHUDProps {
     conditions: string[];
   }>;
   activeTurnIndex: number;
+  isPending: boolean;
   onActionTrigger: (action: string) => void;
 }
 
@@ -44,17 +37,7 @@ interface ActionConfig {
 
 const ACTIONS: ActionConfig[] = [
   { keybind: "F1", action: "Attack", icon: Sword },
-  { keybind: "F2", action: "Dash", icon: Zap },
-  { keybind: "F3", action: "Disengage", icon: Shield },
-  { keybind: "F4", action: "Dodge", icon: Shield },
-  { keybind: "F5", action: "Help", icon: HandHelping },
-  { keybind: "F6", action: "Hide", icon: EyeOff },
-  { keybind: "F7", action: "Ready", icon: Timer },
-  { keybind: "F8", action: "Search", icon: Search },
-  { keybind: "F9", action: "Use Object", icon: Package },
-  { keybind: "F10", action: "Cast Spell", icon: Flame },
-  { keybind: "F11", action: "Class Feature", icon: Sparkles },
-  { keybind: "F12", action: "End Turn", icon: Flag },
+  { keybind: "F2", action: "End Turn", icon: Flag },
 ];
 
 const PANEL_CLASS =
@@ -123,6 +106,7 @@ function hpColor(percent: number) {
 export default function CombatHUD({
   combatants,
   activeTurnIndex,
+  isPending,
   onActionTrigger,
 }: CombatHUDProps) {
   return (
@@ -187,8 +171,9 @@ export default function CombatHUD({
               <button
                 key={keybind}
                 type="button"
+                disabled={isPending}
                 onClick={() => onActionTrigger(action)}
-                className="group relative flex h-16 flex-col items-center justify-center rounded-lg border border-white/15 bg-slate-950/50 px-2 text-xs transition hover:border-amber-300/60 hover:bg-slate-900/60"
+                className="group relative flex h-16 flex-col items-center justify-center rounded-lg border border-white/15 bg-slate-950/50 px-2 text-xs transition hover:border-amber-300/60 hover:bg-slate-900/60 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={`${action} (${keybind})`}
               >
                 <span className="absolute right-1.5 top-1 text-[10px] text-slate-400">

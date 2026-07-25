@@ -565,9 +565,54 @@ describe("executeCombatAction", () => {
           data: { concentrationSpellId: "Bless" },
         })
       );
+      expect(tx.combatant.update).toHaveBeenCalledWith({
+        where: { id: "player-1" },
+        data: { concentrationSpellId: "Bless" },
+      });
       expect(outcome.events.some((e) => e.type === "CONCENTRATION_STARTED")).toBe(true);
       const concEvent = outcome.events.find((e) => e.type === "CONCENTRATION_STARTED");
       expect(concEvent?.payload.spellName).toBe("Bless");
+    });
+
+    it("replaces concentration atomically and emits break before start", async () => {
+      const player = buildPlayer({ concentrationSpellId: "Bless" });
+      const tx = buildMockTx();
+      const outcome = await executeCombatAction({
+        actionType: "cast_spell",
+        encounter: buildEncounter([player]),
+        actorId: player.id,
+        actorName: player.name,
+        actorConditions: [],
+        targetCombatants: [],
+        spellName: "Haste",
+        spellLevel: 3,
+        spellEffect: { type: "utility", concentration: true },
+        rawSpellSlots: { "3": { current: 1, max: 1 } },
+        playerCharacterId: "char-1",
+        actorConcentrationSpellId: "Bless",
+        collectEvents: true,
+      }, tx);
+
+      expect(tx.character.update).toHaveBeenCalledWith({
+        where: { id: "char-1" },
+        data: { concentrationSpellId: "Haste" },
+      });
+      expect(tx.combatant.update).toHaveBeenCalledWith({
+        where: { id: player.id },
+        data: { concentrationSpellId: "Haste" },
+      });
+      expect(outcome.events.map((event) => event.type)).toEqual([
+        "SPELL_CAST",
+        "CONCENTRATION_BROKEN",
+        "CONCENTRATION_STARTED",
+      ]);
+      const broken = outcome.events.find(
+        (event) => event.type === "CONCENTRATION_BROKEN"
+      );
+      expect(broken?.payload).toMatchObject({
+        spellName: "Bless",
+        reason: "replaced",
+      });
     });
 
     it("breaks concentration on both Combatant and Character when CON save fails after damage", async () => {
@@ -638,6 +683,13 @@ describe("executeCombatAction", () => {
       };
 
       const outcome = await executeCombatAction(payload, tx);
+
+      const slotUpdate = (tx.character.update as ReturnType<typeof vi.fn>).mock.calls.find(
+        (call) => call[0].data?.spellSlots !== undefined
+      );
+      expect(slotUpdate).toBeUndefined();
+      const spellCast = outcome.events.find((event) => event.type === "SPELL_CAST");
+      expect(spellCast?.payload.slotConsumed).toBe(false);
 
       // concentrationSpellId must NOT have been cleared on either model
       const concClearOnCombatant = (tx.combatant.update as ReturnType<typeof vi.fn>).mock.calls.find(
@@ -757,6 +809,39 @@ describe("executeCombatAction", () => {
       expect(outcome.consequences[0]?.hpAfter).toBe(11); // 15 - 4
     });
 
+    it("deals no damage when the SRD save outcome is none", async () => {
+      const enemy = buildEnemy();
+      const tx = buildMockTx();
+      mockRandom([0.95, 0.99]);
+
+      const outcome = await executeCombatAction({
+        actionType: "cast_spell",
+        encounter: buildEncounter([buildPlayer(), enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        targetCombatants: [enemy],
+        spellName: "Acid Splash",
+        spellLevel: 0,
+        spellEffect: {
+          type: "damage",
+          dice: "1d6",
+          hasSavingThrow: true,
+          saveAbility: "DEX",
+          saveDamage: "none",
+          damageType: "acid",
+        },
+        spellSaveDC: 15,
+        collectEvents: true,
+      }, tx);
+
+      expect(outcome.totalDamageDealt).toBe(0);
+      expect(outcome.consequences[0]).toMatchObject({
+        damage: 0,
+        hpAfter: enemy.hp,
+      });
+    });
+
     it("applies a status condition to the target on a failed save", async () => {
       const enemy = buildEnemy();
       const tx = buildMockTx();
@@ -834,7 +919,7 @@ describe("executeCombatAction", () => {
   // ── buildCombatConsequenceEvent — pure helper ─────────────────────────────────
 
   describe("buildCombatConsequenceEvent", () => {
-    it("builds a COMBAT_CONSEQUENCE event with correct flat fields from the first target", () => {
+    it("builds a targets-only COMBAT_CONSEQUENCE payload", () => {
       const target: SingleTargetConsequence = {
         targetId: "enemy-1",
         targetName: "Goblin",
@@ -852,25 +937,20 @@ describe("executeCombatAction", () => {
 
       const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [target] });
 
-      expect(event.type).toBe("COMBAT_CONSEQUENCE");
-      expect(event.payload.attackerName).toBe("Aldric");
-      expect(event.payload.damage).toBe(5);
-      expect(event.payload.hpAfter).toBe(10);
-      expect(event.payload.isCrit).toBe(false);
-      expect(event.payload.isFumble).toBe(false);
-      expect(event.payload.isKill).toBe(false);
-      expect(event.payload.targetId).toBe("enemy-1");
+      expect(event).toEqual({
+        type: "COMBAT_CONSEQUENCE",
+        payload: { attackerName: "Aldric", targets: [target] },
+      });
+      expect(Object.keys(event.payload).sort()).toEqual(["attackerName", "targets"]);
     });
 
-    it("returns safe zero-value defaults when targets array is empty", () => {
+    it("preserves an empty canonical targets array", () => {
       const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [] });
 
-      expect(event.type).toBe("COMBAT_CONSEQUENCE");
-      expect(event.payload.damage).toBe(0);
-      expect(event.payload.targetId).toBe("");
-      expect(event.payload.targetName).toBe("");
-      expect(event.payload.isCrit).toBe(false);
-      expect(event.payload.naturalRoll).toBe(0);
+      expect(event).toEqual({
+        type: "COMBAT_CONSEQUENCE",
+        payload: { attackerName: "Aldric", targets: [] },
+      });
     });
 
     it("populates the full targets array in the payload", () => {

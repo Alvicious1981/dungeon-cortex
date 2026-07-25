@@ -309,6 +309,8 @@ export interface SpellEffect {
   hasSavingThrow: boolean;
   /** Ability score index for the saving throw, e.g. "dex". Null if none. */
   saveAbility: string | null;
+  /** Damage applied when the target succeeds on its saving throw. */
+  saveDamage: "half" | "none";
   /** Condition to apply on failed save (or non-save spells), e.g. "Blinded". Null if none. */
   condition: string | null;
 }
@@ -342,8 +344,9 @@ export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CH
  * a raw SrdSpell data blob (Spanish 5e SRD format).
  *
  * Data fields read:
- *   - `damage.damage_at_slot_level[slotLevel]`  → leveled damage dice
- *   - `heal_at_slot_level[slotLevel]`            → leveled healing dice (may contain "APT")
+ *   - `damage.damage_at_slot_level[slotLevel]`       → leveled damage dice
+ *   - `damage.damage_at_character_level[level]`     → cantrip scaling dice
+ *   - `heal_at_slot_level[slotLevel]`               → leveled healing dice (may contain "APT")
  *   - `dc.dc_type.index`                         → saving throw ability
  *   - `dc.dc_success`                            → "mitad" = half damage on save
  *
@@ -355,21 +358,33 @@ export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CH
 export function resolveSpellEffect(
   spellData: Record<string, unknown>,
   slotLevel: number,
-  spellcastingMod: number
+  spellcastingMod: number,
+  characterLevel = slotLevel
 ): SpellEffect {
   // --- Damage spell ---
   const dmg = spellData.damage as Record<string, unknown> | undefined;
   if (dmg) {
     const bySlot = dmg.damage_at_slot_level as Record<string, string> | undefined;
-    if (bySlot) {
-      // Fall back to the lowest available tier if exact slot level is missing
-      const keys = Object.keys(bySlot).map(Number).sort((a, b) => a - b);
-      const bestKey = keys.includes(slotLevel) ? slotLevel : (keys[0] ?? slotLevel);
-      const dice = bySlot[String(bestKey)] ?? null;
+    const byCharacterLevel = dmg.damage_at_character_level as
+      | Record<string, string>
+      | undefined;
+    const scaling = bySlot ?? byCharacterLevel;
+
+    if (scaling) {
+      const requestedLevel = bySlot ? slotLevel : characterLevel;
+      const tiers = Object.keys(scaling)
+        .map(Number)
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+      const bestTier =
+        tiers.filter((tier) => tier <= requestedLevel).at(-1) ?? tiers[0];
+      const dice = bestTier === undefined ? null : scaling[String(bestTier)] ?? null;
 
       const dmgType = (dmg.damage_type as Record<string, unknown> | undefined)?.index as string ?? null;
       const dc = spellData.dc as Record<string, unknown> | undefined;
       const dcType = dc ? ((dc.dc_type as Record<string, unknown> | undefined)?.index as string ?? null) : null;
+      const dcSuccess = String(dc?.dc_success ?? "").toLowerCase();
+      const saveDamage = /half|mitad/.test(dcSuccess) ? "half" : "none";
 
       return {
         type: "damage",
@@ -377,6 +392,7 @@ export function resolveSpellEffect(
         damageType: dmgType,
         hasSavingThrow: !!dc,
         saveAbility: dcType,
+        saveDamage,
         condition: null, // To be extracted from SRD description or specialized fields
       };
     }
@@ -395,12 +411,12 @@ export function resolveSpellEffect(
         .replace(/\s*\+\s*APT\b/gi, modStr)
         .replace(/\bAPT\b/gi, String(spellcastingMod))
         .replace(/\s+/g, ""); // strip remaining whitespace for dice parser
-      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, condition: null };
+      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", condition: null };
     }
   }
 
   // --- Utility spell ---
-  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, condition: null };
+  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", condition: null };
 }
 
 /**
