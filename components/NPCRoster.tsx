@@ -58,19 +58,19 @@ const ROLE_CONFIG: Record<
   { label: string; accentColor: string; bg: string; borderColor: string }
 > = {
   guard: {
-    label: "Guard",
+    label: "Guardia",
     accentColor: "#93C5FD",
     bg: "rgba(30,60,100,0.12)",
     borderColor: "rgba(59,130,246,0.22)",
   },
   bandit: {
-    label: "Bandit",
+    label: "Bandido",
     accentColor: "#FCA5A5",
     bg: "rgba(100,20,20,0.12)",
     borderColor: "rgba(239,68,68,0.22)",
   },
   commoner: {
-    label: "Commoner",
+    label: "Habitante",
     accentColor: "#D4A96A",
     bg: "rgba(80,55,20,0.12)",
     borderColor: "rgba(212,169,106,0.22)",
@@ -157,7 +157,7 @@ export default function NPCRoster({ npcs }: NPCRosterProps) {
 
   return (
     <section
-      aria-label="NPC roster"
+      aria-label="Personajes conocidos"
       className="rounded-lg p-5 space-y-3"
       style={{
         background: "rgba(12,12,22,0.92)",
@@ -171,10 +171,10 @@ export default function NPCRoster({ npcs }: NPCRosterProps) {
           className="text-[10px] uppercase tracking-[0.3em]"
           style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
         >
-          Known Persons
+          Personajes conocidos
         </h2>
         <span className="text-[9px] tabular-nums" style={{ color: "#6A5A38" }}>
-          {npcs.length} {npcs.length === 1 ? "soul" : "souls"}
+          {npcs.length} {npcs.length === 1 ? "persona" : "personas"}
         </span>
       </div>
 
@@ -284,7 +284,7 @@ function NPCCard({ npc }: { npc: NPC }) {
               border: "1px solid rgba(228,168,50,0.2)",
               color: "#C49A2A",
             }}
-            aria-label={`Armor class ${npc.ac}`}
+            aria-label={`Clase de armadura ${npc.ac}`}
           >
             AC {npc.ac}
           </span>
@@ -296,7 +296,7 @@ function NPCCard({ npc }: { npc: NPC }) {
           aria-valuenow={npc.hp}
           aria-valuemin={0}
           aria-valuemax={npc.maxHp}
-          aria-label={`HP: ${npc.hp} of ${npc.maxHp}`}
+          aria-label={`Puntos de golpe: ${npc.hp} de ${npc.maxHp}`}
           className="relative h-1.5 overflow-hidden rounded-full"
           style={{
             background: "rgba(20,14,6,0.9)",
@@ -319,7 +319,7 @@ function NPCCard({ npc }: { npc: NPC }) {
         <div
           className="grid grid-cols-6 gap-1 pt-0.5"
           role="group"
-          aria-label="Ability scores"
+          aria-label="Puntuaciones de característica"
         >
           {STAT_KEYS.map((key) => (
             <div
@@ -353,10 +353,10 @@ function NPCCard({ npc }: { npc: NPC }) {
       {/* ── Personality traits ── */}
       {traits && (
         <dl className="space-y-1 pt-0.5">
-          <TraitRow label="Manner" value={traits.personality} />
+          <TraitRow label="Carácter" value={traits.personality} />
           <TraitRow label="Ideal" value={traits.ideal} />
-          <TraitRow label="Bond" value={traits.bond} />
-          <TraitRow label="Flaw" value={traits.flaw} />
+          <TraitRow label="Vínculo" value={traits.bond} />
+          <TraitRow label="Defecto" value={traits.flaw} />
         </dl>
       )}
 

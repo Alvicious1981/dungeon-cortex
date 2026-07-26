@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Cinzel, Crimson_Pro } from "next/font/google";
 import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
@@ -29,23 +28,6 @@ import CharacterSheetController from "@/components/character/CharacterSheetContr
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
 import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
-
-// ─── Fonts ───────────────────────────────────────────────────────────────────
-
-const cinzel = Cinzel({
-  subsets: ["latin"],
-  weight: ["400", "600", "700", "900"],
-  variable: "--font-cinzel",
-  display: "swap",
-});
-
-const crimsonPro = Crimson_Pro({
-  subsets: ["latin"],
-  weight: ["400", "600"],
-  style: ["normal", "italic"],
-  variable: "--font-crimson",
-  display: "swap",
-});
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -79,21 +61,21 @@ function hpBarColor(hp: number, maxHp: number): string {
 
 /** Human-readable labels for each equipped gear slot. */
 const SLOT_LABELS: Record<string, { label: string; glyph: string }> = {
-  MAIN_HAND:  { label: "Main Hand",  glyph: "⚔" },
-  OFF_HAND:   { label: "Off Hand",   glyph: "🛡" },
-  ARMOR:      { label: "Armor",      glyph: "⛨" },
-  ACCESSORY:  { label: "Accessory",  glyph: "◈" },
+  MAIN_HAND:  { label: "Mano principal",  glyph: "⚔" },
+  OFF_HAND:   { label: "Mano secundaria", glyph: "🛡" },
+  ARMOR:      { label: "Armadura",         glyph: "⛨" },
+  ACCESSORY:  { label: "Accesorio",        glyph: "◈" },
 };
 
 const ITEM_TYPE_STYLE: Record<
   ItemType,
   { label: string; textColor: string; bg: string; glyph: string }
 > = {
-  weapon:     { label: "WPN", glyph: "⚔", textColor: "#FCA5A5", bg: "rgba(239,68,68,0.15)" },
-  armor:      { label: "ARM", glyph: "🛡", textColor: "#93C5FD", bg: "rgba(59,130,246,0.15)" },
+  weapon:     { label: "ARMA", glyph: "⚔", textColor: "#FCA5A5", bg: "rgba(239,68,68,0.15)" },
+  armor:      { label: "ARM",  glyph: "🛡", textColor: "#93C5FD", bg: "rgba(59,130,246,0.15)" },
   consumable: { label: "CON", glyph: "⚗", textColor: "#86EFAC", bg: "rgba(34,197,94,0.15)" },
-  spell:      { label: "SPL", glyph: "✦", textColor: "#C4B5FD", bg: "rgba(139,92,246,0.15)" },
-  misc:       { label: "MSC", glyph: "◆", textColor: "#FDE68A", bg: "rgba(245,158,11,0.15)" },
+  spell:      { label: "CONJ", glyph: "✦", textColor: "#C4B5FD", bg: "rgba(139,92,246,0.15)" },
+  misc:       { label: "OTRO", glyph: "◆", textColor: "#FDE68A", bg: "rgba(245,158,11,0.15)" },
 };
 
 function getItemTypeStyle(type: string) {
@@ -127,13 +109,13 @@ function itemStatLine(type: string, properties: unknown): string {
       const p = properties as Partial<ConsumableProperties>;
       const parts: string[] = [];
       if (p.healingDice)
-        parts.push(`Heals ${p.healingDice}${p.healingBonus ? ` +${p.healingBonus}` : ""}`);
+        parts.push(`Cura ${p.healingDice}${p.healingBonus ? ` +${p.healingBonus}` : ""}`);
       if (p.effects?.length) parts.push(p.effects.join(", "));
       return parts.join(" · ");
     }
     case "spell": {
       const p = properties as Partial<SpellProperties>;
-      const level = p.spellLevel === 0 ? "Cantrip" : `Level ${p.spellLevel ?? "?"}`;
+      const level = p.spellLevel === 0 ? "Truco" : `Nivel ${p.spellLevel ?? "?"}`;
       const dmg = p.damageDice ? ` · ${p.damageDice} ${p.damageType ?? ""}`.trim() : "";
       return `${level}${dmg}`;
     }
@@ -150,7 +132,7 @@ export async function generateMetadata({ params }: CampaignPageProps) {
   return {
     title: campaign
       ? `${campaign.title} — Dungeon Cortex`
-      : "Campaign — Dungeon Cortex",
+      : "Campaña — Dungeon Cortex",
   };
 }
 
@@ -347,8 +329,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   return (
     <div
-      className={`${cinzel.variable} ${crimsonPro.variable} dc-atmosphere min-h-screen pb-20 lg:pb-0`}
-      style={{ background: "#070710", color: "#E2D9C5" }}
+      className="dc-campaign-shell dc-page-shell min-h-screen pb-20 lg:pb-0"
     >
       {/* Ascension Overlay — self-wiring, listens for dungeon-level-up events */}
       <AscensionOverlayController />
@@ -413,7 +394,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:px-3 focus:py-1.5 focus:text-sm"
           style={{ background: "#F59E0B", color: "#0A0A14" }}
         >
-          Skip to chronicle
+          Saltar a la bitácora
         </a>
 
         {/* ════════════════
@@ -425,7 +406,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               className="mb-1 text-[10px] uppercase tracking-[0.3em]"
               style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
             >
-              Active Campaign
+              Campaña activa
             </p>
             <h1
               className="text-2xl font-bold leading-tight sm:text-3xl"
@@ -458,7 +439,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           <aside
             id="character"
             className="order-3 scroll-mt-20 space-y-4 lg:order-1"
-            aria-label="Character status"
+            aria-label="Estado del personaje"
           >
 
             {/* ── Identity card ── */}
@@ -476,7 +457,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   className="mb-0.5 text-[10px] uppercase tracking-[0.3em]"
                   style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
                 >
-                  Adventurer
+                  Personaje
                 </p>
                 <h2
                   className="text-xl font-bold leading-snug"
@@ -488,14 +469,14 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   className="mt-0.5 text-sm"
                   style={{ fontFamily: "var(--font-crimson)", color: "#C8B898", fontStyle: "italic" }}
                 >
-                  Level {character.level} {character.race} {character.class}
+                  Nivel {character.level} · {character.race} · {character.class}
                 </p>
 
                 {/* ── Concentration badge ── */}
                 {character.concentrationSpellId && (
                   <div
                     role="status"
-                    aria-label="Concentration active"
+                    aria-label="Concentración activa"
                     className="mt-2.5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1"
                     style={{
                       background: "rgba(76,29,149,0.25)",
@@ -516,7 +497,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                       className="text-[9px] font-semibold uppercase tracking-[0.2em]"
                       style={{ fontFamily: "var(--font-cinzel)", color: "#C4B5FD" }}
                     >
-                      Concentrating
+                      Concentración
                     </span>
                     <span
                       aria-hidden="true"
@@ -536,7 +517,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                     className="text-[10px] uppercase tracking-widest font-semibold"
                     style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
                   >
-                    Hit Points
+                    Puntos de golpe
                   </span>
                   <span className="text-sm font-semibold tabular-nums">
                     <span style={{ color: barColor }}>{character.hp}</span>
@@ -583,7 +564,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             {spellSlots !== null && (
               <section
                 className="rounded-lg p-5 space-y-3"
-                aria-label="Spell slots"
+                aria-label="Espacios de conjuro"
                 style={{
                   background: "rgba(12,12,22,0.92)",
                   border: "1px solid rgba(99,102,241,0.22)",
@@ -594,7 +575,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   className="text-[10px] uppercase tracking-[0.3em]"
                   style={{ fontFamily: "var(--font-cinzel)", color: "#6B63C0" }}
                 >
-                  Arcane Reserves
+                  Recursos mágicos
                 </p>
 
                 <div className="space-y-2.5">
@@ -608,7 +589,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                             className="w-10 shrink-0 text-[10px] uppercase tracking-widest"
                             style={{ fontFamily: "var(--font-cinzel)", color: "#6B63C0" }}
                           >
-                            Lv {level}
+                            Nv {level}
                           </span>
 
                           {/* Crystal orb indicators */}
@@ -657,7 +638,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             {/* ── Inventory ── */}
             <section
               className="rounded-lg p-5 space-y-3"
-              aria-label="Inventory"
+              aria-label="Inventario"
               style={{
                 background: "rgba(12,12,22,0.92)",
                 border: "1px solid rgba(228,168,50,0.14)",
@@ -667,7 +648,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 className="text-[10px] uppercase tracking-[0.3em]"
                 style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
               >
-                Carried Items
+                Inventario
               </p>
 
               {!hasInventory ? (
@@ -675,7 +656,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   className="text-xs"
                   style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50" }}
                 >
-                  Nothing carried.
+                  No hay objetos registrados.
                 </p>
               ) : (
                 <div className="space-y-4">
@@ -689,7 +670,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                           className="mb-1.5 text-[9px] uppercase tracking-widest font-semibold"
                           style={{ color: ts.textColor, opacity: 0.7, fontFamily: "var(--font-cinzel)" }}
                         >
-                          {type === "spell" ? "Spells" : type === "consumable" ? "Consumables" : type === "misc" ? "Misc" : type.charAt(0).toUpperCase() + type.slice(1) + "s"}
+                          {type === "spell" ? "Conjuros" : type === "consumable" ? "Consumibles" : type === "misc" ? "Otros" : type === "weapon" ? "Armas" : "Armaduras"}
                         </p>
                         <ul className="space-y-1" role="list">
                           {group.map((item) => {
@@ -778,15 +759,15 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             <section id="scene" aria-labelledby="scene-heading" className="scroll-mt-20 overflow-hidden rounded-sm border border-[#4a3b24] bg-[#090811] shadow-2xl">
               <header className="flex items-center justify-between border-b border-[#3b3150] bg-[#15121e]/95 px-4 py-3">
                 <div>
-                  <p className="dc-kicker">Tactical viewport</p>
-                  <h2 id="scene-heading" className="dc-heading mt-1 text-lg font-bold text-[#eadcab]">The Living Scene</h2>
+                  <p className="dc-kicker">Contexto actual</p>
+                  <h2 id="scene-heading" className="dc-heading mt-1 text-lg font-bold text-[#eadcab]">La escena</h2>
                 </div>
-                <span className="rounded-full border border-[#4f4264] px-2 py-1 text-[10px] uppercase tracking-wider text-[#a78bfa]">Backend verified</span>
+                <span className="rounded-full border border-[#4f4264] px-2 py-1 text-[10px] uppercase tracking-wider text-[#a78bfa]">Estado confirmado</span>
               </header>
               <div className="relative min-h-56 bg-[linear-gradient(rgba(7,7,16,.42),rgba(7,7,16,.72)),url('/assets/atmosphere/tactical-table-idle.webp')] bg-cover bg-center p-3 sm:p-4">
                 {!explorationData && !isWildernessMode && !activeEncounter && (
                   <div className="flex min-h-56 items-center justify-center text-center">
-                    <p className="dc-copy max-w-sm rounded-sm bg-[#070710]/80 px-5 py-4 text-sm italic">The scene is carried by the chronicle until a tactical location is revealed.</p>
+                    <p className="dc-copy max-w-sm rounded-sm bg-[#070710]/80 px-5 py-4 text-sm italic">La bitácora mantiene el contexto hasta que el servidor confirme una localización táctica.</p>
                   </div>
                 )}
             {/* ── Exploration map — visible when campaign has an active location ── */}
@@ -850,12 +831,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               </div>
             </section>
 
-            <section aria-label="Adventure chronicle" id="chronicle" className="dc-panel scroll-mt-20 rounded-sm p-4 sm:p-5">
+            <section aria-label="Bitácora de aventura" id="chronicle" className="dc-panel dc-panel--narrative scroll-mt-20 rounded-sm p-4 sm:p-5">
               <p
                 className="mb-3 text-[10px] uppercase tracking-[0.3em]"
                 style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
               >
-                The Chronicle
+                Bitácora
               </p>
 
               {logs.length === 0 ? (
@@ -870,8 +851,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                     className="text-sm"
                     style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50", lineHeight: "1.75" }}
                   >
-                    The parchment is blank. The Dungeon Master awaits
-                    your first declaration. Speak, and let your legend begin.
+                    Aún no hay entradas. Describe qué intenta hacer tu personaje para comenzar.
                   </p>
                 </div>
               ) : (
@@ -910,7 +890,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                             color: isDM ? "#C49A2A" : isPlayer ? "#F59E0B" : "#5B56A0",
                           }}
                         >
-                          {isDM ? "Dungeon Master" : isPlayer ? "You" : "System"}
+                          {isDM ? "Director de Mazmorras" : isPlayer ? "Tú" : "Sistema"}
                         </span>
                         <p
                           className="text-sm leading-relaxed"
@@ -929,7 +909,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               )}
             </section>
 
-            <section id="commands" aria-label="Command deck" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-sm border border-[#4a3b24] bg-[#090811]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
+            <section id="commands" aria-label="Acciones disponibles" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-lg border border-[var(--dc-border-strong)] bg-[var(--dc-canvas-soft)]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
               <MacroDeck inCombat={!!activeEncounter} />
               <ActionInput
                 campaignId={campaign.id}
@@ -950,7 +930,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           {/* ════════════════════════════════════
               RIGHT COLUMN — Combat + Memory
           ════════════════════════════════════ */}
-          <aside id="journal" aria-label="Combat tracker, quest log and memory journal" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
+          <aside id="journal" aria-label="Combate, misiones, personajes y diario" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}
@@ -963,7 +943,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         </div>
 
         {/* ── Footer nav ── */}
-        <nav className="mt-10" aria-label="Page navigation">
+        <nav className="mt-10" aria-label="Navegación de página">
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 rounded text-xs transition-colors duration-200 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
@@ -985,7 +965,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 strokeLinejoin="round"
               />
             </svg>
-            Return to Hall of Records
+            Volver al inicio
           </Link>
         </nav>
 

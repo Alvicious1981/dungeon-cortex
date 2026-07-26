@@ -35,7 +35,7 @@ const STATUS_CONFIG: Record<
   { label: string; glyph: string; borderColor: string; textColor: string; bg: string; labelColor: string }
 > = {
   active: {
-    label: "Active",
+    label: "Activas",
     glyph: "◈",
     borderColor: "rgba(245,158,11,0.22)",
     textColor: "#C8B898",
@@ -43,7 +43,7 @@ const STATUS_CONFIG: Record<
     labelColor: "#F59E0B",
   },
   completed: {
-    label: "Completed",
+    label: "Completadas",
     glyph: "✓",
     borderColor: "rgba(34,197,94,0.18)",
     textColor: "#86EFAC",
@@ -51,7 +51,7 @@ const STATUS_CONFIG: Record<
     labelColor: "#22C55E",
   },
   failed: {
-    label: "Failed",
+    label: "Fallidas",
     glyph: "✕",
     borderColor: "rgba(239,68,68,0.18)",
     textColor: "#FCA5A5",
@@ -80,7 +80,7 @@ export default function QuestTracker({ quests }: QuestTrackerProps) {
 
   return (
     <section
-      aria-label="Quest tracker"
+      aria-label="Registro de misiones"
       className="rounded-lg p-5 space-y-3"
       style={{
         background: "rgba(12,12,22,0.92)",
@@ -94,14 +94,14 @@ export default function QuestTracker({ quests }: QuestTrackerProps) {
           className="text-[10px] uppercase tracking-[0.3em]"
           style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
         >
-          Quest Log
+          Misiones
         </h2>
         {activeCount > 0 && (
           <span
             className="text-[9px] tabular-nums"
             style={{ color: "#B8921E" }}
           >
-            {activeCount} active
+            {activeCount} activas
           </span>
         )}
       </div>
@@ -116,7 +116,7 @@ export default function QuestTracker({ quests }: QuestTrackerProps) {
             color: "#7A6A50",
           }}
         >
-          No quests yet. Speak with the world and your purpose will reveal itself.
+          Aún no hay misiones confirmadas.
         </p>
       ) : (
         <div className="space-y-4">
@@ -240,7 +240,7 @@ function QuestCard({
           {quest.location && (
             <QuestDetailRow
               glyph="◎"
-              label="Where"
+              label="Lugar"
               value={quest.location}
               isActive={isActive}
               valueColor={isActive ? "#C8B898" : "#7A6A50"}
@@ -249,7 +249,7 @@ function QuestCard({
           {quest.objective && (
             <QuestDetailRow
               glyph="⊕"
-              label="Objective"
+              label="Objetivo"
               value={quest.objective}
               isActive={isActive}
               valueColor={isActive ? "#C8B898" : "#7A6A50"}
@@ -258,7 +258,7 @@ function QuestCard({
           {quest.reward && (
             <QuestDetailRow
               glyph="◆"
-              label="Reward"
+              label="Recompensa"
               value={quest.reward}
               isActive={isActive}
               valueColor={isActive ? "#E8C84A" : "#7A6A50"}

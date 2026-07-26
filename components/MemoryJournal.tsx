@@ -27,18 +27,18 @@ function formatRelative(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   const diffMs = Date.now() - d.getTime();
   const diffMins = Math.floor(diffMs / 60_000);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffMins < 1) return "ahora";
+  if (diffMins < 60) return `hace ${diffMins} min`;
   const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffHours < 24) return `hace ${diffHours} h`;
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+  return `hace ${diffDays} d`;
 }
 
 export default function MemoryJournal({ memories }: MemoryJournalProps) {
   return (
     <section
-      aria-label="Memory journal"
+      aria-label="Diario de memoria"
       className="rounded-lg p-5 space-y-3"
       style={{
         background: "rgba(12,12,22,0.92)",
@@ -52,14 +52,14 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
           className="text-[10px] uppercase tracking-[0.3em]"
           style={{ fontFamily: "var(--font-cinzel)", color: "#9B93E0" }}
         >
-          Cortex Memory
+          Memoria
         </h2>
         {memories.length > 0 && (
           <span
             className="text-[9px] tabular-nums"
             style={{ color: "#756EB0" }}
           >
-            {memories.length} {memories.length === 1 ? "record" : "records"}
+            {memories.length} {memories.length === 1 ? "registro" : "registros"}
           </span>
         )}
       </div>
@@ -74,8 +74,8 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
             color: "#3A3860",
           }}
         >
-          The Dungeon Master remembers nothing yet.
-          Play more to build your history.
+          Aún no hay recuerdos consolidados.
+          La campaña confirmará aquí su historia.
         </p>
       ) : (
         <ol className="space-y-3" role="list">

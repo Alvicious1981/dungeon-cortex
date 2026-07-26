@@ -6,37 +6,61 @@ import CampaignLoading from "@/app/campaign/[id]/loading";
 import CampaignError from "@/app/campaign/[id]/error";
 
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>{children}</a>
+  default: ({
+    href,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
   ),
 }));
 
 describe("campaign chrome", () => {
-  it("links every mobile campaign area to an existing section contract", () => {
+  it("enlaza cada área móvil con una sección existente", () => {
     render(<CampaignMobileNav />);
-    const navigation = screen.getByRole("navigation", { name: "Campaign areas" });
+    const navigation = screen.getByRole("navigation", {
+      name: "Áreas de campaña",
+    });
     expect(navigation).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Scene" })).toHaveAttribute("href", "#scene");
-    expect(screen.getByRole("link", { name: "Chronicle" })).toHaveAttribute("href", "#chronicle");
-    expect(screen.getByRole("link", { name: "Character" })).toHaveAttribute("href", "#character");
-    expect(screen.getByRole("link", { name: "Journal" })).toHaveAttribute("href", "#journal");
+    expect(screen.getByRole("link", { name: "Escena" })).toHaveAttribute(
+      "href",
+      "#scene"
+    );
+    expect(screen.getByRole("link", { name: "Bitácora" })).toHaveAttribute(
+      "href",
+      "#chronicle"
+    );
+    expect(screen.getByRole("link", { name: "Personaje" })).toHaveAttribute(
+      "href",
+      "#character"
+    );
+    expect(screen.getByRole("link", { name: "Diario" })).toHaveAttribute(
+      "href",
+      "#journal"
+    );
   });
 
-  it("announces campaign loading without relying on animation", () => {
+  it("anuncia la carga de campaña sin depender de la animación", () => {
     render(<CampaignLoading />);
     const main = screen.getByRole("main");
     expect(main).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByText("Opening campaign…")).toBeInTheDocument();
+    expect(screen.getByText("Abriendo campaña…")).toBeInTheDocument();
   });
 
-  it("offers a retry and a safe exit from a recoverable campaign error", () => {
+  it("ofrece reintento y salida segura ante un error recuperable", () => {
     const reset = vi.fn();
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     render(<CampaignError error={new Error("Unavailable")} reset={reset} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
     expect(reset).toHaveBeenCalledOnce();
-    expect(screen.getByRole("link", { name: "Leave campaign" })).toHaveAttribute("href", "/");
+    expect(
+      screen.getByRole("link", { name: "Volver al inicio" })
+    ).toHaveAttribute("href", "/");
     consoleSpy.mockRestore();
   });
 });

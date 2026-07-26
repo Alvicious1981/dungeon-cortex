@@ -1,0 +1,64 @@
+.dc-campaign-shell {
+  color: var(--dc-text) !important;
+  font-family: var(--font-ui-sans);
+}
+
+.dc-campaign-shell [style*="--font-cinzel"],
+.dc-campaign-shell [style*="--font-crimson"] {
+  font-family: Georgia, "Times New Roman", serif !important;
+}
+
+.dc-campaign-shell #character > section,
+.dc-campaign-shell #journal > section {
+  border-color: var(--dc-border) !important;
+  background: var(--dc-surface) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035) !important;
+}
+
+.dc-campaign-shell #scene {
+  border-color: var(--dc-border-strong) !important;
+  border-radius: var(--dc-radius-lg);
+  background: var(--dc-canvas-soft) !important;
+}
+
+.dc-campaign-shell #scene > header {
+  border-color: var(--dc-border) !important;
+  background: var(--dc-surface-raised) !important;
+}
+
+.dc-campaign-shell #chronicle {
+  border-radius: var(--dc-radius-lg);
+}
+
+.dc-campaign-shell #chronicle > ul > li {
+  border-radius: var(--dc-radius-md);
+}
+
+.dc-campaign-shell > div[aria-hidden="true"] {
+  opacity: 0.55;
+}
+
+.dc-campaign-mobile-nav {
+  border-color: var(--dc-border);
+  background: rgb(15 18 22 / 0.96);
+}
+
+.dc-campaign-mobile-nav a {
+  color: var(--dc-text-muted);
+  text-decoration: none;
+}
+
+.dc-campaign-mobile-nav a:hover {
+  color: var(--dc-text);
+}
+
+@media (max-width: 1023px) {
+  .dc-campaign-shell #chronicle {
+    scroll-margin-bottom: 9rem;
+  }
+
+  .dc-campaign-shell #commands {
+    max-height: min(50svh, 30rem);
+    overflow-y: auto;
+  }
+}
