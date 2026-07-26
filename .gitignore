@@ -51,3 +51,6 @@ server.log
 # playwright
 /playwright-report/
 /test-results/
+
+# Stitch generated exports (documentation and metadata remain versioned)
+/.stitch/designs/
