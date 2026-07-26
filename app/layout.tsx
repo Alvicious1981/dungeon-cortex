@@ -1,20 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Dungeon Cortex",
-  description: "A rules-backed single-player AI Dungeon Master experience.",
+  title: {
+    default: "Dungeon Cortex",
+    template: "%s — Dungeon Cortex",
+  },
+  description:
+    "Una experiencia individual de rol narrativo con reglas deterministas de D&D 5e/SRD 2014.",
 };
 
 export default function RootLayout({
@@ -23,10 +16,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-   <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
-      </body>
+    <html lang="es" suppressHydrationWarning>
+      <body>{children}</body>
     </html>
   );
 }
