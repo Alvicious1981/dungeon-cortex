@@ -12,8 +12,11 @@ El ciclo es manual y requiere revisión humana entre pantallas. Stitch genera pr
 - Proyecto de producción: `15974794171746286383` (`Dungeon Cortex — Product UI`, privado).
 - Design system de producción: `assets/8784545861071306268`.
 - Pantalla fuente prioritaria: instancia `d2c02b9e9ba041d4aec9554fbb8d1cfa`, pantalla `c31196fa0ee04ca8bbf943c7e636b0c3`.
+- Pantalla de producción aprobada: instancia `5477968ff817486dbc4f024a36ed67c5`, pantalla `5477968ff817486dbc4f024a36ed67c5`.
 
 El proyecto fuente no se edita. Sus 17 pantallas visibles aportan únicamente estructura y composición.
+
+Las pantallas de producción `cabaf929f4fe414bb8dc9d566c30f77d` y `5ea1720f03c44255b9b403ec8f3c242d` son iteraciones superadas y no deben usarse como referencia ni implementarse.
 
 ## 3. Reglas del ciclo
 
@@ -27,7 +30,9 @@ El proyecto fuente no se edita. Sus 17 pantallas visibles aportan únicamente es
 
 ## 4. Sitemap
 
-- [ ] `campaign-library` — listado y reanudación; batón actual.
+- [x] `campaign-library` — referencia de escritorio aprobada a 1440 × 900.
+- [ ] `campaign-library-1024` — adaptación 1024 × 768; batón actual.
+- [ ] `campaign-library-768` — adaptación 768 × 1024.
 - [ ] `campaign-library-mobile` — adaptación 390 × 844.
 - [ ] `gameplay-hud` — narración, mecánica y acciones.
 - [ ] `journal` — diario y misiones.
@@ -40,8 +45,8 @@ El proyecto fuente no se edita. Sus 17 pantallas visibles aportan únicamente es
 
 ## 5. Roadmap
 
-1. Generar `campaign-library` para escritorio y someterla a revisión humana.
-2. Crear variantes de 1024, 768 y 390 px antes de cualquier integración.
+1. `campaign-library` de escritorio aprobada como referencia visual y de canon.
+2. Crear y revisar las adaptaciones de 1024, 768 y 390 px antes de cualquier integración.
 3. Definir en una tarea separada el `GET /api/campaign` autoritativo y sus pruebas.
 4. Integrar la biblioteca en Next.js mediante una PR acotada.
 5. Continuar con el HUD principal y después con archivo, inventario y mapa.
@@ -71,3 +76,11 @@ El proyecto fuente no se edita. Sus 17 pantallas visibles aportan únicamente es
 ## 7. Libertad creativa
 
 No se consume libertad creativa mientras existan elementos del roadmap. Toda propuesta adicional debe mantener la identidad de archivo nocturno, funcionar sin ilustraciones y declarar expresamente cualquier dato que aún no tenga contrato backend.
+
+## 8. Revisión de `campaign-library`
+
+- La referencia aprobada muestra solo placeholders neutrales y estados de interfaz; no presupone que `GET /api/campaign` exista.
+- La cabecera usa una navegación semántica y “Volver al inicio” apunta a `/`.
+- “Continuar campaña” permanece deshabilitado sin un identificador válido del servidor.
+- La revisión del prototipo comprobó contenido, canon, jerarquía, fondo de viewport completo, targets mínimos y estructura semántica.
+- Responsive, contraste medido y comportamiento real con teclado deberán verificarse otra vez en la implementación y en cada adaptación.

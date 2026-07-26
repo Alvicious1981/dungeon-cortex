@@ -180,15 +180,33 @@
       "version": "2",
       "displayName": "Dungeon Cortex — Archivo nocturno editorial"
     },
-    "screens": {}
+    "screens": {
+      "campaign-library": {
+        "screenId": "5477968ff817486dbc4f024a36ed67c5",
+        "instanceId": "5477968ff817486dbc4f024a36ed67c5",
+        "sourceScreen": "projects/15974794171746286383/screens/5477968ff817486dbc4f024a36ed67c5",
+        "title": "Biblioteca de Campañas — Dungeon Cortex",
+        "width": 2560,
+        "height": 2048,
+        "deviceType": "DESKTOP",
+        "disposition": "approved_reference",
+        "review": {
+          "visual": "passed",
+          "canon": "passed",
+          "accessibilityPrototype": "passed_with_implementation_checks",
+          "responsive": "pending"
+        }
+      }
+    },
+    "updateTime": "2026-07-26T23:30:19.067104Z"
   },
   "queue": {
-    "currentPage": "campaign-library",
+    "currentPage": "campaign-library-1024",
     "status": "ready",
-    "deviceType": "DESKTOP",
+    "deviceType": "TABLET",
     "sourceReference": {
-      "instanceId": "d2c02b9e9ba041d4aec9554fbb8d1cfa",
-      "sourceScreen": "projects/131487819236908093/screens/c31196fa0ee04ca8bbf943c7e636b0c3"
+      "instanceId": "5477968ff817486dbc4f024a36ed67c5",
+      "sourceScreen": "projects/15974794171746286383/screens/5477968ff817486dbc4f024a36ed67c5"
     }
   }
 }

@@ -1,12 +1,12 @@
 ---
-page: campaign-library
-device: desktop
-source_screen: c31196fa0ee04ca8bbf943c7e636b0c3
+page: campaign-library-1024
+device: tablet-landscape
+source_screen: 5477968ff817486dbc4f024a36ed67c5
 ---
 
-Diseña la biblioteca de campañas de Dungeon Cortex para escritorio a 1440 × 900.
+Adapta la pantalla de producción aprobada `5477968ff817486dbc4f024a36ed67c5` a 1024 × 768.
 
-Toma de la pantalla fuente únicamente la idea de una lista de campañas con un panel de detalle. No copies su marca, imágenes, personajes, campañas, textos promocionales ni datos mecánicos.
+Conserva su identidad, contenido, estados y jerarquía. Esta tarea es exclusivamente responsive: no añadas funciones, campos, navegación global, campañas, personajes ni datos mecánicos.
 
 **DESIGN SYSTEM (REQUIRED):**
 
@@ -24,43 +24,37 @@ Toma de la pantalla fuente únicamente la idea de una lista de campañas con un 
 - Do not invent rules, legal actions, classes, damage, prices, resources or consequences. The backend is authoritative.
 - Desktop target is 1440 × 900. The composition must remain adaptable to 1024 × 768, 768 × 1024 and 390 × 844 without horizontal document overflow.
 
-## Datos permitidos
+## Contenido que debe conservarse
 
-Cada campaña puede mostrar exclusivamente:
-
-- `id`;
-- `title`;
-- `status`;
-- `updatedAt`;
-- `character.name`;
-- `character.class`;
-- `character.level`.
-
-No mostrar tiempo jugado, dificultad, party, misión activa, localización, thumbnail narrativo o peligro. Esos datos no tienen todavía un contrato de listado autoritativo.
+- Marca “Dungeon Cortex”, título “Biblioteca de campañas” y enlace “Volver al inicio” con destino `/`.
+- Banner “Conexión interrumpida. Reintentaremos cuando vuelva la conexión.” y acción “Reintentar”.
+- Lista “Tus campañas” con tarjeta seleccionada, estado no disponible y skeleton.
+- Solo los campos “Nombre de campaña”, “Personaje”, “Última actividad”, “Nombre”, “Personaje vinculado”, “Última actividad” y “Resumen disponible”.
+- Todos los valores de datos deben seguir siendo “Dato disponible al conectar”.
+- Acciones “Crear campaña” y “Continuar campaña”; esta última debe permanecer deshabilitada sin identificador del servidor.
 
 ## Estructura
 
-1. Cabecera compacta con marca Dungeon Cortex, título “Tus campañas” y acceso secundario para volver al inicio.
-2. Introducción breve que explique que se puede continuar una campaña existente.
-3. Lista navegable de campañas a la izquierda o en la zona principal.
-4. Panel de detalle para la campaña seleccionada, limitado a los datos permitidos.
-5. Acción primaria “Continuar campaña”.
-6. Acción secundaria que dirija al flujo existente “Crear personaje”.
-7. Sin imágenes obligatorias; usar superficies, iniciales o geometría CSS si hace falta identificar elementos.
+1. Mantén la cabecera y el banner compactos, sin sidebar ni pestañas.
+2. Conserva lista y detalle en dos columnas si ambos paneles mantienen al menos 320 px útiles; en caso contrario, apílalos.
+3. Reduce espaciado antes que tipografía. El texto funcional no puede bajar de 14 px ni las etiquetas de 12 px.
+4. Mantén visibles las acciones principales sin usar posición fija.
+5. El fondo nocturno debe cubrir todo el viewport y no debe existir overflow horizontal.
 
 ## Estados que deben representarse
 
-- Carga mediante skeletons con dimensiones estables.
-- Vacío con explicación y acción “Crear personaje”.
-- Error recuperable con acción “Reintentar”.
-- Sesión no autenticada con mensaje claro y acción de acceso.
-- Conexión perdida o degradada mediante banner textual.
-- Campaña no disponible o no activa con motivo visible y acción deshabilitada.
+- Seleccionado mediante texto/estructura además del color.
+- Carga mediante skeleton estático o compatible con `prefers-reduced-motion`.
+- Error recuperable mediante “Campaña no disponible” y “Reintentar”.
+- Conexión perdida mediante el banner textual.
+- Acción no disponible mediante estado deshabilitado y nombre accesible.
 
 ## Restricciones funcionales
 
 - Esta generación es una propuesta visual, no una implementación.
 - No presupongas que `GET /api/campaign` ya existe.
-- No calcules ni infieras estados, fechas relativas o acciones legales en el cliente.
-- “Continuar campaña” solo representa navegación futura a `/campaign/{id}`.
-- Usa texto de muestra neutral y claramente ficticio, sin presentar reglas o resultados mecánicos.
+- No calcules ni infieras estados, fechas, acciones legales o valores mecánicos en el cliente.
+- No uses nombres propios, datos ficticios, ilustraciones ni textos promocionales.
+- No uses `href="#"`, controles basados en `div` ni targets menores de 44 × 44 px.
+- Mantén foco visible, orden de teclado lógico, landmarks y nombres accesibles.
+- No cambies el design system ni introduzcas librerías o assets.
