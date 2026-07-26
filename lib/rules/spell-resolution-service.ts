@@ -53,6 +53,10 @@ const SPELL_SELECT = {
   data: true,
 };
 
+function normalizeSpellName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 async function findCachedSpell(
   db: SpellResolutionDb,
   query: string
@@ -63,18 +67,20 @@ async function findCachedSpell(
   });
   if (exactId) return exactId;
 
+  const normalizedQuery = normalizeSpellName(query);
+  if (!normalizedQuery) return null;
+
   const candidates = await db.srdSpell.findMany({
-    where: { name: { contains: query, mode: "insensitive" } },
+    where: { name: { contains: normalizedQuery, mode: "insensitive" } },
     orderBy: { name: "asc" },
     take: 5,
     select: SPELL_SELECT,
   });
-  const normalizedQuery = query.toLowerCase().trim();
-  return (
-    candidates.find((spell) => spell.name.toLowerCase() === normalizedQuery) ??
-    candidates[0] ??
-    null
+  const exactMatches = candidates.filter(
+    (spell) => normalizeSpellName(spell.name) === normalizedQuery
   );
+
+  return exactMatches.length === 1 ? exactMatches[0] : null;
 }
 
 export async function resolveCachedSpell(
