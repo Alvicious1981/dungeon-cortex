@@ -43,9 +43,14 @@ export interface WeaponProperties {
   damageBonus: number;
   /** "slashing" | "piercing" | "bludgeoning" | "fire" | … */
   damageType: string;
+  /** Canonical SRD weapon_range: "Melee" | "Ranged". */
+  weaponRange?: "Melee" | "Ranged";
   /** Weapon range in feet for ranged weapons; undefined for melee */
   rangeNormal?: number;
   rangeLong?: number;
+  /** Canonical SRD throw_range for thrown weapons. */
+  throwRangeNormal?: number;
+  throwRangeLong?: number;
   /** D&D 5e weapon properties, e.g. ["finesse", "light", "thrown"] */
   weaponProperties?: string[];
 }
@@ -271,8 +276,13 @@ export async function addItem(
       damageDice: info.damageDice || "1d4",
       damageBonus: 0,
       damageType: info.damageType || "bludgeoning",
+      weaponRange: info.weaponRange === "Melee" || info.weaponRange === "Ranged"
+        ? info.weaponRange
+        : undefined,
       rangeNormal: info.rangeNormal,
       rangeLong: info.rangeLong,
+      throwRangeNormal: info.throwRangeNormal,
+      throwRangeLong: info.throwRangeLong,
       weaponProperties: info.properties
     };
   } else if (info.armorCategory) {

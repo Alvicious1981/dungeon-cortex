@@ -43,7 +43,6 @@ import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
-  calculateFootprintDistance,
   getAoETargets,
   normalizeSizeCategory,
   validateMovement,
@@ -52,12 +51,13 @@ import {
   type TacticalMap,
 } from "@/lib/rules/geometry";
 import { getSrdRaceWalkingSpeedFt } from "@/lib/rules/movement";
+import { resolveWeaponAttackProfile } from "@/lib/rules/weapons";
 import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import type { ContextCombatant } from "@/lib/memory/context";
+import type { ContextCombatant, ContextInventoryItem } from "@/lib/memory/context";
 import type { PartyInventoryState } from "@/lib/rules/exploration";
 
 const ActionBodySchema = z.object({
@@ -82,46 +82,12 @@ function sseFrame(frame: ActionStreamFrame): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
 }
 
-function resolveWeaponRange(
-  properties: { rangeNormal?: unknown; rangeLong?: unknown } | null | undefined,
-  attacker: ContextCombatant,
-  target: ContextCombatant,
-  map: TacticalMap
-): {
-  distanceFt: number;
-  maxRangeFt: number;
-  longRangeDisadvantage: boolean;
-  isMeleeAttack: boolean;
-} {
-  const rawNormal = properties?.rangeNormal;
-  const rawLong = properties?.rangeLong;
-  const normalRangeFt = typeof rawNormal === "number" && rawNormal > 0 ? rawNormal : 5;
-  const longRangeFt = typeof rawLong === "number" && rawLong >= normalRangeFt
-    ? rawLong
-    : normalRangeFt;
-  const distanceFt = calculateFootprintDistance(
-    {
-      id: attacker.id,
-      x: attacker.x,
-      y: attacker.y,
-      size: normalizeSizeCategory(attacker.size),
-    },
-    {
-      id: target.id,
-      x: target.x,
-      y: target.y,
-      size: normalizeSizeCategory(target.size),
-    },
-    map.gridType,
-    map.cellSize
-  );
+function findMainHandWeapon(inventory: ContextInventoryItem[]): ContextInventoryItem | null {
+  return inventory.find((item) => item.type === "weapon" && item.equippedSlot === "MAIN_HAND") ?? null;
+}
 
-  return {
-    distanceFt,
-    maxRangeFt: longRangeFt,
-    longRangeDisadvantage: distanceFt > normalRangeFt,
-    isMeleeAttack: rawNormal === undefined && rawLong === undefined,
-  };
+function getCharacterProficiencyBonus(level: number | undefined): number {
+  return calculateProficiency(level ?? 1);
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -308,18 +274,18 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         return NextResponse.json({ error: "The selected hostile target is invalid." }, { status: 400 });
       }
 
-      const foundWeapon = context.character.inventory.find(
-        (i) => i.type === "weapon" && i.equippedSlot === "MAIN_HAND"
-      );
+      const foundWeapon = findMainHandWeapon(context.character.inventory);
 
       const charStats = context.character.stats as Record<string, number>;
-      const strMod = abilityModifier(charStats.STR ?? 10);
+      const weaponProps = foundWeapon
+        ? getItemProperties({ ...foundWeapon, characterId: context.character.id }, "weapon")
+        : null;
       
       const weaponDice = foundWeapon 
-        ? (foundWeapon.properties as Record<string, unknown>).damageDice as string ?? "1d4"
+        ? weaponProps?.damageDice ?? "1d4"
         : "1d4";
       const weaponBonus = foundWeapon 
-        ? (foundWeapon.properties as Record<string, unknown>).damageBonus as number ?? 0 
+        ? weaponProps?.damageBonus ?? 0
         : 0;
 
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
@@ -329,12 +295,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           { status: 409 }
         );
       }
-      const range = resolveWeaponRange(
-        foundWeapon?.properties as { rangeNormal?: unknown; rangeLong?: unknown } | undefined,
-        playerCombatant,
-        targets[0]!,
-        activeEncounter.map
-      );
+      const range = resolveWeaponAttackProfile({
+        properties: weaponProps,
+        attacker: playerCombatant,
+        target: targets[0]!,
+        map: activeEncounter.map,
+        actorStats: charStats,
+      });
       if (range.distanceFt > range.maxRangeFt) {
         return NextResponse.json(
           { error: `Target is out of range (${range.distanceFt} ft > ${range.maxRangeFt} ft).` },
@@ -342,7 +309,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = strMod + 2; // Proficiency baseline
+      const attackModifier = range.attackAbilityModifier + getCharacterProficiencyBonus(context.character.level);
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({
@@ -361,9 +328,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           targetCombatants: targets,
           weaponName: foundWeapon?.name || "Unarmed",
           weaponDice,
-          damageType: ((foundWeapon?.properties as Record<string, unknown>)?.damageType || "bludgeoning") as DamageType,
+          damageType: (weaponProps?.damageType || "bludgeoning") as DamageType,
           attackModifier,
-          flatDamageBonus: strMod + weaponBonus,
+          flatDamageBonus: range.damageAbilityModifier + weaponBonus,
           attackDisadvantage: range.longRangeDisadvantage,
           isMeleeAttack: range.isMeleeAttack,
           playerCharacterId: context.character.id,
@@ -853,14 +820,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         return NextResponse.json({ error: `Target "${intent.targetName}" not found.` }, { status: 400 });
       }
 
-      const foundWeapon = context.character.inventory.find(item => item.type === "weapon");
-      if (!foundWeapon) {
-        return NextResponse.json({ error: "No weapon found." }, { status: 400 });
-      }
-
-      const weaponProps = getItemProperties({...foundWeapon, characterId: context.character.id}, "weapon");
+      const foundWeapon = findMainHandWeapon(context.character.inventory);
+      const weaponProps = foundWeapon
+        ? getItemProperties({ ...foundWeapon, characterId: context.character.id }, "weapon")
+        : null;
       const charStats = context.character.stats as Record<string, number>;
-      const strMod = abilityModifier(charStats.STR ?? 10);
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       if (!context.activeEncounter.map || !playerCombatant) {
         return NextResponse.json(
@@ -868,12 +832,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           { status: 409 }
         );
       }
-      const range = resolveWeaponRange(
-        weaponProps,
-        playerCombatant,
-        targets[0]!,
-        context.activeEncounter.map
-      );
+      const range = resolveWeaponAttackProfile({
+        properties: weaponProps,
+        attacker: playerCombatant,
+        target: targets[0]!,
+        map: context.activeEncounter.map,
+        actorStats: charStats,
+      });
       if (range.distanceFt > range.maxRangeFt) {
         return NextResponse.json(
           { error: `Target is out of range (${range.distanceFt} ft > ${range.maxRangeFt} ft).` },
@@ -881,7 +846,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = strMod + 2;
+      const attackModifier = range.attackAbilityModifier + getCharacterProficiencyBonus(context.character.level);
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({
@@ -898,11 +863,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorName: context.character.name,
           actorConditions: playerConditions,
           targetCombatants: targets,
-          weaponName: foundWeapon.name,
+          weaponName: foundWeapon?.name || "Unarmed",
           weaponDice: weaponProps?.damageDice || "1d4",
-          damageType: (weaponProps?.damageType as DamageType) || "slashing",
+          damageType: (weaponProps?.damageType as DamageType) || "bludgeoning",
           attackModifier,
-          flatDamageBonus: strMod + (weaponProps?.damageBonus || 0),
+          flatDamageBonus: range.damageAbilityModifier + (weaponProps?.damageBonus || 0),
           attackDisadvantage: range.longRangeDisadvantage,
           isMeleeAttack: range.isMeleeAttack,
           playerCharacterId: context.character.id,

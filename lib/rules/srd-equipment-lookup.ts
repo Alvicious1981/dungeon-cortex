@@ -15,6 +15,8 @@ export interface EquipmentInfo {
   twoHandedDamageType: string | null;
   rangeNormal: number | null;
   rangeLong: number | null;
+  throwRangeNormal: number | null;
+  throwRangeLong: number | null;
   armorCategory: string | null;
   armorClassBase: number | null;
   armorClassDexBonus: boolean | null;
@@ -23,6 +25,23 @@ export interface EquipmentInfo {
   stealthDisadvantage: boolean | null;
   desc: string | null;
   properties: string[];
+}
+
+function extractThrowRange(data: unknown): { normal: number | null; long: number | null } {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { normal: null, long: null };
+  }
+  const throwRange = (data as { throw_range?: unknown }).throw_range;
+  if (!throwRange || typeof throwRange !== "object" || Array.isArray(throwRange)) {
+    return { normal: null, long: null };
+  }
+
+  const normal = (throwRange as { normal?: unknown }).normal;
+  const long = (throwRange as { long?: unknown }).long;
+  return {
+    normal: typeof normal === "number" ? normal : null,
+    long: typeof long === "number" ? long : null,
+  };
 }
 
 export async function getEquipmentInfo(query: string): Promise<EquipmentInfo | null> {
@@ -43,6 +62,8 @@ export async function getEquipmentInfo(query: string): Promise<EquipmentInfo | n
 
   if (!item) return null;
 
+  const throwRange = extractThrowRange(item.data);
+
   return {
     name: item.name,
     equipmentCategory: item.equipmentCategory,
@@ -58,6 +79,8 @@ export async function getEquipmentInfo(query: string): Promise<EquipmentInfo | n
     twoHandedDamageType: item.twoHandedDamageType,
     rangeNormal: item.rangeNormal,
     rangeLong: item.rangeLong,
+    throwRangeNormal: throwRange.normal,
+    throwRangeLong: throwRange.long,
     armorCategory: item.armorCategory,
     armorClassBase: item.armorClassBase,
     armorClassDexBonus: item.armorClassDexBonus,

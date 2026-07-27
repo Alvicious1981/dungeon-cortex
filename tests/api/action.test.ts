@@ -267,6 +267,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
             damageDice: "1d6",
             damageBonus: 0,
             damageType: "piercing",
+            weaponRange: "Ranged",
             rangeNormal: 20,
             rangeLong: 60,
           },
@@ -295,6 +296,111 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect.objectContaining({ action: "Attack" }),
       prisma
     );
+  });
+
+  it("uses Dexterity for ranged weapon attacks", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20,
+        ac: 14, conditions: [], x: 0, y: 0, size: "Medium",
+      },
+      {
+        id: "t1", name: "Goblin", isPlayer: false, hp: 10, maxHp: 10,
+        ac: 12, conditions: [], x: 6, y: 0, size: "Medium",
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1",
+        name: "Hero",
+        stats: { STR: 8, DEX: 16 },
+        inventory: [{
+          id: "bow-1",
+          name: "Shortbow",
+          type: "weapon",
+          equippedSlot: "MAIN_HAND",
+          properties: {
+            damageDice: "1d6",
+            damageBonus: 0,
+            damageType: "piercing",
+            weaponRange: "Ranged",
+            rangeNormal: 20,
+            rangeLong: 60,
+            weaponProperties: ["ammunition", "two-handed"],
+          },
+        }],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        map: { gridType: "SQUARE", width: 12, height: 8, cellSize: 5 },
+        combatants,
+      },
+    });
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(200);
+    expect(prisma.combatant.update).toHaveBeenCalled();
+  });
+
+  it("accepts reach weapons at 10 ft in melee mode", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20,
+        ac: 14, conditions: [], x: 0, y: 0, size: "Medium",
+      },
+      {
+        id: "t1", name: "Goblin", isPlayer: false, hp: 10, maxHp: 10,
+        ac: 12, conditions: [], x: 2, y: 0, size: "Medium",
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1",
+        name: "Hero",
+        stats: { STR: 10, DEX: 16 },
+        inventory: [{
+          id: "whip-1",
+          name: "Whip",
+          type: "weapon",
+          equippedSlot: "MAIN_HAND",
+          properties: {
+            damageDice: "1d4",
+            damageBonus: 0,
+            damageType: "slashing",
+            weaponRange: "Melee",
+            rangeNormal: 5,
+            weaponProperties: ["finesse", "reach"],
+          },
+        }],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        map: { gridType: "SQUARE", width: 12, height: 8, cellSize: 5 },
+        combatants,
+      },
+    });
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(200);
+    expect(prisma.combatant.update).toHaveBeenCalled();
   });
 
   it("rejects a weapon attack without an explicit target", async () => {
