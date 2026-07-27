@@ -93,7 +93,7 @@ describe("resolveCachedSpell", () => {
     ]);
 
     const result = await resolveCachedSpell({
-      query: "Acid Splash",
+      query: "  aCiD   sPlAsH  ",
       slotLevel: 0,
       spellcastingMod: 3,
       characterLevel: 11,
@@ -106,6 +106,56 @@ describe("resolveCachedSpell", () => {
       saveAbility: "dex",
     });
     expect(db.srdSpell.findMany).toHaveBeenCalledOnce();
+  });
+
+  it("returns null for a partial name even when it has a single candidate", async () => {
+    const result = await resolveCachedSpell({
+      query: "Fire",
+      slotLevel: 3,
+      spellcastingMod: 4,
+      characterLevel: 5,
+      db: createDb([
+        {
+          id: "fireball",
+          indexSlug: "fireball",
+          name: "Fireball",
+          level: 3,
+          concentration: false,
+          data: {},
+        },
+      ]),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when a partial name has multiple candidates", async () => {
+    const result = await resolveCachedSpell({
+      query: "Fire",
+      slotLevel: 3,
+      spellcastingMod: 4,
+      characterLevel: 5,
+      db: createDb([
+        {
+          id: "fire-bolt",
+          indexSlug: "fire-bolt",
+          name: "Fire Bolt",
+          level: 0,
+          concentration: false,
+          data: {},
+        },
+        {
+          id: "fireball",
+          indexSlug: "fireball",
+          name: "Fireball",
+          level: 3,
+          concentration: false,
+          data: {},
+        },
+      ]),
+    });
+
+    expect(result).toBeNull();
   });
 
   it("returns null instead of inventing mechanics for a cache miss", async () => {

@@ -46,9 +46,9 @@ test.describe("authenticated full-session flow", () => {
     const characterName = `E2E Sentinel ${Date.now()}`;
 
     await page.goto("/character/create");
-    await page.getByLabel("Character Name").fill(characterName);
-    await page.getByLabel("Race").selectOption("human");
-    await page.getByLabel("Class").selectOption("fighter");
+    await page.getByLabel("Nombre del personaje").fill(characterName);
+    await page.getByLabel("Linaje").selectOption("human");
+    await page.getByLabel("Clase").selectOption("fighter");
 
     const characterResponsePromise = page.waitForResponse(
       (response) =>
@@ -62,7 +62,7 @@ test.describe("authenticated full-session flow", () => {
         response.request().method() === "POST",
       { timeout: 30_000 }
     );
-    await page.getByRole("button", { name: "Begin Adventure" }).click();
+    await page.getByRole("button", { name: "Comenzar aventura" }).click();
 
     const characterResponse = await characterResponsePromise;
     expect(characterResponse.status()).toBe(201);
@@ -97,8 +97,8 @@ test.describe("authenticated full-session flow", () => {
         response.url().endsWith(`/api/campaign/${campaignId}/action`) &&
         response.request().method() === "POST"
     );
-    await page.getByLabel("Your action").fill("I inspect the chamber.");
-    await page.getByRole("button", { name: "Act", exact: true }).click();
+    await page.getByLabel("Tu acción").fill("I inspect the chamber.");
+    await page.getByRole("button", { name: "Actuar", exact: true }).click();
     expect((await actionResponse).status()).toBe(200);
 
     await expect(sessionState).toContainText("narrative", { ignoreCase: true });

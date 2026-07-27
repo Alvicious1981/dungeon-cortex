@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "workflow": "human-in-loop",
+  "sourceProject": {
+    "name": "projects/131487819236908093",
+    "projectId": "131487819236908093",
+    "title": "Dragons and Dungeons Main Menu",
+    "visibility": "PUBLIC",
+    "userRole": "OWNER",
+    "deviceType": "DESKTOP",
+    "visibleScreenCount": 17,
+    "screens": [
+      {
+        "key": "character-background",
+        "screenId": "d6d39c14079645c9b4ef874199da44cd",
+        "sourceScreen": "projects/131487819236908093/screens/d6d39c14079645c9b4ef874199da44cd",
+        "originalTitle": "Character Background & Narrative Summary",
+        "width": 2560,
+        "height": 2074,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "world-map",
+        "screenId": "023fdcf27ef44a8283f7af6a1e77a1b5",
+        "sourceScreen": "projects/131487819236908093/screens/023fdcf27ef44a8283f7af6a1e77a1b5",
+        "originalTitle": "Cartografía de los Reinos Olvidados",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "character-skills",
+        "screenId": "8698ceeef01b48ada06d4b5653fd3b24",
+        "sourceScreen": "projects/131487819236908093/screens/8698ceeef01b48ada06d4b5653fd3b24",
+        "originalTitle": "Skills Selection Parchment Interface",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "spellbook",
+        "screenId": "d66dd0ef41144947b9f9d6965ad520d5",
+        "sourceScreen": "projects/131487819236908093/screens/d66dd0ef41144947b9f9d6965ad520d5",
+        "originalTitle": "Grimorio de Hechizos Arcanos",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "inventory",
+        "screenId": "1851c9f34ce14e13b30c03f238f4e0d5",
+        "sourceScreen": "projects/131487819236908093/screens/1851c9f34ce14e13b30c03f238f4e0d5",
+        "originalTitle": "Inventory & Equipment Forge Interface",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "trade",
+        "screenId": "ca4108e9caf64e92928fc43c83a8edcc",
+        "sourceScreen": "projects/131487819236908093/screens/ca4108e9caf64e92928fc43c83a8edcc",
+        "originalTitle": "Balanza del Mercader: Sistema de Comercio",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "character-class",
+        "screenId": "9f059bf50ba844829bab16cee166efd9",
+        "sourceScreen": "projects/131487819236908093/screens/9f059bf50ba844829bab16cee166efd9",
+        "originalTitle": "Character Class Selection Panel",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "campaign-library",
+        "screenId": "c31196fa0ee04ca8bbf943c7e636b0c3",
+        "instanceId": "d2c02b9e9ba041d4aec9554fbb8d1cfa",
+        "sourceScreen": "projects/131487819236908093/screens/c31196fa0ee04ca8bbf943c7e636b0c3",
+        "originalTitle": "Dragons and Dungeons Load Game Screen",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "selected_reference"
+      },
+      {
+        "key": "dialogue",
+        "screenId": "7f8a67265d284c5eb8704e426318c5b5",
+        "sourceScreen": "projects/131487819236908093/screens/7f8a67265d284c5eb8704e426318c5b5",
+        "originalTitle": "Cónclave de Sombras: Sistema de Diálogo",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "main-menu",
+        "screenId": "e01db2690988419abb29b7c83be78808",
+        "sourceScreen": "projects/131487819236908093/screens/e01db2690988419abb29b7c83be78808",
+        "originalTitle": "Dragons and Dungeons Menu - Epic Battle Variant",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "death-summary",
+        "screenId": "af6eb697603b4cbabe83a9937af1459b",
+        "sourceScreen": "projects/131487819236908093/screens/af6eb697603b4cbabe83a9937af1459b",
+        "originalTitle": "Dragons and Dungeons Load Game Screen",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "character-attributes",
+        "screenId": "14ad6bd69a8b4dca8f94f1995d9dfc46",
+        "sourceScreen": "projects/131487819236908093/screens/14ad6bd69a8b4dca8f94f1995d9dfc46",
+        "originalTitle": "Attribute Selection & Arcane Runes",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "journal",
+        "screenId": "3e8a36aba3c646ac80b7cd0a1d04a955",
+        "sourceScreen": "projects/131487819236908093/screens/3e8a36aba3c646ac80b7cd0a1d04a955",
+        "originalTitle": "Diario de Historia y Bocetos de Gesta",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "victory-summary",
+        "screenId": "621fda058f244775bcf744407d787917",
+        "sourceScreen": "projects/131487819236908093/screens/621fda058f244775bcf744407d787917",
+        "originalTitle": "Dragons and Dungeons Load Game Screen",
+        "width": 3696,
+        "height": 3500,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "gameplay-hud",
+        "screenId": "2be19c4723d4422a8827217ada2d52a9",
+        "sourceScreen": "projects/131487819236908093/screens/2be19c4723d4422a8827217ada2d52a9",
+        "originalTitle": "Dragons and Dungeons Main Gameplay HUD",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "loot-summary",
+        "screenId": "5f17695491c14b7a9891809c60f78acd",
+        "sourceScreen": "projects/131487819236908093/screens/5f17695491c14b7a9891809c60f78acd",
+        "originalTitle": "Dragons and Dungeons Load Game Screen",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      },
+      {
+        "key": "level-up",
+        "screenId": "d5d823e257fb4aa3937f301331787c16",
+        "sourceScreen": "projects/131487819236908093/screens/d5d823e257fb4aa3937f301331787c16",
+        "originalTitle": "Pantalla de Subida de Nivel - Resplandor Rúnico",
+        "width": 2560,
+        "height": 2048,
+        "disposition": "composition_only"
+      }
+    ]
+  },
+  "targetProject": {
+    "name": "projects/15974794171746286383",
+    "projectId": "15974794171746286383",
+    "title": "Dungeon Cortex — Product UI",
+    "visibility": "PRIVATE",
+    "userRole": "OWNER",
+    "origin": "STITCH",
+    "projectType": "PROJECT_DESIGN",
+    "createTime": "2026-07-26T18:53:51.817563Z",
+    "designSystem": {
+      "name": "assets/8784545861071306268",
+      "version": "2",
+      "displayName": "Dungeon Cortex — Archivo nocturno editorial"
+    },
+    "screens": {}
+  },
+  "queue": {
+    "currentPage": "campaign-library",
+    "status": "ready",
+    "deviceType": "DESKTOP",
+    "sourceReference": {
+      "instanceId": "d2c02b9e9ba041d4aec9554fbb8d1cfa",
+      "sourceScreen": "projects/131487819236908093/screens/c31196fa0ee04ca8bbf943c7e636b0c3"
+    }
+  }
+}

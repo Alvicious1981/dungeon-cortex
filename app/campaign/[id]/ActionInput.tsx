@@ -182,7 +182,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
       router.refresh();
     } catch {
       const errorMessage =
-        "The connection to the Dungeon Master was severed. Please refresh or try your action again.";
+        "Se perdió la conexión con el Director de Mazmorras. Actualiza o vuelve a intentar la acción.";
       setStreamError(errorMessage);
       dispatchDungeonActionError({ ...detail, request, error: errorMessage });
     } finally {
@@ -198,7 +198,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
       if (!detail?.request.action.trim()) return;
 
       if (submittingRef.current) {
-        const errorMessage = "Another action is already being resolved.";
+        const errorMessage = "Ya se está resolviendo otra acción.";
         dispatchDungeonActionError({ ...detail, error: errorMessage });
         dispatchDungeonActionEnd(detail);
         return;
@@ -247,12 +247,12 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             className="mb-1.5 block text-[9px] font-semibold uppercase tracking-[0.2em]"
             style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
           >
-            Dungeon Master
+            Director de Mazmorras
           </span>
 
           {streamingText === "" && !streamError ? (
             /* Skeleton: DM is generating — show pulsing placeholder lines */
-            <div className="space-y-2 animate-pulse" aria-label="Dungeon Master is narrating…" role="status">
+            <div className="space-y-2 animate-pulse" aria-label="El Director de Mazmorras está narrando…" role="status">
               <div
                 className="h-3 rounded"
                 style={{ background: "rgba(228,168,50,0.08)", width: "85%" }}
@@ -303,7 +303,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
                     className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider"
                     style={{ fontFamily: "var(--font-cinzel), serif" }}
                   >
-                    Clear & Sync
+                    Descartar y sincronizar
                   </button>
                 </div>
               )}
@@ -314,14 +314,14 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
 
       {/* ── Input form ────────────────────────────────────────────────────── */}
       <form onSubmit={handleSubmit} className="space-y-3">
-        <p className="dc-kicker">Declare your intent</p>
+        <p className="dc-kicker">Declara tu intención</p>
         {aliveHostileTargets.length > 0 && (
           <fieldset className="rounded-md border border-neutral-700/80 bg-neutral-900/60 px-3 py-2">
             <legend
               className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400"
               style={{ fontFamily: "var(--font-cinzel), serif" }}
             >
-              Target
+              Objetivos
             </legend>
             <div className="flex flex-wrap gap-2">
               {aliveHostileTargets.map((target) => {
@@ -356,7 +356,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
 
         <div className="flex gap-2">
           <label htmlFor="action-input" className="sr-only">
-            Your action
+            Tu acción
           </label>
           <input
             id="action-input"
@@ -365,7 +365,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             onChange={(e) => setAction(e.target.value)}
             disabled={submitting}
             maxLength={500}
-            placeholder="What do you do?"
+            placeholder="¿Qué intentas hacer?"
             className="dc-field min-h-12 flex-1 rounded-sm px-3 py-2 text-sm placeholder:text-[#675c4a] disabled:opacity-50"
           />
           <button
@@ -373,7 +373,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             disabled={submitting || !action.trim()}
             className="dc-button-primary min-w-20 rounded-sm px-4 py-3 text-sm uppercase tracking-wider"
           >
-            {submitting ? "…" : "Act"}
+            {submitting ? "…" : "Actuar"}
           </button>
         </div>
 

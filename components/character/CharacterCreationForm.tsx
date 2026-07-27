@@ -2,16 +2,26 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle, RotateCcw, ShieldCheck } from "lucide-react";
-import { ABILITY_SCORES, STANDARD_ARRAY, type AbilityScore } from "@/lib/dnd-api/constants";
+import { LoaderCircle, RotateCcw } from "lucide-react";
+import {
+  ABILITY_SCORES,
+  STANDARD_ARRAY,
+  type AbilityScore,
+} from "@/lib/dnd-api/constants";
 import type { ApiListItem } from "@/lib/dnd-api/client";
+import { Button } from "@/components/ui/Button";
+import { StatusMessage } from "@/components/ui/StatusMessage";
 
 interface Props {
   races: ApiListItem[];
   classes: ApiListItem[];
 }
 
-type CreationStep = "idle" | "creating-character" | "creating-campaign" | "campaign-error";
+type CreationStep =
+  | "idle"
+  | "creating-character"
+  | "creating-campaign"
+  | "campaign-error";
 
 const DEFAULT_STATS: Record<AbilityScore, number> = {
   STR: 15,
@@ -22,9 +32,29 @@ const DEFAULT_STATS: Record<AbilityScore, number> = {
   CHA: 8,
 };
 
+const ABILITY_LABELS: Record<AbilityScore, string> = {
+  STR: "FUE",
+  DEX: "DES",
+  CON: "CON",
+  INT: "INT",
+  WIS: "SAB",
+  CHA: "CAR",
+};
+
+const ABILITY_NAMES: Record<AbilityScore, string> = {
+  STR: "Fuerza",
+  DEX: "Destreza",
+  CON: "Constitución",
+  INT: "Inteligencia",
+  WIS: "Sabiduría",
+  CHA: "Carisma",
+};
+
 const SCORE_BOUNDS = { min: 3, max: 20 };
 
-async function readResponse(response: Response): Promise<{ id?: string; error?: string }> {
+async function readResponse(
+  response: Response
+): Promise<{ id?: string; error?: string }> {
   try {
     return (await response.json()) as { id?: string; error?: string };
   } catch {
@@ -37,12 +67,16 @@ export default function CharacterCreationForm({ races, classes }: Props) {
   const [name, setName] = useState("");
   const [race, setRace] = useState(races[0]?.index ?? "");
   const [characterClass, setCharacterClass] = useState(classes[0]?.index ?? "");
-  const [stats, setStats] = useState<Record<AbilityScore, number>>(DEFAULT_STATS);
+  const [stats, setStats] =
+    useState<Record<AbilityScore, number>>(DEFAULT_STATS);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<CreationStep>("idle");
-  const [createdCharacterId, setCreatedCharacterId] = useState<string | null>(null);
+  const [createdCharacterId, setCreatedCharacterId] = useState<string | null>(
+    null
+  );
 
-  const submitting = step === "creating-character" || step === "creating-campaign";
+  const submitting =
+    step === "creating-character" || step === "creating-campaign";
   const characterLocked = createdCharacterId !== null;
 
   function handleStatChange(ability: AbilityScore, raw: string) {
@@ -50,7 +84,10 @@ export default function CharacterCreationForm({ races, classes }: Props) {
     if (Number.isNaN(value)) return;
     setStats((previous) => ({
       ...previous,
-      [ability]: Math.min(SCORE_BOUNDS.max, Math.max(SCORE_BOUNDS.min, value)),
+      [ability]: Math.min(
+        SCORE_BOUNDS.max,
+        Math.max(SCORE_BOUNDS.min, value)
+      ),
     }));
   }
 
@@ -68,18 +105,26 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       const response = await fetch("/api/campaign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ characterId, title: `${name.trim()}'s Chronicle` }),
+        body: JSON.stringify({
+          characterId,
+          title: `Crónica de ${name.trim()}`,
+        }),
       });
       const data = await readResponse(response);
       if (!response.ok || !data.id) {
         setStep("campaign-error");
-        setError(data.error ?? "Your hero was saved, but the chronicle could not be opened.");
+        setError(
+          data.error ??
+            "El personaje se ha guardado, pero no se pudo abrir la campaña."
+        );
         return;
       }
       router.push(`/campaign/${data.id}`);
     } catch {
       setStep("campaign-error");
-      setError("Your hero is safe, but the chronicle is still unreachable. Try opening it again.");
+      setError(
+        "El personaje está a salvo, pero la campaña sigue inaccesible. Inténtalo de nuevo."
+      );
     }
   }
 
@@ -97,12 +142,17 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       const response = await fetch("/api/character", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, race, class: characterClass, stats }),
+        body: JSON.stringify({
+          name,
+          race,
+          class: characterClass,
+          stats,
+        }),
       });
       const data = await readResponse(response);
       if (!response.ok || !data.id) {
         setStep("idle");
-        setError(data.error ?? "The hero could not be created.");
+        setError(data.error ?? "No se pudo crear el personaje.");
         return;
       }
 
@@ -110,26 +160,37 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       await createCampaign(data.id);
     } catch {
       setStep("idle");
-      setError("The archive is unreachable. Check your connection and try again.");
+      setError(
+        "No se puede acceder al archivo. Comprueba la conexión e inténtalo de nuevo."
+      );
     }
   }
 
   const submitLabel =
     step === "creating-character"
-      ? "Forging hero…"
+      ? "Guardando personaje…"
       : step === "creating-campaign"
-        ? "Opening chronicle…"
+        ? "Abriendo campaña…"
         : step === "campaign-error"
-          ? "Retry opening chronicle"
-          : "Begin Adventure";
+          ? "Reintentar apertura"
+          : "Comenzar aventura";
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6" aria-describedby="creation-status">
-      <fieldset disabled={submitting || characterLocked} className="space-y-5 disabled:opacity-75">
-        <legend className="sr-only">Hero identity</legend>
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-7"
+      aria-describedby="creation-help creation-status"
+    >
+      <fieldset
+        disabled={submitting || characterLocked}
+        className="space-y-5 disabled:opacity-70"
+      >
+        <legend className="dc-heading mb-5 text-xl font-semibold">
+          Identidad
+        </legend>
         <div>
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[#c8b898]" htmlFor="name">
-            Character Name
+          <label className="dc-label" htmlFor="name">
+            Nombre del personaje
           </label>
           <input
             id="name"
@@ -139,41 +200,98 @@ export default function CharacterCreationForm({ races, classes }: Props) {
             required
             maxLength={60}
             autoComplete="off"
-            placeholder="e.g. Thorin Ironforge"
-            className="dc-field w-full rounded-sm px-3 py-2 text-sm placeholder:text-[#675c4a]"
+            placeholder="Por ejemplo: Mara Veln"
+            className="dc-field px-3 py-2.5"
           />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[#c8b898]" htmlFor="race">Race</label>
-            <select id="race" value={race} onChange={(event) => setRace(event.target.value)} className="dc-field w-full rounded-sm px-3 py-2 text-sm">
-              {races.map((entry) => <option key={entry.index} value={entry.index}>{entry.name}</option>)}
+            <label className="dc-label" htmlFor="race">
+              Linaje
+            </label>
+            <select
+              id="race"
+              value={race}
+              onChange={(event) => setRace(event.target.value)}
+              className="dc-field px-3 py-2.5"
+            >
+              {races.map((entry) => (
+                <option key={entry.index} value={entry.index}>
+                  {entry.name}
+                </option>
+              ))}
             </select>
           </div>
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[#c8b898]" htmlFor="class">Class</label>
-            <select id="class" value={characterClass} onChange={(event) => setCharacterClass(event.target.value)} className="dc-field w-full rounded-sm px-3 py-2 text-sm">
-              {classes.map((entry) => <option key={entry.index} value={entry.index}>{entry.name}</option>)}
+            <label className="dc-label" htmlFor="class">
+              Clase
+            </label>
+            <select
+              id="class"
+              value={characterClass}
+              onChange={(event) => setCharacterClass(event.target.value)}
+              className="dc-field px-3 py-2.5"
+            >
+              {classes.map((entry) => (
+                <option key={entry.index} value={entry.index}>
+                  {entry.name}
+                </option>
+              ))}
             </select>
           </div>
         </div>
       </fieldset>
 
-      <fieldset disabled={submitting || characterLocked} className="m-0 border-0 p-0 disabled:opacity-75">
-        <div className="mb-3 flex items-center justify-between gap-4">
-          <legend className="text-xs font-semibold uppercase tracking-[0.16em] text-[#c8b898]">Ability Scores</legend>
-          <button type="button" onClick={resetToStandardArray} className="inline-flex min-h-11 items-center gap-1.5 text-xs text-amber-300 underline decoration-amber-500/50 underline-offset-4 hover:text-amber-200">
-            <RotateCcw aria-hidden="true" size={14} /> Standard array
-          </button>
+      <fieldset
+        disabled={submitting || characterLocked}
+        className="m-0 border-0 p-0 disabled:opacity-70"
+      >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <legend className="dc-heading text-xl font-semibold">
+            Características
+          </legend>
+          <Button
+            type="button"
+            variant="ghost"
+            size="compact"
+            onClick={resetToStandardArray}
+          >
+            <RotateCcw aria-hidden="true" size={16} />
+            Restaurar matriz
+          </Button>
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        <p className="dc-help mb-4">
+          Usa la matriz estándar 15, 14, 13, 12, 10 y 8. El servidor validará
+          los valores al guardar.
+        </p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {ABILITY_SCORES.map((ability) => {
             const inputId = `ability-${ability.toLowerCase()}`;
             return (
-              <div key={ability} className="rounded-sm border border-[#332a45] bg-black/25 p-2 text-center">
-                <label htmlFor={inputId} className="mb-1 block font-mono text-[11px] font-bold text-[#a78bfa]">{ability}</label>
-                <input id={inputId} aria-label={`${ability} score`} type="number" value={stats[ability]} min={SCORE_BOUNDS.min} max={SCORE_BOUNDS.max} onChange={(event) => handleStatChange(ability, event.target.value)} className="dc-field w-full rounded-sm px-1 py-1 text-center font-mono text-sm" />
+              <div
+                key={ability}
+                className="rounded-lg border border-[var(--dc-border)] bg-[var(--dc-canvas-soft)] p-2.5 text-center"
+              >
+                <label
+                  htmlFor={inputId}
+                  title={ABILITY_NAMES[ability]}
+                  className="mb-1.5 block font-mono text-xs font-bold text-[var(--dc-mechanical)]"
+                >
+                  {ABILITY_LABELS[ability]}
+                </label>
+                <input
+                  id={inputId}
+                  aria-label={`Puntuación de ${ABILITY_NAMES[ability]}`}
+                  type="number"
+                  value={stats[ability]}
+                  min={SCORE_BOUNDS.min}
+                  max={SCORE_BOUNDS.max}
+                  onChange={(event) =>
+                    handleStatChange(ability, event.target.value)
+                  }
+                  className="dc-field px-1 py-2 text-center font-mono"
+                />
               </div>
             );
           })}
@@ -182,21 +300,31 @@ export default function CharacterCreationForm({ races, classes }: Props) {
 
       <div id="creation-status" aria-live="polite" aria-atomic="true">
         {error && (
-          <div role="alert" className="rounded-sm border border-red-400/40 bg-red-950/50 px-4 py-3 text-sm text-red-200">
-            <p className="font-semibold">The archive resisted.</p>
-            <p className="mt-1 text-red-200/80">{error}</p>
-          </div>
+          <StatusMessage tone="error" title="No se pudo completar el proceso">
+            {error}
+          </StatusMessage>
         )}
         {characterLocked && !error && (
-          <p className="flex items-center gap-2 text-sm text-emerald-300"><ShieldCheck aria-hidden="true" size={17} /> Hero saved. Opening the campaign…</p>
+          <StatusMessage tone="success" title="Personaje guardado">
+            Abriendo la campaña confirmada por el servidor…
+          </StatusMessage>
         )}
       </div>
 
-      <button type="submit" disabled={submitting} className="dc-button-primary w-full rounded-sm px-4 py-3 text-sm uppercase tracking-[0.12em]">
-        {submitting && <LoaderCircle aria-hidden="true" className="mr-2 animate-spin motion-reduce:animate-none" size={18} />}
+      <Button type="submit" loading={submitting} className="w-full">
+        {submitting && (
+          <LoaderCircle
+            aria-hidden="true"
+            className="animate-spin motion-reduce:animate-none"
+            size={18}
+          />
+        )}
         {submitLabel}
-      </button>
-      <p className="text-center text-xs leading-relaxed text-[#8f826d]">Rules, rolls and campaign state remain resolved by Dungeon Cortex.</p>
+      </Button>
+      <p id="creation-help" className="dc-help text-center">
+        Dungeon Cortex conserva en el backend las reglas, las tiradas y el
+        estado de campaña.
+      </p>
     </form>
   );
 }

@@ -172,8 +172,8 @@ export default function MacroDeck({ inCombat }: Props) {
     );
   }
 
-  const sectionLabel = inCombat ? "Combat actions" : "Exploration actions";
-  const modeLabel = inCombat ? "Combat" : "Exploration";
+  const sectionLabel = inCombat ? "Acciones de combate" : "Acciones de exploración";
+  const modeLabel = inCombat ? "Combate" : "Exploración";
   const modeBorderColor = inCombat
     ? "rgba(239,68,68,0.25)"
     : "rgba(228,168,50,0.18)";
