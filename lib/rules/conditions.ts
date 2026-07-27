@@ -145,10 +145,11 @@ export function isKnownCondition(conditionId: string): boolean {
 export function evaluateAdvantage(
   attackerConditions: string[],
   defenderConditions: string[],
-  isMelee: boolean
+  isMelee: boolean,
+  situationalDisadvantage = false
 ): { advantage: boolean; disadvantage: boolean } {
   let hasAdvantage = false;
-  let hasDisadvantage = false;
+  let hasDisadvantage = situationalDisadvantage;
 
   // 1. Process Attacker's own conditions.
   for (const condId of attackerConditions) {

@@ -309,6 +309,7 @@ export interface ComputeConsequencesInput {
   attackerConditions: string[];
   defenderConditions: string[];
   isMelee: boolean;
+  attackDisadvantage?: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
 }
@@ -652,6 +653,7 @@ export function computeConsequences(
     attackerConditions,
     defenderConditions,
     isMelee,
+    attackDisadvantage = false,
   } = input;
 
   // 1. Resolve the attack roll.
@@ -660,7 +662,9 @@ export function computeConsequences(
     targetAC,
     attackerConditions,
     defenderConditions,
-    isMelee
+    isMelee,
+    undefined,
+    attackDisadvantage
   );
 
   // 2. Roll damage and hit location only on a hit.
@@ -886,7 +890,8 @@ export function resolveAttackRoll(
   defenderConditions: string[] = [],
   /** @deprecated — Use spatialContext instead. */
   isMelee: boolean = true,
-  spatialContext?: AttackSpatialContext
+  spatialContext?: AttackSpatialContext,
+  situationalDisadvantage = false
 ): AttackRollResult {
   if (spatialContext) {
     const distance = calculateDistance(
@@ -913,7 +918,8 @@ export function resolveAttackRoll(
   const { advantage, disadvantage } = evaluateAdvantage(
     attackerConditions,
     defenderConditions,
-    isMelee
+    isMelee,
+    situationalDisadvantage
   );
 
   const rollResult: RollResult = advantage

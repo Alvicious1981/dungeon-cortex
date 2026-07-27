@@ -14,6 +14,14 @@ describe("SessionControls", () => {
     refresh.mockReset();
   });
 
+  it("renders a non-interactive not-started state without a durable session", () => {
+    render(<SessionControls campaignId="campaign-1" session={null} />);
+
+    expect(screen.getByText("Sesión sin iniciar")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "End session" })).toBeNull();
+  });
+
   it("shows the durable mode and pauses through the authenticated route", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ session: { status: "PAUSED" } }), { status: 200 })

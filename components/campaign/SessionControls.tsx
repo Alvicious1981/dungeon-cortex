@@ -45,13 +45,23 @@ export default function SessionControls({
     }
   }
 
-  const status = session?.status ?? "ACTIVE";
-  const mode = session?.mode ?? "PREPARING";
+  if (!session) {
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-2" aria-label="Session state">
+        <span className="min-h-11 rounded-full border border-[#4f4264] px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[#c4b5fd]">
+          Sesión sin iniciar
+        </span>
+      </div>
+    );
+  }
+
+  const status = session.status;
+  const mode = session.mode;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2" aria-label="Session state">
       <span className="min-h-11 rounded-full border border-[#4f4264] px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[#c4b5fd]">
-        Session {session?.sessionNumber ?? 1} · {mode.toLowerCase()}
+        Session {session.sessionNumber} · {mode.toLowerCase()}
       </span>
       {status === "PAUSED" ? (
         <button type="button" disabled={pending} onClick={() => command("resume")} className="min-h-11 rounded-sm border border-emerald-700/70 px-3 text-xs font-semibold uppercase tracking-wider text-emerald-200 disabled:opacity-50">

@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
 import { resolveCachedSpell } from "@/lib/rules/spell-resolution-service";
+import { checkpointAcceptedAction } from "@/lib/db/session-journal";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -137,6 +138,10 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(prisma.encounter.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "enc_123" }
     }));
+    expect(checkpointAcceptedAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "Attack" }),
+      prisma
+    );
   });
 
   it("advances the turn when an item is used during combat", async () => {
@@ -235,6 +240,61 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       error: expect.stringContaining("out of range"),
     });
     expect(prisma.combatant.update).not.toHaveBeenCalled();
+  });
+
+  it("accepts a target in a weapon's long range and checkpoints the attack", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20,
+        ac: 14, conditions: [], x: 0, y: 0, size: "Medium",
+      },
+      {
+        id: "t1", name: "Goblin", isPlayer: false, hp: 10, maxHp: 10,
+        ac: 12, conditions: [], x: 6, y: 0, size: "Medium",
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1",
+        name: "Hero",
+        stats: { STR: 10 },
+        inventory: [{
+          id: "bow-1",
+          name: "Shortbow",
+          type: "weapon",
+          equippedSlot: "MAIN_HAND",
+          properties: {
+            damageDice: "1d6",
+            damageBonus: 0,
+            damageType: "piercing",
+            rangeNormal: 20,
+            rangeLong: 60,
+          },
+        }],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        map: { gridType: "SQUARE", width: 12, height: 8, cellSize: 5 },
+        combatants,
+      },
+    });
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(200);
+    expect(prisma.combatant.update).toHaveBeenCalled();
+    expect(checkpointAcceptedAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "Attack" }),
+      prisma
+    );
   });
 
   it("rejects a weapon attack without an explicit target", async () => {
@@ -341,6 +401,42 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ code: "OUT_OF_BOUNDS" });
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+  });
+
+  it("derives legacy combatant speed from the character's SRD race", async () => {
+    const player = {
+      id: "p1", name: "Dwarf Hero", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      initiativeTotal: 15, conditions: [], stats: {},
+      concentrationSpellId: null, x: 0, y: 0, size: "Medium",
+    };
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1", name: "Dwarf Hero", race: "dwarf",
+        stats: { STR: 10 }, inventory: [],
+      },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        map: { gridType: "SQUARE", width: 8, height: 8, cellSize: 5 },
+        combatants: [player],
+      },
+    });
+    (prisma.encounter.findUnique as any).mockResolvedValue({
+      map: { gridType: "SQUARE", width: 8, height: 8, cellSize: 5 },
+      combatants: [player],
+    });
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action: "Move", targetX: 6, targetY: 0 }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: "SPEED_EXCEEDED" });
     expect(prisma.combatant.update).not.toHaveBeenCalled();
   });
 

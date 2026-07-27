@@ -335,6 +335,28 @@ export function getCombatantOccupiedSquares(
 }
 
 /**
+ * Returns the minimum distance between any squares occupied by two combatants.
+ * Range checks must use footprints rather than top-left persistence anchors.
+ */
+export function calculateFootprintDistance(
+  from: GridCombatant,
+  to: GridCombatant,
+  gridType: TacticalGridType,
+  cellSize = 5
+): number {
+  let minimum = Number.POSITIVE_INFINITY
+  for (const fromSquare of getCombatantOccupiedSquares(from)) {
+    for (const toSquare of getCombatantOccupiedSquares(to)) {
+      minimum = Math.min(
+        minimum,
+        calculateDistance(fromSquare, toSquare, gridType, cellSize)
+      )
+    }
+  }
+  return minimum
+}
+
+/**
  * Returns true if `point` is occupied by any combatant in `combatants`.
  *
  * O(n × s²) — acceptable for typical encounter sizes (≤ 20 combatants,

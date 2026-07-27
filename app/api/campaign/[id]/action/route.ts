@@ -43,7 +43,7 @@ import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
-  calculateDistance,
+  calculateFootprintDistance,
   getAoETargets,
   normalizeSizeCategory,
   validateMovement,
@@ -51,6 +51,7 @@ import {
   type GridCombatant,
   type TacticalMap,
 } from "@/lib/rules/geometry";
+import { getSrdRaceWalkingSpeedFt } from "@/lib/rules/movement";
 import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
@@ -79,6 +80,48 @@ const encoder = new TextEncoder();
 
 function sseFrame(frame: ActionStreamFrame): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
+}
+
+function resolveWeaponRange(
+  properties: { rangeNormal?: unknown; rangeLong?: unknown } | null | undefined,
+  attacker: ContextCombatant,
+  target: ContextCombatant,
+  map: TacticalMap
+): {
+  distanceFt: number;
+  maxRangeFt: number;
+  longRangeDisadvantage: boolean;
+  isMeleeAttack: boolean;
+} {
+  const rawNormal = properties?.rangeNormal;
+  const rawLong = properties?.rangeLong;
+  const normalRangeFt = typeof rawNormal === "number" && rawNormal > 0 ? rawNormal : 5;
+  const longRangeFt = typeof rawLong === "number" && rawLong >= normalRangeFt
+    ? rawLong
+    : normalRangeFt;
+  const distanceFt = calculateFootprintDistance(
+    {
+      id: attacker.id,
+      x: attacker.x,
+      y: attacker.y,
+      size: normalizeSizeCategory(attacker.size),
+    },
+    {
+      id: target.id,
+      x: target.x,
+      y: target.y,
+      size: normalizeSizeCategory(target.size),
+    },
+    map.gridType,
+    map.cellSize
+  );
+
+  return {
+    distanceFt,
+    maxRangeFt: longRangeFt,
+    longRangeDisadvantage: distanceFt > normalRangeFt,
+    isMeleeAttack: rawNormal === undefined && rawLong === undefined,
+  };
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -203,6 +246,25 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // This bypasses LLM intent parsing to ensure 100% reliability for core mechanics.
   const MACRO_ACTIONS = ["Attack", "End Turn", "Move"];
   let actionTypeForSession: string | undefined;
+  let actionCheckpointed = false;
+  const checkpointMode = () => gameEvents.some((event) => event.type === "COMBAT_ENDED")
+    ? "RESOLUTION" as const
+    : deriveSessionMode({
+        hasActiveEncounter: Boolean(context.activeEncounter),
+        actionType: actionTypeForSession,
+      });
+  const checkpointInTransaction = async (tx: Prisma.TransactionClient) => {
+    await checkpointAcceptedAction({
+      campaignId,
+      sessionId: reservation.sessionId,
+      requestId,
+      action: trimmedAction,
+      mode: checkpointMode(),
+      events: gameEvents,
+    }, tx);
+    actionCheckpointed = true;
+  };
+
   if (MACRO_ACTIONS.includes(trimmedAction)) {
     if (!context.activeEncounter) {
       return NextResponse.json({ error: "No active encounter." }, { status: 400 });
@@ -228,7 +290,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           round: context.activeEncounter!.round,
         });
         gameEvents.push(...finalizeOutcome.events);
-      });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
     if (trimmedAction === "Attack") {
@@ -266,19 +329,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           { status: 409 }
         );
       }
-      const weaponRange = foundWeapon
-        ? (foundWeapon.properties as Record<string, unknown>).rangeNormal
-        : undefined;
-      const maxRangeFt = typeof weaponRange === "number" && weaponRange > 0 ? weaponRange : 5;
-      const distanceFt = calculateDistance(
+      const range = resolveWeaponRange(
+        foundWeapon?.properties as { rangeNormal?: unknown; rangeLong?: unknown } | undefined,
         playerCombatant,
         targets[0]!,
-        activeEncounter.map.gridType,
-        activeEncounter.map.cellSize
+        activeEncounter.map
       );
-      if (distanceFt > maxRangeFt) {
+      if (range.distanceFt > range.maxRangeFt) {
         return NextResponse.json(
-          { error: `Target is out of range (${distanceFt} ft > ${maxRangeFt} ft).` },
+          { error: `Target is out of range (${range.distanceFt} ft > ${range.maxRangeFt} ft).` },
           { status: 400 }
         );
       }
@@ -305,6 +364,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           damageType: ((foundWeapon?.properties as Record<string, unknown>)?.damageType || "bludgeoning") as DamageType,
           attackModifier,
           flatDamageBonus: strMod + weaponBonus,
+          attackDisadvantage: range.longRangeDisadvantage,
+          isMeleeAttack: range.isMeleeAttack,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
 
@@ -324,7 +385,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             targets: attackOutcome.consequences,
           }));
         }
-      });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
     if (trimmedAction === "Move") {
@@ -384,7 +446,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
         const combatantStats = (playerCombatant.stats as Record<string, unknown>) ?? {};
         const rawSpeed = combatantStats.speed;
-        const speedFt = typeof rawSpeed === "number" && rawSpeed > 0 ? rawSpeed : 30;
+        const speedFt = typeof rawSpeed === "number" && rawSpeed > 0
+          ? rawSpeed
+          : getSrdRaceWalkingSpeedFt(context.character.race);
+        if (speedFt === null) {
+          return {
+            valid: false as const,
+            status: 409,
+            code: "MISSING_SPEED",
+            error: "Character walking speed is not available from authoritative SRD data.",
+          };
+        }
         const gridCombatants: GridCombatant[] = encounterState.combatants.map((combatant) => ({
           id: combatant.id,
           x: combatant.x,
@@ -420,13 +492,26 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           data: { x: targetX, y: targetY },
         });
 
-        return {
+        const result = {
           valid: true as const,
           combatantId: playerCombatant.id,
           fromX: playerCombatant.x,
           fromY: playerCombatant.y,
           distanceFt: movement.distanceFt,
         };
+        gameEvents.push({
+          type: "MOVE_COMBATANT",
+          payload: {
+            combatantId: result.combatantId,
+            fromX: result.fromX,
+            fromY: result.fromY,
+            toX: targetX,
+            toY: targetY,
+            distanceFt: result.distanceFt,
+          },
+        });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+        return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
       if (!moveResult.valid) {
@@ -436,17 +521,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      gameEvents.push({
-        type: "MOVE_COMBATANT",
-        payload: {
-          combatantId: moveResult.combatantId,
-          fromX: moveResult.fromX,
-          fromY: moveResult.fromY,
-          toX: targetX,
-          toY: targetY,
-          distanceFt: moveResult.distanceFt,
-        },
-      });
     }
 
     // After mechanical resolution, proceed to narration using the NEW state.
@@ -668,7 +742,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             targets: spellOutcome.consequences,
           }));
         }
-      });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
   if (intent.actionType === "use_item" && intent.targetName) {
@@ -723,7 +798,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           });
           gameEvents.push(...finalizeOutcome.events);
         }
-      });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
     // ── Gate: equip ─────────────────────────────────────────────────────────────
@@ -751,13 +827,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           where: { id: foundItem.id },
           data: { equippedSlot: targetSlot },
         });
-      });
-      
-      // Send event to update the UI
-      gameEvents.push({
-        type: "EQUIP_ITEM",
-        payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
-      });
+        gameEvents.push({
+          type: "EQUIP_ITEM",
+          payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
+        });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
@@ -793,18 +868,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           { status: 409 }
         );
       }
-      const maxRangeFt = typeof weaponProps?.rangeNormal === "number" && weaponProps.rangeNormal > 0
-        ? weaponProps.rangeNormal
-        : 5;
-      const distanceFt = calculateDistance(
+      const range = resolveWeaponRange(
+        weaponProps,
         playerCombatant,
         targets[0]!,
-        context.activeEncounter.map.gridType,
-        context.activeEncounter.map.cellSize
+        context.activeEncounter.map
       );
-      if (distanceFt > maxRangeFt) {
+      if (range.distanceFt > range.maxRangeFt) {
         return NextResponse.json(
-          { error: `Target is out of range (${distanceFt} ft > ${maxRangeFt} ft).` },
+          { error: `Target is out of range (${range.distanceFt} ft > ${range.maxRangeFt} ft).` },
           { status: 400 }
         );
       }
@@ -831,6 +903,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           damageType: (weaponProps?.damageType as DamageType) || "slashing",
           attackModifier,
           flatDamageBonus: strMod + (weaponProps?.damageBonus || 0),
+          attackDisadvantage: range.longRangeDisadvantage,
+          isMeleeAttack: range.isMeleeAttack,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
 
@@ -850,22 +924,27 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             targets: attackOutcome.consequences,
           }));
         }
-      });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
     // ── Gate: rest ──────────────────────────────────────────────────────────────
     if (intent.actionType === "rest") {
       try {
-        const restResult = await resolveRest({
-          campaignId,
-          characterId: context.character.id,
-          restType: intent.restType ?? "short",
-        });
+        await prisma.$transaction(async (tx) => {
+          const restResult = await resolveRest({
+            campaignId,
+            characterId: context.character.id,
+            restType: intent.restType ?? "short",
+            tx,
+          });
 
-        gameEvents.push({
-          type: "REST_COMPLETED",
-          payload: { ...restResult.facts },
-        });
+          gameEvents.push({
+            type: "REST_COMPLETED",
+            payload: { ...restResult.facts },
+          });
+          await checkpointInTransaction(tx as Prisma.TransactionClient);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       } catch (error) {
         if (error instanceof RestServiceError) {
           const status = error.code === "ACTIVE_ENCOUNTER" ? 409 : 400;
@@ -908,18 +987,30 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
              }
           }
         }
-      });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
     // ── Gate: move ──────────────────────────────────────────────────────────────
     if (intent.actionType === "move" && intent.destination) {
       const moveResult = await prisma.$transaction(async (tx) => {
-        return await moveToNode(
+        const result = await moveToNode(
           tx as Prisma.TransactionClient,
           campaignId,
           intent.destination!
         );
-      });
+        if (!result.success) return result;
+
+        gameEvents.push({
+          type: "PLAYER_MOVE",
+          payload: {
+            targetNodeId: result.targetNodeId,
+            passageType: result.passageType,
+          },
+        });
+        await checkpointInTransaction(tx as Prisma.TransactionClient);
+        return result;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
       if (!moveResult.success) {
         return NextResponse.json(
@@ -928,31 +1019,21 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      gameEvents.push({
-        type: "PLAYER_MOVE",
-        payload: { 
-          targetNodeId: moveResult.targetNodeId,
-          passageType: moveResult.passageType 
-        },
-      });
     }
   }
 
   // Only accepted actions enter the canonical transcript. Rejected requests
   // return before this checkpoint and therefore cannot become campaign facts.
-  await checkpointAcceptedAction({
-    campaignId,
-    sessionId: reservation.sessionId,
-    requestId,
-    action: trimmedAction,
-    mode: gameEvents.some((event) => event.type === "COMBAT_ENDED")
-      ? "RESOLUTION"
-      : deriveSessionMode({
-          hasActiveEncounter: Boolean(context.activeEncounter),
-          actionType: actionTypeForSession,
-        }),
-    events: gameEvents,
-  });
+  if (!actionCheckpointed) {
+    await checkpointAcceptedAction({
+      campaignId,
+      sessionId: reservation.sessionId,
+      requestId,
+      action: trimmedAction,
+      mode: checkpointMode(),
+      events: gameEvents,
+    });
+  }
   // ── State is now safely mutated.  Start the narrative stream. ────────────────
 
   const narrativeContext = adaptCombatEventsToNarrativeContext(gameEvents);

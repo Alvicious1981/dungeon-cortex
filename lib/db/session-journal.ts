@@ -82,7 +82,7 @@ export async function reserveActionRequest(input: {
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function checkpointAcceptedAction(input: {
+interface AcceptedActionCheckpoint {
   campaignId: string;
   sessionId: string;
   requestId: string;
@@ -90,56 +90,73 @@ export async function checkpointAcceptedAction(input: {
   mode: SessionModeName;
   events: GameEvent[];
   additionalLogs?: Array<{ role: string; content: string }>;
-}): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    const session = await tx.gameSession.findUnique({
-      where: { id: input.sessionId },
-      select: { status: true, mode: true, eventSequence: true },
-    });
-    if (!session || session.status !== "ACTIVE") {
-      throw new Error("The active session disappeared before the action checkpoint.");
-    }
+}
 
-    assertSessionTransition(session.mode, input.mode);
-    const records = [
-      { type: "ACTION_ACCEPTED", payload: { action: input.action } },
-      ...input.events,
-    ];
-    const lastSequence = session.eventSequence + records.length;
+async function checkpointAcceptedActionInTransaction(
+  tx: Prisma.TransactionClient,
+  input: AcceptedActionCheckpoint
+): Promise<void> {
+  const session = await tx.gameSession.findUnique({
+    where: { id: input.sessionId },
+    select: { status: true, mode: true, eventSequence: true },
+  });
+  if (!session || session.status !== "ACTIVE") {
+    throw new Error("The active session disappeared before the action checkpoint.");
+  }
 
-    await tx.gameSession.update({
-      where: { id: input.sessionId },
-      data: { mode: input.mode, eventSequence: lastSequence },
-    });
-    await tx.actionRequest.update({
-      where: {
-        campaignId_requestId: {
-          campaignId: input.campaignId,
-          requestId: input.requestId,
-        },
-      },
-      data: { status: "COMPLETED" },
-    });
-    await tx.gameLog.createMany({
-      data: [
-        { campaignId: input.campaignId, role: "user", content: input.action },
-        ...(input.additionalLogs ?? []).map((log) => ({
-          campaignId: input.campaignId,
-          role: log.role,
-          content: log.content,
-        })),
-      ],
-    });
-    await tx.gameEventRecord.createMany({
-      data: records.map((record, index) => ({
+  assertSessionTransition(session.mode, input.mode);
+  const records = [
+    { type: "ACTION_ACCEPTED", payload: { action: input.action } },
+    ...input.events,
+  ];
+  const lastSequence = session.eventSequence + records.length;
+
+  await tx.gameSession.update({
+    where: { id: input.sessionId },
+    data: { mode: input.mode, eventSequence: lastSequence },
+  });
+  await tx.actionRequest.update({
+    where: {
+      campaignId_requestId: {
         campaignId: input.campaignId,
-        sessionId: input.sessionId,
         requestId: input.requestId,
-        sequence: session.eventSequence + index + 1,
-        type: record.type,
-        payload: JSON.parse(JSON.stringify(record.payload)) as Prisma.InputJsonValue,
+      },
+    },
+    data: { status: "COMPLETED" },
+  });
+  await tx.gameLog.createMany({
+    data: [
+      { campaignId: input.campaignId, role: "user", content: input.action },
+      ...(input.additionalLogs ?? []).map((log) => ({
+        campaignId: input.campaignId,
+        role: log.role,
+        content: log.content,
       })),
-    });
+    ],
+  });
+  await tx.gameEventRecord.createMany({
+    data: records.map((record, index) => ({
+      campaignId: input.campaignId,
+      sessionId: input.sessionId,
+      requestId: input.requestId,
+      sequence: session.eventSequence + index + 1,
+      type: record.type,
+      payload: JSON.parse(JSON.stringify(record.payload)) as Prisma.InputJsonValue,
+    })),
+  });
+}
+
+export async function checkpointAcceptedAction(
+  input: AcceptedActionCheckpoint,
+  tx?: Prisma.TransactionClient
+): Promise<void> {
+  if (tx) {
+    await checkpointAcceptedActionInTransaction(tx, input);
+    return;
+  }
+
+  await prisma.$transaction(async (transaction) => {
+    await checkpointAcceptedActionInTransaction(transaction, input);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 

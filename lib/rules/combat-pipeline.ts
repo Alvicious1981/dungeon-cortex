@@ -80,6 +80,8 @@ export interface CombatActionPayload {
   damageType?: DamageType;
   attackModifier?: number;
   flatDamageBonus?: number;
+  attackDisadvantage?: boolean;
+  isMeleeAttack?: boolean;
 
   // Spell data
   spellName?: string;
@@ -325,7 +327,8 @@ export async function executeCombatAction(
         statusApplied: [],
         attackerConditions: actorConditions,
         defenderConditions: extractConditions(target.conditions),
-        isMelee: true,
+        isMelee: payload.isMeleeAttack ?? true,
+        attackDisadvantage: payload.attackDisadvantage,
         encounterSnapshot: snapshot,
         usedSenses: [],
       });
@@ -542,4 +545,3 @@ export async function finalizeEncounterTurn(
     encounterResolved: true,
   };
 }
-

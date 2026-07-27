@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   calculateDistance,
+  calculateFootprintDistance,
   chebyshevSquares,
   gridDistanceFt,
   isInSphere,
@@ -61,6 +62,17 @@ describe("chebyshevSquares", () => {
 
   it("handles negative coordinate offsets symmetrically", () => {
     expect(chebyshevSquares({ x: -3, y: 0 }, { x: 3, y: 0 })).toBe(6)
+  })
+})
+
+describe("calculateFootprintDistance", () => {
+  it("uses the nearest occupied squares instead of persistence anchors", () => {
+    expect(calculateFootprintDistance(
+      { id: "large-attacker", x: 0, y: 0, size: "Large" },
+      { id: "target", x: 3, y: 0, size: "Medium" },
+      "SQUARE",
+      5
+    )).toBe(10)
   })
 })
 

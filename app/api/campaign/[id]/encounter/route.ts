@@ -10,6 +10,7 @@ import {
   type SizeCategory,
   type TacticalMap,
 } from "@/lib/rules/geometry";
+import { getSrdRaceWalkingSpeedFt } from "@/lib/rules/movement";
 
 interface EnemyInput {
   name: string;
@@ -167,6 +168,18 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   const stats = campaign.character.stats as Record<string, number>;
   const playerDexMod = abilityModifier(stats.DEX ?? 10);
   const playerAC = acFromInventory(campaign.character.inventory, playerDexMod);
+  const playerSpeedFt = typeof stats.speed === "number" && stats.speed > 0
+    ? stats.speed
+    : getSrdRaceWalkingSpeedFt(campaign.character.race);
+  if (playerSpeedFt === null) {
+    return NextResponse.json(
+      {
+        error: "Character walking speed is not available from authoritative SRD data.",
+        code: "MISSING_SPEED",
+      },
+      { status: 409 }
+    );
+  }
 
   const combatantInputs = [
     {
@@ -224,7 +237,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           maxHp: campaign.character.maxHp,
           ac: playerAC,
           initiativeTotal: entry.initiative,
-          stats: campaign.character.stats || {},
+          stats: {
+            ...((campaign.character.stats as Record<string, unknown>) ?? {}),
+            speed: playerSpeedFt,
+          },
           concentrationSpellId: campaign.character.concentrationSpellId,
           size: placement.size,
           x: placement.x,

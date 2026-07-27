@@ -71,6 +71,13 @@ describe("conditions and advantage logic", () => {
         disadvantage: true,
       });
     });
+
+    it("cancels long-range disadvantage against another advantage source", () => {
+      expect(evaluateAdvantage(["invisible"], [], false, true)).toEqual({
+        advantage: false,
+        disadvantage: false,
+      });
+    });
   });
 
   describe("resolveAttackRoll integration", () => {
@@ -116,6 +123,18 @@ describe("conditions and advantage logic", () => {
       expect(result.disadvantage).toBe(false);
       expect(result.roll).toBe(10);
       expect(result.dice).toEqual([10]);
+    });
+
+    it("rolls with disadvantage for a long-range attack", () => {
+      let i = 0;
+      const values = [0.7, 0.2];
+      vi.spyOn(Math, "random").mockImplementation(() => values[i++]);
+
+      const result = resolveAttackRoll(0, 10, [], [], false, undefined, true);
+
+      expect(result.disadvantage).toBe(true);
+      expect(result.roll).toBe(5);
+      expect(result.dice).toEqual([15, 5]);
     });
   });
 });

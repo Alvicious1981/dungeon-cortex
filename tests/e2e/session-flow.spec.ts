@@ -88,7 +88,7 @@ test.describe("authenticated full-session flow", () => {
     expect(campaign.userId).toBe(PRIVATE_USER_ID);
 
     const sessionState = page.getByLabel("Session state");
-    await expect(sessionState).toContainText("Session 1 · preparing", {
+    await expect(sessionState).toContainText("Sesión sin iniciar", {
       ignoreCase: true,
     });
 

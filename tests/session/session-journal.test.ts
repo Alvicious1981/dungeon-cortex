@@ -91,6 +91,30 @@ describe("session action journal", () => {
     });
   });
 
+  it("uses a caller transaction so mechanics and checkpoint share one commit boundary", async () => {
+    tx.gameSession.findUnique.mockResolvedValue({
+      status: "ACTIVE",
+      mode: "COMBAT",
+      eventSequence: 2,
+    });
+    const transactionMock = (await import("@/lib/db/prisma")).prisma.$transaction as ReturnType<typeof vi.fn>;
+    transactionMock.mockClear();
+
+    await checkpointAcceptedAction({
+      campaignId: "campaign-1",
+      sessionId: "session-1",
+      requestId: "request-123",
+      action: "Attack",
+      mode: "COMBAT",
+      events: [],
+    }, tx as never);
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(tx.actionRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: "COMPLETED" },
+    }));
+  });
+
   it("turns an abandoned reservation into a durable rejection", async () => {
     tx.actionRequest.findUnique.mockResolvedValue({
       status: "PENDING",

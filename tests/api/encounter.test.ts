@@ -39,6 +39,7 @@ describe("Encounter Route - authoritative tactical map", () => {
       status: "active",
       character: {
         name: "Aldric",
+        race: "human",
         hp: 24,
         maxHp: 24,
         stats: { DEX: 14 },
@@ -93,6 +94,7 @@ describe("Encounter Route - authoritative tactical map", () => {
     const player = createManyArgs.data.find((combatant: any) => combatant.isPlayer);
     const ogre = createManyArgs.data.find((combatant: any) => !combatant.isPlayer);
     expect(ogre).toMatchObject({ hp: 59, maxHp: 59, size: "Large" });
+    expect(player.stats).toMatchObject({ DEX: 14, speed: 30 });
     expect(player).not.toHaveProperty("zoneId");
     expect(ogre).not.toHaveProperty("zoneId");
 
@@ -105,5 +107,35 @@ describe("Encounter Route - authoritative tactical map", () => {
     expect(ogreSquares.some((square) => playerSquares.some(
       (playerSquare) => playerSquare.x === square.x && playerSquare.y === square.y
     ))).toBe(false);
+  });
+
+  it("preserves a backend-authored speed effect over the base race speed", async () => {
+    (prisma.campaign.findUnique as any).mockResolvedValue({
+      id: "campaign-1",
+      userId: "user-1",
+      status: "active",
+      character: {
+        name: "Aldric",
+        race: "human",
+        hp: 24,
+        maxHp: 24,
+        stats: { DEX: 14, speed: 20 },
+        concentrationSpellId: null,
+        inventory: [],
+      },
+    });
+    const request = new NextRequest("http://localhost/api/campaign/campaign-1/encounter", {
+      method: "POST",
+      body: JSON.stringify({
+        enemies: [{ name: "Goblin", hp: 7, maxHp: 7, dexModifier: 2 }],
+      }),
+    });
+
+    const response = await POST(request, { params: Promise.resolve({ id: "campaign-1" }) });
+
+    expect(response.status).toBe(201);
+    const createManyArgs = (prisma.combatant.createMany as any).mock.calls[0][0];
+    const player = createManyArgs.data.find((combatant: any) => combatant.isPlayer);
+    expect(player.stats.speed).toBe(20);
   });
 });
