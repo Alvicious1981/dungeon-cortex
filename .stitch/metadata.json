@@ -196,17 +196,50 @@
           "accessibilityPrototype": "passed_with_implementation_checks",
           "responsive": "pending"
         }
+      },
+      "campaign-library-1024": {
+        "screenId": "bd8ff41eed88407fbff63077466592c8",
+        "instanceId": "bd8ff41eed88407fbff63077466592c8",
+        "sourceScreen": "projects/15974794171746286383/screens/bd8ff41eed88407fbff63077466592c8",
+        "title": "Biblioteca de Campañas — Dungeon Cortex (1024x768)",
+        "width": 2560,
+        "height": 2048,
+        "deviceType": "DESKTOP",
+        "targetViewport": {
+          "width": 1024,
+          "height": 768,
+          "orientation": "landscape"
+        },
+        "canvasInstance": {
+          "x": 1344,
+          "y": 3356,
+          "width": 1280,
+          "height": 1024
+        },
+        "disposition": "approved_reference",
+        "sourceReference": "5477968ff817486dbc4f024a36ed67c5",
+        "supersedes": [
+          "bb811e13283e4178b381992144138398",
+          "9a7177f4b9774ffbb8dfc31806d5a52e"
+        ],
+        "review": {
+          "visual": "passed",
+          "canon": "passed",
+          "accessibilityPrototype": "passed_with_stitch_focus_preview_limitation",
+          "responsive": "passed_1024x768",
+          "zoom": "passed"
+        }
       }
     },
-    "updateTime": "2026-07-26T23:30:19.067104Z"
+    "updateTime": "2026-07-26T23:58:34.807559Z"
   },
   "queue": {
-    "currentPage": "campaign-library-1024",
+    "currentPage": "campaign-library-768",
     "status": "ready",
     "deviceType": "TABLET",
     "sourceReference": {
-      "instanceId": "5477968ff817486dbc4f024a36ed67c5",
-      "sourceScreen": "projects/15974794171746286383/screens/5477968ff817486dbc4f024a36ed67c5"
+      "instanceId": "bd8ff41eed88407fbff63077466592c8",
+      "sourceScreen": "projects/15974794171746286383/screens/bd8ff41eed88407fbff63077466592c8"
     }
   }
 }

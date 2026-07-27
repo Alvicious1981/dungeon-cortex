@@ -1,10 +1,10 @@
 ---
-page: campaign-library-1024
-device: tablet-landscape
-source_screen: 5477968ff817486dbc4f024a36ed67c5
+page: campaign-library-768
+device: tablet-portrait
+source_screen: bd8ff41eed88407fbff63077466592c8
 ---
 
-Adapta la pantalla de producción aprobada `5477968ff817486dbc4f024a36ed67c5` a 1024 × 768.
+Adapta la pantalla de producción aprobada `bd8ff41eed88407fbff63077466592c8` a 768 × 1024.
 
 Conserva su identidad, contenido, estados y jerarquía. Esta tarea es exclusivamente responsive: no añadas funciones, campos, navegación global, campañas, personajes ni datos mecánicos.
 
@@ -33,28 +33,33 @@ Conserva su identidad, contenido, estados y jerarquía. Esta tarea es exclusivam
 - Todos los valores de datos deben seguir siendo “Dato disponible al conectar”.
 - Acciones “Crear campaña” y “Continuar campaña”; esta última debe permanecer deshabilitada sin identificador del servidor.
 
-## Estructura
+## Estructura a 768 × 1024
 
-1. Mantén la cabecera y el banner compactos, sin sidebar ni pestañas.
-2. Conserva lista y detalle en dos columnas si ambos paneles mantienen al menos 320 px útiles; en caso contrario, apílalos.
-3. Reduce espaciado antes que tipografía. El texto funcional no puede bajar de 14 px ni las etiquetas de 12 px.
-4. Mantén visibles las acciones principales sin usar posición fija.
-5. El fondo nocturno debe cubrir todo el viewport y no debe existir overflow horizontal.
+1. Usa una sola columna en este orden: cabecera, banner, lista de campañas y detalle seleccionado.
+2. Permite que la cabecera y el banner distribuyan su contenido en varias líneas cuando sea necesario; conserva todos los textos y acciones.
+3. No uses sidebar, pestañas, posición fija ni paneles pegajosos.
+4. Mantén entre 20 y 24 px de padding lateral y una separación mínima de 8 px entre controles contiguos.
+5. Las acciones del detalle pueden ocupar todo el ancho disponible y apilarse para mantener targets de al menos 44 × 44 px.
+6. Reduce espaciado antes que tipografía. El texto funcional no puede bajar de 14 px ni las etiquetas de 12 px.
+7. El fondo nocturno debe cubrir todo el viewport y no debe existir overflow horizontal.
 
 ## Estados que deben representarse
 
-- Seleccionado mediante texto/estructura además del color.
-- Carga mediante skeleton estático o compatible con `prefers-reduced-motion`.
+- Seleccionado mediante texto/estructura además del color y con un único control semántico `button` que use `aria-pressed`.
+- Carga mediante skeleton estático, sin animación decorativa.
 - Error recuperable mediante “Campaña no disponible” y “Reintentar”.
 - Conexión perdida mediante el banner textual.
 - Acción no disponible mediante estado deshabilitado y nombre accesible.
 
-## Restricciones funcionales
+## Restricciones funcionales y accesibles
 
 - Esta generación es una propuesta visual, no una implementación.
 - No presupongas que `GET /api/campaign` ya existe.
 - No calcules ni infieras estados, fechas, acciones legales o valores mecánicos en el cliente.
 - No uses nombres propios, datos ficticios, ilustraciones ni textos promocionales.
 - No uses `href="#"`, controles basados en `div` ni targets menores de 44 × 44 px.
-- Mantén foco visible, orden de teclado lógico, landmarks y nombres accesibles.
+- “Volver al inicio” debe conservar `href="/"`.
+- Mantén foco visible `#8dd7ff`, orden de teclado lógico, landmarks y nombres accesibles.
+- Conserva `<meta name="viewport" content="width=device-width, initial-scale=1.0">` sin `maximum-scale` ni `user-scalable=no`.
+- Respeta `prefers-reduced-motion`; el skeleton debe permanecer estático.
 - No cambies el design system ni introduzcas librerías o assets.

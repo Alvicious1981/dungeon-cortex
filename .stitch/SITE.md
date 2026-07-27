@@ -12,11 +12,12 @@ El ciclo es manual y requiere revisión humana entre pantallas. Stitch genera pr
 - Proyecto de producción: `15974794171746286383` (`Dungeon Cortex — Product UI`, privado).
 - Design system de producción: `assets/8784545861071306268`.
 - Pantalla fuente prioritaria: instancia `d2c02b9e9ba041d4aec9554fbb8d1cfa`, pantalla `c31196fa0ee04ca8bbf943c7e636b0c3`.
-- Pantalla de producción aprobada: instancia `5477968ff817486dbc4f024a36ed67c5`, pantalla `5477968ff817486dbc4f024a36ed67c5`.
+- Pantalla de producción aprobada a 1440 × 900: instancia `5477968ff817486dbc4f024a36ed67c5`, pantalla `5477968ff817486dbc4f024a36ed67c5`.
+- Adaptación aprobada a 1024 × 768: instancia `bd8ff41eed88407fbff63077466592c8`, pantalla `bd8ff41eed88407fbff63077466592c8`.
 
 El proyecto fuente no se edita. Sus 17 pantallas visibles aportan únicamente estructura y composición.
 
-Las pantallas de producción `cabaf929f4fe414bb8dc9d566c30f77d` y `5ea1720f03c44255b9b403ec8f3c242d` son iteraciones superadas y no deben usarse como referencia ni implementarse.
+Las pantallas de producción `cabaf929f4fe414bb8dc9d566c30f77d` y `5ea1720f03c44255b9b403ec8f3c242d` son iteraciones iniciales superadas. La pantalla `bb811e13283e4178b381992144138398` se descarta porque introdujo contenido no respaldado y las ediciones posteriores no resultaron fiables. La pantalla `9a7177f4b9774ffbb8dfc31806d5a52e` resolvió la composición, pero se descarta porque bloqueaba el zoom del navegador. Ninguna debe usarse como referencia ni implementarse.
 
 ## 3. Reglas del ciclo
 
@@ -31,8 +32,8 @@ Las pantallas de producción `cabaf929f4fe414bb8dc9d566c30f77d` y `5ea1720f03c44
 ## 4. Sitemap
 
 - [x] `campaign-library` — referencia de escritorio aprobada a 1440 × 900.
-- [ ] `campaign-library-1024` — adaptación 1024 × 768; batón actual.
-- [ ] `campaign-library-768` — adaptación 768 × 1024.
+- [x] `campaign-library-1024` — adaptación aprobada a 1024 × 768.
+- [ ] `campaign-library-768` — adaptación 768 × 1024; batón actual.
 - [ ] `campaign-library-mobile` — adaptación 390 × 844.
 - [ ] `gameplay-hud` — narración, mecánica y acciones.
 - [ ] `journal` — diario y misiones.
@@ -46,7 +47,7 @@ Las pantallas de producción `cabaf929f4fe414bb8dc9d566c30f77d` y `5ea1720f03c44
 ## 5. Roadmap
 
 1. `campaign-library` de escritorio aprobada como referencia visual y de canon.
-2. Crear y revisar las adaptaciones de 1024, 768 y 390 px antes de cualquier integración.
+2. Completar y revisar las adaptaciones responsive antes de cualquier integración: 1024 px aprobada; 768 y 390 px pendientes.
 3. Definir en una tarea separada el `GET /api/campaign` autoritativo y sus pruebas.
 4. Integrar la biblioteca en Next.js mediante una PR acotada.
 5. Continuar con el HUD principal y después con archivo, inventario y mapa.
@@ -83,4 +84,6 @@ No se consume libertad creativa mientras existan elementos del roadmap. Toda pro
 - La cabecera usa una navegación semántica y “Volver al inicio” apunta a `/`.
 - “Continuar campaña” permanece deshabilitado sin un identificador válido del servidor.
 - La revisión del prototipo comprobó contenido, canon, jerarquía, fondo de viewport completo, targets mínimos y estructura semántica.
+- La adaptación aprobada a 1024 × 768 conserva lista y detalle en dos columnas, no presenta desbordamiento horizontal, mantiene los placeholders neutrales y permite zoom del navegador.
+- El lienzo de previsualización de Stitch suprime visualmente los estilos de foco mediante CSS propio. La implementación deberá restaurar y verificar el foco `#8dd7ff`; esta limitación no cambia la intención del diseño.
 - Responsive, contraste medido y comportamiento real con teclado deberán verificarse otra vez en la implementación y en cada adaptación.
