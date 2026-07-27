@@ -3,6 +3,13 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { rollInitiative, acFromMonsterData, acFromInventory } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
+import {
+  findAvailablePosition,
+  normalizeSizeCategory,
+  type GridCombatant,
+  type SizeCategory,
+  type TacticalMap,
+} from "@/lib/rules/geometry";
 
 interface EnemyInput {
   name: string;
@@ -31,6 +38,44 @@ function isEnemyInput(v: unknown): v is EnemyInput {
     typeof o.maxHp === "number" && o.maxHp > 0 &&
     typeof o.dexModifier === "number"
   );
+}
+
+function allocateEncounterPositions(enemySizes: SizeCategory[]): {
+  map: TacticalMap;
+  positions: Map<string, GridCombatant>;
+} {
+  const occupiedSquares = 1 + enemySizes.reduce((total, size) => {
+    const side = size === "Large" ? 2 : size === "Huge" ? 3 : size === "Gargantuan" ? 4 : 1;
+    return total + side * side;
+  }, 0);
+  let dimension = Math.max(10, Math.ceil(Math.sqrt(occupiedSquares)) + 2);
+
+  for (;;) {
+    const map: TacticalMap = {
+      gridType: "SQUARE",
+      width: dimension,
+      height: dimension,
+      cellSize: 5,
+    };
+    const player: GridCombatant = {
+      id: "player",
+      x: Math.floor(dimension / 2),
+      y: Math.floor(dimension / 2),
+      size: "Medium",
+    };
+    const placed: GridCombatant[] = [player];
+
+    for (const [index, size] of enemySizes.entries()) {
+      const position = findAvailablePosition(map, size, placed);
+      if (!position) break;
+      placed.push({ id: `enemy-${index}`, ...position, size });
+    }
+
+    if (placed.length === enemySizes.length + 1) {
+      return { map, positions: new Map(placed.map((combatant) => [combatant.id, combatant])) };
+    }
+    dimension += 2;
+  }
 }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
@@ -96,13 +141,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // Resolve HP, DEX, and AC for enemies from SRD or inputs
   const resolvedEnemies = await Promise.all(
     enemies.map(async (e) => {
-      if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
+      if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 }, size: "Medium" as const };
       const srdMonster = await prisma.srdMonster.findUnique({
         where: { id: e.monsterIndex },
       });
-      if (!srdMonster) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
+      if (!srdMonster) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 }, size: "Medium" as const };
       const data = srdMonster.data as Record<string, unknown>;
       const abilityScores = (data.ability_scores || {}) as Record<string, number>;
+      const size = normalizeSizeCategory(String(data.size ?? srdMonster.size ?? "Medium"));
       return {
         ...e,
         hp: typeof data.hit_points === "number" ? data.hit_points : e.hp,
@@ -113,6 +159,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             : e.dexModifier,
         ac: acFromMonsterData(data),
         stats: abilityScores,
+        size,
       };
     })
   );
@@ -136,20 +183,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const { order } = rollInitiative(combatantInputs);
 
-  // Define spatial scaling
-  const totalCombatants = combatantInputs.length;
-  const mapSize = totalCombatants > 9 ? 5 : 3;
-  const centerX = Math.floor(mapSize / 2);
-  const centerY = Math.floor(mapSize / 2);
-
-  // Available slots for enemies (all cells except center)
-  const enemySlots: Array<{ x: number; y: number }> = [];
-  for (let x = 0; x < mapSize; x++) {
-    for (let y = 0; y < mapSize; y++) {
-      if (x === centerX && y === centerY) continue;
-      enemySlots.push({ x, y });
-    }
-  }
+  const { map, positions } = allocateEncounterPositions(
+    resolvedEnemies.map((enemy) => enemy.size)
+  );
 
   // Transaction for atomic spatial initialization
   const encounter = await prisma.$transaction(async (tx) => {
@@ -163,52 +199,25 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       },
     });
 
-    // 2. Create Zones (Grid Cells)
-    const zonesToCreate = [];
-    for (let x = 0; x < mapSize; x++) {
-      for (let y = 0; y < mapSize; y++) {
-        zonesToCreate.push({
-          encounterId: e.id,
-          name: `z_${x}_${y}`,
-          x,
-          y,
-        });
-      }
-    }
-
-    // Using a loop to ensure we have the created objects with IDs
-    const createdZones = await Promise.all(
-      zonesToCreate.map((z) => tx.zone.create({ data: z }))
-    );
-
-    // Map coordinates to zone IDs for fast lookup
-    const zoneMap: Record<string, string> = {};
-    createdZones.forEach((z) => {
-      zoneMap[`${z.x},${z.y}`] = z.id;
+    // 2. Persist one authoritative tactical map.
+    await tx.encounterMap.create({
+      data: {
+        encounterId: e.id,
+        gridType: map.gridType,
+        width: map.width,
+        height: map.height,
+        cellSize: map.cellSize,
+      },
     });
 
-    // 3. Prepare Combatant Data with spatial placement tied to zoneId
-    let enemyIdx = 0;
+    // 3. Prepare combatants at deterministic, non-overlapping coordinates.
     const combatantData = order.map((entry) => {
       const isPlayer = entry.id === "player";
-      let posX, posY;
-
-      if (isPlayer) {
-        posX = centerX;
-        posY = centerY;
-      } else {
-        const slot = enemySlots[enemyIdx % enemySlots.length];
-        posX = slot.x;
-        posY = slot.y;
-        enemyIdx++;
-      }
-      
-      const zoneId = zoneMap[`${posX},${posY}`];
+      const placement = positions.get(entry.id)!;
       
       if (isPlayer) {
         return {
           encounterId: e.id,
-          zoneId,
           name: campaign.character.name,
           isPlayer: true,
           hp: campaign.character.hp,
@@ -217,8 +226,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           initiativeTotal: entry.initiative,
           stats: campaign.character.stats || {},
           concentrationSpellId: campaign.character.concentrationSpellId,
-          x: posX,
-          y: posY,
+          size: placement.size,
+          x: placement.x,
+          y: placement.y,
         };
       }
       
@@ -227,7 +237,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
       return {
         encounterId: e.id,
-        zoneId,
         name: enemy.name,
         isPlayer: false,
         hp: enemy.hp,
@@ -235,8 +244,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         ac: enemy.ac,
         initiativeTotal: entry.initiative,
         stats: enemy.stats || {},
-        x: posX,
-        y: posY,
+        size: enemy.size,
+        x: placement.x,
+        y: placement.y,
       };
     });
 
@@ -250,7 +260,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       where: { id: e.id },
       include: {
         combatants: { orderBy: { initiativeTotal: "desc" } },
-        zones: { orderBy: [{ x: "asc" }, { y: "asc" }] },
+        map: true,
       },
     });
   });

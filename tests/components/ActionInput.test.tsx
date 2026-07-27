@@ -75,11 +75,11 @@ describe("ActionInput shared SSE transport", () => {
     await waitFor(() => expect(actionEndListener).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/campaign/campaign-1/action",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ action: "Attack", targetIds: ["enemy-1"] }),
-      })
+      expect.objectContaining({ method: "POST" })
     );
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      action: "Attack", targetIds: ["enemy-1"], requestId,
+    });
     const broadcast = gameEventListener.mock.calls[0]?.[0] as CustomEvent<{
       event: GameEvent;
     }>;
@@ -92,7 +92,7 @@ describe("ActionInput shared SSE transport", () => {
     window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
   });
 
-  it("adds selected targets to an external Attack request", async () => {
+  it("adds exactly one selected target to an external Attack request", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(`data: ${JSON.stringify({ t: "done" })}\n\n`, {
         status: 200,
@@ -123,8 +123,8 @@ describe("ActionInput shared SSE transport", () => {
       />
     );
 
-    fireEvent.click(getByRole("checkbox", { name: "Goblin Alpha10/10" }));
-    fireEvent.click(getByRole("checkbox", { name: "Goblin Beta10/10" }));
+    fireEvent.click(getByRole("radio", { name: "Goblin Alpha10/10" }));
+    fireEvent.click(getByRole("radio", { name: "Goblin Beta10/10" }));
     act(() => {
       requestDungeonAction({ action: "Attack" });
     });
@@ -132,14 +132,11 @@ describe("ActionInput shared SSE transport", () => {
     await waitFor(() => expect(actionEndListener).toHaveBeenCalledOnce());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/campaign/campaign-1/action",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          action: "Attack",
-          targetIds: ["enemy-1", "enemy-2"],
-        }),
-      })
+      expect.objectContaining({ method: "POST" })
     );
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toMatchObject({
+      action: "Attack", targetIds: ["enemy-2"], requestId: expect.any(String),
+    });
 
     window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
   });

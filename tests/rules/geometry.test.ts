@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  calculateDistance,
   chebyshevSquares,
   gridDistanceFt,
   isInSphere,
@@ -11,6 +12,12 @@ import {
   GridPoint,
   GridCombatant,
   SizeCategory,
+  findAvailablePosition,
+  getAoETargets,
+  isPlacementWithinMap,
+  normalizeSizeCategory,
+  validateMovement,
+  type TacticalMap,
 } from "@/lib/rules/geometry"
 
 // ---------------------------------------------------------------------------
@@ -322,5 +329,221 @@ describe("isOccupied", () => {
     // Square just outside the footprint
     expect(isOccupied({ x: 3, y: 0 }, [c])).toBe(false)
     expect(isOccupied({ x: 0, y: 3 }, [c])).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Milestone V complete geometry contract
+// ---------------------------------------------------------------------------
+
+describe("calculateDistance", () => {
+  it("uses Chebyshev distance and the supplied cell size for square grids", () => {
+    expect(calculateDistance({ x: 0, y: 0 }, { x: 3, y: 2 }, "SQUARE", 10)).toBe(30)
+  })
+
+  it("uses axial/cube distance for hex grids", () => {
+    expect(calculateDistance({ x: 0, y: 0 }, { x: 2, y: -1 }, "HEX", 5)).toBe(10)
+    expect(calculateDistance({ x: 1, y: -2 }, { x: -1, y: 1 }, "HEX", 5)).toBe(15)
+  })
+
+  it("rejects non-finite coordinates and invalid cell sizes", () => {
+    expect(() => calculateDistance({ x: Number.NaN, y: 0 }, { x: 0, y: 0 }, "SQUARE")).toThrow(/finite/)
+    expect(() => calculateDistance({ x: 0, y: 0 }, { x: 0, y: 0 }, "SQUARE", 0)).toThrow(/positive/)
+  })
+})
+
+describe("normalizeSizeCategory", () => {
+  it("preserves canonical sizes and defaults unknown data to Medium", () => {
+    expect(normalizeSizeCategory("Huge")).toBe("Huge")
+    expect(normalizeSizeCategory("Colossal")).toBe("Medium")
+  })
+})
+
+describe("getAoETargets", () => {
+  const combatants: GridCombatant[] = [
+    { id: "source", x: 0, y: 0, size: "Medium" },
+    { id: "axis", x: 3, y: 0, size: "Medium" },
+    { id: "boundary", x: 2, y: 1, size: "Medium" },
+    { id: "outside", x: 1, y: 1, size: "Medium" },
+  ]
+
+  it("selects square-grid sphere targets by radius", () => {
+    const result = getAoETargets({
+      origin: { x: 2, y: 0 },
+      shape: "SPHERE",
+      sizeFt: 5,
+      gridType: "SQUARE",
+      cellSize: 5,
+    }, combatants)
+    expect(result.map((target) => target.id)).toEqual(["axis", "boundary"])
+  })
+
+  it("uses hex distance for a hex-grid sphere", () => {
+    const result = getAoETargets({
+      origin: { x: 0, y: 0 },
+      shape: "SPHERE",
+      sizeFt: 5,
+      gridType: "HEX",
+      cellSize: 5,
+    }, [
+      { id: "adjacent", x: 1, y: -1, size: "Medium" },
+      { id: "far", x: 2, y: -1, size: "Medium" },
+    ])
+    expect(result.map((target) => target.id)).toEqual(["adjacent"])
+  })
+
+  it("selects a cone from its source and direction", () => {
+    const result = getAoETargets({
+      origin: { x: 0, y: 0 },
+      direction: { x: 1, y: 0 },
+      shape: "CONE",
+      sizeFt: 15,
+      gridType: "SQUARE",
+      cellSize: 5,
+    }, combatants)
+    expect(result.map((target) => target.id)).toEqual(["axis", "boundary"])
+  })
+
+
+  it("uses grid distance for a diagonal cone's inclusive length", () => {
+    const result = getAoETargets({
+      origin: { x: 0, y: 0 },
+      direction: { x: 1, y: 1 },
+      shape: "CONE",
+      sizeFt: 20,
+      gridType: "SQUARE",
+      cellSize: 5,
+    }, [
+      { id: "boundary", x: 4, y: 4, size: "Medium" },
+    ])
+    expect(result.map((target) => target.id)).toEqual(["boundary"])
+  })
+  it("projects cone direction correctly on a hex grid", () => {
+    const result = getAoETargets({
+      origin: { x: 0, y: 0 },
+      direction: { x: 1, y: 0 },
+      shape: "CONE",
+      sizeFt: 10,
+      gridType: "HEX",
+      cellSize: 5,
+    }, [
+      { id: "axis", x: 2, y: 0, size: "Medium" },
+      { id: "off-axis", x: 0, y: 1, size: "Medium" },
+    ])
+    expect(result.map((target) => target.id)).toEqual(["axis"])
+  })
+
+  it("selects a cube from its north-west anchor and intersects footprints", () => {
+    const result = getAoETargets({
+      origin: { x: 1, y: 1 },
+      shape: "CUBE",
+      sizeFt: 10,
+      gridType: "SQUARE",
+      cellSize: 5,
+    }, [
+      { id: "large-intersection", x: 0, y: 0, size: "Large" },
+      { id: "inside", x: 2, y: 2, size: "Medium" },
+      { id: "outside", x: 3, y: 3, size: "Medium" },
+    ])
+    expect(result.map((target) => target.id)).toEqual(["large-intersection", "inside"])
+  })
+
+  it("selects a one-cell-wide line and excludes its source", () => {
+    const result = getAoETargets({
+      origin: { x: 0, y: 0 },
+      direction: { x: 1, y: 0 },
+      shape: "LINE",
+      sizeFt: 20,
+      gridType: "SQUARE",
+      cellSize: 5,
+    }, combatants)
+
+    expect(result.map((target) => target.id)).toEqual(["axis"])
+  })
+
+  it("rejects directional targets behind the source or beyond grid range", () => {
+    const rejected = getAoETargets({
+      origin: { x: 0, y: 0 },
+      direction: { x: 1, y: 0 },
+      shape: "LINE",
+      sizeFt: 10,
+      gridType: "SQUARE",
+      cellSize: 5,
+    }, [
+      { id: "behind", x: -1, y: 0, size: "Medium" },
+      { id: "beyond", x: 3, y: 0, size: "Medium" },
+    ])
+
+    expect(rejected).toEqual([])
+  })
+
+  it("rejects invalid area contracts", () => {
+    expect(() => getAoETargets({
+      origin: { x: 0, y: 0 }, shape: "CONE", sizeFt: 10, gridType: "SQUARE", cellSize: 5,
+    }, [])).toThrow(/direction/)
+    expect(() => getAoETargets({
+      origin: { x: 0, y: 0 }, shape: "SPHERE", sizeFt: -1, gridType: "SQUARE", cellSize: 5,
+    }, [])).toThrow(/non-negative/)
+    expect(() => getAoETargets({
+      origin: { x: 0, y: 0 }, direction: { x: 0, y: Number.NaN }, shape: "LINE", sizeFt: 10, gridType: "SQUARE", cellSize: 5,
+    }, [])).toThrow(/finite/)
+  })
+
+  it("returns no directional targets for a zero vector", () => {
+    expect(getAoETargets({
+      origin: { x: 0, y: 0 }, direction: { x: 0, y: 0 }, shape: "LINE", sizeFt: 10, gridType: "SQUARE", cellSize: 5,
+    }, combatants)).toEqual([])
+  })
+})
+
+describe("validateMovement", () => {
+  const map: TacticalMap = { gridType: "SQUARE", width: 5, height: 5, cellSize: 5 }
+  const mover: GridCombatant = { id: "mover", x: 0, y: 0, size: "Medium" }
+  const blocker: GridCombatant = { id: "blocker", x: 2, y: 0, size: "Medium" }
+
+  it("accepts an in-bounds, unoccupied move within speed", () => {
+    expect(validateMovement({ combatant: mover, target: { x: 1, y: 1 }, map, combatants: [mover, blocker], speedFt: 30 }))
+      .toEqual({ valid: true, distanceFt: 5 })
+  })
+
+  it.each([
+    [{ x: 1.5, y: 1 }, map, 30, "INVALID_COORDINATES"],
+    [{ x: 1, y: 1 }, { ...map, width: 0 }, 30, "INVALID_MAP"],
+    [{ x: 1, y: 1 }, map, Number.NaN, "INVALID_SPEED"],
+    [{ x: 0, y: 0 }, map, 30, "NO_MOVEMENT"],
+    [{ x: -1, y: 0 }, map, 30, "OUT_OF_BOUNDS"],
+    [{ x: 4, y: 4 }, map, 15, "SPEED_EXCEEDED"],
+    [{ x: 2, y: 0 }, map, 30, "OCCUPIED"],
+  ] as const)("rejects %o with %s", (target, testMap, speedFt, code) => {
+    const result = validateMovement({ combatant: mover, target, map: testMap, combatants: [mover, blocker], speedFt })
+    expect(result).toMatchObject({ valid: false, code })
+  })
+
+  it("checks the complete footprint against map bounds", () => {
+    const large: GridCombatant = { id: "large", x: 0, y: 0, size: "Large" }
+    expect(validateMovement({ combatant: large, target: { x: 4, y: 4 }, map, combatants: [large], speedFt: 30 }))
+      .toMatchObject({ valid: false, code: "OUT_OF_BOUNDS" })
+  })
+
+  it("supports hex movement cost", () => {
+    const hexMap: TacticalMap = { ...map, gridType: "HEX" }
+    expect(validateMovement({ combatant: mover, target: { x: 2, y: 1 }, map: hexMap, combatants: [mover], speedFt: 15 }))
+      .toEqual({ valid: true, distanceFt: 15 })
+  })
+})
+
+describe("map placement", () => {
+  const map: TacticalMap = { gridType: "SQUARE", width: 2, height: 2, cellSize: 5 }
+
+  it("validates footprint boundaries", () => {
+    expect(isPlacementWithinMap({ x: 0, y: 0 }, "Large", map)).toBe(true)
+    expect(isPlacementWithinMap({ x: 1, y: 1 }, "Large", map)).toBe(false)
+    expect(isPlacementWithinMap({ x: 0.5, y: 0 }, "Medium", map)).toBe(false)
+  })
+
+  it("finds the first row-major empty position or null when full", () => {
+    const occupied: GridCombatant[] = [{ id: "first", x: 0, y: 0, size: "Medium" }]
+    expect(findAvailablePosition(map, "Medium", occupied)).toEqual({ x: 1, y: 0 })
+    expect(findAvailablePosition(map, "Large", occupied)).toBeNull()
   })
 })

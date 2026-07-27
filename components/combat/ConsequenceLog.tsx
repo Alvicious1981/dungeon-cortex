@@ -2,7 +2,7 @@
 
 import React, { memo } from "react";
 import type { CombatConsequencePayload } from "@/lib/events/game-events";
-import { hpColor, hpRatio } from "./ZoneGrid";
+import { hpColor, hpRatio } from "./health";
 
 // ---------------------------------------------------------------------------
 // Beat catalogue

@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import {
   ExplorationTurnInputSchema,
-  REST_INTERVAL_TURNS,
   advanceTurn,
   applyRest,
   checkRandomEncounter,
@@ -240,50 +239,6 @@ async function resolveCampaign(
   return campaign;
 }
 
-async function applyExhaustionIfNeeded(
-  db: ExplorationTurnDb,
-  campaign: ExplorationTurnCampaignRecord,
-  shouldApply: boolean
-): Promise<boolean> {
-  if (!shouldApply) return false;
-
-  if (!campaign.characterId) {
-    throw new ExplorationTurnServiceError(
-      "CHARACTER_NOT_FOUND",
-      "Campaign has no character for exploration exhaustion."
-    );
-  }
-
-  const character = await db.character.findUnique({
-    where: { id: campaign.characterId },
-    select: { id: true, exhaustionLevel: true },
-  });
-
-  if (!character) {
-    throw new ExplorationTurnServiceError(
-      "CHARACTER_NOT_FOUND",
-      `Character not found: ${campaign.characterId}`
-    );
-  }
-
-  const exhaustionLevel = character.exhaustionLevel ?? 0;
-  if (exhaustionLevel < 0 || exhaustionLevel >= 6) {
-    throw new ExplorationTurnServiceError(
-      "INVALID_EXHAUSTION_STATE",
-      "Exhaustion level cannot be incremented beyond the valid 5e range.",
-      { exhaustionLevel }
-    );
-  }
-
-  await db.character.update({
-    where: { id: character.id },
-    data: { exhaustionLevel: exhaustionLevel + 1 },
-    select: { id: true, exhaustionLevel: true },
-  });
-
-  return true;
-}
-
 function buildResult(input: {
   campaignId: string;
   action: string;
@@ -349,7 +304,7 @@ async function resolveExplorationTurnInTransaction(
   input: ResolveExplorationTurnInput
 ): Promise<ResolveExplorationTurnResult> {
   const parsed = parseInput(input);
-  const campaign = await resolveCampaign(db, input);
+  await resolveCampaign(db, input);
   const [campaignTimeRecord, partyInventoryRecord, activeEncounter] = await Promise.all([
     db.campaignTime.findUnique({ where: { campaignId: input.campaignId } }),
     db.partyInventory.findUnique({ where: { campaignId: input.campaignId } }),
@@ -387,13 +342,8 @@ async function resolveExplorationTurnInTransaction(
     });
   }
 
-  const restAlreadyOverdue = currentTime.turnsSinceRest >= REST_INTERVAL_TURNS;
   const turnResult = advanceTurn(currentTime, parsed.turnsToAdvance);
-  const exhaustionApplied = await applyExhaustionIfNeeded(
-    db,
-    campaign,
-    restAlreadyOverdue && turnResult.restRequired
-  );
+  const exhaustionApplied = false;
 
   const partySize = activeEncounter?.combatants?.length ?? 1;
   const resourceResult = consumeResources(

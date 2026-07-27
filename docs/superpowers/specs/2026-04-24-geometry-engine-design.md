@@ -1,7 +1,10 @@
 # Geometry Engine — Design Spec
 **Date:** 2026-04-24
 **Milestone:** V — Tactical Combat Geometry
-**Status:** Approved
+**Status:** Superseded for current implementation by `docs/MILESTONE_V_SPEC.md`
+
+> Historical slice design. It accurately describes the first geometry slice,
+> but its Zone separation and non-goals are no longer the active Milestone V contract.
 
 ---
 

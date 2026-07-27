@@ -48,6 +48,7 @@ const resolvedEncounter: CampaignContext["activeEncounter"] = {
   round: 4,
   currentTurnIndex: 0,
   totalDamageDealt: 0,
+  map: null,
   status: "resolved",
   tensionScore: 0.73,
   reason: "all_enemies_dead",
@@ -203,13 +204,13 @@ describe("formatSystemPrompt — relevance clipping", () => {
       currentExploration: makeExploration("dungeon"),
       explorationHUD: baseHUD,
     });
-    expect(withDungeon).toContain("Dungeon Clock");
+    expect(withDungeon).toContain("Exploration Time & Resources");
 
     const withoutDungeon = formatSystemPrompt({
       ...baseContext,
       explorationHUD: baseHUD,
     });
-    expect(withoutDungeon).not.toContain("Dungeon Clock");
+    expect(withoutDungeon).not.toContain("Exploration Time & Resources");
   });
 
   it("injects wilderness HUD in overworld and clips it in dungeon scenes", () => {
@@ -254,6 +255,7 @@ describe("formatSystemPrompt — relevance clipping", () => {
         round: 1,
         currentTurnIndex: 0,
         totalDamageDealt: 0,
+        map: null,
         combatants: [],
       },
     });
@@ -265,13 +267,13 @@ describe("formatSurvivalHUD", () => {
   it("renders time/light/ration data", () => {
     const output = formatSurvivalHUD(baseHUD);
     expect(output).toContain("12");
-    expect(output).toContain("2h");
+    expect(output).toContain("recorded hours: 2");
     expect(output).toContain("🕯️");
     expect(output).toContain("Rations");
   });
 
-  it("shows overdue rest warning when rest is overdue", () => {
+  it("keeps rest legality delegated to the backend service", () => {
     const output = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 6 });
-    expect(output).toContain("OVERDUE");
+    expect(output).toContain("backend rest service accepts it");
   });
 });

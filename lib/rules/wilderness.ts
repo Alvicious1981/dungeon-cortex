@@ -11,7 +11,7 @@ export const WATCHES_PER_DAY = 6;
 /** Dungeon turns that fit inside one wilderness watch (4 hours × 6 turns/hour). */
 export const TURNS_PER_WATCH = 24;
 
-/** Watch index (0-based) that is mandatory rest. Mirrors Milestone O restRequired gate. */
+/** Conventional night-watch index (0-based); it does not force a rest action. */
 export const NIGHT_WATCH_INDEX = 5;
 
 /** Rations are consumed once per full day — every 6 watches. */

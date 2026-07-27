@@ -3,7 +3,6 @@ import { rollDie } from "@/lib/rules/dice";
 import { seededFloat } from "@/lib/rules/generators";
 import {
   FAST_PACE_FORAGING_DC_PENALTY,
-  NIGHT_WATCH_INDEX,
   TravelWatchInputSchema,
   WATCHES_PER_DAY,
   WEATHER_RECALC_INTERVAL_WATCHES,
@@ -443,14 +442,6 @@ async function resolveTravelWatchInTransaction(
   const currentTerrain = normalizeTerrain(currentHexRaw?.terrain);
   const currentBiome = currentHexRaw?.biome ?? "temperate grassland";
 
-  if (travelState.currentWatch === NIGHT_WATCH_INDEX && parsed.action !== "rest") {
-    throw new WildernessServiceError(
-      "INVALID_TRAVEL_WATCH_INPUT",
-      "The Night watch is mandatory rest.",
-      { reason: "restRequired" }
-    );
-  }
-
   const warnings: string[] = [];
   const updatedHexes: Array<{ q: number; r: number; discovered?: boolean; scouted?: boolean }> = [];
   const newWeatherCounter = travelState.weatherWatchCounter + 1;
@@ -596,7 +587,7 @@ async function resolveTravelWatchInTransaction(
           : WILDERNESS_ENCOUNTER_NORMAL;
         encounter = { triggered: encounterRoll <= encounterThreshold, roll: encounterRoll };
         if (encounter.triggered) {
-          warnings.push("A random encounter is triggered - begin combat or reaction roll.");
+          warnings.push("A random encounter is triggered; resolve the encounter through the combat pipeline.");
         }
 
         const destSeed = makeHexSeed(input.campaignId, newQ, newR);
@@ -660,10 +651,7 @@ async function resolveTravelWatchInTransaction(
   const newTotalDays = Math.floor(newTotalWatches / WATCHES_PER_DAY);
   if (newCurrentWatch === 0) newWatchesTraveledToday = 0;
 
-  const restRequired = newCurrentWatch === NIGHT_WATCH_INDEX;
-  if (restRequired) {
-    warnings.push("Night falls. The party must rest before the next action.");
-  }
+  const restRequired = false;
 
   const nextTravelState: TravelStateRecord = {
     id: travelState.id ?? "",

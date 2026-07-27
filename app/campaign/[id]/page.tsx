@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Cinzel, Crimson_Pro } from "next/font/google";
 import { prisma } from "@/lib/db/prisma";
+import { getAuthUser } from "@/lib/auth/session";
 import ActionInput from "./ActionInput";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
@@ -26,9 +27,9 @@ import { WildernessMapController } from "@/components/exploration/map/Wilderness
 import WildernessHUD from "@/components/exploration/WildernessHUD";
 import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
-import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
 import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
+import SessionControls from "@/components/campaign/SessionControls";
 
 // ─── Fonts ───────────────────────────────────────────────────────────────────
 
@@ -145,23 +146,19 @@ function itemStatLine(type: string, properties: unknown): string {
 // ─── Metadata ────────────────────────────────────────────────────────────────
 
 export async function generateMetadata({ params }: CampaignPageProps) {
-  const { id } = await params;
-  const campaign = await prisma.campaign.findUnique({ where: { id } });
-  return {
-    title: campaign
-      ? `${campaign.title} — Dungeon Cortex`
-      : "Campaign — Dungeon Cortex",
-  };
+  await params;
+  return { title: "Campaign — Dungeon Cortex" };
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default async function CampaignPage({ params }: CampaignPageProps) {
   const { id } = await params;
+  const user = await getAuthUser();
 
   const [campaign, memories, quests, npcs, wildernessHexes, travelState, partyInventory] = await Promise.all([
-    prisma.campaign.findUnique({
-      where: { id },
+    prisma.campaign.findFirst({
+      where: { id, userId: user.id },
       include: {
         character: {
           include: {
@@ -170,11 +167,13 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             },
           },
         },
-        logs: { orderBy: { createdAt: "asc" } },
+        logs: { orderBy: { createdAt: "desc" }, take: 50 },
+        sessions: { orderBy: { sessionNumber: "desc" }, take: 1 },
         encounters: {
           where: { status: "active" },
           include: {
             combatants: { orderBy: { initiativeTotal: "desc" } },
+            map: true,
           },
         },
       },
@@ -285,7 +284,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     }
   }
 
-  const { character, logs } = campaign;
+  const { character } = campaign;
+  const logs = [...campaign.logs].reverse();
   const activeEncounter = campaign.encounters[0] ?? null;
 
   // ── Wilderness & Mode Detection ─────────────────────────────────────────────
@@ -394,22 +394,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         className="relative z-10 mx-auto max-w-[100rem] px-3 py-5 sm:px-5 sm:py-7 xl:px-8"
         id="main-content"
       >
-        {activeEncounter && (
-          <CombatHUDController
-            activeTurnIndex={activeEncounter.currentTurnIndex}
-            combatants={activeEncounter.combatants.map((c) => ({
-              id: c.id,
-              name: c.name,
-              hp: c.hp,
-              maxHp: c.maxHp,
-              initiativeTotal: c.initiativeTotal,
-              conditions: (c.conditions as string[]) || [],
-            }))}
-          />
-        )}
         {/* ── Skip link (accessibility) ── */}
         <a
-          href="#chronicle"
+          href="#commands"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:px-3 focus:py-1.5 focus:text-sm"
           style={{ background: "#F59E0B", color: "#0A0A14" }}
         >
@@ -434,17 +421,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               {campaign.title}
             </h1>
           </div>
-          <span
-            className="mt-1 inline-flex shrink-0 items-center rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest"
-            style={{
-              background: "rgba(100,70,14,0.25)",
-              border: "1px solid rgba(245,158,11,0.3)",
-              color: "#F59E0B",
-              fontFamily: "var(--font-cinzel)",
-            }}
-          >
-            {campaign.status}
-          </span>
+          <SessionControls campaignId={campaign.id} session={campaign.sessions[0] ?? null} />
         </header>
 
         {/* ════════════════
@@ -457,7 +434,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           ════════════════════════════════════ */}
           <aside
             id="character"
-            className="order-3 scroll-mt-20 space-y-4 lg:order-1"
+            className="order-2 scroll-mt-20 space-y-4 lg:order-1"
             aria-label="Character status"
           >
 
@@ -773,9 +750,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           {/* ════════════════════════════════════
               CENTRE — Chronicle + Action
           ════════════════════════════════════ */}
-          <div className="order-1 min-w-0 space-y-5 lg:order-2">
+          <div className="order-1 flex min-w-0 flex-col gap-5 lg:order-2">
 
-            <section id="scene" aria-labelledby="scene-heading" className="scroll-mt-20 overflow-hidden rounded-sm border border-[#4a3b24] bg-[#090811] shadow-2xl">
+            <section id="scene" aria-labelledby="scene-heading" className="order-1 scroll-mt-20 overflow-hidden rounded-sm border border-[#4a3b24] bg-[#090811] shadow-2xl">
               <header className="flex items-center justify-between border-b border-[#3b3150] bg-[#15121e]/95 px-4 py-3">
                 <div>
                   <p className="dc-kicker">Tactical viewport</p>
@@ -830,9 +807,15 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             )}
 
             {/* Legacy zone-based combat map removed in Phase 1.5. */}
-            {activeEncounter && (
+            {activeEncounter?.map && (
               <BattleGrid
                 activeCombatantId={activeCombatantId}
+                map={{
+                  gridType: activeEncounter.map.gridType,
+                  width: activeEncounter.map.width,
+                  height: activeEncounter.map.height,
+                  cellSize: activeEncounter.map.cellSize,
+                }}
                 combatants={activeEncounter.combatants.map((c) => ({
                   id: c.id,
                   name: c.name,
@@ -850,7 +833,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               </div>
             </section>
 
-            <section aria-label="Adventure chronicle" id="chronicle" className="dc-panel scroll-mt-20 rounded-sm p-4 sm:p-5">
+            <section aria-label="Adventure chronicle" id="chronicle" className="dc-panel order-3 scroll-mt-20 rounded-sm p-4 sm:p-5">
               <p
                 className="mb-3 text-[10px] uppercase tracking-[0.3em]"
                 style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
@@ -929,7 +912,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               )}
             </section>
 
-            <section id="commands" aria-label="Command deck" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-sm border border-[#4a3b24] bg-[#090811]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
+            <section id="commands" aria-label="Command deck" className="sticky bottom-[4.5rem] z-30 order-2 space-y-3 rounded-sm border border-[#4a3b24] bg-[#090811]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
               <MacroDeck inCombat={!!activeEncounter} />
               <ActionInput
                 campaignId={campaign.id}
@@ -950,7 +933,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           {/* ════════════════════════════════════
               RIGHT COLUMN — Combat + Memory
           ════════════════════════════════════ */}
-          <aside id="journal" aria-label="Combat tracker, quest log and memory journal" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
+          <aside id="journal" aria-label="Combat tracker, quest log and memory journal" className="order-3 scroll-mt-20 space-y-4 lg:order-3">
             <InitiativeTracker
               entries={initiativeEntries}
               activeId={activeCombatantId}

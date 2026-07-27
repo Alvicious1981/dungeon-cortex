@@ -10,8 +10,12 @@ import {
   type DungeonActionErrorDetail,
   type DungeonActionRequestDetail,
 } from "@/lib/events/action-transport";
+import {
+  normalizeSizeCategory,
+  sizeToSquares,
+  type TacticalMap,
+} from "@/lib/rules/geometry";
 
-const GRID_SIZE = 10;
 type Position = { x: number; y: number };
 type KeyboardMove = { id: string; origin: Position; destination: Position };
 
@@ -19,10 +23,10 @@ export interface BattleGridCombatant {
   id: string; name: string; isPlayer: boolean; hp: number; maxHp: number; ac: number; x: number; y: number; size: string;
 }
 
-interface BattleGridProps { combatants: BattleGridCombatant[]; activeCombatantId?: string; }
+interface BattleGridProps { combatants: BattleGridCombatant[]; map: TacticalMap; activeCombatantId?: string; }
 
-function sizeToSquares(size: string): number {
-  switch (size) { case "Large": return 2; case "Huge": return 3; case "Gargantuan": return 4; default: return 1; }
+function footprintSide(size: string): number {
+  return sizeToSquares(normalizeSizeCategory(size));
 }
 function clamp(value: number, min: number, max: number): number { return Math.min(max, Math.max(min, value)); }
 function initials(name: string): string {
@@ -30,7 +34,7 @@ function initials(name: string): string {
   return parts.length === 1 ? parts[0]!.slice(0, 2).toUpperCase() : `${parts[0]![0]}${parts[parts.length - 1]![0]}`.toUpperCase();
 }
 
-export default function BattleGrid({ combatants, activeCombatantId }: BattleGridProps) {
+export default function BattleGrid({ combatants, map, activeCombatantId }: BattleGridProps) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const [positions, setPositions] = useState<Record<string, Position>>({});
   const [dragId, setDragId] = useState<string | null>(null);
@@ -53,22 +57,21 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
   }, [combatants, dragId, keyboardMove, movePending]);
 
   function getCurrentPos(combatant: BattleGridCombatant): Position {
-    const maxStart = GRID_SIZE - sizeToSquares(combatant.size);
+    const side = footprintSide(combatant.size);
     const source = dragId === combatant.id && dragCell ? dragCell : positions[combatant.id] ?? { x: combatant.x, y: combatant.y };
-    return { x: clamp(source.x, 0, maxStart), y: clamp(source.y, 0, maxStart) };
+    return { x: clamp(source.x, 0, map.width - side), y: clamp(source.y, 0, map.height - side) };
   }
 
-  function pointerToCell(clientX: number, clientY: number, size: number): Position | null {
+  const pointerToCell = useCallback((clientX: number, clientY: number, size: number): Position | null => {
     const board = boardRef.current;
     if (!board) return null;
     const rect = board.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
-    const maxStart = GRID_SIZE - size;
     return {
-      x: clamp(Math.floor((clientX - rect.left) / (rect.width / GRID_SIZE)), 0, maxStart),
-      y: clamp(Math.floor((clientY - rect.top) / (rect.height / GRID_SIZE)), 0, maxStart),
+      x: clamp(Math.floor((clientX - rect.left) / (rect.width / map.width)), 0, map.width - size),
+      y: clamp(Math.floor((clientY - rect.top) / (rect.height / map.height)), 0, map.height - size),
     };
-  }
+  }, [map.height, map.width]);
 
   const commitMove = useCallback((id: string, origin: Position, destination: Position) => {
     if (origin.x === destination.x && origin.y === destination.y) return;
@@ -115,7 +118,7 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
     if (!dragId) return;
     const mover = combatantById.get(dragId);
     if (!mover) return;
-    const moverSize = sizeToSquares(mover.size);
+    const moverSize = footprintSide(mover.size);
 
     const onMove = (event: PointerEvent) => {
       const cell = pointerToCell(event.clientX, event.clientY, moverSize);
@@ -136,7 +139,7 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [combatantById, commitMove, dragCell, dragId, dragOrigin]);
+  }, [combatantById, commitMove, dragCell, dragId, dragOrigin, pointerToCell]);
 
   function startDrag(event: ReactPointerEvent, combatant: BattleGridCombatant) {
     if (!combatant.isPlayer || movePending) return;
@@ -155,8 +158,11 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
       event.preventDefault();
       const current = positions[combatant.id] ?? { x: combatant.x, y: combatant.y };
       const origin = keyboardMove?.id === combatant.id ? keyboardMove.origin : current;
-      const maxStart = GRID_SIZE - sizeToSquares(combatant.size);
-      const destination = { x: clamp(current.x + delta.x, 0, maxStart), y: clamp(current.y + delta.y, 0, maxStart) };
+      const side = footprintSide(combatant.size);
+      const destination = {
+        x: clamp(current.x + delta.x, 0, map.width - side),
+        y: clamp(current.y + delta.y, 0, map.height - side),
+      };
       setPositions((previous) => ({ ...previous, [combatant.id]: destination }));
       if (destination.x === origin.x && destination.y === origin.y) {
         setKeyboardMove(null);
@@ -174,20 +180,26 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
     }
   }
 
+  const gridStyle = {
+    gridTemplateColumns: `repeat(${map.width}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${map.height}, minmax(0, 1fr))`,
+  };
+
   return (
     <section aria-label="Tactical battle grid" className="rounded-sm border border-zinc-700/80 bg-zinc-950/90 p-3 shadow-[0_8px_28px_rgba(0,0,0,0.55)]">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300" style={{ fontFamily: "var(--font-cinzel)" }}>Tactical Grid 10x10</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300" style={{ fontFamily: "var(--font-cinzel)" }}>Tactical Grid {map.width}x{map.height}</p>
         {movePending && <span role="status" className="text-[11px] text-amber-300/90">Backend validating…</span>}
       </div>
       <p id="battle-grid-help" className="sr-only">Player token: drag with a pointer, or use arrow keys to preview a move, Enter to submit it, and Escape to cancel. The backend validates the destination.</p>
 
-      <div ref={boardRef} role="grid" aria-describedby="battle-grid-help" className="relative aspect-square w-full overflow-hidden rounded-sm border border-zinc-700/80 bg-zinc-900" style={{ backgroundImage: "radial-gradient(circle at 15% 10%, rgba(255,255,255,0.04), transparent 45%), linear-gradient(to bottom, rgba(24,24,27,0.98), rgba(9,9,11,0.98))" }}>
-        <div aria-hidden="true" className="absolute inset-0 grid grid-cols-10 grid-rows-10">{Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => <div key={index} className="border border-zinc-700/50" />)}</div>
-        <div className="absolute inset-0 grid grid-cols-10 grid-rows-10">
+      <div className="overflow-auto pb-1" aria-label="Scrollable tactical map">
+      <div ref={boardRef} role="grid" aria-rowcount={map.height} aria-colcount={map.width} aria-describedby="battle-grid-help" className="relative w-full overflow-hidden rounded-sm border border-zinc-700/80 bg-zinc-900" style={{ minWidth: `${map.width * 44}px`, aspectRatio: `${map.width} / ${map.height}`, backgroundImage: "radial-gradient(circle at 15% 10%, rgba(255,255,255,0.04), transparent 45%), linear-gradient(to bottom, rgba(24,24,27,0.98), rgba(9,9,11,0.98))" }}>
+        <div aria-hidden="true" className="absolute inset-0 grid" style={gridStyle}>{Array.from({ length: map.width * map.height }).map((_, index) => <div key={index} className="border border-zinc-700/50" />)}</div>
+        <div className="absolute inset-0 grid" style={gridStyle}>
           {combatants.map((combatant) => {
             const pos = getCurrentPos(combatant);
-            const side = sizeToSquares(combatant.size);
+            const side = footprintSide(combatant.size);
             const isActive = combatant.id === activeCombatantId;
             const isDragged = dragId === combatant.id;
             const canMove = combatant.isPlayer && !movePending;
@@ -202,9 +214,10 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
         </div>
       </div>
 
+      </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400" style={{ fontFamily: "var(--font-crimson)" }}>
         <span>Drag, or arrows + Enter, to request movement.</span>
-        {error ? <span role="alert" className="text-red-300">{error}</span> : keyboardMove ? <span role="status" className="text-amber-200">Preview {keyboardMove.destination.x},{keyboardMove.destination.y} — Enter to confirm</span> : <span>1 square = 5 ft</span>}
+        {error ? <span role="alert" className="text-red-300">{error}</span> : keyboardMove ? <span role="status" className="text-amber-200">Preview {keyboardMove.destination.x},{keyboardMove.destination.y} — Enter to confirm</span> : <span>1 cell = {map.cellSize} ft</span>}
       </div>
     </section>
   );

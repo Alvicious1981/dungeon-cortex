@@ -894,17 +894,17 @@ describe("advanceTurn — rest cycle", () => {
     expect(advanceTurn(freshTime, 5).restRequired).toBe(false);
   });
 
-  it("restRequired = true after turn 6 from fresh state", () => {
-    expect(advanceTurn(freshTime, 6).restRequired).toBe(true);
+  it("does not force a rest after six exploration time blocks", () => {
+    expect(advanceTurn(freshTime, 6).restRequired).toBe(false);
   });
 
-  it("restRequired = true when turnsSinceRest is already at REST_INTERVAL_TURNS", () => {
-    expect(advanceTurn({ ...freshTime, turnsSinceRest: 6 }).restRequired).toBe(true);
+  it("does not turn a legacy rest counter into a legality gate", () => {
+    expect(advanceTurn({ ...freshTime, turnsSinceRest: 6 }).restRequired).toBe(false);
   });
 
-  it("turnsSinceRest never exceeds REST_INTERVAL_TURNS (6)", () => {
+  it("keeps the legacy counter monotonic for migration compatibility", () => {
     const { next } = advanceTurn({ ...freshTime, turnsSinceRest: 6 }, 6);
-    expect(next.turnsSinceRest).toBe(6);
+    expect(next.turnsSinceRest).toBe(12);
   });
 
   it("turnsSinceRest accumulates across multiple calls", () => {

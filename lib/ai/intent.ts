@@ -95,34 +95,106 @@ export async function parseIntent(
   playerInput: string,
   systemContext: string
 ): Promise<Intent> {
-  void playerInput;
   void systemContext;
+  const input = playerInput.trim().replace(/\s+/g, " ");
+  const lower = input.toLocaleLowerCase("en");
+  let intent: Intent = { actionType: "general" };
 
-  // ─── MOCK TEMPORAL PARA TESTING LOCAL ───────────────────────────────────────
-  // Para evitar bloqueos por falta de OPENAI_API_KEY.
-  // Clasifica todas las acciones como "general" por defecto.
-  const object = {
-    actionType: "general" as const,
+  const prefixedValue = (pattern: RegExp): string | undefined => {
+    const match = input.match(pattern);
+    const value = (match?.[1] ?? match?.[2])
+      ?.trim()
+      .replace(/^(?:the|el|la|los|las|al)\s+/i, "");
+    return value || undefined;
   };
 
-  /* CÓDIGO ORIGINAL COMENTADO (Requiere OPENAI_API_KEY)
-  const { object } = await generateObject({
-    model: openai("gpt-4o-mini"),
-    schema: IntentSchema,
-    system: [
-      "You are a D&D 5e rules classifier. Your only job is to extract structured intent from a player's action.",
-      "Classify the actionType as precisely as possible based on the player's words and the game state below.",
-      "For 'cast_spell': include spellLevel only if the player specifies a slot level; omit it for cantrips.",
-      "For 'attack', 'use_item', or 'equip': include targetName if a target is named.",
-      "When in doubt, classify as 'general'.",
-      "",
-      systemContext,
-    ].join("\n"),
-    prompt: playerInput,
-  });
-  */
+  const castMatch = input.match(
+    /^(?:i\s+)?(?:cast|conjure|lanzo|lanzar|conjuro|conjurar)\s+(.+)$/i
+  );
+  if (castMatch) {
+    let remainder = castMatch[1].trim();
+    const levelMatch = remainder.match(
+      /\s+(?:at|using|a|al|usando)\s+(?:slot\s+)?(?:level|nivel)\s*(\d)\b/i
+    );
+    const spellLevel = levelMatch ? Number(levelMatch[1]) : undefined;
+    if (levelMatch?.index !== undefined) {
+      remainder =
+        remainder.slice(0, levelMatch.index) +
+        remainder.slice(levelMatch.index + levelMatch[0].length);
+    }
 
-  const intent: Intent = { ...object };
+    const targetMatch = remainder.match(
+      /\s+(?:on|against|at|sobre|contra|hacia)\s+(.+)$/i
+    );
+    const targetName = targetMatch?.[1]?.trim();
+    const spellName = (
+      targetMatch?.index === undefined
+        ? remainder
+        : remainder.slice(0, targetMatch.index)
+    )
+      .replace(/^(?:the\s+spell|el\s+conjuro|el\s+hechizo)\s+/i, "")
+      .trim();
+
+    intent = {
+      actionType: "cast_spell",
+      ...(spellName ? { spellName } : {}),
+      ...(spellLevel !== undefined ? { spellLevel } : {}),
+      ...(targetName ? { targetName } : {}),
+    };
+  } else if (/^(?:i\s+)?(?:attack|strike|hit|ataco|atacar|golpeo|golpear)\b/i.test(input)) {
+    intent = {
+      actionType: "attack",
+      targetName: prefixedValue(
+        /^(?:i\s+)?(?:attack|strike|hit|ataco|atacar|golpeo|golpear)(?:\s+(?:at|al|a|contra))?\s*(.*)$/i
+      ),
+    };
+  } else if (/^(?:i\s+)?(?:use|drink|usar|uso|beber|bebo)\b/i.test(input)) {
+    intent = {
+      actionType: "use_item",
+      targetName: prefixedValue(
+        /^(?:i\s+)?(?:use|drink|usar|uso|beber|bebo)\s+(.+?)(?:\s+(?:on|sobre)\s+.+)?$/i
+      ),
+    };
+  } else if (/^(?:i\s+)?(?:equip|wield|don|equipar|equipo|empuñar|empuño)\b/i.test(input)) {
+    intent = {
+      actionType: "equip",
+      targetName: prefixedValue(
+        /^(?:i\s+)?(?:equip|wield|don|equipar|equipo|empuñar|empuño)\s+(.+)$/i
+      ),
+    };
+  } else if (
+    /\b(?:short|long)\s+rest\b/i.test(input) ||
+    /\bdescanso\s+(?:corto|largo)\b/i.test(input)
+  ) {
+    intent = {
+      actionType: "rest",
+      restType: /\b(?:long\s+rest|descanso\s+largo)\b/i.test(input)
+        ? "long"
+        : "short",
+    };
+  } else if (
+    /^(?:i\s+)?(?:move|go|walk)\s+to\b/i.test(input) ||
+    /^(?:moverme|mover|ir|caminar)\s+(?:a|hacia)\b/i.test(input)
+  ) {
+    intent = {
+      actionType: "move",
+      destination: prefixedValue(
+        /^(?:i\s+)?(?:move|go|walk)\s+to\s+(.+)$|^(?:moverme|mover|ir|caminar)\s+(?:a|hacia)\s+(.+)$/i
+      ),
+    };
+  } else if (/^(?:i\s+)?(?:travel|journey|viajar|viajo)\b/i.test(input)) {
+    intent = { actionType: "travel" };
+  } else if (
+    /^(?:i\s+)?(?:explore|search|investigate|scout|hide|explorar|buscar|investigar|registrar|ocultarme)\b/i.test(
+      input
+    )
+  ) {
+    intent = { actionType: "explore" };
+  } else if (lower === "rest" || lower === "descansar" || lower === "descanso") {
+    intent = { actionType: "rest", restType: "short" };
+  }
+
+  intent = IntentSchema.parse(intent);
 
   // Consume strongly typed SpellEffect immediately if spell was identified.
   // The caller acts on this without hallucinating raw JSON stats.

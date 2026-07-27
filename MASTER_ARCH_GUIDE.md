@@ -74,6 +74,13 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - AD&D, OSR, retroclone mechanics, THAC0, descending Armor Class, AD&D saving throw categories, and 5e-to-retro conversion paths are non-authoritative and out of scope.
 - The backend remains the sole authority for mechanical legality, roll/DC resolution, state mutation, and persistence; AI narration must only describe outcomes already resolved by backend facts.
 
+### LAW-07: EncounterMap Is Tactical Spatial Truth
+
+- Each encounter owns one authoritative `EncounterMap`; combat position is `Combatant.x/y/size` within that map.
+- Movement bounds, distance, collision, and area membership are resolved by pure backend geometry before persistence.
+- `Zone`, `Combatant.zoneId`, UI-only dimensions, and AI-selected area membership are non-authoritative legacy paths.
+- Coordinate mutations execute in backend transactions and emit deterministic events before narration.
+
 ## 4. Current Architecture Truth Map
 
 ### 4.1 Transport and Event Contract
@@ -94,6 +101,13 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - Consequences must be batched in one `COMBAT_CONSEQUENCE` frame using `targets[]`.
 - Local UI feedback should update each target before final refresh.
 
+### 4.4 Tactical Map Contract
+
+- New encounters persist `gridType`, `width`, `height`, and `cellSize` with their combatants in one transaction.
+- Square-grid distance uses the 5e 1-1-1 diagonal convention; hex distance uses axial/cube math.
+- Area spells consume canonical SRD `area_of_effect` metadata and backend coordinates to derive `targets[]`.
+- `BattleGrid` projects the persisted map and never owns legality or map dimensions.
+
 ## 5. Obsolescence Registry
 
 This registry defines deprecated fields and legacy logic paths to remove during cleanup after migration safety checks.
@@ -101,10 +115,9 @@ This registry defines deprecated fields and legacy logic paths to remove during 
 ### 5.1 Deprecated consequence flat fields — Removed 2026-07-25
 
 The deprecated flat members were removed from `CombatConsequencePayload`. The strict consequence event now contains only `attackerName` and complete `targets[]` entries.
-
 ### 5.2 Legacy UI update paths — Resolved 2026-07-25
 
-- `CombatHUDController`, `ConsequenceLog`, and `CombatVTT` consume `targets[]` directly.
+- `CombatHUDController` and `ConsequenceLog` consume `targets[]` directly.
 - Multi-target HP and condition feedback is applied locally before the authoritative refresh.
 - No flat-field fallback or `as CombatConsequencePayload` cast remains in active consumers.
 

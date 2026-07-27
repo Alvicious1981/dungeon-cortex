@@ -573,7 +573,7 @@ describe("exploration-turn-service resolveExplorationTurn contract", () => {
     );
   });
 
-  it("applies exhaustion when rest is already overdue and another turn is taken", async () => {
+  it("does not apply exhaustion from a legacy rest counter", async () => {
     const state = createTx({
       campaignTime: [{ ...baseCampaignTime[0], turnsSinceRest: 6 }],
     });
@@ -581,19 +581,18 @@ describe("exploration-turn-service resolveExplorationTurn contract", () => {
     await resolveTurn({}, state);
 
     expect(state.characters.find((character) => character.id === "character-1")?.exhaustionLevel).toBe(
-      1
+      0
     );
   });
 
-  it("does not allow invalid exhaustion values", async () => {
+  it("does not mutate a terminal exhaustion value during exploration", async () => {
     const state = createTx({
       characters: [{ ...baseCharacters[0], exhaustionLevel: 6 }],
       campaignTime: [{ ...baseCampaignTime[0], turnsSinceRest: 6 }],
     });
 
-    await expect(resolveTurn({}, state)).rejects.toMatchObject({
-      code: "INVALID_EXHAUSTION_STATE",
-    });
+    await expect(resolveTurn({}, state)).resolves.toMatchObject({ exhaustionApplied: false });
+    expect(state.characters.find((character) => character.id === "character-1")?.exhaustionLevel).toBe(6);
   });
 
   it("can resolve a rest turn using only the existing exploration rest-cycle semantics", async () => {

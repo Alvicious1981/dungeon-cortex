@@ -80,8 +80,8 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
   function toggleTarget(targetId: string) {
     setSelectedTargetIds((current) =>
       current.includes(targetId)
-        ? current.filter((id) => id !== targetId)
-        : [...current, targetId]
+        ? []
+        : [targetId]
     );
   }
 
@@ -100,7 +100,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
       const res = await fetch(`/api/campaign/${campaignId}/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
+        body: JSON.stringify({ ...request, requestId: detail.requestId }),
       });
 
       if (!res.ok) {
@@ -321,7 +321,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
               className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400"
               style={{ fontFamily: "var(--font-cinzel), serif" }}
             >
-              Targets
+              Target
             </legend>
             <div className="flex flex-wrap gap-2">
               {aliveHostileTargets.map((target) => {
@@ -329,14 +329,15 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
                 return (
                   <label
                     key={target.id}
-                    className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                    className={`flex min-h-11 cursor-pointer items-center gap-2 rounded border px-3 py-2 text-xs transition-colors ${
                       selected
                         ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
                         : "border-neutral-700 bg-neutral-950/30 text-neutral-300 hover:border-neutral-500"
                     }`}
                   >
                     <input
-                      type="checkbox"
+                      type="radio"
+                      name="action-target"
                       checked={selected}
                       disabled={submitting}
                       onChange={() => toggleTarget(target.id)}

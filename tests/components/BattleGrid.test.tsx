@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 
 describe("BattleGrid", () => {
   afterEach(() => vi.restoreAllMocks());
+  const map = { gridType: "SQUARE" as const, width: 8, height: 6, cellSize: 10 };
   const combatants = [
     {
       id: "pc-1",
@@ -41,15 +42,18 @@ describe("BattleGrid", () => {
     },
   ];
 
-  it("renders a 10x10 tactical grid", () => {
+  it("renders the persisted tactical map dimensions and cell size", () => {
     render(
       <BattleGrid
         combatants={combatants}
+        map={map}
         activeCombatantId="pc-1"
       />
     );
 
-    expect(screen.getByText("Tactical Grid 10x10")).toBeInTheDocument();
+    expect(screen.getByText("Tactical Grid 8x6")).toBeInTheDocument();
+    expect(screen.getByRole("grid")).toHaveAttribute("aria-colcount", "8");
+    expect(screen.getByText("1 cell = 10 ft")).toBeInTheDocument();
     expect(screen.getByLabelText("Aldric token at 1,2")).toBeInTheDocument();
     expect(screen.getByLabelText("Ogre token at 2,3")).toBeInTheDocument();
   });
@@ -57,6 +61,7 @@ describe("BattleGrid", () => {
   it("renders Large tokens as 2x2", () => {
     render(
       <BattleGrid
+        map={map}
         combatants={combatants}
       />
     );
@@ -70,7 +75,7 @@ describe("BattleGrid", () => {
   it("previews keyboard movement and requests the canonical Move action on Enter", async () => {
     const requestListener = vi.fn();
     window.addEventListener(DUNGEON_ACTION_REQUEST, requestListener);
-    render(<BattleGrid combatants={combatants} activeCombatantId="pc-1" />);
+    render(<BattleGrid map={map} combatants={combatants} activeCombatantId="pc-1" />);
 
     fireEvent.keyDown(screen.getByLabelText("Aldric token at 1,2"), { key: "ArrowRight" });
     const preview = screen.getByLabelText("Aldric token at 2,2");
@@ -88,7 +93,7 @@ describe("BattleGrid", () => {
   });
 
   it("clears the keyboard preview when the token returns to its origin", () => {
-    render(<BattleGrid combatants={combatants} activeCombatantId="pc-1" />);
+    render(<BattleGrid map={map} combatants={combatants} activeCombatantId="pc-1" />);
 
     fireEvent.keyDown(screen.getByLabelText("Aldric token at 1,2"), { key: "ArrowRight" });
     expect(screen.getByRole("status")).toHaveTextContent("Enter to confirm");

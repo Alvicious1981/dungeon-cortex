@@ -7,21 +7,12 @@ datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
   directUrl  = env("DIRECT_URL")
-  extensions = [vector, pg_graphql, pg_stat_statements, pgcrypto, supabase_vault, uuid_ossp(map: "uuid-ossp"), ltree, pgrouting, postgis]
+  extensions = [vector]
 }
 
-model Zone {
-  id          String @id @default(cuid())
-  encounterId String
-  name        String
-  x           Int    @default(0)
-  y           Int    @default(0)
-
-  encounter  Encounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
-  combatants Combatant[]
-
-  @@unique([encounterId, x, y])
-  @@index([encounterId])
+enum GridType {
+  SQUARE
+  HEX
 }
 
 model User {
@@ -55,14 +46,16 @@ model Character {
   /// Reset to hitDiceTotal on long rest. Must satisfy 0 ≤ remaining ≤ total.
   hitDiceRemaining     Int      @default(1)
   /// D&D 5e 2014 exhaustion level. Range: 0 (none) to 6 (dead).
-  /// Incremented by executeExplorationTurn when a mandatory rest is skipped.
-  /// Decremented by 1 on long rest per 5e 2014 rules.
+  /// Increased only by explicit 5e exhaustion effects.
+  /// Decremented by 1 when an authoritative long-rest resolution allows it.
   exhaustionLevel      Int      @default(0)
   createdAt            DateTime @default(now())
 
   user      User            @relation(fields: [userId], references: [id])
   campaigns Campaign[]
   inventory InventoryItem[]
+
+  @@index([userId])
 }
 
 model Campaign {
@@ -81,8 +74,8 @@ model Campaign {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  user           User            @relation(fields: [userId], references: [id])
-  character      Character       @relation(fields: [characterId], references: [id])
+  user           User              @relation(fields: [userId], references: [id])
+  character      Character         @relation(fields: [characterId], references: [id])
   logs           GameLog[]
   encounters     Encounter[]
   memories       MemoryEntry[]
@@ -95,6 +88,12 @@ model Campaign {
   travelState    TravelState?
   havens         Haven[]
   retainers      Retainer[]
+  sessions       GameSession[]
+  actionRequests ActionRequest[]
+  eventRecords   GameEventRecord[]
+
+  @@index([characterId])
+  @@index([userId])
 }
 
 model GameLog {
@@ -105,6 +104,90 @@ model GameLog {
   createdAt  DateTime @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
+
+enum SessionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum SessionMode {
+  PREPARING
+  NARRATIVE
+  SOCIAL
+  EXPLORATION
+  COMBAT
+  REST
+  RESOLUTION
+  PAUSED
+  COMPLETED
+}
+
+enum ActionRequestStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+}
+
+model GameSession {
+  id            String        @id @default(cuid())
+  campaignId    String
+  sessionNumber Int
+  status        SessionStatus @default(ACTIVE)
+  mode          SessionMode   @default(PREPARING)
+  sceneNumber   Int           @default(1)
+  sceneTitle    String?
+  eventSequence Int           @default(0)
+  summary       String?
+  startedAt     DateTime      @default(now())
+  pausedAt      DateTime?
+  endedAt       DateTime?
+  updatedAt     DateTime      @updatedAt
+
+  campaign       Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  actionRequests ActionRequest[]
+  events         GameEventRecord[]
+
+  @@unique([campaignId, sessionNumber])
+  @@index([campaignId, status])
+}
+
+model ActionRequest {
+  id         String              @id @default(cuid())
+  campaignId String
+  sessionId  String
+  requestId  String
+  action     String
+  status     ActionRequestStatus @default(PENDING)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  campaign Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  session  GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, requestId])
+  @@index([sessionId, createdAt])
+}
+
+model GameEventRecord {
+  id         String   @id @default(cuid())
+  campaignId String
+  sessionId  String
+  requestId  String?
+  sequence   Int
+  type       String
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  campaign Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  session  GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, sequence])
+  @@index([campaignId, createdAt])
+  @@index([requestId])
 }
 
 model Encounter {
@@ -119,9 +202,23 @@ model Encounter {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  campaign   Campaign    @relation(fields: [campaignId], references: [id])
+  campaign   Campaign      @relation(fields: [campaignId], references: [id])
   combatants Combatant[]
-  zones      Zone[]
+  map        EncounterMap?
+
+  @@index([campaignId])
+}
+
+model EncounterMap {
+  id          String   @id @default(cuid())
+  encounterId String   @unique
+  gridType    GridType @default(SQUARE)
+  width       Int      @default(10)
+  height      Int      @default(10)
+  /// Number of feet represented by one grid cell.
+  cellSize    Int      @default(5)
+
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
 }
 
 model Combatant {
@@ -139,17 +236,14 @@ model Combatant {
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
   size                 String  @default("Medium")
-  zoneId               String?
   /// Precise grid column (0-based). Relative to the encounter's global space.
   x                    Int     @default(0)
   /// Precise grid row (0-based). Relative to the encounter's global space.
   y                    Int     @default(0)
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
-  zone      Zone?     @relation(fields: [zoneId], references: [id])
 
   @@index([encounterId])
-  @@index([encounterId, zoneId])
 }
 
 model InventoryItem {
@@ -167,6 +261,8 @@ model InventoryItem {
   indexSlug    String?
 
   character Character @relation(fields: [characterId], references: [id])
+
+  @@index([characterId])
 }
 
 model MemoryEntry {
@@ -185,6 +281,7 @@ model MemoryEntry {
   campaign Campaign @relation(fields: [campaignId], references: [id])
 
   @@index([campaignId])
+  @@index([embedding], map: "MemoryEntry_embedding_hnsw_idx")
 }
 
 model Quest {
@@ -208,6 +305,8 @@ model Quest {
   updatedAt   DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
 }
 
 model NPC {
@@ -239,7 +338,7 @@ model NPC {
   traits               Json?
   /// Current disposition toward the party. Range: −10 (Hostile) to +10 (Helpful).
   /// Set by rollReaction on first meeting; updated by socialCheck on social actions.
-  /// Null for NPCs the party has never spoken to (legacy reaction roll pending).
+  /// Null for NPCs whose disposition has not yet been resolved by the social service.
   disposition          Int?
   /// Personality Tags generated deterministically from the seed.
   /// JSON object: { motivation: string, secret: string, distinctiveTrait: string }
@@ -247,7 +346,7 @@ model NPC {
   /// Never null after first meeting; null for legacy/unmet NPCs.
   personalityTags      Json?
   /// True once the party has formally met this NPC (rollReaction has fired).
-  /// Prevents duplicate legacy reaction rolls on subsequent encounters.
+  /// Prevents duplicate first-meeting disposition resolution.
   hasMetPlayer         Boolean  @default(false)
   knownRumors          String[] @default([])
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
@@ -314,6 +413,11 @@ model SrdMonster {
   @@index([alignment])
   @@index([indexSlug])
   @@index([hasSpellcasting])
+  @@index([conditionImmunities], map: "SrdMonster_conditionImmunities_gin", type: Gin)
+  @@index([damageImmunities], map: "SrdMonster_damageImmunities_gin", type: Gin)
+  @@index([damageResistances], map: "SrdMonster_damageResistances_gin", type: Gin)
+  @@index([damageVulnerabilities], map: "SrdMonster_damageVulnerabilities_gin", type: Gin)
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "SrdMonster_name_trgm_idx", type: Gin)
 }
 
 model SrdSpell {
@@ -349,6 +453,9 @@ model SrdSpell {
   @@index([attackType])
   @@index([damageType])
   @@index([saveAbility])
+  @@index([classes], map: "SrdSpell_classes_gin", type: Gin)
+  @@index([components], map: "SrdSpell_components_gin", type: Gin)
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "SrdSpell_name_trgm_idx", type: Gin)
 }
 
 model SrdItem {
@@ -491,7 +598,7 @@ model CampaignTime {
   id         String @id @default(cuid())
   campaignId String @unique
 
-  /// Total dungeon turns elapsed since campaign start. 1 turn = 10 minutes.
+  /// Legacy exploration time blocks elapsed since campaign start.
   totalTurns Int @default(0)
 
   /// Derived display field: floor(totalTurns / 6). Stored for query efficiency.
@@ -658,7 +765,7 @@ model TravelState {
   campaign Campaign @relation(fields: [campaignId], references: [id])
 }
 
-/// A safe zone or town where the party can rest and convert gold to XP.
+/// A legacy safe-zone record. It grants no automatic XP or rest recovery.
 model Haven {
   id              String   @id @default(cuid())
   campaignId      String
@@ -672,8 +779,8 @@ model Haven {
   @@index([campaignId])
 }
 
-/// A hired NPC companion that demands wages and maintains legacy morale state.
-/// Morale mechanics are pending technical migration to the canonical 5e/SRD 2014 rules reference.
+/// A legacy hired-companion record retained for data compatibility.
+/// Its loyalty fields are inert until replaced by a canonical 5e relationship model.
 model Retainer {
   id           String   @id @default(cuid())
   campaignId   String

@@ -1,8 +1,8 @@
-import { BookOpenText, Map, ScrollText, UserRound } from "lucide-react";
+import { Map, ScrollText, Swords, UserRound } from "lucide-react";
 
 const ITEMS = [
   { href: "#scene", label: "Scene", icon: Map },
-  { href: "#chronicle", label: "Chronicle", icon: BookOpenText },
+  { href: "#commands", label: "Act", icon: Swords },
   { href: "#character", label: "Character", icon: UserRound },
   { href: "#journal", label: "Journal", icon: ScrollText },
 ] as const;

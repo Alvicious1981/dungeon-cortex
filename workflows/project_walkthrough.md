@@ -27,7 +27,7 @@ Un hito se clasifica como **100% completado y validado** solo si cumple simultá
 2. **Núcleo determinista de combate con integración de estado**
 - Reglas: `lib/rules/combat.ts` cubre iniciativa, avance de turno, resolución de ataque, checks de concentración, fin de encuentro, AC derivado.
 - Integración: `app/api/campaign/[id]/action/route.ts` y `lib/ai/tools/combat.ts` aplican daño, concentración, avance/resolución y persisten en DB.
-- Modelo: `Encounter`/`Combatant`/`Zone` en `prisma/schema.prisma` soportan estado resumible de combate.
+- Modelo: `Encounter`/`EncounterMap`/`Combatant` y las coordenadas `x/y/size` en `prisma/schema.prisma` soportan estado resumible y geometría táctica autoritativa.
 
 3. **Motores de exploración y wilderness autoritativos con estado persistente**
 - Dungeon exploration: `lib/rules/exploration.ts` + `lib/rules/exploration-logic.ts` + `lib/ai/tools/exploration.ts` implementan reloj, recursos, encuentros, descanso obligatorio y persistencia.

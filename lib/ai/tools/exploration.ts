@@ -73,14 +73,9 @@ export function buildExplorationTools(campaignId: string) {
     }),
     executeExplorationTurn: tool({
       description:
-        "Advance the dungeon clock by one exploration turn (10 minutes) for the given action. " +
-        "MUST be called for every dungeon action the party takes — moving, searching, resting, " +
-        "interacting, or making noise. " +
-        "Handles torch/lantern burn, ration consumption, random encounter checks, " +
-        "and mandatory rest enforcement automatically. " +
-        "NEVER narrate the passage of time, torch burn, ration loss, exhaustion, or encounters " +
-        "without calling this tool first. " +
-        "If the response contains `restRequired: true`, the NEXT call MUST use action='rest'. " +
+        "Advance the legacy exploration time ledger for a validated action. " +
+        "Handles light, ration consumption, and backend encounter checks. " +
+        "Character recovery is never resolved here; use the dedicated rest service. " +
         "Voice the returned `warnings[]` diegetically. Code is Law.",
       inputSchema: ExplorationTurnInputSchema,
       execute: async ({ action, turnsToAdvance }) => {

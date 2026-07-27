@@ -21,7 +21,6 @@ import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 import { getDispositionBand } from "@/lib/rules/social-logic";
-import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
 // ---------------------------------------------------------------------------
@@ -400,19 +399,13 @@ const LIGHT_ICONS: Record<"torch" | "lantern" | "none", string> = {
  * @pure — no I/O, deterministic output for the same input.
  */
 export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
-  const lines: string[] = ["## ⏱️ Dungeon Clock & Survival"];
+  const lines: string[] = ["## ⏱️ Exploration Time & Resources"];
 
   // Time
-  const minutesThisHour = (hud.totalTurns % TURNS_PER_HOUR) * 10;
-  lines.push(`**Turn:** ${hud.totalTurns} — ${hud.totalHours}h ${minutesThisHour}min elapsed`);
+  lines.push(`**Elapsed time blocks:** ${hud.totalTurns} — recorded hours: ${hud.totalHours}`);
 
-  // Rest status
-  const turnsUntilRest = REST_INTERVAL_TURNS - hud.turnsSinceRest;
-  if (hud.turnsSinceRest >= REST_INTERVAL_TURNS) {
-    lines.push("**Rest:** ⚠️ OVERDUE — mandatory rest not taken. Exhaustion applies on next non-rest action.");
-  } else {
-    lines.push(`**Rest:** ${turnsUntilRest} turn(s) until mandatory rest`);
-  }
+  // Rest is always a player choice, subject to the 5e rest service's legality checks.
+  lines.push("**Rest:** available only when the backend rest service accepts it");
 
   // Exhaustion
   if (hud.exhaustionLevel > 0) {
@@ -543,7 +536,6 @@ export function formatHavenHUD(ctx: HavenHUDContext): string {
     "## Haven & Downtime Status",
     `**Party Wealth:** ${ctx.currentWealth} GP`,
     `**Haven Upkeep:** ${ctx.havenUpkeep} GP/day`,
-    `**Retainer Morale:** ${ctx.retainerMorale}`,
   ].join("\n");
 }
 

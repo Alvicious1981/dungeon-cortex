@@ -7,6 +7,13 @@ import { buildCampaignContext } from "@/lib/memory/context";
 import { formatSystemPrompt } from "@/lib/memory/formatter";
 import { parseIntent } from "@/lib/ai/intent";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
+import {
+  checkpointAcceptedAction,
+  reserveActionRequest,
+  rejectPendingActionRequest,
+} from "@/lib/db/session-journal";
+import { deriveSessionMode } from "@/lib/session/contracts";
+
 import { 
   isSpellSlots, hasAvailableSlot, 
   spellcastingAbility,
@@ -23,11 +30,8 @@ import {
 import {
   advanceTurn as advanceExplorationTurn,
   consumeResources,
-  applyRest,
-  applyShortRest,
-  applyLongRest,
-  type CharacterState,
 } from "@/lib/rules/exploration";
+import { resolveRest, RestServiceError } from "@/lib/rules/rest-service";
 import { moveToNode } from "@/lib/rules/navigation";
 import {
   buildCombatConsequenceEvent,
@@ -39,25 +43,31 @@ import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
-  chebyshevSquares,
-  isOccupied,
-  sizeToSquares,
+  calculateDistance,
+  getAoETargets,
+  normalizeSizeCategory,
+  validateMovement,
+  type AreaShape,
   type GridCombatant,
-  type SizeCategory,
+  type TacticalMap,
 } from "@/lib/rules/geometry";
 import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import type { ContextCombatant } from "@/lib/memory/context";
 import type { PartyInventoryState } from "@/lib/rules/exploration";
 
-interface ActionBody {
-  action: string;
-  targetIds?: string[];
-  targetX?: number;
-  targetY?: number;
-}
+const ActionBodySchema = z.object({
+  action: z.string().trim().min(1).max(2_000),
+  requestId: z.string().trim().min(8).max(128).optional(),
+  targetIds: z.array(z.string().trim().min(1)).max(50).optional(),
+  targetX: z.number().int().optional(),
+  targetY: z.number().int().optional(),
+}).strict();
+
+type ActionBody = z.infer<typeof ActionBodySchema>;
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -78,16 +88,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   let body: ActionBody;
   try {
-    body = await req.json();
+    const parsed = ActionBodySchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid action request.", issues: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+    body = parsed.data;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
   const { action } = body;
-
-  if (!action?.trim()) {
-    return NextResponse.json({ error: "action is required." }, { status: 400 });
-  }
 
   let user;
   try {
@@ -115,17 +128,32 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   const trimmedAction = action.trim();
+  const requestId = body.requestId ?? crypto.randomUUID();
+  const reservation = await reserveActionRequest({
+    campaignId,
+    requestId,
+    action: trimmedAction,
+  });
+  if (!reservation.ok) {
+    return NextResponse.json(
+      { error: "This session is paused.", code: reservation.code },
+      { status: 409 }
+    );
+  }
+  if (reservation.duplicate) {
+    return NextResponse.json(
+      { error: "This action request was already received.", code: "DUPLICATE_ACTION", status: reservation.status },
+      { status: 409 }
+    );
+  }
 
-  // Step 1: Persist the player's action to the GameLog
-  await prisma.gameLog.create({
-    data: {
-      campaignId,
-      role: "user",
-      content: trimmedAction,
-    },
+  after(async () => {
+    await rejectPendingActionRequest({ campaignId, requestId }).catch((error) => {
+      console.error("[action] Failed to checkpoint a rejected request:", error);
+    });
   });
 
-  // Step 2: Detect and resolve /roll commands (non-streaming, quick response)
+  // Detect and resolve /roll commands (non-streaming, quick response).
   const ROLL_PREFIX = "/roll ";
   if (trimmedAction.toLowerCase().startsWith(ROLL_PREFIX)) {
     const notation = trimmedAction.slice(ROLL_PREFIX.length).trim();
@@ -143,15 +171,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       rollContent = `⚠️ Invalid dice notation: "${notation}". Use format like 1d20+5 or 2d6.`;
     }
 
-    await prisma.gameLog.create({
-      data: {
-        campaignId,
-        role: "system",
-        content: rollContent,
-      },
+    await checkpointAcceptedAction({
+      campaignId,
+      sessionId: reservation.sessionId,
+      requestId,
+      action: trimmedAction,
+      mode: "NARRATIVE",
+      events: [],
+      additionalLogs: [{ role: "system", content: rollContent }],
     });
 
-    return NextResponse.json({ ok: true }, { status: 202 });
+    return NextResponse.json({ ok: true, requestId }, { status: 202 });
   }
 
   // ── "Code is Law" resolution gates ──────────────────────────────────────────
@@ -172,14 +202,26 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // Authoritative "fast-path" for UI-triggered buttons (CombatHUD).
   // This bypasses LLM intent parsing to ensure 100% reliability for core mechanics.
   const MACRO_ACTIONS = ["Attack", "End Turn", "Move"];
+  let actionTypeForSession: string | undefined;
   if (MACRO_ACTIONS.includes(trimmedAction)) {
     if (!context.activeEncounter) {
       return NextResponse.json({ error: "No active encounter." }, { status: 400 });
     }
+    const activeCombatant = context.activeEncounter.combatants[
+      context.activeEncounter.currentTurnIndex
+    ];
+    if (!activeCombatant?.isPlayer || activeCombatant.hp <= 0) {
+      return NextResponse.json(
+        { error: "It is not the player character's active combat turn.", code: "NOT_ACTIVE_ACTOR" },
+        { status: 409 }
+      );
+    }
+
 
     if (trimmedAction === "End Turn") {
       await prisma.$transaction(async (tx) => {
         const finalizeOutcome = await finalizeEncounterTurn({
+
           tx: tx as Prisma.TransactionClient,
           encounterId: context.activeEncounter!.id,
           currentTurnIndex: context.activeEncounter!.currentTurnIndex,
@@ -192,19 +234,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     if (trimmedAction === "Attack") {
       const activeEncounter = context.activeEncounter;
       const targetIds = body.targetIds ?? [];
-      
-      let targets: ContextCombatant[] = [];
-      if (targetIds.length > 0) {
-        targets = activeEncounter.combatants.filter(c => targetIds.includes(c.id));
-        if (targets.length === 0) {
-          return NextResponse.json({ error: "None of the specified targets were found in this encounter." }, { status: 400 });
-        }
-      } else {
-        const autoTarget = activeEncounter.combatants.find((c) => !c.isPlayer && c.hp > 0);
-        if (!autoTarget) {
-          return NextResponse.json({ error: "No valid hostile targets." }, { status: 400 });
-        }
-        targets = [autoTarget];
+
+      if (targetIds.length !== 1) {
+        return NextResponse.json({ error: "A weapon attack requires exactly one target." }, { status: 400 });
+      }
+      const targets: ContextCombatant[] = activeEncounter.combatants.filter(
+        (combatant) => targetIds[0] === combatant.id && !combatant.isPlayer && combatant.hp > 0
+      );
+      if (targets.length !== 1) {
+        return NextResponse.json({ error: "The selected hostile target is invalid." }, { status: 400 });
       }
 
       const foundWeapon = context.character.inventory.find(
@@ -222,6 +260,28 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         : 0;
 
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
+      if (!activeEncounter.map || !playerCombatant) {
+        return NextResponse.json(
+          { error: "A tactical map and player position are required to validate attack range." },
+          { status: 409 }
+        );
+      }
+      const weaponRange = foundWeapon
+        ? (foundWeapon.properties as Record<string, unknown>).rangeNormal
+        : undefined;
+      const maxRangeFt = typeof weaponRange === "number" && weaponRange > 0 ? weaponRange : 5;
+      const distanceFt = calculateDistance(
+        playerCombatant,
+        targets[0]!,
+        activeEncounter.map.gridType,
+        activeEncounter.map.cellSize
+      );
+      if (distanceFt > maxRangeFt) {
+        return NextResponse.json(
+          { error: `Target is out of range (${distanceFt} ft > ${maxRangeFt} ft).` },
+          { status: 400 }
+        );
+      }
       const playerConditions = extractConditions(playerCombatant?.conditions);
       const attackModifier = strMod + 2; // Proficiency baseline
 
@@ -276,98 +336,115 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const targetX = body.targetX;
       const targetY = body.targetY;
 
-      if (targetX === undefined || targetY === undefined
-        || !Number.isInteger(targetX) || !Number.isInteger(targetY)) {
+      if (targetX === undefined || targetY === undefined) {
         return NextResponse.json(
           { error: "Move requires integer targetX and targetY." },
           { status: 400 }
         );
       }
 
-      const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
-      if (!playerCombatant) {
-        return NextResponse.json(
-          { error: "Player combatant not found in encounter." },
-          { status: 400 }
-        );
-      }
+      const moveResult = await prisma.$transaction(async (tx) => {
+        const encounterState = await tx.encounter.findUnique({
+          where: { id: context.activeEncounter!.id },
+          select: {
+            map: {
+              select: { gridType: true, width: true, height: true, cellSize: true },
+            },
+            combatants: {
+              select: {
+                id: true,
+                isPlayer: true,
+                stats: true,
+                x: true,
+                y: true,
+                size: true,
+              },
+            },
+          },
+        });
 
-      // ── Speed extraction ──────────────────────────────────────────────────
-      // Attempt to read speed from the combatant's stats JSON.
-      // Fallback: 30 ft (6 squares) — the D&D 5e 2014 SRD default.
-      const DEFAULT_SPEED_FT = 30;
-      const combatantStats = (playerCombatant.stats as Record<string, unknown>) ?? {};
-      const rawSpeed = combatantStats.speed;
-      const speedFt = typeof rawSpeed === "number" && rawSpeed > 0
-        ? rawSpeed
-        : DEFAULT_SPEED_FT;
-      const speedSquares = Math.floor(speedFt / 5);
-
-      // ── Distance validation (Chebyshev — 5e grid diagonal = 1 square) ─────
-      const from = { x: playerCombatant.x, y: playerCombatant.y };
-      const to   = { x: targetX, y: targetY };
-      const distSquares = chebyshevSquares(from, to);
-
-      if (distSquares === 0) {
-        return NextResponse.json(
-          { error: "Already at that position." },
-          { status: 400 }
-        );
-      }
-
-      if (distSquares > speedSquares) {
-        return NextResponse.json(
-          { error: `Movement exceeds speed. Distance: ${distSquares * 5} ft, speed: ${speedFt} ft.` },
-          { status: 400 }
-        );
-      }
-
-      // ── Collision validation (size-aware footprint) ────────────────────────
-      // Build a list of all other combatants as GridCombatants, then check
-      // every square the mover's footprint would cover at the destination.
-      const VALID_SIZES: SizeCategory[] = ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"];
-      const moverSize: SizeCategory = VALID_SIZES.includes(playerCombatant.size as SizeCategory)
-        ? (playerCombatant.size as SizeCategory)
-        : "Medium";
-
-      const otherCombatants: GridCombatant[] = context.activeEncounter.combatants
-        .filter(c => c.id !== playerCombatant.id)
-        .map(c => ({
-          id: c.id,
-          x: c.x,
-          y: c.y,
-          size: VALID_SIZES.includes(c.size as SizeCategory)
-            ? (c.size as SizeCategory)
-            : "Medium",
-        }));
-
-      const footprintSide = sizeToSquares(moverSize);
-      for (let row = targetY; row < targetY + footprintSide; row++) {
-        for (let col = targetX; col < targetX + footprintSide; col++) {
-          if (isOccupied({ x: col, y: row }, otherCombatants)) {
-            return NextResponse.json(
-              { error: "Target square is occupied." },
-              { status: 400 }
-            );
-          }
+        if (!encounterState?.map) {
+          return {
+            valid: false as const,
+            status: 409,
+            code: "MISSING_MAP",
+            error: "Encounter has no authoritative tactical map.",
+          };
         }
-      }
 
-      // ── State mutation ─────────────────────────────────────────────────────
-      await prisma.combatant.update({
-        where: { id: playerCombatant.id },
-        data: { x: targetX, y: targetY },
-      });
+        const playerCombatant = encounterState.combatants.find((combatant) => combatant.isPlayer);
+        if (!playerCombatant) {
+          return {
+            valid: false as const,
+            status: 400,
+            code: "MISSING_PLAYER",
+            error: "Player combatant not found in encounter.",
+          };
+        }
+
+        const combatantStats = (playerCombatant.stats as Record<string, unknown>) ?? {};
+        const rawSpeed = combatantStats.speed;
+        const speedFt = typeof rawSpeed === "number" && rawSpeed > 0 ? rawSpeed : 30;
+        const gridCombatants: GridCombatant[] = encounterState.combatants.map((combatant) => ({
+          id: combatant.id,
+          x: combatant.x,
+          y: combatant.y,
+          size: normalizeSizeCategory(combatant.size),
+        }));
+        const mover = gridCombatants.find((combatant) => combatant.id === playerCombatant.id)!;
+        const map: TacticalMap = {
+          gridType: encounterState.map.gridType,
+          width: encounterState.map.width,
+          height: encounterState.map.height,
+          cellSize: encounterState.map.cellSize,
+        };
+        const movement = validateMovement({
+          combatant: mover,
+          target: { x: targetX, y: targetY },
+          map,
+          combatants: gridCombatants,
+          speedFt,
+        });
+
+        if (!movement.valid) {
+          return {
+            valid: false as const,
+            status: 400,
+            code: movement.code,
+            error: movement.message,
+          };
+        }
+
+        await tx.combatant.update({
+          where: { id: playerCombatant.id },
+          data: { x: targetX, y: targetY },
+        });
+
+        return {
+          valid: true as const,
+          combatantId: playerCombatant.id,
+          fromX: playerCombatant.x,
+          fromY: playerCombatant.y,
+          distanceFt: movement.distanceFt,
+        };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+      if (!moveResult.valid) {
+        return NextResponse.json(
+          { error: moveResult.error, code: moveResult.code },
+          { status: moveResult.status }
+        );
+      }
 
       gameEvents.push({
         type: "MOVE_COMBATANT",
         payload: {
-          combatantId: playerCombatant.id,
-          fromX: from.x,
-          fromY: from.y,
+          combatantId: moveResult.combatantId,
+          fromX: moveResult.fromX,
+          fromY: moveResult.fromY,
           toX: targetX,
           toY: targetY,
-          distanceFt: distSquares * 5,
+          distanceFt: moveResult.distanceFt,
         },
       });
     }
@@ -377,9 +454,47 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   } else {
     // LLM Intent Parsing (for natural language actions)
     const intent = await parseIntent(trimmedAction, systemContext);
+    actionTypeForSession = intent.actionType;
+    if (intent.actionType === "cast_spell" && !intent.spellName) {
+      return NextResponse.json(
+        { error: "An exact spell name is required for backend resolution." },
+        { status: 400 }
+      );
+    }
+    if (
+      (intent.actionType === "use_item" || intent.actionType === "equip") &&
+      !intent.targetName
+    ) {
+      return NextResponse.json(
+        { error: "That mechanical action requires an exact item name." },
+        { status: 400 }
+      );
+    }
+    if (intent.actionType === "attack" && !intent.targetName && !body.targetIds?.length) {
+      return NextResponse.json({ error: "Attack requires one exact target." }, { status: 400 });
+    }
+    if (intent.actionType === "move" && !intent.destination) {
+      return NextResponse.json({ error: "Move requires an exact destination." }, { status: 400 });
+    }
+    const consumesCombatTurn = ["cast_spell", "attack", "use_item"].includes(
+      intent.actionType
+    );
+    if (consumesCombatTurn && context.activeEncounter) {
+      const activeCombatant = context.activeEncounter.combatants[
+        context.activeEncounter.currentTurnIndex
+      ];
+      if (!activeCombatant?.isPlayer || activeCombatant.hp <= 0) {
+        return NextResponse.json(
+          { error: "It is not the player character's active combat turn.", code: "NOT_ACTIVE_ACTOR" },
+          { status: 409 }
+        );
+      }
+    }
+
+
 
     // ── Gate: cast_spell ────────────────────────────────────────────────────────
-    if (intent.actionType === "cast_spell" && intent.spellLevel !== undefined) {
+    if (intent.actionType === "cast_spell") {
       if (!intent.spellName) {
         return NextResponse.json(
           { error: "An exact spell name is required for backend resolution." },
@@ -387,8 +502,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
+      const spellLevel = intent.spellLevel ?? intent.spellEffect?.level;
+      if (spellLevel === undefined) {
+        return NextResponse.json(
+          { error: `Spell "${intent.spellName}" is unavailable in the SRD cache.` },
+          { status: 400 }
+        );
+      }
+
       const rawSlots = context.character.spellSlots;
-      const usesSpellSlot = intent.spellLevel > 0;
+      const usesSpellSlot = spellLevel > 0;
 
       if (usesSpellSlot && !isSpellSlots(rawSlots)) {
         return NextResponse.json(
@@ -400,10 +523,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       if (
         usesSpellSlot &&
         isSpellSlots(rawSlots) &&
-        !hasAvailableSlot(rawSlots, intent.spellLevel)
+        !hasAvailableSlot(rawSlots, spellLevel)
       ) {
         return NextResponse.json(
-          { error: `No available spell slots remaining at level ${intent.spellLevel}.` },
+          { error: `No available spell slots remaining at level ${spellLevel}.` },
           { status: 400 }
         );
       }
@@ -418,7 +541,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         const profBonus = calculateProficiency(context.character.level);
         const spellEffect = await resolveCachedSpell({
           query: intent.spellName,
-          slotLevel: intent.spellLevel,
+          slotLevel: spellLevel,
           spellcastingMod: abilityMod,
           characterLevel: context.character.level,
         });
@@ -446,6 +569,63 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
+      if (effect?.areaOfEffect && effect.type === "damage") {
+        const activeEncounter = context.activeEncounter;
+        if (!activeEncounter || !playerCombatant) {
+          return NextResponse.json(
+            { error: "An active encounter is required for an area spell." },
+            { status: 400 }
+          );
+        }
+        if (!activeEncounter.map) {
+          return NextResponse.json(
+            { error: "Encounter has no authoritative tactical map." },
+            { status: 409 }
+          );
+        }
+
+        const anchor = targets[0];
+        if (!anchor) {
+          return NextResponse.json(
+            { error: "Area spells require one target as the area anchor or direction." },
+            { status: 400 }
+          );
+        }
+
+        const shape: AreaShape = effect.areaOfEffect.shape;
+        const directional = shape === "CONE" || shape === "LINE";
+        const areaOrigin = directional
+          ? { x: playerCombatant.x, y: playerCombatant.y }
+          : { x: anchor.x, y: anchor.y };
+        const direction = directional
+          ? { x: anchor.x - playerCombatant.x, y: anchor.y - playerCombatant.y }
+          : undefined;
+        const gridCombatants: GridCombatant[] = activeEncounter.combatants
+          .filter((combatant) => combatant.hp > 0)
+          .map((combatant) => ({
+            id: combatant.id,
+            x: combatant.x,
+            y: combatant.y,
+            size: normalizeSizeCategory(combatant.size),
+          }));
+        const affectedIds = new Set(getAoETargets({
+          origin: areaOrigin,
+          direction,
+          shape,
+          sizeFt: effect.areaOfEffect.sizeFt,
+          gridType: activeEncounter.map.gridType,
+          cellSize: activeEncounter.map.cellSize,
+        }, gridCombatants).map((combatant) => combatant.id));
+        targets = activeEncounter.combatants.filter((combatant) => affectedIds.has(combatant.id));
+
+        if (targets.length === 0) {
+          return NextResponse.json(
+            { error: "No living combatants intersect the selected spell area." },
+            { status: 400 }
+          );
+        }
+      }
+
       await prisma.$transaction(async (tx) => {
         const spellOutcome = await executeCombatAction({
           actionType: "cast_spell",
@@ -462,7 +642,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorConditions: playerConditions,
           targetCombatants: targets,
           spellName: intent.spellName,
-          spellLevel: intent.spellLevel,
+          spellLevel,
           spellEffect: effect ?? undefined,
           spellSaveDC: saveDC,
           rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
@@ -587,11 +767,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       }
 
       const normalizedTarget = intent.targetName.toLowerCase();
-      const targets = context.activeEncounter.combatants.filter(c => 
-        c.name.toLowerCase().includes(normalizedTarget)
+      const targets = context.activeEncounter.combatants.filter(
+        (combatant) =>
+          !combatant.isPlayer &&
+          combatant.hp > 0 &&
+          combatant.name.toLowerCase().includes(normalizedTarget)
       );
 
-      if (targets.length === 0) {
+      if (targets.length !== 1) {
         return NextResponse.json({ error: `Target "${intent.targetName}" not found.` }, { status: 400 });
       }
 
@@ -604,6 +787,27 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const charStats = context.character.stats as Record<string, number>;
       const strMod = abilityModifier(charStats.STR ?? 10);
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
+      if (!context.activeEncounter.map || !playerCombatant) {
+        return NextResponse.json(
+          { error: "A tactical map and player position are required to validate attack range." },
+          { status: 409 }
+        );
+      }
+      const maxRangeFt = typeof weaponProps?.rangeNormal === "number" && weaponProps.rangeNormal > 0
+        ? weaponProps.rangeNormal
+        : 5;
+      const distanceFt = calculateDistance(
+        playerCombatant,
+        targets[0]!,
+        context.activeEncounter.map.gridType,
+        context.activeEncounter.map.cellSize
+      );
+      if (distanceFt > maxRangeFt) {
+        return NextResponse.json(
+          { error: `Target is out of range (${distanceFt} ft > ${maxRangeFt} ft).` },
+          { status: 400 }
+        );
+      }
       const playerConditions = extractConditions(playerCombatant?.conditions);
       const attackModifier = strMod + 2;
 
@@ -651,60 +855,27 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     // ── Gate: rest ──────────────────────────────────────────────────────────────
     if (intent.actionType === "rest") {
-      const charData = context.character;
-      
-      await prisma.$transaction(async (tx) => {
-        const charState: CharacterState = {
-          hp: charData.hp,
-          maxHp: charData.maxHp,
-          level: charData.level,
-          class: charData.class,
-          stats: charData.stats as Record<string, number>,
-          spellSlots: charData.spellSlots as Record<string, { current: number; max: number }> | null,
-          hitDiceTotal: charData.hitDiceTotal,
-          hitDiceRemaining: charData.hitDiceRemaining,
-          exhaustionLevel: charData.exhaustionLevel,
-        };
-
-        const isLongRest = intent.restType === "long" || trimmedAction.toLowerCase().includes("long rest");
-        
-        let nextChar: CharacterState;
-        let eventPayload: Record<string, unknown>;
-
-        if (isLongRest) {
-          const result = applyLongRest(charState);
-          nextChar = result.next;
-          eventPayload = { type: "LONG_REST", hpRecovered: result.hpRecovered, hitDiceRecovered: result.hitDiceRecovered, exhaustionReduced: result.exhaustionReduced, spellSlotsRecovered: result.spellSlotsRecovered };
-        } else {
-          const result = applyShortRest(charState);
-          nextChar = result.next;
-          eventPayload = { type: "SHORT_REST", hpRecovered: result.hpRecovered, hitDiceSpent: result.hitDiceSpent };
-        }
-
-        await tx.character.update({
-          where: { id: charData.id },
-          data: {
-            hp: nextChar.hp,
-            hitDiceRemaining: nextChar.hitDiceRemaining,
-            exhaustionLevel: nextChar.exhaustionLevel,
-            spellSlots: nextChar.spellSlots ? (nextChar.spellSlots as Prisma.InputJsonValue) : Prisma.JsonNull,
-          },
+      try {
+        const restResult = await resolveRest({
+          campaignId,
+          characterId: context.character.id,
+          restType: intent.restType ?? "short",
         });
 
-        const campaignTime = await tx.campaignTime.findUnique({ where: { campaignId } });
-        if (campaignTime) {
-          const nextTime = applyRest(campaignTime);
-          await tx.campaignTime.update({
-            where: { campaignId },
-            data: { turnsSinceRest: nextTime.turnsSinceRest },
-          });
-        }
-        
         gameEvents.push({
           type: "REST_COMPLETED",
-          payload: eventPayload,
+          payload: { ...restResult.facts },
         });
-      });
+      } catch (error) {
+        if (error instanceof RestServiceError) {
+          const status = error.code === "ACTIVE_ENCOUNTER" ? 409 : 400;
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status }
+          );
+        }
+        throw error;
+      }
     }
 
     // ── Gate: explore / travel ──────────────────────────────────────────────────
@@ -767,6 +938,21 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
   }
 
+  // Only accepted actions enter the canonical transcript. Rejected requests
+  // return before this checkpoint and therefore cannot become campaign facts.
+  await checkpointAcceptedAction({
+    campaignId,
+    sessionId: reservation.sessionId,
+    requestId,
+    action: trimmedAction,
+    mode: gameEvents.some((event) => event.type === "COMBAT_ENDED")
+      ? "RESOLUTION"
+      : deriveSessionMode({
+          hasActiveEncounter: Boolean(context.activeEncounter),
+          actionType: actionTypeForSession,
+        }),
+    events: gameEvents,
+  });
   // ── State is now safely mutated.  Start the narrative stream. ────────────────
 
   const narrativeContext = adaptCombatEventsToNarrativeContext(gameEvents);

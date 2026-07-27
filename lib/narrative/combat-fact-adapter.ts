@@ -201,6 +201,16 @@ export function adaptCombatEventsToNarrativeContext(
           payload: { targetName }
         });
       })
+      .with('COMBAT_ENDED', () => {
+        const reason = typeof event.payload?.reason === 'string'
+          ? event.payload.reason
+          : 'resolved';
+        addFact({
+          type: 'turn_ended',
+          description: `Encounter ended: ${reason}`,
+          payload: { reason }
+        });
+      })
       .with(
         'SPELL_CAST',
         'PLAYER_DOWNED',
@@ -215,6 +225,11 @@ export function adaptCombatEventsToNarrativeContext(
         'REST_COMPLETED',
         'EXPLORATION_WARNING',
         'PLAYER_MOVE',
+        'ACTION_ACCEPTED',
+        'ACTION_REJECTED',
+        'SESSION_PAUSED',
+        'SESSION_RESUMED',
+        'SESSION_COMPLETED',
         () => undefined
       )
       .exhaustive();

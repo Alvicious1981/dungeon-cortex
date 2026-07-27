@@ -18,13 +18,22 @@ const FORBIDDEN_PATTERNS = [
   { name: 'XP por oro', regex: /\bxp\s+por\s+oro\b/i },
   { name: 'AD&D', regex: /\bad&d\b/i },
   { name: 'OSR', regex: /\bosr\b/i },
+  { name: 'mandatory rest', regex: /\bmandatory\s+rest\b/i },
+  { name: 'reaction roll', regex: /\breaction\s+roll\b/i },
+  { name: 'gold-to-XP conversion', regex: /\b(?:convert|exchange)\s+gold\s+(?:to|for|into)\s+xp\b/i },
+  { name: 'fixed ten-minute dungeon turn', regex: /\b(?:10|ten)[- ]minute\s+(?:dungeon\s+)?turn\b/i },
 ];
 
 // Scan paths for this specific narrative roadmap
 const SCAN_PATHS = [
   '.agents/skills/narrative-canon/SKILL.md',
   'docs/NARRATIVE_SAFETY.md',
+  'app',
+  'lib/ai',
+  'lib/memory',
   'lib/narrative',
+  'lib/rules',
+  'prisma/schema.prisma',
   'tests/narrative'
 ];
 

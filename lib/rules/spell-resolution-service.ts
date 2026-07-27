@@ -3,6 +3,7 @@ import {
   resolveSpellEffect,
   type SpellEffect,
 } from "@/lib/rules/magic";
+import type { AreaShape } from "@/lib/rules/geometry";
 
 interface CachedSpellRecord {
   id: string;
@@ -34,6 +35,10 @@ export interface ResolvedSpellEffect extends SpellEffect {
   level: number;
   concentration: boolean;
   sourceEndpoint: string;
+  areaOfEffect: {
+    shape: AreaShape;
+    sizeFt: number;
+  } | null;
 }
 
 export interface ResolveSpellInput {
@@ -77,6 +82,25 @@ async function findCachedSpell(
   );
 }
 
+function resolveAreaOfEffect(data: Record<string, unknown>): ResolvedSpellEffect["areaOfEffect"] {
+  const rawArea = data.area_of_effect;
+  if (!rawArea || typeof rawArea !== "object") return null;
+
+  const area = rawArea as Record<string, unknown>;
+  const rawType = typeof area.type === "string" ? area.type.toUpperCase() : "";
+  const sizeFt = area.size;
+  const supportedShapes: AreaShape[] = ["CONE", "SPHERE", "CUBE", "LINE"];
+
+  if (!supportedShapes.includes(rawType as AreaShape)
+    || typeof sizeFt !== "number"
+    || !Number.isFinite(sizeFt)
+    || sizeFt < 0) {
+    return null;
+  }
+
+  return { shape: rawType as AreaShape, sizeFt };
+}
+
 export async function resolveCachedSpell(
   input: ResolveSpellInput
 ): Promise<ResolvedSpellEffect | null> {
@@ -99,5 +123,6 @@ export async function resolveCachedSpell(
     level: spell.level ?? input.slotLevel,
     concentration: spell.concentration ?? false,
     sourceEndpoint: `https://www.dnd5eapi.co/api/2014/spells/${sourceSlug}`,
+    areaOfEffect: resolveAreaOfEffect(spell.data as Record<string, unknown>),
   };
 }

@@ -56,12 +56,21 @@ export interface ContextInventoryItem {
   equippedSlot: string | null;
 }
 
+export interface ContextEncounterMap {
+  gridType: "SQUARE" | "HEX";
+  width: number;
+  height: number;
+  cellSize: number;
+}
+
 export interface ContextEncounter {
   id: string;
   round: number;
   currentTurnIndex: number;
   /** Ordered by initiativeTotal DESC — index 0 acts first. */
   combatants: ContextCombatant[];
+  /** Authoritative tactical geometry for coordinates and movement. */
+  map: ContextEncounterMap | null;
   /** Total damage dealt to enemies. */
   totalDamageDealt: number;
   /** Encounter lifecycle status. "active" | "resolved" | "fled". */
@@ -190,13 +199,14 @@ async function fetchExplorationContext(
 
   const nodeById = new Map(location.nodes.map((n) => [n.id, n]));
 
-  const allEdges: ContextExplorationEdge[] = location.edges.map((e) => ({
+  const visibleEdges: ContextExplorationEdge[] = location.edges
+    .filter((edge) => edge.passageType !== "hidden").map((e) => ({
     fromIndex: nodeById.get(e.fromNodeId)?.index ?? 0,
     toIndex: nodeById.get(e.toNodeId)?.index ?? 0,
     passageType: e.passageType,
   }));
 
-  const allNodes: ContextExplorationNode[] = location.nodes.map((n) => ({
+  const databaseNodes: ContextExplorationNode[] = location.nodes.map((n) => ({
     index: n.index,
     name: n.name,
     description: n.description,
@@ -224,7 +234,7 @@ async function fetchExplorationContext(
 
   const adjacentNodes: Array<{ node: ContextExplorationNode; passageType: string }> =
     currentNode
-      ? allEdges
+      ? visibleEdges
           .filter(
             (e) =>
               e.fromIndex === currentNode.index ||
@@ -233,9 +243,20 @@ async function fetchExplorationContext(
           .map((e) => {
             const adjIndex =
               e.fromIndex === currentNode.index ? e.toIndex : e.fromIndex;
-            const adjNode = allNodes.find((n) => n.index === adjIndex);
+            const adjNode = databaseNodes.find((n) => n.index === adjIndex);
             return adjNode
-              ? { node: adjNode, passageType: e.passageType }
+              ? {
+                  node: {
+                    index: adjNode.index,
+                    name: "Unexplored area",
+                    description: "Details are unknown until the party enters.",
+                    feature: "empty",
+                    npcSeed: null,
+                    x: adjNode.x,
+                    y: adjNode.y,
+                  } as ContextExplorationNode,
+                  passageType: e.passageType,
+                }
               : null;
           })
           .filter((entry): entry is { node: ContextExplorationNode; passageType: string } =>
@@ -253,8 +274,8 @@ async function fetchExplorationContext(
     currentNode,
     adjacentNodes,
     visitedNodeIndices: currentNode ? [currentNode.index] : [],
-    allNodes,
-    allEdges,
+    allNodes: currentNode ? [currentNode] : [],
+    allEdges: visibleEdges.filter((edge) => edge.fromIndex === currentNode?.index || edge.toIndex === currentNode?.index),
   };
 }
 
@@ -316,6 +337,14 @@ export async function buildCampaignContext(
         round: true,
         currentTurnIndex: true,
         totalDamageDealt: true,
+        map: {
+          select: {
+            gridType: true,
+            width: true,
+            height: true,
+            cellSize: true,
+          },
+        },
         combatants: {
           select: {
             id: true,

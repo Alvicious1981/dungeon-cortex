@@ -21,13 +21,6 @@ import { openai } from "@ai-sdk/openai";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatSystemPrompt } from "@/lib/memory/formatter";
 import type { AsyncIterableStream } from "ai";
-import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
-import { buildCombatTools } from "@/lib/ai/tools/combat";
-import { buildProgressionTools } from "@/lib/ai/tools/progression";
-import { buildSocialTools } from "@/lib/ai/tools/social";
-import { buildExplorationTools } from "@/lib/ai/tools/exploration";
-import { buildWorldTools } from "@/lib/ai/tools/world";
-import { buildInventoryTools } from "@/lib/ai/tools/inventory";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
 import type { LevelUpPayload } from "@/lib/rules/progression";
 import type { MerchantPayload } from "@/lib/rules/trade";
@@ -63,23 +56,10 @@ export interface NarrativeStream {
 
 // ─── Tool definitions (shared) ────────────────────────────────────────────────
 
-function buildTools(
-  campaignId: string,
-  callbacks?: { 
-    onLevelUp?: (payload: LevelUpPayload) => void;
-    onMerchantGenerated?: (payload: MerchantPayload) => void;
-  },
-) {
-  return {
-    ...buildCombatTools(campaignId),
-    ...buildProgressionTools(campaignId, callbacks),
-    ...buildSocialTools(campaignId, callbacks),
-    ...buildExplorationTools(campaignId),
-    executeTravelWatch: buildWildernessTool(campaignId),
-    ...buildWorldTools(campaignId),
-    ...buildSrdTools(),
-    ...buildInventoryTools(campaignId),
-  };
+function buildReadOnlyTools() {
+  // Narration may inspect canonical cached SRD data, but it cannot call any
+  // state-changing tool. All mutations must have completed before this point.
+  return buildSrdTools();
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -158,10 +138,7 @@ export async function streamNarrative(
     system,
     prompt,
     stopWhen: stepCountIs(5),
-    tools: buildTools(campaignId, {
-      onLevelUp: (payload) => resolveLevelUp(payload),
-      onMerchantGenerated: (payload) => resolveMerchant(payload),
-    }),
+    tools: buildReadOnlyTools(),
   });
 
   // If narrativeContext exists, we buffer and validate the result.text before yielding/resolving.

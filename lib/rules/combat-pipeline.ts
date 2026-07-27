@@ -328,7 +328,6 @@ export async function executeCombatAction(
         isMelee: true,
         encounterSnapshot: snapshot,
         usedSenses: [],
-        zones: [],
       });
 
       damage = consequencesPayload.combat_facts.damage;
@@ -505,6 +504,12 @@ export async function finalizeEncounterTurn(
       where: { id: encounterId },
       data: { status: "resolved" },
     });
+    if (collectEvents) {
+      events.push({
+        type: "COMBAT_ENDED",
+        payload: { encounterId, reason: resolution.reason },
+      });
+    }
   } else {
     const { nextTurnIndex, nextRound, roundAdvanced } = advanceTurn({
       currentTurnIndex,

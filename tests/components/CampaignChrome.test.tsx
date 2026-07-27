@@ -17,7 +17,7 @@ describe("campaign chrome", () => {
     const navigation = screen.getByRole("navigation", { name: "Campaign areas" });
     expect(navigation).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Scene" })).toHaveAttribute("href", "#scene");
-    expect(screen.getByRole("link", { name: "Chronicle" })).toHaveAttribute("href", "#chronicle");
+    expect(screen.getByRole("link", { name: "Act" })).toHaveAttribute("href", "#commands");
     expect(screen.getByRole("link", { name: "Character" })).toHaveAttribute("href", "#character");
     expect(screen.getByRole("link", { name: "Journal" })).toHaveAttribute("href", "#journal");
   });

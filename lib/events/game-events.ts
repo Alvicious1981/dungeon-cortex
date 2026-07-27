@@ -27,6 +27,7 @@ export type GameEventType =
   | "ROUND_ADVANCE"        // Turn index wrapped; a new combat round begins
   | "COMBAT_CONSEQUENCE"   // Full Consequences Engine payload from a resolved attack
   | "LOOT_GENERATED"       // generateLoot tool completed; LootPayload ready for display
+  | "COMBAT_ENDED"         // Backend resolved the encounter terminal state
   | "LEVEL_UP_RESOLVED"    // triggerLevelUp tool completed; LevelUpPayload ready for display
   | "CONCENTRATION_STARTED" // Combatant began concentrating on a spell
   | "CONCENTRATION_BROKEN"  // Combatant failed a concentration check or cast a new conc spell
@@ -34,7 +35,12 @@ export type GameEventType =
   | "EQUIP_ITEM"           // Item was equipped/unequipped
   | "REST_COMPLETED"       // Short or long rest completed
   | "EXPLORATION_WARNING"   // Resource depletion or other exploration danger
-  | "PLAYER_MOVE";         // Player moved between dungeon nodes
+  | "PLAYER_MOVE"          // Player moved between dungeon nodes
+  | "ACTION_ACCEPTED"      // Durable action checkpoint was committed
+  | "ACTION_REJECTED"      // Durable action reservation was rejected
+  | "SESSION_PAUSED"
+  | "SESSION_RESUMED"
+  | "SESSION_COMPLETED";
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.

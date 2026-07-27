@@ -41,6 +41,7 @@ describe("resolveCachedSpell", () => {
             damage_at_slot_level: { "3": "8d6", "4": "9d6" },
           },
           dc: { dc_type: { index: "dex" }, dc_success: "half" },
+          area_of_effect: { type: "sphere", size: 20 },
         },
       },
     ]);
@@ -64,6 +65,7 @@ describe("resolveCachedSpell", () => {
       saveDamage: "half",
       concentration: false,
       sourceEndpoint: "https://www.dnd5eapi.co/api/2014/spells/fireball",
+      areaOfEffect: { shape: "SPHERE", sizeFt: 20 },
     });
   });
 
@@ -116,5 +118,34 @@ describe("resolveCachedSpell", () => {
     });
 
     expect(result).toBeNull();
+  });
+
+  it("does not invent geometry for unsupported or malformed SRD areas", async () => {
+    const db = createDb([
+      {
+        id: "cloudkill",
+        indexSlug: "cloudkill",
+        name: "Cloudkill",
+        level: 5,
+        concentration: true,
+        data: {
+          damage: {
+            damage_type: { index: "poison" },
+            damage_at_slot_level: { "5": "5d8" },
+          },
+          area_of_effect: { type: "cylinder", size: 20 },
+        },
+      },
+    ]);
+
+    const result = await resolveCachedSpell({
+      query: "cloudkill",
+      slotLevel: 5,
+      spellcastingMod: 4,
+      characterLevel: 9,
+      db,
+    });
+
+    expect(result?.areaOfEffect).toBeNull();
   });
 });

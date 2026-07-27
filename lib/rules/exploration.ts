@@ -131,7 +131,7 @@ export const ExplorationTurnInputSchema = z.object({
       "The type of exploration action taken. " +
       "'move': standard movement to adjacent node, 1 turn. " +
       "'search': careful room examination, 1 turn. " +
-      "'rest': mandatory rest turn — resets the rest cycle, no resources consumed. " +
+      "'rest': requests a pause in exploration; character recovery is resolved only by the rest service. " +
       "'interact': non-combat interaction with environment or NPC, 1 turn. " +
       "'loud': noisy action (breaking down door, shouting) — forces an immediate encounter check.",
     ),
@@ -365,7 +365,7 @@ export const LOCATION_TEMPLATES: Record<LocationType, LocationTemplate> = {
 // Exploration Time Engine Constants & Types
 // ---------------------------------------------------------------------------
 
-/** 1 dungeon turn = 10 minutes. 6 turns = 1 hour. */
+/** Legacy time-block conversion retained for stored campaign clocks. */
 export const TURNS_PER_HOUR = 6;
 /** A lit torch burns for 6 turns (1 hour). */
 export const TORCH_DURATION_TURNS = 6;

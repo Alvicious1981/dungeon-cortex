@@ -11,7 +11,7 @@ import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
 import { evaluateAdvantage, isKnownCondition } from "./conditions";
 
-import { calculateDistance, type GridZone } from "./spatial";
+import { calculateDistance, type GridPoint, type TacticalGridType } from "./geometry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,9 +195,11 @@ export function removeCondition(
 // ---------------------------------------------------------------------------
 
 export interface AttackSpatialContext {
-  attackerZone: GridZone;
-  targetZone: GridZone;
+  attackerPosition: GridPoint;
+  targetPosition: GridPoint;
   rangeInFeet: number;
+  gridType?: TacticalGridType;
+  cellSize?: number;
 }
 
 export type DamageType =
@@ -309,7 +311,6 @@ export interface ComputeConsequencesInput {
   isMelee: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
-  zones: Array<{ name: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -607,11 +608,9 @@ export function selectSenses(usedRecently: string[]): string[] {
  * Returns lowercase action strings. @pure
  */
 export function selectTacticalHooks(
-  facts: CombatFacts,
-  zones: Array<{ name: string }>
+  facts: CombatFacts
 ): string[] {
   const hooks: string[] = [];
-  void zones;
 
   // Always available in melee.
   hooks.push("push");
@@ -649,7 +648,7 @@ export function computeConsequences(
     flatDamageBonus = 0,
     targetAC, targetHp, targetMaxHp,
     statusApplied, encounterSnapshot,
-    usedSenses, zones,
+    usedSenses,
     attackerConditions,
     defenderConditions,
     isMelee,
@@ -714,7 +713,7 @@ export function computeConsequences(
   const combat_beat        = deriveCombatBeat(encounterSnapshot, combat_facts);
   const style_dsl          = deriveStyleDSL(narrative_intensity, combat_beat);
   const suggested_senses   = selectSenses(usedSenses);
-  const suggested_actions  = selectTacticalHooks(combat_facts, zones);
+  const suggested_actions  = selectTacticalHooks(combat_facts);
 
   return {
     combat_facts,
@@ -891,8 +890,10 @@ export function resolveAttackRoll(
 ): AttackRollResult {
   if (spatialContext) {
     const distance = calculateDistance(
-      spatialContext.attackerZone,
-      spatialContext.targetZone
+      spatialContext.attackerPosition,
+      spatialContext.targetPosition,
+      spatialContext.gridType ?? "SQUARE",
+      spatialContext.cellSize ?? 5
     );
     if (distance > spatialContext.rangeInFeet) {
       return {
