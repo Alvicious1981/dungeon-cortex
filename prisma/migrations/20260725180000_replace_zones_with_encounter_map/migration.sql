@@ -1,5 +1,6 @@
 -- Milestone V: replace per-cell Zone persistence with one authoritative map.
--- Existing Combatant.x/y coordinates are preserved.
+-- Legacy Zone coordinates are copied into Combatant.x/y before zone references
+-- are removed. The migration aborts if a referenced Zone cannot be resolved.
 
 CREATE TYPE "GridType" AS ENUM ('SQUARE', 'HEX');
 
@@ -23,6 +24,32 @@ ALTER TABLE "EncounterMap"
   ADD CONSTRAINT "EncounterMap_encounterId_fkey"
   FOREIGN KEY ("encounterId") REFERENCES "Encounter"("id")
   ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Refuse to discard a zone reference that cannot be translated into grid
+-- coordinates. This is intentionally fail-fast and non-destructive.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "Combatant" c
+    LEFT JOIN "Zone" z ON z."id" = c."zoneId"
+    WHERE c."zoneId" IS NOT NULL
+      AND z."id" IS NULL
+  ) THEN
+    RAISE EXCEPTION
+      'Cannot replace Zone persistence: at least one Combatant.zoneId references a missing Zone';
+  END IF;
+END
+$$;
+
+-- Zone was the legacy spatial authority whenever zoneId was present. Copy its
+-- coordinates before creating map dimensions or dropping the relation.
+UPDATE "Combatant" c
+SET
+  "x" = z."x",
+  "y" = z."y"
+FROM "Zone" z
+WHERE c."zoneId" = z."id";
 
 -- Backfill one map for every encounter. Ten cells preserves the current VTT
 -- projection; larger persisted footprints expand the corresponding axis.
