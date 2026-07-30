@@ -126,7 +126,7 @@ jobs:
             exit 1
           fi
 
-          if ! grep -q "orphaned Combatant.zoneId" <<<"$output"; then
+          if ! grep -Fq "references a missing Zone" <<<"$output"; then
             echo "Migration failed, but not because of the expected orphan protection" >&2
             exit 1
           fi
