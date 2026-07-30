@@ -1,0 +1,132 @@
+name: PR58 Migration Validation
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/pr58-migration-validation.yml"
+      - "prisma/migrations/**"
+      - "prisma/schema.prisma"
+      - "tests/migrations/sql/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr58-migrations-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clean-database:
+    name: Clean database migration chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dungeon_cortex_clean
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dungeon_cortex_clean"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dungeon_cortex_clean?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/dungeon_cortex_clean?schema=public
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply complete migration chain
+        run: pnpm prisma migrate deploy
+
+      - name: Confirm migration status
+        run: pnpm prisma migrate status
+
+  legacy-zone-backfill:
+    name: Legacy Zone coordinate backfill
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dungeon_cortex_legacy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dungeon_cortex_legacy"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGPASSWORD: postgres
+      LEGACY_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dungeon_cortex_legacy
+      ORPHAN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dungeon_cortex_orphan
+      TACTICAL_MIGRATION: prisma/migrations/20260725180000_replace_zones_with_encounter_map/migration.sql
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create legacy fixture
+        run: psql "$LEGACY_DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/migrations/sql/legacy-zone-fixture.sql
+
+      - name: Apply tactical map migration
+        run: psql "$LEGACY_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$TACTICAL_MIGRATION"
+
+      - name: Verify preserved coordinates and map dimensions
+        run: psql "$LEGACY_DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/migrations/sql/legacy-zone-assertions.sql
+
+      - name: Create orphan fixture database
+        run: |
+          createdb -h localhost -U postgres dungeon_cortex_orphan
+          psql "$ORPHAN_DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/migrations/sql/orphan-zone-fixture.sql
+
+      - name: Verify orphaned zone references abort safely
+        shell: bash
+        run: |
+          set +e
+          output=$(psql "$ORPHAN_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$TACTICAL_MIGRATION" 2>&1)
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+
+          if [ "$status" -eq 0 ]; then
+            echo "Migration unexpectedly succeeded with an orphaned Combatant.zoneId" >&2
+            exit 1
+          fi
+
+          if ! grep -q "orphaned Combatant.zoneId" <<<"$output"; then
+            echo "Migration failed, but not because of the expected orphan protection" >&2
+            exit 1
+          fi
