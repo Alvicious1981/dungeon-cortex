@@ -77,7 +77,9 @@ jobs:
       - name: Verify one open session per campaign
         shell: bash
         run: |
-          psql "$DIRECT_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          PSQL_URL="${DIRECT_URL%%\?*}"
+
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
           INSERT INTO "User" ("id", "email", "createdAt")
           VALUES ('integrity-user', 'integrity@example.test', NOW());
 
@@ -101,13 +103,15 @@ jobs:
           SQL
 
           set +e
-          output=$(psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c '
-            INSERT INTO "GameSession" (
-              "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
-            ) VALUES (
-              ''integrity-session-paused'', ''integrity-campaign'', 2, ''PAUSED'', ''PAUSED'', NOW()
-            );
-          ' 2>&1)
+          output=$(
+            psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL' 2>&1
+          INSERT INTO "GameSession" (
+            "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
+          ) VALUES (
+            'integrity-session-paused', 'integrity-campaign', 2, 'PAUSED', 'PAUSED', NOW()
+          );
+          SQL
+          )
           status=$?
           set -e
 
@@ -123,20 +127,22 @@ jobs:
             exit 1
           fi
 
-          psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c '
-            INSERT INTO "GameSession" (
-              "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
-            ) VALUES (
-              ''integrity-session-completed'', ''integrity-campaign'', 2, ''COMPLETED'', ''COMPLETED'', NOW()
-            );
-          '
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO "GameSession" (
+            "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
+          ) VALUES (
+            'integrity-session-completed', 'integrity-campaign', 2, 'COMPLETED', 'COMPLETED', NOW()
+          );
+          SQL
 
-          open_count=$(psql "$DIRECT_URL" -Atc '
-            SELECT COUNT(*)
-            FROM "GameSession"
-            WHERE "campaignId" = ''integrity-campaign''
-              AND "status" IN (''ACTIVE'', ''PAUSED'');
-          ')
+          open_count=$(
+            psql "$PSQL_URL" -At <<'SQL'
+          SELECT COUNT(*)
+          FROM "GameSession"
+          WHERE "campaignId" = 'integrity-campaign'
+            AND "status" IN ('ACTIVE', 'PAUSED');
+          SQL
+          )
 
           if [ "$open_count" != "1" ]; then
             echo "Expected exactly one open session, found $open_count" >&2
