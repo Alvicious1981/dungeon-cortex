@@ -67,6 +67,82 @@ jobs:
       - name: Confirm migration status
         run: pnpm prisma migrate status
 
+      - name: Confirm schema diff is empty
+        run: >-
+          pnpm prisma migrate diff
+          --from-url "$DIRECT_URL"
+          --to-schema-datamodel prisma/schema.prisma
+          --exit-code
+
+      - name: Verify one open session per campaign
+        shell: bash
+        run: |
+          psql "$DIRECT_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO "User" ("id", "email", "createdAt")
+          VALUES ('integrity-user', 'integrity@example.test', NOW());
+
+          INSERT INTO "Character" (
+            "id", "userId", "name", "race", "class", "hp", "maxHp", "stats", "createdAt"
+          ) VALUES (
+            'integrity-character', 'integrity-user', 'Integrity Hero', 'human', 'fighter', 10, 10, '{}'::jsonb, NOW()
+          );
+
+          INSERT INTO "Campaign" (
+            "id", "userId", "characterId", "title", "updatedAt"
+          ) VALUES (
+            'integrity-campaign', 'integrity-user', 'integrity-character', 'Integrity Campaign', NOW()
+          );
+
+          INSERT INTO "GameSession" (
+            "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
+          ) VALUES (
+            'integrity-session-active', 'integrity-campaign', 1, 'ACTIVE', 'PREPARING', NOW()
+          );
+          SQL
+
+          set +e
+          output=$(psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c '
+            INSERT INTO "GameSession" (
+              "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
+            ) VALUES (
+              ''integrity-session-paused'', ''integrity-campaign'', 2, ''PAUSED'', ''PAUSED'', NOW()
+            );
+          ' 2>&1)
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+
+          if [ "$status" -eq 0 ]; then
+            echo "A second open session was accepted for the same campaign" >&2
+            exit 1
+          fi
+
+          if ! grep -Fq "GameSession_one_open_per_campaign_key" <<<"$output"; then
+            echo "The second open session failed for an unexpected reason" >&2
+            exit 1
+          fi
+
+          psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c '
+            INSERT INTO "GameSession" (
+              "id", "campaignId", "sessionNumber", "status", "mode", "updatedAt"
+            ) VALUES (
+              ''integrity-session-completed'', ''integrity-campaign'', 2, ''COMPLETED'', ''COMPLETED'', NOW()
+            );
+          '
+
+          open_count=$(psql "$DIRECT_URL" -Atc '
+            SELECT COUNT(*)
+            FROM "GameSession"
+            WHERE "campaignId" = ''integrity-campaign''
+              AND "status" IN (''ACTIVE'', ''PAUSED'');
+          ')
+
+          if [ "$open_count" != "1" ]; then
+            echo "Expected exactly one open session, found $open_count" >&2
+            exit 1
+          fi
+
   legacy-zone-backfill:
     name: Legacy Zone coordinate backfill
     runs-on: ubuntu-latest
