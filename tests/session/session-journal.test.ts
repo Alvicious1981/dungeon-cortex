@@ -16,9 +16,11 @@ const tx = vi.hoisted(() => ({
   gameEventRecord: { create: vi.fn(), createMany: vi.fn() },
 }));
 
-vi.mock("@/lib/db/prisma", () => ({
-  prisma: { $transaction: vi.fn((callback: (client: typeof tx) => unknown) => callback(tx)) },
+const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn(),
 }));
+
+vi.mock("@/lib/db/prisma", () => ({ prisma: prismaMock }));
 
 import {
   checkpointAcceptedAction,
@@ -29,6 +31,10 @@ import {
 describe("session action journal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.$transaction.mockReset();
+    prismaMock.$transaction.mockImplementation(
+      (callback: (client: typeof tx) => unknown) => callback(tx)
+    );
     tx.actionRequest.findUnique.mockResolvedValue(null);
     tx.gameSession.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     tx.gameSession.create.mockResolvedValue({ id: "session-1", sessionNumber: 1 });
@@ -59,6 +65,41 @@ describe("session action journal", () => {
       requestId: "request-123",
       action: "Explore",
     })).resolves.toMatchObject({ duplicate: true, status: "COMPLETED" });
+    expect(tx.actionRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("retries a serializable write conflict before returning", async () => {
+    prismaMock.$transaction.mockRejectedValueOnce({ code: "P2034" });
+
+    await expect(reserveActionRequest({
+      campaignId: "campaign-1",
+      requestId: "request-123",
+      action: "Explore",
+    })).resolves.toMatchObject({ duplicate: false, sessionId: "session-1" });
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-reads the winning idempotency record after a concurrent unique conflict", async () => {
+    prismaMock.$transaction.mockRejectedValueOnce({ code: "P2002" });
+    tx.actionRequest.findUnique.mockResolvedValueOnce({
+      status: "PENDING",
+      sessionId: "session-1",
+    });
+
+    await expect(reserveActionRequest({
+      campaignId: "campaign-1",
+      requestId: "request-123",
+      action: "Explore",
+    })).resolves.toEqual({
+      ok: true,
+      duplicate: true,
+      requestId: "request-123",
+      status: "PENDING",
+      sessionId: "session-1",
+    });
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
     expect(tx.actionRequest.create).not.toHaveBeenCalled();
   });
 
@@ -97,8 +138,7 @@ describe("session action journal", () => {
       mode: "COMBAT",
       eventSequence: 2,
     });
-    const transactionMock = (await import("@/lib/db/prisma")).prisma.$transaction as ReturnType<typeof vi.fn>;
-    transactionMock.mockClear();
+    prismaMock.$transaction.mockClear();
 
     await checkpointAcceptedAction({
       campaignId: "campaign-1",
@@ -109,7 +149,7 @@ describe("session action journal", () => {
       events: [],
     }, tx as never);
 
-    expect(transactionMock).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
     expect(tx.actionRequest.update).toHaveBeenCalledWith(expect.objectContaining({
       data: { status: "COMPLETED" },
     }));
