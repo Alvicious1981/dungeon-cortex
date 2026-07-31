@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db/prisma";
 import type { GameEvent } from "@/lib/events/game-events";
+import { runSerializableTransaction } from "@/lib/db/serializable-transaction";
 import {
   assertSessionTransition,
   type SessionModeName,
@@ -16,7 +16,7 @@ export async function reserveActionRequest(input: {
   requestId: string;
   action: string;
 }): Promise<ActionReservation> {
-  return prisma.$transaction(async (tx) => {
+  return runSerializableTransaction(async (tx) => {
     const existing = await tx.actionRequest.findUnique({
       where: {
         campaignId_requestId: {
@@ -79,7 +79,12 @@ export async function reserveActionRequest(input: {
       requestRecordId: request.id,
       sessionId: session.id,
     };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, {
+    // P2002 is expected when concurrent requests race either the idempotency
+    // key or the one-open-session guard. Retrying lets the loser re-read the
+    // row committed by the winner and return a stable result instead of 500.
+    retryCodes: ["P2034", "P2002"],
+  });
 }
 
 interface AcceptedActionCheckpoint {
@@ -155,9 +160,9 @@ export async function checkpointAcceptedAction(
     return;
   }
 
-  await prisma.$transaction(async (transaction) => {
+  await runSerializableTransaction(async (transaction) => {
     await checkpointAcceptedActionInTransaction(transaction, input);
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 }
 
 /**
@@ -169,7 +174,7 @@ export async function rejectPendingActionRequest(input: {
   campaignId: string;
   requestId: string;
 }): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  await runSerializableTransaction(async (tx) => {
     const request = await tx.actionRequest.findUnique({
       where: {
         campaignId_requestId: {
@@ -208,5 +213,5 @@ export async function rejectPendingActionRequest(input: {
         payload: { reason: "validation_or_resolution_rejected" },
       },
     });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 }
