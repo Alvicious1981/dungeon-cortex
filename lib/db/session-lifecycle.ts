@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db/prisma";
+import { runSerializableTransaction } from "@/lib/db/serializable-transaction";
 import { assertSessionTransition, type SessionModeName } from "@/lib/session/contracts";
 
 export class SessionLifecycleError extends Error {
@@ -36,7 +36,7 @@ async function writeLifecycleEvent(
 }
 
 export async function pauseSession(campaignId: string) {
-  return prisma.$transaction(async (tx) => {
+  return runSerializableTransaction(async (tx) => {
     const session = await tx.gameSession.findFirst({
       where: { campaignId, status: "ACTIVE" },
       orderBy: { sessionNumber: "desc" },
@@ -61,11 +61,11 @@ export async function pauseSession(campaignId: string) {
         eventSequence: sequence,
       },
     });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 }
 
 export async function resumeSession(campaignId: string) {
-  return prisma.$transaction(async (tx) => {
+  return runSerializableTransaction(async (tx) => {
     const session = await tx.gameSession.findFirst({
       where: { campaignId, status: "PAUSED" },
       orderBy: { sessionNumber: "desc" },
@@ -95,11 +95,11 @@ export async function resumeSession(campaignId: string) {
         eventSequence: sequence,
       },
     });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 }
 
 export async function completeSession(campaignId: string) {
-  return prisma.$transaction(async (tx) => {
+  return runSerializableTransaction(async (tx) => {
     const session = await tx.gameSession.findFirst({
       where: { campaignId, status: { in: ["ACTIVE", "PAUSED"] } },
       orderBy: { sessionNumber: "desc" },
@@ -143,5 +143,5 @@ export async function completeSession(campaignId: string) {
         eventSequence: sequence,
       },
     });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 }
