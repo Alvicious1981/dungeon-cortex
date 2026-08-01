@@ -21,6 +21,7 @@ import { openai } from "@ai-sdk/openai";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatIronLaws, formatCanonicalState } from "@/lib/memory/formatter";
 import { buildNarratorRequest } from "@/lib/ai/trust-boundary";
+import { getActiveNarratorToolNames } from "@/lib/ai/tool-policy";
 import type { AsyncIterableStream } from "ai";
 import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
 import { buildCombatTools } from "@/lib/ai/tools/combat";
@@ -82,6 +83,22 @@ function buildTools(
     ...buildInventoryTools(campaignId),
   };
 }
+
+/** Every tool name in the catalogue. */
+type NarratorToolName = keyof ReturnType<typeof buildTools>;
+
+/**
+ * Least-privilege tool containment (SEC-AI-001).
+ *
+ * Resolved once, at module load, from the policy constant. The type annotation
+ * makes the compiler reject any name that is not a real catalogue key, and the
+ * absence of parameters makes it impossible for campaign state, scene, player
+ * input, memory, dialogue or tool output to widen the set.
+ *
+ * TEMPORARY: the remaining catalogue tools stay defined but inactive until
+ * SEC-AI-001 PR 3.
+ */
+const ACTIVE_NARRATOR_TOOLS: readonly NarratorToolName[] = getActiveNarratorToolNames();
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -175,6 +192,9 @@ export async function streamNarrative(
       onLevelUp: (payload) => resolveLevelUp(payload),
       onMerchantGenerated: (payload) => resolveMerchant(payload),
     }),
+    // Least-privilege containment: the full catalogue is registered, but only
+    // the fixed read-only subset is callable. Never recomputed per step.
+    activeTools: [...ACTIVE_NARRATOR_TOOLS],
   });
 
   // If narrativeContext exists, we buffer and validate the result.text before yielding/resolving.
