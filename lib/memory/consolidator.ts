@@ -64,6 +64,26 @@ export type ConsolidationVerdict =
   | { ok: true; summary: string; sourceLogIds: string[] }
   | { ok: false; reason: string };
 
+/**
+ * Classifies a caught provider failure into a fixed, non-sensitive reason code.
+ *
+ * Only the error's `name` is inspected. The error object, its message, stack,
+ * response body, prompt and headers are never read here and never logged, so no
+ * provider- or content-derived text can leak through the failure path.
+ *
+ * @pure — no I/O, deterministic output for the same input.
+ */
+export function classifyProviderError(err: unknown): string {
+  const name =
+    typeof (err as { name?: unknown } | null)?.name === "string"
+      ? (err as { name: string }).name
+      : "";
+
+  if (name === "AbortError") return "provider_aborted";
+  if (name === "TimeoutError") return "provider_timeout";
+  return "provider_error";
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -187,27 +207,26 @@ export async function summarizeAndStore(
   const batchLogIds = collectBatchLogIds(logs);
   if (batchLogIds.size === 0) return;
 
+  // Fail closed when the provider is not configured. Never invent a fallback
+  // summary and never write memory. Outside tests, a missing API key means the
+  // real provider cannot be called; in tests the provider is mocked, so this
+  // guard never blocks deterministic runs.
+  if (process.env.NODE_ENV !== "test" && !process.env.OPENAI_API_KEY) {
+    console.error(
+      "[consolidator] Rejected consolidation — no memory written. Reason: provider_unavailable"
+    );
+    return;
+  }
+
   try {
-    const useMock = process.env.NODE_ENV !== "test" && !process.env.OPENAI_API_KEY;
+    const result = await generateObject({
+      model: openai("gpt-4o-mini"),
+      schema: ConsolidationSchema,
+      system: CONSOLIDATION_INSTRUCTIONS,
+      prompt: buildConsolidationPayload(logs),
+    });
 
-    let candidate: unknown;
-
-    if (useMock) {
-      candidate = {
-        summary: "Resumen de memoria (MODO MOCK).",
-        sourceLogIds: [...batchLogIds],
-      } satisfies ConsolidationOutput;
-    } else {
-      const result = await generateObject({
-        model: openai("gpt-4o-mini"),
-        schema: ConsolidationSchema,
-        system: CONSOLIDATION_INSTRUCTIONS,
-        prompt: buildConsolidationPayload(logs),
-      });
-      candidate = result?.object;
-    }
-
-    const verdict = verifyConsolidation(candidate, batchLogIds);
+    const verdict = verifyConsolidation(result?.object, batchLogIds);
     if (!verdict.ok) {
       // Reason code only — never log the prompt, the logs, or the candidate text.
       console.error(
@@ -219,6 +238,13 @@ export async function summarizeAndStore(
 
     await saveMemory(campaignId, verdict.summary);
   } catch (err) {
-    console.error("[consolidator] Failed to consolidate memory for campaign", campaignId, err);
+    // Fixed, non-sensitive reason code only. The error object is never logged,
+    // so provider messages, stacks, response bodies and prompts cannot leak.
+    console.error(
+      "[consolidator] Failed to consolidate memory for campaign",
+      campaignId,
+      "Reason:",
+      classifyProviderError(err)
+    );
   }
 }

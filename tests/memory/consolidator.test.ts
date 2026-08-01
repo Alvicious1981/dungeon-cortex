@@ -17,7 +17,7 @@
  * No provider calls are made.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared before subject imports
@@ -46,6 +46,7 @@ vi.mock("@ai-sdk/openai", () => ({
 import {
   summarizeAndStore,
   verifyConsolidation,
+  classifyProviderError,
   collectBatchLogIds,
   buildConsolidationPayload,
   ConsolidationSchema,
@@ -192,6 +193,36 @@ describe("summarizeAndStore — rejected outputs never write memory", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Provider not configured → fail closed, no invented memory
+// ---------------------------------------------------------------------------
+
+describe("summarizeAndStore — provider unavailable fails closed", () => {
+  beforeEach(() => {
+    // Simulate a real (non-test) runtime with no provider credentials.
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("OPENAI_API_KEY", "");
+  });
+
+  afterEach(() => {
+    // Restore the environment for every following test.
+    vi.unstubAllEnvs();
+  });
+
+  it("never calls the model, never writes memory, never throws, logs a safe code", async () => {
+    await expect(summarizeAndStore(CAMPAIGN_ID, BATCH)).resolves.toBeUndefined();
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockSaveMemory).not.toHaveBeenCalled();
+
+    const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
+    expect(logged).toContain("provider_unavailable");
+    // No invented fallback summary text of any kind.
+    expect(logged).not.toContain("MOCK");
+    expect(logged).not.toContain("Resumen de memoria");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 7, 10. Provider failure, cancellation, timeout → NO memory write
 // ---------------------------------------------------------------------------
 
@@ -215,6 +246,62 @@ describe("summarizeAndStore — provider failures never write memory", () => {
   it("never throws to the caller — the game loop must not crash", async () => {
     mockGenerateObject.mockRejectedValueOnce(new Error("boom"));
     await expect(summarizeAndStore(CAMPAIGN_ID, BATCH)).resolves.toBeUndefined();
+  });
+
+  const SENSITIVE = "SENSITIVE_PROVIDER_DETAIL_9281";
+
+  const SENSITIVE_FAILURES: Array<[string, unknown, string]> = [
+    ["generic error with sensitive message", new Error(SENSITIVE), "provider_error"],
+    [
+      "abort error carrying sensitive message",
+      Object.assign(new Error(SENSITIVE), { name: "AbortError" }),
+      "provider_aborted",
+    ],
+    [
+      "timeout error carrying sensitive message",
+      Object.assign(new Error(SENSITIVE), { name: "TimeoutError" }),
+      "provider_timeout",
+    ],
+    [
+      "error whose stack leaks a sensitive prompt",
+      Object.assign(new Error("upstream failed"), { stack: `Error\n  at prompt ${SENSITIVE}` }),
+      "provider_error",
+    ],
+  ];
+
+  it.each(SENSITIVE_FAILURES)(
+    "logs a safe code and never the provider detail on %s",
+    async (_label, error, expectedCode) => {
+      mockGenerateObject.mockRejectedValueOnce(error);
+
+      await expect(summarizeAndStore(CAMPAIGN_ID, BATCH)).resolves.toBeUndefined();
+
+      expect(mockSaveMemory).not.toHaveBeenCalled();
+
+      const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
+      expect(logged).not.toContain(SENSITIVE);
+      expect(logged).toContain(expectedCode);
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// classifyProviderError — pure, name-only classification
+// ---------------------------------------------------------------------------
+
+describe("classifyProviderError", () => {
+  it("maps abort and timeout by error name, everything else to a generic code", () => {
+    expect(classifyProviderError(Object.assign(new Error("x"), { name: "AbortError" }))).toBe("provider_aborted");
+    expect(classifyProviderError(Object.assign(new Error("x"), { name: "TimeoutError" }))).toBe("provider_timeout");
+    expect(classifyProviderError(new Error("x"))).toBe("provider_error");
+    expect(classifyProviderError(null)).toBe("provider_error");
+    expect(classifyProviderError("SENSITIVE_PROVIDER_DETAIL_9281")).toBe("provider_error");
+  });
+
+  it("returns only the fixed code, never any text from the error", () => {
+    const code = classifyProviderError(new Error("SENSITIVE_PROVIDER_DETAIL_9281"));
+    expect(code).toBe("provider_error");
+    expect(code).not.toContain("SENSITIVE");
   });
 });
 
