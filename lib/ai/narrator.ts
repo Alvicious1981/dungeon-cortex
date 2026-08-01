@@ -19,7 +19,8 @@
 import { streamText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { buildCampaignContext } from "@/lib/memory/context";
-import { formatSystemPrompt } from "@/lib/memory/formatter";
+import { formatIronLaws, formatCanonicalState } from "@/lib/memory/formatter";
+import { buildNarratorRequest } from "@/lib/ai/trust-boundary";
 import type { AsyncIterableStream } from "ai";
 import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
 import { buildCombatTools } from "@/lib/ai/tools/combat";
@@ -144,19 +145,31 @@ export async function streamNarrative(
   }
 
   const context = await buildCampaignContext(campaignId);
-  let system = formatSystemPrompt(context);
-  let prompt = playerInput;
 
-  if (narrativeContext) {
-    const safetyPrompt = buildNarrativePrompt(narrativeContext);
-    system = system + "\n\n" + safetyPrompt.system;
-    prompt = playerInput + "\n\nResolved Facts for this action:\n" + safetyPrompt.user;
-  }
+  // Backend-resolved facts (highest authority) and the extra safety rules that
+  // accompany them are kept apart: the rules are stable instructions, the facts
+  // are data.
+  const safetyPrompt = narrativeContext ? buildNarrativePrompt(narrativeContext) : null;
+
+  // Stable instructions go to `system`; every variable value — player input,
+  // memory, logs, quest/NPC/location text — travels in the JSON data message.
+  const request = buildNarratorRequest({
+    personaInstructions: formatIronLaws(),
+    extraInstructions: safetyPrompt?.system ?? null,
+    canonicalState: formatCanonicalState(context),
+    memory: context.relevantMemories,
+    recentDialogue: context.recentLogs.map((log) => ({
+      role: log.role,
+      content: log.content,
+    })),
+    playerAction: playerInput,
+    backendResolvedFacts: safetyPrompt?.user ?? null,
+  });
 
   const result = streamText({
     model: openai("gpt-4o-mini"),
-    system,
-    prompt,
+    system: request.system,
+    messages: request.messages,
     stopWhen: stepCountIs(5),
     tools: buildTools(campaignId, {
       onLevelUp: (payload) => resolveLevelUp(payload),

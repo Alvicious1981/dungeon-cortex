@@ -42,7 +42,7 @@ vi.mock("@/lib/memory/embeddings", () => ({
 
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
-  return { ...actual, generateText: vi.fn() };
+  return { ...actual, generateText: vi.fn(), generateObject: vi.fn() };
 });
 
 // Stub out the openai client constructor so module-level constants in
@@ -63,7 +63,7 @@ import { searchMemories } from "@/lib/memory/search";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { generateEmbedding } from "@/lib/memory/embeddings";
-import { generateText } from "ai";
+import { generateText, generateObject } from "ai";
 import { prisma } from "@/lib/db/prisma";
 import type { GameLog } from "@prisma/client";
 
@@ -73,6 +73,7 @@ import type { GameLog } from "@prisma/client";
 
 const mockGenerateEmbedding = vi.mocked(generateEmbedding);
 const mockGenerateText = vi.mocked(generateText);
+const mockGenerateObject = vi.mocked(generateObject);
 const mockExecuteRaw = vi.mocked(prisma.$executeRaw);
 const mockQueryRaw = vi.mocked(prisma.$queryRaw);
 const mockCampaignFindUnique = vi.mocked(prisma.campaign.findUnique);
@@ -179,11 +180,13 @@ describe("summarizeAndStore", () => {
     },
   ];
 
-  it("calls generateText with a clinical summarisation prompt then persists the result", async () => {
+  it("requests a structured consolidation then persists the verified result", async () => {
     const SUMMARY = "The wizard cast Fireball, killing three goblins in the cellar.";
 
-    // generateText mock returns the LLM-produced summary
-    mockGenerateText.mockResolvedValueOnce({ text: SUMMARY } as Awaited<ReturnType<typeof generateText>>);
+    // generateObject returns a schema-valid consolidation citing this batch
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { summary: SUMMARY, sourceLogIds: ["log-1", "log-2"] },
+    } as Awaited<ReturnType<typeof generateObject>>);
 
     // saveMemory will internally call generateEmbedding + $executeRaw
     mockGenerateEmbedding.mockResolvedValueOnce(FAKE_VECTOR);
@@ -191,21 +194,22 @@ describe("summarizeAndStore", () => {
 
     await summarizeAndStore(CAMPAIGN_ID, sampleLogs);
 
-    // LLM was asked to summarise exactly once
-    expect(mockGenerateText).toHaveBeenCalledOnce();
+    // LLM was asked to summarise exactly once, as a structured object
+    expect(mockGenerateObject).toHaveBeenCalledOnce();
 
     // The system prompt must reference its RPG record-keeping purpose
-    const callArgs = mockGenerateText.mock.calls[0][0] as { system?: string };
+    const callArgs = mockGenerateObject.mock.calls[0][0] as { system?: string };
     expect(callArgs.system).toContain("tabletop RPG");
 
     // The summary was then persisted via the store layer
+    expect(mockGenerateEmbedding).toHaveBeenCalledWith(SUMMARY);
     expect(mockExecuteRaw).toHaveBeenCalledOnce();
   });
 
-  it("exits early without calling generateText when the log slice is empty", async () => {
+  it("exits early without calling the model when the log slice is empty", async () => {
     await summarizeAndStore(CAMPAIGN_ID, []);
 
-    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(mockGenerateObject).not.toHaveBeenCalled();
     expect(mockExecuteRaw).not.toHaveBeenCalled();
   });
 });
