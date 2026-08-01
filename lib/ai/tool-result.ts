@@ -121,14 +121,36 @@ export function classifyToolError(error: unknown): ToolFailure {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
+/**
+ * A value is serialisable only if `JSON.stringify` produces actual text.
+ *
+ * Functions and symbols do not throw — they serialise to `undefined`, which
+ * would silently drop `data` from the envelope and leave the model with a bare
+ * `{"status":"ok"}`. Circular structures and BigInt throw instead.
+ */
 function isSerialisable(value: unknown): boolean {
   if (value === undefined) return false;
   try {
-    JSON.stringify(value);
-    return true;
+    return JSON.stringify(value) !== undefined;
   } catch {
     return false;
   }
+}
+
+/**
+ * The complete set of top-level keys each envelope variant may carry.
+ *
+ * Validation compares the real `Object.keys` against these sets, so a result
+ * cannot smuggle an extra `message`, `detail`, `stack`, `error`, `query`,
+ * `prompt` or any other unknown property past the boundary.
+ */
+const SUCCESS_KEYS = ["status", "data"] as const;
+const FAILURE_KEYS = ["status", "reason"] as const;
+const FAILURE_WITH_CODE_KEYS = ["status", "reason", "code"] as const;
+
+function hasExactKeys(value: object, allowed: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === allowed.length && allowed.every((key) => keys.includes(key));
 }
 
 /**
@@ -141,16 +163,17 @@ export function isToolResult(value: unknown): value is ToolResult<unknown> {
   const candidate = value as { status?: unknown; data?: unknown; reason?: unknown; code?: unknown };
 
   if (candidate.status === "ok") {
-    if (!("data" in candidate)) return false;
-    if ("reason" in candidate || "code" in candidate) return false;
+    if (!hasExactKeys(candidate, SUCCESS_KEYS)) return false;
     return isSerialisable(candidate.data);
   }
 
   if (candidate.status === "error") {
-    if ("data" in candidate) return false;
     if (!TOOL_FAILURE_REASONS.includes(candidate.reason as ToolFailureReason)) return false;
-    if (candidate.code === undefined) return true;
+
+    if (hasExactKeys(candidate, FAILURE_KEYS)) return true;
+
     return (
+      hasExactKeys(candidate, FAILURE_WITH_CODE_KEYS) &&
       candidate.reason === "rejected" &&
       typeof candidate.code === "string" &&
       DOMAIN_CODE_PATTERN.test(candidate.code)

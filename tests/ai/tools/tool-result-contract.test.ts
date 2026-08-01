@@ -429,6 +429,69 @@ describe("SRD lookups — not_found", () => {
   );
 });
 
+describe("envelope top-level keys", () => {
+  it.each(CATALOGUE_NAMES)("%s emits only status and data on success", async (name) => {
+    primeSuccess();
+    const result = (await buildCatalogue()[name]!.execute(TOOL_INPUTS[name], {
+      messages: [],
+      toolCallId: `tc-${name}`,
+      toolName: name,
+    })) as object;
+
+    expect(Object.keys(result).sort()).toEqual(["data", "status"]);
+  });
+
+  it.each(CATALOGUE_NAMES)("%s emits no key beyond the failure contract", async (name) => {
+    primeFailure();
+    const result = (await buildCatalogue()[name]!.execute(TOOL_INPUTS[name], {
+      messages: [],
+      toolCallId: `tc-${name}`,
+      toolName: name,
+    })) as object;
+
+    const keys = Object.keys(result).sort();
+    expect([["reason", "status"], ["code", "reason", "status"]]).toContainEqual(keys);
+  });
+});
+
+describe("DTOs with undefined optional properties", () => {
+  it("getMonsterInfo stays a success when SRD columns are null", async () => {
+    primeSuccess();
+    // A sparse SrdMonster row: every optional column is null, so the mapped DTO
+    // carries undefined optional properties.
+    services.srdFindUnique.mockResolvedValue({
+      id: "goblin",
+      indexSlug: "goblin",
+      name: "Goblin",
+      hitPoints: 7,
+      armorClass: null,
+      size: null,
+      type: null,
+      alignment: null,
+      cr: null,
+      xp: null,
+      hitDice: null,
+      speed: null,
+      strength: null,
+      dexterity: null,
+      constitution: null,
+      intelligence: null,
+      wisdom: null,
+      charisma: null,
+    });
+
+    const result = await buildCatalogue().getMonsterInfo!.execute(TOOL_INPUTS.getMonsterInfo, {
+      messages: [],
+      toolCallId: "tc-monster-sparse",
+      toolName: "getMonsterInfo",
+    });
+
+    expect(isToolResult(result)).toBe(true);
+    expect(result).toMatchObject({ status: "ok", data: { name: "Goblin", hit_points: 7 } });
+    expect(Object.keys(result as object).sort()).toEqual(["data", "status"]);
+  });
+});
+
 describe("useConsumable error classification", () => {
   it("keeps the stable domain code of a ConsumableServiceError", async () => {
     primeSuccess();
