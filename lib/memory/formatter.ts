@@ -63,7 +63,7 @@ function truncate(text: string, maxLen = 200): string {
  *
  * @pure — no parameters, no side effects, constant output.
  */
-function formatIronLaws(): string {
+export function formatIronLaws(): string {
   return [
     "## Iron Laws — Referee Persona",
     "You are an impartial, neutral referee simulating a lethal, persistent fantasy world.",
@@ -551,16 +551,27 @@ export function formatHavenHUD(ctx: HavenHUDContext): string {
 // Main export
 // ---------------------------------------------------------------------------
 
+/** Full input shape accepted by the canonical-state and system-prompt formatters. */
+export type FormatterContext = CampaignContext & {
+  gold?: number;
+  activeNPC?: ActiveNPC;
+  explorationHUD?: ExplorationHUDContext;
+  wildernessHUD?: WildernessHUDContext;
+  havenHUD?: HavenHUDContext;
+};
+
 /**
- * Returns a markdown-formatted system prompt section derived from the
- * current campaign context. Append this to the AI DM's system instructions
- * so the model always has accurate game state without hallucinating it.
+ * Returns ONLY the canonical game-state sections: character, exploration, HUDs,
+ * encounter, quests and NPC context.
+ *
+ * Deliberately excludes the Iron Laws (stable instructions), long-term memory
+ * (derived data) and recent logs (dialogue). Those belong to different trust
+ * tiers and are assembled separately by `lib/ai/trust-boundary.ts`, which keeps
+ * untrusted text out of the model's system message.
  *
  * @pure — no side effects, deterministic output for the same input.
  */
-export function formatSystemPrompt(
-  context: CampaignContext & { gold?: number; activeNPC?: ActiveNPC; explorationHUD?: ExplorationHUDContext; wildernessHUD?: WildernessHUDContext; havenHUD?: HavenHUDContext },
-): string {
+export function formatCanonicalState(context: FormatterContext): string {
   const locationType = context.currentExploration?.location?.type?.toLowerCase() ?? null;
   const hasLocation = Boolean(context.currentExploration?.location);
   const isOverworldScene = locationType === "wilderness" || (!hasLocation && Boolean(context.wildernessHUD));
@@ -568,17 +579,11 @@ export function formatSystemPrompt(
   const isHavenScene = !hasLocation && !context.activeEncounter && Boolean(context.havenHUD);
   const shouldShowNPCContext = Boolean(context.activeNPC) && !context.activeEncounter;
 
-  const memorySection = formatMemories(context.relevantMemories);
   const questSection = formatQuests(context.quests);
   const partyGold = context.gold ?? 0;
   const explorationSection = formatExploration(context.currentExploration, partyGold);
 
   const sections = [
-    formatIronLaws(),
-    // Long-Term Memory inserted here so the model reads historical context
-    // before live game state. The empty-string guard means this slot is a
-    // no-op (filtered out below) when no memories were retrieved.
-    ...(memorySection ? [memorySection] : []),
     "# Current Game State",
     formatCharacter(context.character),
     // Exploration state injected between character and combat so the model
@@ -599,8 +604,32 @@ export function formatSystemPrompt(
     // NPC social context — injected when the party is actively interacting
     // with a tracked NPC. Absent when no NPC is in scope.
     ...(shouldShowNPCContext && context.activeNPC ? [formatNPCContext(context.activeNPC)] : []),
-    formatRecentLogs(context.recentLogs),
   ];
 
   return sections.join("\n\n");
+}
+
+/**
+ * Returns a markdown-formatted system prompt section derived from the
+ * current campaign context.
+ *
+ * Retained unchanged for existing consumers (e.g. the intent layer) that expect
+ * a single flat context blob. The narrator no longer uses this function as its
+ * system message — see `lib/ai/trust-boundary.ts` — because it interleaves
+ * stable instructions with untrusted memory and dialogue text.
+ *
+ * @pure — no side effects, deterministic output for the same input.
+ */
+export function formatSystemPrompt(context: FormatterContext): string {
+  const memorySection = formatMemories(context.relevantMemories);
+
+  return [
+    formatIronLaws(),
+    // Long-Term Memory inserted here so the model reads historical context
+    // before live game state. The empty-string guard means this slot is a
+    // no-op when no memories were retrieved.
+    ...(memorySection ? [memorySection] : []),
+    formatCanonicalState(context),
+    formatRecentLogs(context.recentLogs),
+  ].join("\n\n");
 }
