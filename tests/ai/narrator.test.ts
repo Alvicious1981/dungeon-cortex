@@ -37,6 +37,8 @@ vi.mock("@/lib/memory/context", () => ({
 
 vi.mock("@/lib/memory/formatter", () => ({
   formatSystemPrompt: vi.fn().mockReturnValue("## Iron Laws\n..."),
+  formatIronLaws: vi.fn().mockReturnValue("## Iron Laws — Referee Persona\n..."),
+  formatCanonicalState: vi.fn().mockReturnValue("# Current Game State\n..."),
 }));
 
 vi.mock("@/lib/ai/tools/srd-lookup", () => {
