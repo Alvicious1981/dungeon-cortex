@@ -1,4 +1,5 @@
 import { tool } from "ai";
+import { runTool } from "@/lib/ai/tool-result";
 import {
   generateNPC,
   GenerateNPCInputSchema,
@@ -16,7 +17,6 @@ import {
 import {
   resolveRumors,
   resolveSocialCheck,
-  SocialServiceError,
 } from "@/lib/rules/social-service";
 import {
   GenerateMerchantInputSchema,
@@ -46,11 +46,7 @@ export function buildSocialTools(
         "Get the deterministic statblock and persistent proper name of an NPC. Use this before narrating interactions with unknown or generic NPCs. The attackString field is dice notation (e.g. '1d6+2'), not a pre-rolled number.",
       inputSchema: GenerateNPCInputSchema,
       execute: async ({ seed, role }) => {
-        try {
-          return generateNPC(seed, role);
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically. Narrate a brief failure or silence." });
-        }
+        return runTool(() => generateNPC(seed, role));
       },
     }),
 
@@ -64,9 +60,9 @@ export function buildSocialTools(
         "Notes should be brief: who they are, their attitude toward the party, and any plot hooks.",
       inputSchema: TrackNPCInputSchema,
       execute: async ({ seed, role, notes, hp }) => {
-        try {
+        return runTool(() => {
           const statblock = generateNPC(seed, role as NPCRole);
-          const result = await trackNpcState({
+          return trackNpcState({
             campaignId,
             npcSeed: seed,
             role,
@@ -81,10 +77,7 @@ export function buildSocialTools(
               notes: notes ?? "",
             },
           });
-          return JSON.stringify(result);
-        } catch (err: unknown) {
-          return JSON.stringify({ error: err instanceof Error ? err.message : "NPC tracking failed mechanically." });
-        }
+        });
       },
     }),
 
@@ -98,7 +91,7 @@ export function buildSocialTools(
         "The returned summary includes personality traits — use them to drive immediate narration.",
       inputSchema: TrackNPCInputSchema,
       execute: async ({ seed, role, notes }) => {
-        try {
+        return runTool(async () => {
           const statblock = generateNPC(seed, role as NPCRole);
           const result = await upsertGeneratedNpc({
             campaignId,
@@ -119,8 +112,8 @@ export function buildSocialTools(
               traits: statblock.traits,
             },
           });
-          return JSON.stringify({
-            ok: result.ok,
+
+          return {
             seed: result.seed,
             name: result.name,
             race: result.race,
@@ -128,10 +121,8 @@ export function buildSocialTools(
             alignment: result.alignment,
             traits: result.traits,
             facts: result.facts,
-          });
-        } catch {
-          return JSON.stringify({ error: "NPC generation failed mechanically." });
-        }
+          };
+        });
       },
     }),
     establishInitialDisposition: tool({
@@ -145,7 +136,7 @@ export function buildSocialTools(
         "Code is Law.",
       inputSchema: InitialDispositionInputSchema,
       execute: async ({ npcSeed, npcRole, charismaModifier }) => {
-        try {
+        return runTool(async () => {
           const result = establishInitialDispositionPure({ npcSeed, npcRole, charismaModifier });
           const statblock = generateNPC(npcSeed, npcRole as NPCRole);
           const descriptor: NpcDescriptor = {
@@ -170,10 +161,8 @@ export function buildSocialTools(
             descriptor,
           });
 
-          return JSON.stringify(result);
-        } catch (err: unknown) {
-          return JSON.stringify({ error: err instanceof Error ? err.message : "Initial disposition check failed mechanically." });
-        }
+          return result;
+        });
       },
     }),
 
@@ -189,19 +178,15 @@ export function buildSocialTools(
         "Code is Law.",
       inputSchema: SocialCheckInputSchema,
       execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
-        try {
-          const result = await resolveSocialCheck({
+        return runTool(() =>
+          resolveSocialCheck({
             campaignId,
             npcSeed,
             approach,
             dispositionDelta,
             intent,
-          });
-
-          return JSON.stringify(result);
-        } catch (err: unknown) {
-          return JSON.stringify({ error: err instanceof Error ? err.message : "Social check failed mechanically." });
-        }
+          }),
+        );
       },
     }),
 
@@ -218,21 +203,12 @@ export function buildSocialTools(
         "Code is Law.",
       inputSchema: GetRumorsInputSchema,
       execute: async ({ npcSeed }) => {
-        try {
-          const payload = await resolveRumors({
+        return runTool(() =>
+          resolveRumors({
             campaignId,
             npcSeed,
-          });
-
-          return JSON.stringify(payload);
-        } catch (error: unknown) {
-          return JSON.stringify({
-            error:
-              error instanceof SocialServiceError
-                ? error.message
-                : "Rumor retrieval failed mechanically. The NPC goes quiet.",
-          });
-        }
+          }),
+        );
       },
     }),
 
@@ -244,14 +220,12 @@ export function buildSocialTools(
         "Code is Law.",
       inputSchema: GenerateMerchantInputSchema,
       execute: async ({ archetype, npcSeed }) => {
-        try {
+        return runTool(() => {
           const block = generateNPC(npcSeed, "commoner");
           const payload = buildMerchantPayload(archetype, npcSeed);
           callbacks?.onMerchantGenerated?.(payload);
-          return JSON.stringify({ ok: true, archetype, npcName: block.name, itemCount: payload.inventory.length });
-        } catch {
-          return JSON.stringify({ error: "Merchant generation failed mechanically." });
-        }
+          return { archetype, npcName: block.name, itemCount: payload.inventory.length };
+        });
       },
     }),
 
@@ -263,35 +237,31 @@ export function buildSocialTools(
         "The current transaction must only involve ONE item.",
       inputSchema: TradeActionSchema,
       execute: async ({ action, itemIndex, inventoryItemId, quantity, npcSeed, archetype }) => {
-        try {
+        return runTool(async () => {
           const characterId = await getCampaignCharacterIdForTrade(campaignId);
 
           const merchantPayload = buildMerchantPayload(archetype, npcSeed);
-          const result =
-            action === "buy"
-              ? await resolveTradeTransaction({
-                  campaignId,
-                  characterId,
-                  npcId: npcSeed,
-                  operation: "buy",
-                  itemDescriptor: getMerchantItemDescriptor(merchantPayload, itemIndex),
-                  price: getMerchantItemPrice(merchantPayload, itemIndex),
-                  quantity,
-                })
-              : await resolveTradeTransaction({
-                  campaignId,
-                  characterId,
-                  npcId: npcSeed,
-                  operation: "sell",
-                  itemId: inventoryItemId,
-                  price: 0,
-                  quantity,
-                  sellModifier: merchantPayload.sellModifier,
-                });
-          return JSON.stringify(result);
-        } catch (error: unknown) {
-          return JSON.stringify({ error: error instanceof Error ? error.message : "Trade execution failed mechanically." });
-        }
+          return action === "buy"
+            ? await resolveTradeTransaction({
+                campaignId,
+                characterId,
+                npcId: npcSeed,
+                operation: "buy",
+                itemDescriptor: getMerchantItemDescriptor(merchantPayload, itemIndex),
+                price: getMerchantItemPrice(merchantPayload, itemIndex),
+                quantity,
+              })
+            : await resolveTradeTransaction({
+                campaignId,
+                characterId,
+                npcId: npcSeed,
+                operation: "sell",
+                itemId: inventoryItemId,
+                price: 0,
+                quantity,
+                sellModifier: merchantPayload.sellModifier,
+              });
+        });
       },
     }),
   };

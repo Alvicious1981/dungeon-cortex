@@ -487,7 +487,8 @@ describe("awardXP tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
     expect(result.leveledUp).toBe(true);
     expect(result.newLevel).toBe(2);
@@ -513,7 +514,8 @@ describe("awardXP tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
     expect(result.leveledUp).toBe(false);
     const updateCall = mockPrisma.character.update.mock.calls[0][0] as any;
@@ -535,8 +537,9 @@ describe("awardXP tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
-    expect(result.error).toBeDefined();
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
+    expect(envelope.status).toBe("error");
     expect(mockPrisma.character.update).not.toHaveBeenCalled();
   });
 });
@@ -580,9 +583,10 @@ describe("manageEquipment tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     expect(result.targetSlot).toBe("MAIN_HAND");
     expect(mockPrisma.inventoryItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -634,8 +638,9 @@ describe("manageEquipment tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
-    expect(result.error).toBeDefined();
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
+    expect(envelope.status).toBe("error");
     expect(mockPrisma.inventoryItem.update).not.toHaveBeenCalled();
   });
 });
@@ -762,9 +767,10 @@ describe("generateAndTrackNPC tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     expect(result.name).toBe("Aldric Fenwick");
     expect(result.race).toBe("human");
     expect(result.profession).toBe("soldier");
@@ -787,8 +793,9 @@ describe("generateAndTrackNPC tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
-    expect(result.error).toBeDefined();
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
+    expect(envelope.status).toBe("error");
   });
 });
 
@@ -895,9 +902,10 @@ describe("generateAndTrackQuest tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     expect(result.questId).toBe("quest-generated-001");
     expect(result.title).toBe("The Black Messenger");
     expect(result.hook).toBe("A dying merchant clutches a sealed letter addressed to no one.");
@@ -921,8 +929,9 @@ describe("generateAndTrackQuest tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
-    expect(result.error).toBeDefined();
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
+    expect(envelope.status).toBe("error");
     expect(mockPrisma.quest.create).toHaveBeenCalledOnce();
   });
 });
@@ -1023,9 +1032,10 @@ describe("resolveAttack tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.error).toBeDefined();
+    expect(envelope.status).toBe("error");
     expect(mockPrisma.combatant.update).not.toHaveBeenCalled();
   });
 
@@ -1048,9 +1058,10 @@ describe("resolveAttack tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.error).toBeDefined();
+    expect(envelope.status).toBe("error");
     expect(mockPrisma.combatant.update).not.toHaveBeenCalled();
   });
 
@@ -1073,10 +1084,11 @@ describe("resolveAttack tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
     // A damage roll was made and the DB was updated
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     expect(mockPrisma.combatant.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "cbt-goblin" },
@@ -1108,9 +1120,10 @@ describe("resolveAttack tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     // Consequences fields the narrator must consume
     expect(result.combat_facts).toBeDefined();
     expect(result.narrative_tags).toBeDefined();
@@ -1165,11 +1178,12 @@ describe("resolveAttack tool", () => {
     }) as any);
 
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
     // Target already at 0 hp — consequences still computed, but DB write
     // must not push hp below 0 (floor is 0, no negative HP stored)
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     if (mockPrisma.combatant.update.mock.calls.length > 0) {
       const updateData = mockPrisma.combatant.update.mock.calls[0][0] as any;
       expect(updateData.data.hp).toBeGreaterThanOrEqual(0);
@@ -1290,9 +1304,10 @@ describe("generateLoot tool", () => {
 
     invokeLootTool({ encounterId: "no-such-enc", tensionScore: 0.5 });
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.error).toBeDefined();
+    expect(envelope.status).toBe("error");
   });
 
   it("returns an error when the campaign is not found", async () => {
@@ -1300,9 +1315,10 @@ describe("generateLoot tool", () => {
 
     invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.5 });
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.error).toBeDefined();
+    expect(envelope.status).toBe("error");
   });
 
   it("calls generateLootPayload with the correct tensionScore and enemy count", async () => {
@@ -1352,9 +1368,10 @@ describe("generateLoot tool", () => {
   it("returns a valid LootPayload JSON on success", async () => {
     invokeLootTool({ encounterId: "enc-loot-01", tensionScore: 0.6 });
     const { textPromise } = await streamNarrative(CAMPAIGN_ID, "");
-    const result = JSON.parse(await textPromise);
+    const envelope = (await textPromise) as any;
+    const result = envelope.data ?? {};
 
-    expect(result.ok).toBe(true);
+    expect(envelope.status).toBe("ok");
     expect(result.gold).toBe(MOCK_LOOT_PAYLOAD.gold);
     expect(result.rarityBracket).toBe(MOCK_LOOT_PAYLOAD.rarityBracket);
     expect(result.flavorText).toBe(MOCK_LOOT_PAYLOAD.flavorText);

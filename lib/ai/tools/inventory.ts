@@ -1,8 +1,6 @@
 import { tool } from "ai";
-import {
-  ConsumableServiceError,
-  useConsumableItem as consumeInventoryItem,
-} from "@/lib/rules/consumable-service";
+import { runTool } from "@/lib/ai/tool-result";
+import { useConsumableItem as consumeInventoryItem } from "@/lib/rules/consumable-service";
 import { UseConsumableInputSchema } from "@/lib/rules/inventory";
 
 export function buildInventoryTools(campaignId: string) {
@@ -11,7 +9,7 @@ export function buildInventoryTools(campaignId: string) {
       description: "Requests consumption of an inventory item and returns backend-resolved facts for narration.",
       inputSchema: UseConsumableInputSchema,
       execute: async ({ characterId, itemName }) => {
-        try {
+        return runTool(async () => {
           const result = await consumeInventoryItem({
             campaignId,
             characterId,
@@ -19,24 +17,14 @@ export function buildInventoryTools(campaignId: string) {
           });
 
           return {
-            success: true,
             itemConsumed: result.itemName,
             hpRestored: result.hpRestored,
             currentHp: result.currentHp,
             maxHp: result.maxHp,
             facts: result.facts,
           };
-        } catch (error) {
-          if (error instanceof ConsumableServiceError) {
-            return {
-              success: false,
-              error: error.code,
-            };
-          }
-
-          throw error;
-        }
-      }
+        });
+      },
     }),
   };
 }

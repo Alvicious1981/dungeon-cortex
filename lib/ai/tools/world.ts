@@ -10,11 +10,9 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { runTool } from "@/lib/ai/tool-result";
 import { ManageEquipmentInputSchema } from "@/lib/rules/inventory";
-import {
-  EquipmentServiceError,
-  equipCharacterItem,
-} from "@/lib/rules/equipment-service";
+import { equipCharacterItem } from "@/lib/rules/equipment-service";
 import {
   generateTavernName,
   generateMundaneLoot,
@@ -33,11 +31,7 @@ export function buildWorldTools(campaignId: string) {
         "Get the canonical, deterministic name of a tavern for a given location ID.",
       inputSchema: GetTavernNameInputSchema,
       execute: async ({ locationId }) => {
-        try {
-          return generateTavernName(locationId);
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically. Narrate a brief failure or silence." });
-        }
+        return runTool(() => ({ tavernName: generateTavernName(locationId) }));
       },
     }),
     getMundaneLoot: tool({
@@ -45,11 +39,7 @@ export function buildWorldTools(campaignId: string) {
         "Get the deterministic mundane loot found on an entity or in a container.",
       inputSchema: GetMundaneLootInputSchema,
       execute: async ({ entityId }) => {
-        try {
-          return generateMundaneLoot(entityId);
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically. Narrate a brief failure or silence." });
-        }
+        return runTool(() => ({ loot: generateMundaneLoot(entityId) }));
       },
     }),
     recallLore: tool({
@@ -59,11 +49,9 @@ export function buildWorldTools(campaignId: string) {
         query: z.string().min(1).max(200),
       }).strict(),
       execute: async ({ query }) => {
-        try {
-          return await searchMemories(campaignId, query);
-        } catch {
-          return JSON.stringify({ error: "Memory recall failed mechanically." });
-        }
+        return runTool(async () => ({
+          memories: await searchMemories(campaignId, query),
+        }));
       },
     }),
     manageEquipment: tool({
@@ -74,7 +62,7 @@ export function buildWorldTools(campaignId: string) {
         "NEVER narrate an item as equipped without calling this tool first.",
       inputSchema: ManageEquipmentInputSchema,
       execute: async ({ characterId, itemId, targetSlot }) => {
-        try {
+        return runTool(async () => {
           const result = await equipCharacterItem({
             campaignId,
             characterId,
@@ -82,19 +70,13 @@ export function buildWorldTools(campaignId: string) {
             targetSlot,
           });
 
-          return JSON.stringify({
-            ok: true,
+          return {
             itemId: result.itemId,
             targetSlot: result.targetSlot,
             itemName: result.itemName,
             facts: result.facts,
-          });
-        } catch (e) {
-          if (e instanceof EquipmentServiceError) {
-            return JSON.stringify({ error: e.message });
-          }
-          return JSON.stringify({ error: "Equipment update failed mechanically." });
-        }
+          };
+        });
       },
     }),
   };

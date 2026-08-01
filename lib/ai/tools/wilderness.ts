@@ -9,6 +9,7 @@
  */
 
 import { tool } from "ai";
+import { runTool } from "@/lib/ai/tool-result";
 import { TravelWatchInputSchema } from "@/lib/rules/wilderness";
 import {
   extractSurvivalMod,
@@ -54,22 +55,14 @@ export function buildWildernessTool(campaignId: string) {
     inputSchema: TravelWatchInputSchema,
 
     execute: async ({ action, direction, pace }) => {
-      try {
-        const result = await resolveTravelWatch({
+      return runTool(() =>
+        resolveTravelWatch({
           campaignId,
           action,
           direction,
           pace,
-        });
-
-        return JSON.stringify(result);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return JSON.stringify({
-          error: "executeTravelWatch failed",
-          detail: msg,
-        });
-      }
+        }),
+      );
     },
   });
 }

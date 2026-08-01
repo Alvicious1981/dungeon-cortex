@@ -75,7 +75,10 @@ describe("spawnEncounter architecture: AI tool must delegate encounter spawning"
       /from\s*["']@\/lib\/rules\/encounter-service["']/
     );
     expect(spawnEncounterBody).toMatch(/\bspawnCombatEncounter\s*\(/);
-    expect(spawnEncounterBody).toMatch(/\bJSON\.stringify\s*\(\s*result\s*\)/);
+    // SEC-AI-001 PR2: the service payload is returned through the common
+    // tool-result contract, not hand-serialised.
+    expect(spawnEncounterBody).toMatch(/\brunTool\s*\(/);
+    expect(spawnEncounterBody).not.toMatch(/\bJSON\.stringify\s*\(/);
   });
 
   it("does not use Prisma directly inside spawnEncounter", () => {
@@ -111,7 +114,10 @@ describe("resolveAttack architecture: AI tool must delegate combat resolution", 
       /from\s*["']@\/lib\/rules\/combat-service["']/
     );
     expect(resolveAttackBody).toMatch(/\bresolveCombatAttack\s*\(/);
-    expect(resolveAttackBody).toMatch(/\bJSON\.stringify\s*\(\s*result\s*\)/);
+    // SEC-AI-001 PR2: consequences travel through the common tool-result
+    // contract, not hand-serialised JSON.
+    expect(resolveAttackBody).toMatch(/\brunTool\s*\(/);
+    expect(resolveAttackBody).not.toMatch(/\bJSON\.stringify\s*\(/);
   });
 
   it("does not use Prisma directly inside resolveAttack", () => {

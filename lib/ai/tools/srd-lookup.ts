@@ -11,6 +11,7 @@
  */
 
 import { tool } from "ai";
+import { runLookup } from "@/lib/ai/tool-result";
 import { prisma } from "@/lib/db/prisma";
 import { SrdLookupInputSchema } from "@/lib/rules/srd";
 import type { Monster } from "@/lib/rules/srd";
@@ -248,32 +249,18 @@ export function buildSrdTools() {
   return {
     getSpellInfo: tool({
       description:
-        "Fetch exact mechanical JSON data for a spell by name or ID. MUST be used before narrating spell effects.",
+        "Fetch exact mechanical data for a spell by name or ID. MUST be used before narrating spell effects.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        try {
-          const data = await getSpellInfo(query);
-          return data
-            ? JSON.stringify(data)
-            : JSON.stringify({ error: "Spell not found mechanically." });
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically." });
-        }
+        return runLookup(() => getSpellInfo(query));
       },
     }),
     getItemInfo: tool({
       description:
-        "Fetch exact mechanical JSON data for an item or piece of equipment by name or ID. MUST be used before narrating the properties of magical or mundane items.",
+        "Fetch exact mechanical data for an item or piece of equipment by name or ID. MUST be used before narrating the properties of magical or mundane items.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        try {
-          const data = await getItemInfo(query);
-          return data
-            ? JSON.stringify(data)
-            : JSON.stringify({ error: "Item not found mechanically." });
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically." });
-        }
+        return runLookup(() => getItemInfo(query));
       },
     }),
     getEquipmentInfo: tool({
@@ -281,29 +268,15 @@ export function buildSrdTools() {
         "Fetch strongly typed mechanical data for an equipment item, weapon, or armor by name or ID.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        try {
-          const data = await getEquipmentInfo(query);
-          return data
-            ? JSON.stringify(data)
-            : JSON.stringify({ error: "Equipment not found mechanically." });
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically." });
-        }
+        return runLookup(() => getEquipmentInfo(query));
       },
     }),
     getMonsterInfo: tool({
       description:
-        "Fetch exact mechanical JSON data for a monster by name or ID. MUST be used before narrating combat encounters, describing enemy abilities, or resolving monster actions. Never invent AC, HP, or attack stats.",
+        "Fetch exact mechanical data for a monster by name or ID. MUST be used before narrating combat encounters, describing enemy abilities, or resolving monster actions. Never invent AC, HP, or attack stats.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        try {
-          const data = await getMonsterInfo(query);
-          return data
-            ? JSON.stringify(data)
-            : JSON.stringify({ error: "Monster not found mechanically." });
-        } catch {
-          return JSON.stringify({ error: "Action failed mechanically." });
-        }
+        return runLookup(() => getMonsterInfo(query));
       },
     }),
   };
