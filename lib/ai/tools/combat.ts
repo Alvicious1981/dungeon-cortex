@@ -1,7 +1,8 @@
 import { tool } from "ai";
+import { runTool } from "@/lib/ai/tool-result";
 import { SpawnEncounterInputSchema } from "@/lib/rules/encounters";
 import { ResolveAttackInputSchema } from "@/lib/rules/combat";
-import { CombatServiceError, resolveCombatAttack } from "@/lib/rules/combat-service";
+import { resolveCombatAttack } from "@/lib/rules/combat-service";
 import { spawnCombatEncounter } from "@/lib/rules/encounter-service";
 import { GenerateLootInputSchema } from "@/lib/rules/loot";
 import { grantLoot } from "@/lib/rules/loot-service";
@@ -18,17 +19,13 @@ export function buildCombatTools(campaignId: string) {
         "and their initiative positions. NEVER invent combat stats — always call this first.",
       inputSchema: SpawnEncounterInputSchema,
       execute: async ({ targetCR, theme }) => {
-        try {
-          const result = await spawnCombatEncounter({
+        return runTool(() =>
+          spawnCombatEncounter({
             campaignId,
             targetCR,
             theme,
-          });
-
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Encounter spawning failed mechanically." });
-        }
+          }),
+        );
       },
     }),
 
@@ -43,24 +40,16 @@ export function buildCombatTools(campaignId: string) {
         "NEVER invent damage numbers, hit locations, or overkill values.",
       inputSchema: ResolveAttackInputSchema,
       execute: async ({ attackerId, targetId, weaponDamageDice, attackModifier, damageType }) => {
-        try {
-          const result = await resolveCombatAttack({
+        return runTool(() =>
+          resolveCombatAttack({
             campaignId,
             attackerId,
             targetId,
             weaponDamageDice,
             attackModifier,
             damageType,
-          });
-
-          return JSON.stringify(result);
-        } catch (error) {
-          if (error instanceof CombatServiceError) {
-            return JSON.stringify({ error: error.message });
-          }
-
-          return JSON.stringify({ error: "Attack resolution failed mechanically." });
-        }
+          }),
+        );
       },
     }),
 
@@ -74,7 +63,7 @@ export function buildCombatTools(campaignId: string) {
         "and gold amount — NEVER invent treasure or modify values.",
       inputSchema: GenerateLootInputSchema,
       execute: async ({ encounterId, tensionScore }) => {
-        try {
+        return runTool(async () => {
           const result = await grantLoot({
             campaignId,
             encounterId,
@@ -82,14 +71,11 @@ export function buildCombatTools(campaignId: string) {
             source: "generateLoot",
           });
 
-          return JSON.stringify({
-            ok: true,
+          return {
             ...(result.loot ?? { gold: result.gold, items: result.items }),
             facts: result.facts,
-          });
-        } catch {
-          return JSON.stringify({ error: "Loot generation failed mechanically." });
-        }
+          };
+        });
       },
     }),
   };

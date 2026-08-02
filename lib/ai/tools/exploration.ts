@@ -1,4 +1,5 @@
 import { tool } from "ai";
+import { runTool } from "@/lib/ai/tool-result";
 import {
   GenerateLocationInputSchema,
   MoveToNodeInputSchema,
@@ -6,7 +7,7 @@ import {
 } from "@/lib/rules/exploration";
 import { generateExplorationLocation } from "@/lib/rules/exploration-service";
 import { resolveExplorationTurn } from "@/lib/rules/exploration-turn-service";
-import { moveCampaignToNode, NavigationServiceError } from "@/lib/rules/navigation-service";
+import { moveCampaignToNode } from "@/lib/rules/navigation-service";
 
 export function buildExplorationTools(campaignId: string) {
   return {
@@ -20,18 +21,14 @@ export function buildExplorationTools(campaignId: string) {
         "The returned nodes define the ONLY rooms that exist. Code is Law.",
       inputSchema: GenerateLocationInputSchema,
       execute: async ({ locationType, seed, parentLocationId }) => {
-        try {
-          const result = await generateExplorationLocation({
+        return runTool(() =>
+          generateExplorationLocation({
             campaignId,
             locationType,
             seed,
             parentLocationId,
-          });
-
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Location generation failed mechanically." });
-        }
+          }),
+        );
       },
     }),
 
@@ -44,31 +41,20 @@ export function buildExplorationTools(campaignId: string) {
         "NEVER describe a room the player hasn't moved to. Code is Law.",
       inputSchema: MoveToNodeInputSchema,
       execute: async ({ targetNodeIndex }) => {
-        try {
+        return runTool(async () => {
           const result = await moveCampaignToNode({
             campaignId,
             toNodeIndex: targetNodeIndex,
           });
 
-          return JSON.stringify({
-            ok: true,
+          return {
             targetNode: result.targetNode,
             adjacentNodes: result.adjacentNodes,
             passageType: result.passageType,
             explorationXPHints: result.explorationXPHints,
             facts: result.facts,
-          });
-        } catch (error) {
-          if (error instanceof NavigationServiceError) {
-            return JSON.stringify({
-              error: error.message,
-              code: error.code,
-              ...error.details,
-            });
-          }
-
-          return JSON.stringify({ error: "Movement failed mechanically." });
-        }
+          };
+        });
       },
     }),
     executeExplorationTurn: tool({
@@ -84,18 +70,14 @@ export function buildExplorationTools(campaignId: string) {
         "Voice the returned `warnings[]` diegetically. Code is Law.",
       inputSchema: ExplorationTurnInputSchema,
       execute: async ({ action, turnsToAdvance }) => {
-        try {
-          const result = await resolveExplorationTurn({
+        return runTool(() =>
+          resolveExplorationTurn({
             campaignId,
             turnAction: action,
             turnsToAdvance,
-          });
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Exploration turn failed mechanically. The moment hangs suspended." });
-        }
+          }),
+        );
       },
     }),
   };
 }
-

@@ -53,12 +53,14 @@ describe("social AI tools", () => {
     prismaMock.nPC.upsert.mockResolvedValueOnce({});
 
     const tools = buildSocialTools("campaign-1") as any;
-    const raw = await tools.establishInitialDisposition.execute({
+    const envelope = await tools.establishInitialDisposition.execute({
       npcSeed: "gate_guard",
       npcRole: "guard",
       charismaModifier: 0,
     });
-    const result = JSON.parse(raw);
+
+    expect(envelope.status).toBe("ok");
+    const result = envelope.data;
 
     expect(result.roll).toBe(20);
     expect(result.dispositionBand).toBe("Helpful");
@@ -84,14 +86,18 @@ describe("social AI tools", () => {
     prismaMock.nPC.findUnique.mockResolvedValueOnce({ hasMetPlayer: true, disposition: 4 });
 
     const tools = buildSocialTools("campaign-1") as any;
-    const raw = await tools.establishInitialDisposition.execute({
+    const result = await tools.establishInitialDisposition.execute({
       npcSeed: "gate_guard",
       npcRole: "guard",
       charismaModifier: 0,
     });
-    const result = JSON.parse(raw);
 
-    expect(result.error).toContain("already established");
+    // The rejection surfaces as a stable domain code — never the raw message.
+    expect(result.status).toBe("error");
+    expect(result.reason).toBe("rejected");
+    expect(result.code).toMatch(/^[A-Z][A-Z0-9_]*$/);
+    expect(result.data).toBeUndefined();
+    expect(JSON.stringify(result)).not.toMatch(/already established/i);
     expect(prismaMock.nPC.upsert).not.toHaveBeenCalled();
   });
 
@@ -102,13 +108,15 @@ describe("social AI tools", () => {
     prismaMock.nPC.update.mockResolvedValueOnce({});
 
     const tools = buildSocialTools("campaign-1") as any;
-    const raw = await tools.socialCheck.execute({
+    const envelope = await tools.socialCheck.execute({
       npcSeed: "gate_guard",
       approach: "persuade",
       dispositionDelta: 2,
       intent: "Ask for directions.",
     });
-    const result = JSON.parse(raw);
+
+    expect(envelope.status).toBe("ok");
+    const result = envelope.data;
 
     expect(result.dispositionBefore).toBe(4);
     expect(result.dispositionAfter).toBe(6);
@@ -137,8 +145,10 @@ describe("social AI tools", () => {
     ]);
 
     const tools = buildSocialTools("campaign-1") as any;
-    const raw = await tools.getRumors.execute({ npcSeed: "bert" });
-    const result = JSON.parse(raw);
+    const envelope = await tools.getRumors.execute({ npcSeed: "bert" });
+
+    expect(envelope.status).toBe("ok");
+    const result = envelope.data;
 
     expect(result.npcName).toBe("Bert");
     expect(result.rumors).toHaveLength(1);

@@ -1,4 +1,5 @@
 import { tool } from "ai";
+import { runTool } from "@/lib/ai/tool-result";
 import {
   TriggerLevelUpInputSchema,
   AwardXPInputSchema,
@@ -23,17 +24,14 @@ export function buildProgressionTools(
         "Mark a quest as 'completed' or 'failed' after the backend-resolved outcome definitively settles it. The quest ID is provided in the system prompt under ## Active Quests. ONLY call this when the player has unambiguously succeeded or failed an objective - never speculatively.",
       inputSchema: UpdateQuestStatusInputSchema,
       execute: async ({ questId, status }) => {
-        try {
-          const result = await updateTrackedQuestStatus({
+        return runTool(() =>
+          updateTrackedQuestStatus({
             campaignId,
             questId,
             status,
             reason: "ai_tool_updateQuestStatus",
-          });
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Quest update failed mechanically." });
-        }
+          }),
+        );
       },
     }),
 
@@ -46,16 +44,13 @@ export function buildProgressionTools(
         "NEVER invent quest details without calling this tool first.",
       inputSchema: GenerateAndTrackQuestInputSchema,
       execute: async ({ giverId }) => {
-        try {
-          const result = await createTrackedQuest({
+        return runTool(() =>
+          createTrackedQuest({
             campaignId,
             context: "ai_tool_generateAndTrackQuest",
             giverId,
-          });
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Quest generation failed mechanically." });
-        }
+          }),
+        );
       },
     }),
     awardXP: tool({
@@ -65,18 +60,15 @@ export function buildProgressionTools(
         "Use the returned facts only to describe already resolved progression.",
       inputSchema: AwardXPInputSchema,
       execute: async ({ characterId, amount, reason }) => {
-        try {
-          const result = await applyExperienceAward({
+        return runTool(() =>
+          applyExperienceAward({
             campaignId,
             characterId,
             xpAmount: amount,
             reason,
             source: "awardXP",
-          });
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "XP award failed mechanically." });
-        }
+          }),
+        );
       },
     }),
     triggerLevelUp: tool({
@@ -89,7 +81,7 @@ export function buildProgressionTools(
         "Code is Law.",
       inputSchema: TriggerLevelUpInputSchema,
       execute: async ({ characterId, useAverage }) => {
-        try {
+        return runTool(async () => {
           const result = await applyLevelUp({
             campaignId,
             characterId,
@@ -99,10 +91,8 @@ export function buildProgressionTools(
 
           callbacks?.onLevelUp?.(result);
 
-          return JSON.stringify(result);
-        } catch {
-          return JSON.stringify({ error: "Level-up resolution failed mechanically." });
-        }
+          return result;
+        });
       },
     }),
   };

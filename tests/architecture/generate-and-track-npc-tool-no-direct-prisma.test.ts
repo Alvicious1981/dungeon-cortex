@@ -103,9 +103,11 @@ describe("generateAndTrackNPC architecture: AI tool must delegate generated NPC 
     );
   });
 
-  it("returns structured facts while preserving external summary compatibility", () => {
-    expect(generateAndTrackNPCSource).toMatch(/\bJSON\.stringify\s*\(/);
-    expect(generateAndTrackNPCSource).toMatch(/\bok\b/);
+  it("returns structured facts through the common tool-result contract", () => {
+    // SEC-AI-001 PR2: results are objects validated by lib/ai/tool-result.ts,
+    // never hand-serialised JSON.
+    expect(generateAndTrackNPCSource).not.toMatch(/\bJSON\.stringify\s*\(/);
+    expect(generateAndTrackNPCSource).toMatch(/\brunTool\s*\(/);
     expect(generateAndTrackNPCSource).toMatch(/\bname\b/);
     expect(generateAndTrackNPCSource).toMatch(/\brace\b/);
     expect(generateAndTrackNPCSource).toMatch(/\bprofession\b/);

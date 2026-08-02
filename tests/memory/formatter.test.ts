@@ -120,15 +120,16 @@ describe("formatSystemPrompt — core prompt contract", () => {
 });
 
 describe("formatSystemPrompt — victory trigger section", () => {
-  it("injects VICTORY guidance with generateLoot and awardXP", () => {
+  it("injects VICTORY guidance without unavailable narrator tools", () => {
     const prompt = formatSystemPrompt({
       ...baseContext,
       activeEncounter: resolvedEncounter,
     });
 
     expect(prompt).toContain("VICTORY");
-    expect(prompt).toContain("generateLoot");
-    expect(prompt).toContain("awardXP");
+    expect(prompt).toContain("backend action pipeline");
+    expect(prompt).not.toContain("generateLoot");
+    expect(prompt).not.toContain("awardXP");
     expect(prompt).toContain("0.73");
   });
 });
@@ -153,18 +154,51 @@ describe("formatNPCContext", () => {
     expect(output).not.toContain("owe money to people");
   });
 
-  it("requires establishInitialDisposition for unmet NPCs", () => {
+  it("marks unmet NPCs without requesting an unavailable tool", () => {
     const output = formatNPCContext({
       name: "Stranger",
       disposition: null,
       personalityTags: null,
       hasMetPlayer: false,
     });
-    expect(output).toContain("establishInitialDisposition");
+    expect(output).toContain("Not yet met");
+    expect(output).not.toContain("establishInitialDisposition");
   });
 });
 
-const baseHUD: ExplorationHUDContext = {
+
+describe("formatter narrator-tool containment", () => {
+  const UNAVAILABLE_NARRATOR_TOOLS = [
+    "establishInitialDisposition",
+    "updateQuestStatus",
+    "generateLoot",
+    "awardXP",
+    "executeTrade",
+    "resolveAttack",
+    "manageEquipment",
+    "generateAndTrackNPC",
+    "generateAndTrackQuest",
+  ];
+
+  it("does not instruct the narrator to call an unavailable tool", () => {
+    const prompts = [
+      formatSystemPrompt(baseContext),
+      formatSystemPrompt({ ...baseContext, activeEncounter: resolvedEncounter }),
+      formatNPCContext({
+        name: "Stranger",
+        disposition: null,
+        personalityTags: null,
+        hasMetPlayer: false,
+      }),
+    ];
+
+    for (const prompt of prompts) {
+      for (const toolName of UNAVAILABLE_NARRATOR_TOOLS) {
+        expect(prompt).not.toContain(toolName);
+      }
+    }
+  });
+});const baseHUD: ExplorationHUDContext = {
   totalTurns: 12,
   totalHours: 2,
   turnsSinceRest: 3,
