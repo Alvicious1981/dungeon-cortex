@@ -138,8 +138,7 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
     return "## Combat\nNo active encounter.";
   }
 
-  // Victory trigger — injected when encounter resolves with all enemies dead.
-  // The AI MUST call `generateLoot` before narrating any treasure.
+  // Loot and progression are backend-resolved before this narrator is called.
   if (encounter.status === "resolved" && encounter.reason === "all_enemies_dead") {
     const tensionDisplay =
       encounter.tensionScore != null ? encounter.tensionScore.toFixed(2) : "unknown";
@@ -147,11 +146,8 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
       "## ⚔️ VICTORY — Encounter Resolved",
       `All enemies have been defeated. Tension Score at encounter end: **${tensionDisplay}**`,
       "",
-      `**MANDATORY:** Call \`generateLoot\` with encounterId \`${encounter.id}\` and tensionScore \`${tensionDisplay}\` NOW.`,
-      "Do NOT narrate any loot or treasure until you have the tool response.",
-      "",
-      "**Then call `awardXP`** with the combat XP for this encounter. " +
-      "Compute the total from the defeated enemies' Challenge Ratings using the CR/XP table (DMG p. 275).",
+      "Loot, XP, and state changes are resolved by the backend action pipeline.",
+      "Narrate only the resolved facts present in the game state or backend facts.",
     ].join("\n");
   }
 
@@ -298,9 +294,8 @@ export function formatShopNode(
   lines.push(`**Sell Modifier:** ${Math.round(merchantPayload.sellModifier * 100)}% of item value`);
   lines.push(`**Party Gold:** ${partyGold} GP`);
   lines.push("");
-  lines.push("To BUY: call `executeTrade` with action \"buy\", itemIndex, quantity.");
-  lines.push("To SELL: call `executeTrade` with action \"sell\", inventoryItemId, quantity.");
-
+  lines.push("Purchases and sales are resolved by the backend action pipeline.");
+  lines.push("Do not attempt to execute a trade from narration.");
   return lines.join("\n");
 }
 
@@ -459,7 +454,7 @@ const DISPOSITION_ICONS: Record<DispositionBand, string> = {
  * Returns a "## 🎭 NPC" prompt section for the AI, grounding the narrator in
  * the NPC's persisted personality and current disposition.
  *
- * - Unmet NPC: instructs the AI to call `establishInitialDisposition` first.
+ * - Unmet NPC: identifies that the NPC has not yet met the character.
  * - Met NPC: injects disposition band, icon, motivation, and distinctive trait.
  *   The secret is intentionally withheld from the narrator prompt to prevent
  *   premature disclosure — it is revealed only at Helpful disposition.
@@ -468,7 +463,7 @@ const DISPOSITION_ICONS: Record<DispositionBand, string> = {
  */
 export function formatNPCContext(npc: ActiveNPC): string {
   if (!npc.hasMetPlayer) {
-    return `## 🎭 NPC: ${npc.name}\n*(Not yet met — call establishInitialDisposition before first interaction.)*`;
+    return `## 🎭 NPC: ${npc.name}\n*(Not yet met.)*`;
   }
 
   const band = getDispositionBand(npc.disposition ?? 0);

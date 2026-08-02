@@ -21,16 +21,11 @@ import { openai } from "@ai-sdk/openai";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatIronLaws, formatCanonicalState } from "@/lib/memory/formatter";
 import { buildNarratorRequest } from "@/lib/ai/trust-boundary";
-import { getActiveNarratorToolNames } from "@/lib/ai/tool-policy";
 import type { AsyncIterableStream } from "ai";
-import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
-import { buildCombatTools } from "@/lib/ai/tools/combat";
-import { buildProgressionTools } from "@/lib/ai/tools/progression";
 import { buildSocialTools } from "@/lib/ai/tools/social";
-import { buildExplorationTools } from "@/lib/ai/tools/exploration";
 import { buildWorldTools } from "@/lib/ai/tools/world";
-import { buildInventoryTools } from "@/lib/ai/tools/inventory";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
+import { selectActiveNarratorTools, type ActiveNarratorToolName } from "@/lib/ai/tool-policy";
 import type { LevelUpPayload } from "@/lib/rules/progression";
 import type { MerchantPayload } from "@/lib/rules/trade";
 import type { CombatNarrativeContext } from "@/lib/narrative/combat-narrative-types";
@@ -50,56 +45,36 @@ export interface NarrativeStream {
   /** Resolves to the full assembled text once the LLM finishes. */
   textPromise: PromiseLike<string>;
   /**
-   * Resolves to the LevelUpPayload if `triggerLevelUp` was called during this
-   * narrative turn, or null if no level-up occurred.
-   * Always resolves (never hangs) because it falls back to null when the text
-   * stream ends without a level-up tool call.
+   * Temporarily resolves to null while mutating narrator tools are absent.
+   * Retained to preserve the existing stream return shape for callers.
    */
   levelUpPayload: Promise<LevelUpPayload | null>;
   /**
-   * Resolves to the MerchantPayload if `generateMerchant` was called during this
-   * narrative turn, or null if no merchant was generated.
+   * Temporarily resolves to null while mutating narrator tools are absent.
+   * Retained to preserve the existing stream return shape for callers.
    */
   merchantPayload: Promise<MerchantPayload | null>;
 }
 
 // ─── Tool definitions (shared) ────────────────────────────────────────────────
 
-function buildTools(
-  campaignId: string,
-  callbacks?: { 
-    onLevelUp?: (payload: LevelUpPayload) => void;
-    onMerchantGenerated?: (payload: MerchantPayload) => void;
-  },
-) {
-  return {
-    ...buildCombatTools(campaignId),
-    ...buildProgressionTools(campaignId, callbacks),
-    ...buildSocialTools(campaignId, callbacks),
-    ...buildExplorationTools(campaignId),
-    executeTravelWatch: buildWildernessTool(campaignId),
+/**
+ * Builds the complete model-visible tool surface.
+ *
+ * This is deliberately a physical projection, not an `activeTools` hint over
+ * a larger catalogue. A model response that names an excluded tool therefore
+ * has no executable function to reach. State-changing callbacks are not wired
+ * into this builder while narrator mutations are contained.
+ */
+export function buildNarratorTools(campaignId: string) {
+  const toolCatalogue = {
+    ...buildSocialTools(campaignId),
     ...buildWorldTools(campaignId),
     ...buildSrdTools(),
-    ...buildInventoryTools(campaignId),
-  };
+  } satisfies Record<ActiveNarratorToolName, unknown>;
+
+  return selectActiveNarratorTools(toolCatalogue);
 }
-
-/** Every tool name in the catalogue. */
-type NarratorToolName = keyof ReturnType<typeof buildTools>;
-
-/**
- * Least-privilege tool containment (SEC-AI-001).
- *
- * Resolved once, at module load, from the policy constant. The type annotation
- * makes the compiler reject any name that is not a real catalogue key, and the
- * absence of parameters makes it impossible for campaign state, scene, player
- * input, memory, dialogue or tool output to widen the set.
- *
- * TEMPORARY: the remaining catalogue tools stay defined but inactive until
- * SEC-AI-001 PR 3.
- */
-const ACTIVE_NARRATOR_TOOLS: readonly NarratorToolName[] = getActiveNarratorToolNames();
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -119,8 +94,7 @@ export async function streamNarrative(
   options?: StreamNarrativeOptions,
 ): Promise<NarrativeStream> {
   // Shared promise that resolves once we know whether a level-up occurred.
-  // The onLevelUp callback resolves it with the payload; the text-completion
-  // fallback resolves it with null so the promise never hangs.
+  // Mutating tool callbacks are disconnected; text completion resolves this with null.
   let resolveLevelUp!: (p: LevelUpPayload | null) => void;
   const levelUpPayload = new Promise<LevelUpPayload | null>((resolve) => {
     resolveLevelUp = resolve;
@@ -188,13 +162,7 @@ export async function streamNarrative(
     system: request.system,
     messages: request.messages,
     stopWhen: stepCountIs(5),
-    tools: buildTools(campaignId, {
-      onLevelUp: (payload) => resolveLevelUp(payload),
-      onMerchantGenerated: (payload) => resolveMerchant(payload),
-    }),
-    // Least-privilege containment: the full catalogue is registered, but only
-    // the fixed read-only subset is callable. Never recomputed per step.
-    activeTools: [...ACTIVE_NARRATOR_TOOLS],
+    tools: buildNarratorTools(campaignId),
   });
 
   // If narrativeContext exists, we buffer and validate the result.text before yielding/resolving.
@@ -220,7 +188,7 @@ export async function streamNarrative(
 
   // Fallback: if the text stream ends without a level-up tool call, resolve null.
   // Promise.resolve wraps the PromiseLike so we can chain .catch().
-  // A second resolveLevelUp call after onLevelUp fires is a no-op (Promises resolve once).
+  // Promises resolve once, so the completion fallback is safe on every outcome.
   Promise.resolve(finalNarrativeTextPromise).then(() => {
     resolveLevelUp(null);
     resolveMerchant(null);

@@ -12,6 +12,12 @@
 
 import { tool } from "ai";
 import { runLookup } from "@/lib/ai/tool-result";
+import {
+  projectEquipmentInfo,
+  projectItemInfo,
+  projectMonsterInfo,
+  projectSpellInfo,
+} from "@/lib/ai/read-only-projections";
 import { prisma } from "@/lib/db/prisma";
 import { SrdLookupInputSchema } from "@/lib/rules/srd";
 import type { Monster } from "@/lib/rules/srd";
@@ -169,7 +175,7 @@ export async function getItemInfo(query: string): Promise<unknown | null> {
       null;
   }
 
-  return item ? item.data : null;
+  return item ? projectItemInfo(item.name, item.data) : null;
 }
 
 // ─── Equipment lookup ─────────────────────────────────────────────────────────
@@ -252,7 +258,7 @@ export function buildSrdTools() {
         "Fetch exact mechanical data for a spell by name or ID. MUST be used before narrating spell effects.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        return runLookup(() => getSpellInfo(query));
+        return runLookup(async () => { const spell = await getSpellInfo(query); return spell ? projectSpellInfo(spell) : null; });
       },
     }),
     getItemInfo: tool({
@@ -268,7 +274,7 @@ export function buildSrdTools() {
         "Fetch strongly typed mechanical data for an equipment item, weapon, or armor by name or ID.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        return runLookup(() => getEquipmentInfo(query));
+        return runLookup(async () => { const item = await getEquipmentInfo(query); return item ? projectEquipmentInfo(item) : null; });
       },
     }),
     getMonsterInfo: tool({
@@ -276,7 +282,7 @@ export function buildSrdTools() {
         "Fetch exact mechanical data for a monster by name or ID. MUST be used before narrating combat encounters, describing enemy abilities, or resolving monster actions. Never invent AC, HP, or attack stats.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
-        return runLookup(() => getMonsterInfo(query));
+        return runLookup(async () => { const monster = await getMonsterInfo(query); return monster ? projectMonsterInfo(monster) : null; });
       },
     }),
   };

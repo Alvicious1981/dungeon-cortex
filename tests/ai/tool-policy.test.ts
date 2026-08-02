@@ -18,7 +18,6 @@ import {
 const AUTHORISED_ACTIVE_TOOLS = [
   "getNPCDetails",
   "getTavernName",
-  "getMundaneLoot",
   "getSpellInfo",
   "getItemInfo",
   "getEquipmentInfo",
@@ -26,9 +25,9 @@ const AUTHORISED_ACTIVE_TOOLS = [
 ];
 
 describe("narrator tool policy", () => {
-  it("exposes exactly the seven authorised read-only tools", () => {
+  it("exposes exactly the six authorised read-only tools", () => {
     expect([...getActiveNarratorToolNames()]).toEqual(AUTHORISED_ACTIVE_TOOLS);
-    expect(getActiveNarratorToolNames()).toHaveLength(7);
+    expect(getActiveNarratorToolNames()).toHaveLength(6);
   });
 
   it("keeps recallLore and getRumors out of the active set", () => {
@@ -62,7 +61,7 @@ describe("narrator tool policy", () => {
       "useConsumable",
     ];
 
-    // 28 catalogue tools − 7 active = 21 contained.
+    // The model-visible surface contains only the six listed tools.
     expect(stateMutatingTools).toHaveLength(21);
     for (const toolName of stateMutatingTools) {
       expect([...getActiveNarratorToolNames()]).not.toContain(toolName);
@@ -81,7 +80,7 @@ describe("narrator tool policy", () => {
     const mutable = ACTIVE_NARRATOR_TOOL_NAMES as unknown as string[];
 
     expect(() => mutable.push("executeTrade")).toThrow();
-    expect(getActiveNarratorToolNames()).toHaveLength(7);
+    expect(getActiveNarratorToolNames()).toHaveLength(6);
   });
 
   it("takes no arguments, so no runtime value can influence it", () => {

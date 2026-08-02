@@ -11,6 +11,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { runTool } from "@/lib/ai/tool-result";
+import { projectTavernName } from "@/lib/ai/read-only-projections";
 import { ManageEquipmentInputSchema } from "@/lib/rules/inventory";
 import { equipCharacterItem } from "@/lib/rules/equipment-service";
 import {
@@ -31,7 +32,7 @@ export function buildWorldTools(campaignId: string) {
         "Get the canonical, deterministic name of a tavern for a given location ID.",
       inputSchema: GetTavernNameInputSchema,
       execute: async ({ locationId }) => {
-        return runTool(() => ({ tavernName: generateTavernName(locationId) }));
+        return runTool(() => projectTavernName(generateTavernName(locationId)));
       },
     }),
     getMundaneLoot: tool({

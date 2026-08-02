@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { runTool } from "@/lib/ai/tool-result";
+import { projectNpcDetails } from "@/lib/ai/read-only-projections";
 import {
   generateNPC,
   GenerateNPCInputSchema,
@@ -46,7 +47,7 @@ export function buildSocialTools(
         "Get the deterministic statblock and persistent proper name of an NPC. Use this before narrating interactions with unknown or generic NPCs. The attackString field is dice notation (e.g. '1d6+2'), not a pre-rolled number.",
       inputSchema: GenerateNPCInputSchema,
       execute: async ({ seed, role }) => {
-        return runTool(() => generateNPC(seed, role));
+        return runTool(() => projectNpcDetails(generateNPC(seed, role)));
       },
     }),
 

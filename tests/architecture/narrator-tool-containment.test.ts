@@ -19,29 +19,45 @@ function readTool(file: string): string {
   return readFileSync(join(toolsDir, file), "utf8");
 }
 
-describe("narrator activeTools containment", () => {
-  it("passes activeTools to streamText exactly once", () => {
-    const occurrences = narratorSource.match(/\bactiveTools\s*:/g) ?? [];
+describe("narrator physical tool containment", () => {
+  it("passes one physically projected tools object to streamText", () => {
+    const occurrences = narratorSource.match(/\btools\s*:/g) ?? [];
     expect(occurrences).toHaveLength(1);
+    expect(narratorSource).toContain("tools: buildNarratorTools(campaignId)");
   });
 
-  it("derives the active set from the pure policy module", () => {
-    expect(narratorSource).toMatch(/from\s*["']@\/lib\/ai\/tool-policy["']/);
-    expect(narratorSource).toMatch(/getActiveNarratorToolNames\s*\(\s*\)/);
-  });
+  it("derives the model tool object from the typed policy projection", () => {
+    expect(narratorSource).toContain(
+      "satisfies Record<ActiveNarratorToolName, unknown>",
+    );
+    expect(narratorSource).toContain(
+      "return selectActiveNarratorTools(toolCatalogue)",
+    );
+    expect(policySource).toContain(
+      "const TTools extends NarratorToolCatalogue",
+    );
 
-  it("does not use prepareStep or the deprecated experimental flag", () => {
+    for (const name of [
+      "getNPCDetails",
+      "getTavernName",
+      "getSpellInfo",
+      "getItemInfo",
+      "getEquipmentInfo",
+      "getMonsterInfo",
+    ]) {
+      expect(policySource).toMatch(new RegExp(`\\b${name}\\b`));
+    }
+
+    expect(policySource).not.toContain("getMundaneLoot");
+    expect(narratorSource).not.toContain("executeTrade");
+    expect(narratorSource).not.toContain("buildProgressionTools");
+    expect(narratorSource).not.toContain("buildCombatTools");
+  });
+  it("does not use activeTools, prepareStep, or mutation callbacks", () => {
+    expect(narratorSource).not.toMatch(/\bactiveTools\s*:/);
     expect(narratorSource).not.toContain("prepareStep");
-    expect(narratorSource).not.toContain("experimental_activeTools");
-  });
-
-  it("computes the active list once, outside streamNarrative", () => {
-    const activeConstIndex = narratorSource.indexOf("const ACTIVE_NARRATOR_TOOLS");
-    const streamNarrativeIndex = narratorSource.indexOf("export async function streamNarrative");
-
-    expect(activeConstIndex).toBeGreaterThan(-1);
-    expect(streamNarrativeIndex).toBeGreaterThan(-1);
-    expect(activeConstIndex).toBeLessThan(streamNarrativeIndex);
+    expect(narratorSource).not.toContain("onLevelUp:");
+    expect(narratorSource).not.toContain("onMerchantGenerated:");
   });
 
   it("keeps the policy module free of runtime inputs and I/O", () => {

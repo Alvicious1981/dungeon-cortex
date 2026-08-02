@@ -136,6 +136,13 @@ import { buildWorldTools } from "@/lib/ai/tools/world";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
 import { buildInventoryTools } from "@/lib/ai/tools/inventory";
 import { isToolResult } from "@/lib/ai/tool-result";
+import {
+  EquipmentInfoOutputSchema,
+  MonsterInfoOutputSchema,
+  NpcDetailsOutputSchema,
+  SpellInfoOutputSchema,
+  TavernNameOutputSchema,
+} from "@/lib/ai/read-only-projections";
 
 const CAMPAIGN_ID = "campaign-contract-001";
 
@@ -539,5 +546,29 @@ describe("useConsumable error classification", () => {
 
     expect(result).toEqual({ status: "error", reason: "internal_error" });
     assertNoLeak(result);
+  });
+});
+
+describe("active read-only tool projections", () => {
+  const ACTIVE_PROJECTIONS = [
+    ["getNPCDetails", NpcDetailsOutputSchema],
+    ["getTavernName", TavernNameOutputSchema],
+    ["getSpellInfo", SpellInfoOutputSchema],
+    ["getEquipmentInfo", EquipmentInfoOutputSchema],
+    ["getMonsterInfo", MonsterInfoOutputSchema],
+  ] as const;
+
+  it.each(ACTIVE_PROJECTIONS)("%s executes its real tool and returns only its closed projection", async (name, schema) => {
+    primeSuccess();
+
+    const result = await buildCatalogue()[name]!.execute(TOOL_INPUTS[name], {
+      messages: [],
+      toolCallId: `projection-${name}`,
+      toolName: name,
+    }) as { status: string; data?: unknown };
+
+    expect(result.status).toBe("ok");
+    expect(schema.safeParse(result.data).success).toBe(true);
+    expect(Object.keys(result.data as object).sort()).toEqual(Object.keys(schema.shape).sort());
   });
 });
