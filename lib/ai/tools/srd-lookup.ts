@@ -279,7 +279,7 @@ export function buildSrdTools() {
     }),
     getMonsterInfo: tool({
       description:
-        "Fetch exact mechanical data for a monster by name or ID. MUST be used before narrating combat encounters, describing enemy abilities, or resolving monster actions. Never invent AC, HP, or attack stats.",
+        "Fetch exact mechanical reference data for a monster by name or ID. Use it only to describe statistics or abilities for a monster already identified by backend-resolved context. Never use this tool to resolve monster actions, attacks, damage, or other outcomes. Never invent AC, HP, or attack stats.",
       inputSchema: SrdLookupInputSchema,
       execute: async ({ query }) => {
         return runLookup(async () => { const monster = await getMonsterInfo(query); return monster ? projectMonsterInfo(monster) : null; });

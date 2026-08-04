@@ -44,7 +44,7 @@ export function buildSocialTools(
   return {
     getNPCDetails: tool({
       description:
-        "Get the deterministic statblock and persistent proper name of an NPC. Use this before narrating interactions with unknown or generic NPCs. The attackString field is dice notation (e.g. '1d6+2'), not a pre-rolled number.",
+        "Generate a deterministic reference statblock and proper name for an NPC already identified and authorized by backend context. This result does not persist or establish an NPC. The attackString field is dice notation (e.g. '1d6+2'), not a pre-rolled number.",
       inputSchema: GenerateNPCInputSchema,
       execute: async ({ seed, role }) => {
         return runTool(() => projectNpcDetails(generateNPC(seed, role)));
