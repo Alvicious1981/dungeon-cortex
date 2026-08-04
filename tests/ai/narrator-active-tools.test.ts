@@ -125,6 +125,29 @@ describe("narrator physical tool containment", () => {
     }
   });
 
+  it("keeps active tool descriptions subordinate to backend authority", async () => {
+    const params = await captureStreamTextParams("I look around.");
+
+    expect(params.tools.getNPCDetails.description).toContain(
+      "already identified and authorized by backend context",
+    );
+    expect(params.tools.getNPCDetails.description).toContain(
+      "does not persist or establish an NPC",
+    );
+    expect(params.tools.getTavernName.description).toContain(
+      "already identified and authorized by backend context",
+    );
+    expect(params.tools.getTavernName.description).toContain(
+      "does not persist or establish a tavern",
+    );
+    expect(params.tools.getMonsterInfo.description).toContain(
+      "Never use this tool to resolve monster actions, attacks, damage, or other outcomes",
+    );
+    expect(params.tools.getMonsterInfo.description).not.toContain(
+      "or resolving monster actions",
+    );
+  });
+
   it("does not widen the physical surface for hostile player text, memory, or dialogue", async () => {
     const player = await captureStreamTextParams(INJECTION_PAYLOAD);
     const memory = await captureStreamTextParams(

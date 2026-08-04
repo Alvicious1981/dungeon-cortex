@@ -203,7 +203,9 @@ describe("formatter narrator-tool containment", () => {
     const prompt = formatSystemPrompt(baseContext);
 
     expect(prompt).toContain("Only use a tool that is available in this request");
-    expect(prompt).toContain("Available tools are read-only lookups");
+    expect(prompt).toContain("non-mutating reference lookups or deterministic generators");
+    expect(prompt).toContain("does not establish a canonical fact");
+    expect(prompt).toContain("backend context already identifies and authorizes");
     expect(prompt).not.toContain("call the relevant tool first");
   });
 });
