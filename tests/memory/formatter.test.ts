@@ -198,7 +198,17 @@ describe("formatter narrator-tool containment", () => {
       }
     }
   });
-});const baseHUD: ExplorationHUDContext = {
+
+  it("limits the general tooling protocol to the temporary read-only surface", () => {
+    const prompt = formatSystemPrompt(baseContext);
+
+    expect(prompt).toContain("Only use a tool that is available in this request");
+    expect(prompt).toContain("Available tools are read-only lookups");
+    expect(prompt).not.toContain("call the relevant tool first");
+  });
+});
+
+const baseHUD: ExplorationHUDContext = {
   totalTurns: 12,
   totalHours: 2,
   turnsSinceRest: 3,

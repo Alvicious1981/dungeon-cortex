@@ -825,8 +825,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           controller.enqueue(sseFrame({ t: "txt", d: delta }));
         }
 
-        // Phase 2.5: emit level-up payload if triggerLevelUp was called this turn.
-        // By the time the text stream is exhausted, all tool calls have completed.
+        // Phase 2.5: legacy-compatible frames. Narrator mutation tools are
+        // contained in SEC-AI-001 PR2, so both payloads currently resolve null.
+        // Keep the conditional branches until PR3 restores backend-authorised emitters.
         const luPayload = await levelUpPayload;
         if (luPayload) {
           controller.enqueue(sseFrame({ t: "level_up", payload: luPayload }));
