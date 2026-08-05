@@ -75,8 +75,8 @@ export function formatIronLaws(): string {
     "Never invent rolls, damage, loot, XP, movement outcomes, social outcomes, weather, or economy changes.",
     "Narrate only mechanics that come from tool outputs or persisted state in this prompt.",
     "",
-    "**Tooling Protocol:** Tool descriptions are the canonical action procedures.",
-    "When a player action implies a mechanic, call the relevant tool first, then narrate only its returned result.",
+    "**Tooling Protocol:** Only use a tool that is available in this request. Available tools are read-only lookups.",
+    "Never use a tool to resolve, apply, or persist a mechanical outcome. If no persisted state or backend-resolved fact supports it, do not create that fact in narration.",
     "",
     "**Lookup Accuracy:** For spells, items, and monsters, use lookup tools before narrating mechanics.",
     "Never invent AC, HP, damage, or feature text.",
@@ -524,25 +524,6 @@ function formatWildernessHUD(ctx: WildernessHUDContext): string {
 }
 
 // ---------------------------------------------------------------------------
-// Haven HUD
-// ---------------------------------------------------------------------------
-
-export interface HavenHUDContext {
-  currentWealth: number;
-  havenUpkeep: number;
-  retainerMorale: string;
-}
-
-export function formatHavenHUD(ctx: HavenHUDContext): string {
-  return [
-    "## Haven & Downtime Status",
-    `**Party Wealth:** ${ctx.currentWealth} GP`,
-    `**Haven Upkeep:** ${ctx.havenUpkeep} GP/day`,
-    `**Retainer Morale:** ${ctx.retainerMorale}`,
-  ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -552,7 +533,6 @@ export type FormatterContext = CampaignContext & {
   activeNPC?: ActiveNPC;
   explorationHUD?: ExplorationHUDContext;
   wildernessHUD?: WildernessHUDContext;
-  havenHUD?: HavenHUDContext;
 };
 
 /**
@@ -571,7 +551,6 @@ export function formatCanonicalState(context: FormatterContext): string {
   const hasLocation = Boolean(context.currentExploration?.location);
   const isOverworldScene = locationType === "wilderness" || (!hasLocation && Boolean(context.wildernessHUD));
   const isDungeonScene = hasLocation && locationType !== "wilderness";
-  const isHavenScene = !hasLocation && !context.activeEncounter && Boolean(context.havenHUD);
   const shouldShowNPCContext = Boolean(context.activeNPC) && !context.activeEncounter;
 
   const questSection = formatQuests(context.quests);
@@ -590,8 +569,6 @@ export function formatCanonicalState(context: FormatterContext): string {
     // Wilderness HUD — hex position, terrain, weather, pace, rations, watch clock.
     // Injected only in overworld scenes to avoid irrelevant context.
     ...(context.wildernessHUD && isOverworldScene ? [formatWildernessHUD(context.wildernessHUD)] : []),
-    // Haven-only economics and morale context.
-    ...(context.havenHUD && isHavenScene ? [formatHavenHUD(context.havenHUD)] : []),
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.

@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/db/prisma";
 import {
   ExplorationTurnInputSchema,
   REST_INTERVAL_TURNS,
@@ -16,7 +15,8 @@ export type ExplorationTurnServiceErrorCode =
   | "CAMPAIGN_OWNERSHIP_MISMATCH"
   | "CHARACTER_NOT_FOUND"
   | "INVALID_EXPLORATION_TURN_INPUT"
-  | "INVALID_EXHAUSTION_STATE";
+  | "INVALID_EXHAUSTION_STATE"
+  | "LEGACY_SUBSYSTEM_DISABLED";
 
 export class ExplorationTurnServiceError extends Error {
   constructor(
@@ -165,7 +165,14 @@ const emptyPartyInventory: PartyInventoryState = {
 };
 
 function resolveDb(input: ResolveExplorationTurnInput): ExplorationTurnDb {
-  return input.tx ?? input.db ?? (prisma as unknown as ExplorationTurnDb);
+  const injectedDb = input.tx ?? input.db;
+  if (!injectedDb) {
+    throw new ExplorationTurnServiceError(
+      "LEGACY_SUBSYSTEM_DISABLED",
+      "Legacy exploration-turn persistence is disabled until it is redesigned for D&D 5e/SRD 2014.",
+    );
+  }
+  return injectedDb;
 }
 
 function normalizeTime(

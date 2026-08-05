@@ -150,8 +150,8 @@ export interface DialogueOpenPayload {
  *
  *   t:"evt"      — a deterministic game event (fires before any LLM tokens)
  *   t:"txt"      — a text delta from the AI narrator
- *   t:"level_up" — triggerLevelUp tool completed; contains the full LevelUpPayload
- *   t:"merchant" — trade initiated; contains the full MerchantPayload
+ *   t:"level_up" — reserved for a backend-authorised level-up resolution
+ *   t:"merchant" — reserved for a backend-authorised merchant resolution
  *   t:"dialogue_open" — dialogue initiated; contains the full DialogueOpenPayload
  *   t:"dialogue_update" — social check resolved; contains the updated disposition
  *   t:"done"     — stream complete; client should call router.refresh()

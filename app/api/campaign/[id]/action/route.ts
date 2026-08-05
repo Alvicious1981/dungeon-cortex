@@ -21,9 +21,6 @@ import {
   type DamageType,
 } from "@/lib/rules/combat";
 import {
-  advanceTurn as advanceExplorationTurn,
-  consumeResources,
-  applyRest,
   applyShortRest,
   applyLongRest,
   type CharacterState,
@@ -50,7 +47,6 @@ import type {
 } from "@/lib/events/game-events";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
-import type { PartyInventoryState } from "@/lib/rules/exploration";
 
 interface ActionBody {
   action: string;
@@ -691,52 +687,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           },
         });
 
-        const campaignTime = await tx.campaignTime.findUnique({ where: { campaignId } });
-        if (campaignTime) {
-          const nextTime = applyRest(campaignTime);
-          await tx.campaignTime.update({
-            where: { campaignId },
-            data: { turnsSinceRest: nextTime.turnsSinceRest },
-          });
-        }
-        
         gameEvents.push({
           type: "REST_COMPLETED",
           payload: eventPayload,
         });
-      });
-    }
-
-    // ── Gate: explore / travel ──────────────────────────────────────────────────
-    if (intent.actionType === "explore" || intent.actionType === "travel") {
-      await prisma.$transaction(async (tx) => {
-        const campaignTime = await tx.campaignTime.findUnique({ where: { campaignId } });
-        const partyInventory = await tx.partyInventory.findUnique({ where: { campaignId } });
-        
-        if (campaignTime && partyInventory) {
-          const advanceResult = advanceExplorationTurn(campaignTime, 1);
-          
-          await tx.campaignTime.update({
-            where: { campaignId },
-            data: advanceResult.next,
-          });
-
-          if (advanceResult.rationConsumptionDue || advanceResult.turnsAdvanced > 0) {
-             const consumeResult = consumeResources(partyInventory as unknown as PartyInventoryState, { rationConsumptionDue: advanceResult.rationConsumptionDue, partySize: 1 }, advanceResult.turnsAdvanced);
-             
-             await tx.partyInventory.update({
-               where: { campaignId },
-               data: consumeResult.next,
-             });
-             
-             if (consumeResult.warnings.length > 0) {
-               gameEvents.push({
-                 type: "EXPLORATION_WARNING",
-                 payload: { warnings: consumeResult.warnings },
-               });
-             }
-          }
-        }
       });
     }
 
@@ -825,8 +779,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           controller.enqueue(sseFrame({ t: "txt", d: delta }));
         }
 
-        // Phase 2.5: emit level-up payload if triggerLevelUp was called this turn.
-        // By the time the text stream is exhausted, all tool calls have completed.
+        // Phase 2.5: legacy-compatible frames. Narrator mutation tools are
+        // contained in SEC-AI-001 PR2, so both payloads currently resolve null.
+        // Keep the conditional branches until PR3 restores backend-authorised emitters.
         const luPayload = await levelUpPayload;
         if (luPayload) {
           controller.enqueue(sseFrame({ t: "level_up", payload: luPayload }));

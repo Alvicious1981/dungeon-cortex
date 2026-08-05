@@ -10,6 +10,36 @@ datasource db {
   extensions = [vector, pg_graphql, pg_stat_statements, pgcrypto, supabase_vault, uuid_ossp(map: "uuid-ossp"), ltree, pgrouting, postgis]
 }
 
+enum CharacterProfileField {
+  NAME
+  APPEARANCE
+  BACKSTORY
+  PERSONALITY_TRAITS
+  IDEALS
+  BONDS
+  FLAWS
+}
+
+enum CharacterChangeSource {
+  PLAYER
+  AI_PROPOSAL
+  PDF_IMPORT
+  UNDO
+}
+
+enum CharacterProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  STALE
+  EXPIRED
+}
+
+enum CharacterProposalValidationStatus {
+  VALID
+  REJECTED
+}
+
 model Zone {
   id          String @id @default(cuid())
   encounterId String
@@ -58,11 +88,87 @@ model Character {
   /// Incremented by executeExplorationTurn when a mandatory rest is skipped.
   /// Decremented by 1 on long rest per 5e 2014 rules.
   exhaustionLevel      Int      @default(0)
+  /// Monotonic revision used for optimistic concurrency on character-sheet writes.
+  revision             Int      @default(1)
   createdAt            DateTime @default(now())
+  updatedAt            DateTime @default(now()) @updatedAt
 
-  user      User            @relation(fields: [userId], references: [id])
-  campaigns Campaign[]
-  inventory InventoryItem[]
+  user            User                      @relation(fields: [userId], references: [id])
+  campaigns       Campaign[]
+  inventory       InventoryItem[]
+  profile         CharacterProfile?
+  changeAudits    CharacterChangeAudit[]
+  changeProposals CharacterChangeProposal[]
+
+  @@index([userId], map: "Character_userId_idx")
+}
+
+/// Player-authored narrative data. Mechanical state remains on Character and domain entities.
+model CharacterProfile {
+  id                String   @id @default(cuid())
+  characterId       String   @unique
+  appearance        String   @default("")
+  backstory         String   @default("")
+  personalityTraits String   @default("")
+  ideals            String   @default("")
+  bonds             String   @default("")
+  flaws             String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+}
+
+/// Immutable record of an applied sheet change. Undo creates another event.
+model CharacterChangeAudit {
+  id             String                @id @default(cuid())
+  characterId    String
+  actorUserId    String
+  field          CharacterProfileField
+  previousValue  Json
+  newValue       Json
+  source         CharacterChangeSource
+  reason         String?
+  revisionBefore Int
+  revisionAfter  Int
+  proposalId     String?
+  idempotencyKey String
+  createdAt      DateTime              @default(now())
+
+  character Character                @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  proposal  CharacterChangeProposal? @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+
+  @@unique([actorUserId, idempotencyKey])
+  @@index([characterId, createdAt])
+  @@index([proposalId])
+}
+
+/// Untrusted AI/PDF output held for validation and explicit player confirmation.
+model CharacterChangeProposal {
+  id                         String                            @id @default(cuid())
+  characterId                String
+  actorUserId                String
+  expectedVersion            Int
+  reason                     String
+  changes                    Json
+  previousValues             Json
+  validationStatus           CharacterProposalValidationStatus
+  warnings                   String[]                          @default([])
+  requiresPlayerConfirmation Boolean                           @default(true)
+  status                     CharacterProposalStatus           @default(PENDING)
+  source                     CharacterChangeSource
+  idempotencyKey             String
+  decisionIdempotencyKey     String?
+  createdAt                  DateTime                          @default(now())
+  expiresAt                  DateTime
+  decidedAt                  DateTime?
+
+  character   Character              @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  auditEvents CharacterChangeAudit[]
+
+  @@unique([actorUserId, idempotencyKey])
+  @@unique([actorUserId, decisionIdempotencyKey])
+  @@index([characterId, status, createdAt])
 }
 
 model Campaign {
@@ -81,20 +187,19 @@ model Campaign {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  user           User            @relation(fields: [userId], references: [id])
-  character      Character       @relation(fields: [characterId], references: [id])
-  logs           GameLog[]
-  encounters     Encounter[]
-  memories       MemoryEntry[]
-  quests         Quest[]
-  npcs           NPC[]
-  locations      Location[]
-  campaignTime   CampaignTime?
-  partyInventory PartyInventory?
-  wildernessMap  WildernessMap[]
-  travelState    TravelState?
-  havens         Haven[]
-  retainers      Retainer[]
+  user            User          @relation(fields: [userId], references: [id])
+  character       Character     @relation(fields: [characterId], references: [id])
+  logs            GameLog[]
+  encounters      Encounter[]
+  memories        MemoryEntry[]
+  quests          Quest[]
+  npcs            NPC[]
+  locations       Location[]    @relation("CampaignLocations")
+  currentLocation Location?     @relation("CampaignCurrentLocation", fields: [currentLocationId, id], references: [id, campaignId], onDelete: Restrict, onUpdate: Cascade)
+  currentNode     LocationNode? @relation("CampaignCurrentNode", fields: [currentNodeId, currentLocationId], references: [id, locationId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId], map: "Campaign_userId_idx")
+  @@index([characterId], map: "Campaign_characterId_idx")
 }
 
 model GameLog {
@@ -105,6 +210,8 @@ model GameLog {
   createdAt  DateTime @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId], map: "GameLog_campaignId_idx")
 }
 
 model Encounter {
@@ -122,6 +229,8 @@ model Encounter {
   campaign   Campaign    @relation(fields: [campaignId], references: [id])
   combatants Combatant[]
   zones      Zone[]
+
+  @@index([campaignId], map: "Encounter_campaignId_idx")
 }
 
 model Combatant {
@@ -140,6 +249,13 @@ model Combatant {
   concentrationSpellId String?
   size                 String  @default("Medium")
   zoneId               String?
+  /// Successful death saves accumulated while the combatant is at 0 hit points.
+  deathSaveSuccesses   Int     @default(0)
+  /// Failed death saves accumulated while the combatant is at 0 hit points.
+  deathSaveFailures    Int     @default(0)
+  /// Per-turn action economy, owned by the combat rules engine.
+  /// The column is nullable for pre-action-budget combatants.
+  actionBudget         Json?
   /// Precise grid column (0-based). Relative to the encounter's global space.
   x                    Int     @default(0)
   /// Precise grid row (0-based). Relative to the encounter's global space.
@@ -150,6 +266,7 @@ model Combatant {
 
   @@index([encounterId])
   @@index([encounterId, zoneId])
+  @@index([zoneId], map: "Combatant_zoneId_idx")
 }
 
 model InventoryItem {
@@ -167,6 +284,8 @@ model InventoryItem {
   indexSlug    String?
 
   character Character @relation(fields: [characterId], references: [id])
+
+  @@index([characterId], map: "InventoryItem_characterId_idx")
 }
 
 model MemoryEntry {
@@ -177,6 +296,8 @@ model MemoryEntry {
   /// 1536-dimensional embedding from text-embedding-3-small.
   /// Stored as Unsupported until Prisma ships a native Vector scalar.
   embedding  Unsupported("vector(1536)")
+  /// The production HNSW cosine index is raw-SQL managed because Prisma does
+  /// not model HNSW indexes. Do not remove it from the database through a diff.
   /// Relative importance weight; higher values surface this memory first.
   importance Float                       @default(1.0)
   createdAt  DateTime                    @default(now())
@@ -208,6 +329,8 @@ model Quest {
   updatedAt   DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId], map: "Quest_campaignId_idx")
 }
 
 model NPC {
@@ -314,6 +437,11 @@ model SrdMonster {
   @@index([alignment])
   @@index([indexSlug])
   @@index([hasSpellcasting])
+  @@index([damageImmunities], type: Gin, map: "SrdMonster_damageImmunities_gin")
+  @@index([damageResistances], type: Gin, map: "SrdMonster_damageResistances_gin")
+  @@index([damageVulnerabilities], type: Gin, map: "SrdMonster_damageVulnerabilities_gin")
+  @@index([conditionImmunities], type: Gin, map: "SrdMonster_conditionImmunities_gin")
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "SrdMonster_name_trgm_idx")
 }
 
 model SrdSpell {
@@ -349,6 +477,9 @@ model SrdSpell {
   @@index([attackType])
   @@index([damageType])
   @@index([saveAbility])
+  @@index([classes], type: Gin, map: "SrdSpell_classes_gin")
+  @@index([components], type: Gin, map: "SrdSpell_components_gin")
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "SrdSpell_name_trgm_idx")
 }
 
 model SrdItem {
@@ -425,13 +556,15 @@ model Location {
   parentId    String?
   createdAt   DateTime @default(now())
 
-  campaign Campaign       @relation(fields: [campaignId], references: [id])
-  parent   Location?      @relation("LocationHierarchy", fields: [parentId], references: [id])
-  children Location[]     @relation("LocationHierarchy")
-  nodes    LocationNode[]
-  edges    LocationEdge[]
+  campaign            Campaign       @relation("CampaignLocations", fields: [campaignId], references: [id])
+  currentForCampaigns Campaign[]     @relation("CampaignCurrentLocation")
+  parent              Location?      @relation("LocationHierarchy", fields: [parentId, campaignId], references: [id, campaignId], onDelete: Restrict, onUpdate: Cascade)
+  children            Location[]     @relation("LocationHierarchy")
+  nodes               LocationNode[]
+  edges               LocationEdge[]
 
   @@unique([campaignId, seed])
+  @@unique([id, campaignId], map: "Location_id_campaignId_key")
   @@index([campaignId])
 }
 
@@ -457,11 +590,13 @@ model LocationNode {
   /// Grid position for visual rendering (row, 0-based).
   y           Int
 
-  location  Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  edgesFrom LocationEdge[] @relation("EdgeFrom")
-  edgesTo   LocationEdge[] @relation("EdgeTo")
+  location            Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  currentForCampaigns Campaign[]     @relation("CampaignCurrentNode")
+  edgesFrom           LocationEdge[] @relation("EdgeFrom")
+  edgesTo             LocationEdge[] @relation("EdgeTo")
 
   @@unique([locationId, index])
+  @@unique([id, locationId], map: "LocationNode_id_locationId_key")
   @@index([locationId])
 }
 
@@ -476,216 +611,9 @@ model LocationEdge {
   passageType String @default("open")
 
   location Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  fromNode LocationNode @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
-  toNode   LocationNode @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+  fromNode LocationNode @relation("EdgeFrom", fields: [fromNodeId, locationId], references: [id, locationId], onDelete: Cascade, onUpdate: Cascade)
+  toNode   LocationNode @relation("EdgeTo", fields: [toNodeId, locationId], references: [id, locationId], onDelete: Cascade, onUpdate: Cascade)
 
   @@unique([fromNodeId, toNodeId])
   @@index([locationId])
-}
-
-/// Tracks the campaign's absolute temporal state for the exploration-time engine.
-/// Legacy subsystem pending technical migration to the canonical 5e/SRD 2014 rules reference.
-/// One record per campaign. totalTurns is monotonically increasing — never decremented.
-/// All mutations occur inside prisma.$transaction — no partial writes.
-model CampaignTime {
-  id         String @id @default(cuid())
-  campaignId String @unique
-
-  /// Total dungeon turns elapsed since campaign start. 1 turn = 10 minutes.
-  totalTurns Int @default(0)
-
-  /// Derived display field: floor(totalTurns / 6). Stored for query efficiency.
-  /// Must always equal floor(totalTurns / TURNS_PER_HOUR). Updated atomically.
-  totalHours Int @default(0)
-
-  /// The current adventuring day, based on 24 hours (144 turns).
-  totalDays Int @default(0)
-
-  /// Turns accumulated in the current rest cycle (0–6).
-  /// Reaching REST_INTERVAL_TURNS (6) makes rest mandatory before the next turn.
-  /// Reset to 0 by applyRest(). Capped at 6 to prevent integer overflow.
-  turnsSinceRest Int @default(0)
-
-  /// Turns accumulated in the current encounter-check cycle (0–1).
-  /// An encounter roll fires when this reaches ENCOUNTER_CHECK_INTERVAL_TURNS (2).
-  /// Resets modulo 2 after each check fires.
-  turnsSinceEncounterCheck Int @default(0)
-
-  /// Turns accumulated in the current ration cycle (0–143).
-  /// Ration consumption fires when this reaches RATION_INTERVAL_TURNS (144).
-  /// Resets modulo 144 after each consumption fires.
-  turnsSinceRation Int @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  campaign Campaign @relation(fields: [campaignId], references: [id])
-}
-
-/// Tracks consumable exploration resources for the exploration-time engine.
-/// Legacy subsystem pending technical migration to the canonical 5e/SRD 2014 rules reference.
-/// One record per campaign. Quantities are non-negative integers — never fractional.
-/// The AI narrator MUST NOT mutate this table directly.
-model PartyInventory {
-  id         String @id @default(cuid())
-  campaignId String @unique
-
-  /// Unlit torches in the pack. Each provides TORCH_DURATION_TURNS (6) of light when lit.
-  /// Seeded at INITIAL_TORCHES_PER_PLAYER × partySize on campaign creation.
-  torches Int @default(0)
-
-  /// Oil flasks in the pack. Each provides OIL_DURATION_TURNS (24) of light when burning.
-  /// Not seeded at campaign creation — must be purchased in-world.
-  oilFlasks Int @default(0)
-
-  /// Total rations across all party members.
-  /// Seeded at INITIAL_RATIONS_PER_PLAYER × partySize on campaign creation.
-  rations Int @default(0)
-
-  /// Active light source currently being consumed. "torch" | "lantern" | "none".
-  /// "none" means the party is in darkness — may trigger penalties.
-  activeLightSource String @default("none")
-
-  /// Turns remaining on the active light source before it burns out.
-  /// At 0, consumeResources() auto-selects the next source (torch priority — Q3).
-  lightSourceTurnsRemaining Int @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  campaign Campaign @relation(fields: [campaignId], references: [id])
-}
-
-/// One record per unique hex coordinate per campaign — the wilderness map grid.
-/// Created on first visit (infinite on-demand generation — Q1).
-/// The AI narrator MUST NOT invent hex contents. Hex is real only once this record exists
-/// and discovered = true.
-model WildernessMap {
-  id         String @id @default(cuid())
-  campaignId String
-
-  /// Azgaar cube coordinate Q axis. s = -q - r (never stored).
-  q Int
-  /// Azgaar cube coordinate R axis.
-  r Int
-
-  /// Canonical terrain type: plains | forest | hills | mountain | swamp | desert | coast | tundra | taiga
-  terrain   String
-  /// Azgaar biome label for narrative flavor (e.g. "temperate broadleaf forest").
-  biome     String
-  /// Elevation 0–100. Used with moisture to derive terrain + biome deterministically.
-  elevation Int    @default(0)
-  /// Moisture 0–100. Used with elevation to derive terrain + biome deterministically.
-  moisture  Int    @default(0)
-
-  /// True once the party has physically occupied this hex.
-  /// Write-once-forward — never reverts to false.
-  discovered Boolean @default(false)
-  /// True if revealed from an adjacent hex (fog-of-war lite).
-  /// Write-once-forward — never reverts to false.
-  scouted    Boolean @default(false)
-
-  /// Optional overworld feature: "dungeon_entrance" | "village" | "ruins" | "shrine" | null
-  feature    String?
-  /// FK → Location if the feature has been expanded into a generated Location record.
-  locationId String?
-
-  /// Deterministic content seed — derived from campaignId + q + r.
-  /// The same coordinate always generates identical terrain, biome, elevation, moisture, and feature.
-  seed String
-
-  createdAt DateTime @default(now())
-
-  campaign Campaign @relation(fields: [campaignId], references: [id])
-
-  /// One hex per coordinate per campaign.
-  @@unique([campaignId, q, r])
-  @@index([campaignId])
-}
-
-/// Tracks the campaign's overworld temporal and spatial state.
-/// One record per campaign. All mutations occur inside prisma.$transaction — no partial writes.
-/// Coexists with CampaignTime (Milestone O). Active system inferred from Campaign.currentLocationId:
-///   non-null → CampaignTime governs (dungeon); null + this record exists → TravelState governs.
-model TravelState {
-  id         String @id @default(cuid())
-  campaignId String @unique
-
-  /// Current party position — Azgaar cube coordinate Q.
-  currentQ Int @default(0)
-  /// Current party position — Azgaar cube coordinate R.
-  currentR Int @default(0)
-
-  /// Watch index within the current day (0–5). 5 = mandatory Night rest.
-  currentWatch Int @default(0)
-  /// Monotonically increasing watch counter. Never decremented.
-  totalWatches Int @default(0)
-  /// floor(totalWatches / 6). Stored for query efficiency.
-  totalDays    Int @default(0)
-
-  /// How many travel-action watches have been spent today.
-  /// Resets to 0 at the start of each new day (watch 0 = Dawn).
-  /// When this reaches MAX_TRAVEL_WATCHES_PER_DAY (2), next travel signals Constitution save risk.
-  watchesTraveledToday Int @default(0)
-
-  /// Watches accumulated since last ration consumption.
-  /// Ration fires at WILDERNESS_RATION_INTERVAL_WATCHES (6). Resets to 0 after deduction.
-  watchesSinceRation Int @default(0)
-
-  /// Watches since last weather recalculation.
-  /// generateWeatherCheck fires at WEATHER_RECALC_INTERVAL_WATCHES (6). Resets to 0 after recalc.
-  weatherWatchCounter Int @default(0)
-
-  /// Sub-hex movement accumulator for Slow pace. Range: 0.0 to <1.0.
-  /// Slow pace adds 0.5 per travel watch. When >= 1.0, a hex is crossed and value wraps mod 1.
-  partialHexProgress Float @default(0.0)
-
-  /// Persisted party pace setting. Overridable per-watch by executeTravelWatch input.
-  /// "slow" | "normal" | "fast"
-  partyPace String @default("normal")
-
-  /// Current weather condition. Updated by generateWeatherCheck every 6 watches.
-  /// "clear" | "overcast" | "rain" | "storm" | "fog" | "snow"
-  weatherCondition String @default("clear")
-
-  /// Weather severity: 0 = mild, 1 = moderate, 2 = severe.
-  weatherIntensity Int @default(0)
-
-  /// Season index fixed at campaign creation. 0=spring 1=summer 2=autumn 3=winter.
-  /// Used by generateWeatherCheck to gate snow and adjust transition probabilities.
-  seasonIndex Int @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  campaign Campaign @relation(fields: [campaignId], references: [id])
-}
-
-/// A safe zone or town where the party can rest and convert gold to XP.
-model Haven {
-  id              String   @id @default(cuid())
-  campaignId      String
-  name            String
-  prosperityLevel Int      @default(1)
-  baseUpkeepCost  Int      @default(10)
-  createdAt       DateTime @default(now())
-
-  campaign Campaign @relation(fields: [campaignId], references: [id])
-
-  @@index([campaignId])
-}
-
-/// A hired NPC companion that demands wages and maintains legacy morale state.
-/// Morale mechanics are pending technical migration to the canonical 5e/SRD 2014 rules reference.
-model Retainer {
-  id           String   @id @default(cuid())
-  campaignId   String
-  name         String
-  class        String
-  level        Int      @default(1)
-  wage         Int      @default(5)
-  loyaltyScore Int      @default(7) // Legacy 2d6 scale, 7 is average; pending technical migration.
-  moraleState  String   @default("confident")
-  createdAt    DateTime @default(now())
-
-  campaign Campaign @relation(fields: [campaignId], references: [id])
-
-  @@index([campaignId])
 }

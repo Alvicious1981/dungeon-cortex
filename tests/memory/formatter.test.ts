@@ -12,7 +12,6 @@ import {
   type ActiveNPC,
   type ExplorationHUDContext,
   type WildernessHUDContext,
-  type HavenHUDContext,
 } from "@/lib/memory/formatter";
 import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 
@@ -198,7 +197,17 @@ describe("formatter narrator-tool containment", () => {
       }
     }
   });
-});const baseHUD: ExplorationHUDContext = {
+
+  it("limits the general tooling protocol to the temporary read-only surface", () => {
+    const prompt = formatSystemPrompt(baseContext);
+
+    expect(prompt).toContain("Only use a tool that is available in this request");
+    expect(prompt).toContain("Available tools are read-only lookups");
+    expect(prompt).not.toContain("call the relevant tool first");
+  });
+});
+
+const baseHUD: ExplorationHUDContext = {
   totalTurns: 12,
   totalHours: 2,
   turnsSinceRest: 3,
@@ -222,12 +231,6 @@ const baseWildernessHUD: WildernessHUDContext = {
   partyPace: "normal",
   rations: 7,
   featureHere: false,
-};
-
-const baseHavenHUD: HavenHUDContext = {
-  currentWealth: 120,
-  havenUpkeep: 10,
-  retainerMorale: "confident",
 };
 
 describe("formatSystemPrompt — relevance clipping", () => {
@@ -259,21 +262,6 @@ describe("formatSystemPrompt — relevance clipping", () => {
       wildernessHUD: baseWildernessHUD,
     });
     expect(dungeonPrompt).not.toContain("Wilderness & Travel Status");
-  });
-
-  it("injects haven HUD only in haven-like out-of-location scenes", () => {
-    const havenPrompt = formatSystemPrompt({
-      ...baseContext,
-      havenHUD: baseHavenHUD,
-    });
-    expect(havenPrompt).toContain("Haven & Downtime Status");
-
-    const locationPrompt = formatSystemPrompt({
-      ...baseContext,
-      currentExploration: makeExploration("dungeon"),
-      havenHUD: baseHavenHUD,
-    });
-    expect(locationPrompt).not.toContain("Haven & Downtime Status");
   });
 
   it("injects NPC context only when activeNPC exists and no active encounter", () => {

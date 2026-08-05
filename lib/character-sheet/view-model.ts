@@ -51,14 +51,30 @@ function buildSpellSlots(raw: unknown): CharacterSpellSlot[] {
   return Object.entries(raw as Record<string, unknown>).flatMap(([level, value]) => {
     if (!value || typeof value !== "object") return [];
     const slot = value as Record<string, unknown>;
-    if (typeof slot.total !== "number" || typeof slot.used !== "number") return [];
+    const total = typeof slot.total === "number" ? slot.total : slot.max;
+    const used = typeof slot.used === "number"
+      ? slot.used
+      : typeof slot.current === "number" && typeof total === "number"
+        ? Math.max(0, total - slot.current)
+        : undefined;
+    if (typeof total !== "number" || typeof used !== "number") return [];
 
     return [{
       level: Number(level),
-      total: slot.total,
-      used: slot.used,
+      total,
+      used,
     }];
   });
+}
+
+function getObject(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+}
+
+function getStringArray(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((value): value is string => typeof value === "string") : [];
 }
 
 export function buildSheetViewModel({ character, inventory }: CharacterSheetSource): CharacterSheetProps {
@@ -66,6 +82,22 @@ export function buildSheetViewModel({ character, inventory }: CharacterSheetSour
   const proficiencyBonus = 2 + Math.floor((character.level - 1) / 4);
   const dexMod = getModifier(stats.DEX);
   const wisMod = getModifier(stats.WIS);
+  let armorClass = 10 + dexMod;
+  const equippedArmor = inventory.find(
+    (item) => item.type === "armor" && item.equippedSlot === "ARMOR"
+  );
+  if (equippedArmor) {
+    const armor = getObject(equippedArmor.properties);
+    if (typeof armor.baseAC === "number") {
+      armorClass = armor.baseAC;
+      if (armor.addDexModifier === true) {
+        const dexBonus = typeof armor.maxDexBonus === "number"
+          ? Math.min(dexMod, armor.maxDexBonus)
+          : dexMod;
+        armorClass += dexBonus;
+      }
+    }
+  }
 
   return {
     identity: {
@@ -75,10 +107,10 @@ export function buildSheetViewModel({ character, inventory }: CharacterSheetSour
       race: character.race,
     },
     core: {
-      armorClass: 10 + dexMod,
+      armorClass,
       hitPoints: { current: character.hp, max: character.maxHp },
       initiative: dexMod,
-      speedFeet: 30,
+      speedFeet: null,
       proficiencyBonus,
       passivePerception: 10 + wisMod,
     },
@@ -106,13 +138,24 @@ export function buildSheetViewModel({ character, inventory }: CharacterSheetSour
       { label: "Insight", value: formatModifier(wisMod) },
       { label: "Persuasion", value: formatModifier(getModifier(stats.CHA)) },
     ],
-    attacks: inventory.filter((item) => item.type === "weapon").map((weapon) => ({
-      id: weapon.id,
-      name: weapon.name,
-      bonus: getModifier(stats.STR) + proficiencyBonus,
-      damage: "1d6 slashing",
-      traits: [],
-    })),
+    attacks: inventory.filter((item) => item.type === "weapon").map((weapon) => {
+      const properties = getObject(weapon.properties);
+      const traits = getStringArray(properties.properties);
+      const finesse = traits.some((trait) => trait.toLowerCase() === "finesse");
+      const attackModifier = finesse
+        ? Math.max(getModifier(stats.STR), getModifier(stats.DEX))
+        : getModifier(stats.STR);
+      const damageBonus = attackModifier + (typeof properties.damageBonus === "number" ? properties.damageBonus : 0);
+      const damageDice = typeof properties.damageDice === "string" ? properties.damageDice : "N/D";
+      const damageType = typeof properties.damageType === "string" ? properties.damageType : "";
+      return {
+        id: weapon.id,
+        name: weapon.name,
+        bonus: attackModifier + proficiencyBonus,
+        damage: `${damageDice}${damageBonus === 0 ? "" : formatModifier(damageBonus)} ${damageType}`.trim(),
+        traits,
+      };
+    }),
     spellSlots: buildSpellSlots(character.spellSlots),
     inventory: inventory.map((item) => ({
       id: item.id,

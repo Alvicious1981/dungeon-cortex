@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/db/prisma";
 import { rollDie } from "@/lib/rules/dice";
 import { seededFloat } from "@/lib/rules/generators";
 import {
@@ -25,7 +24,8 @@ import {
 export type WildernessServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
   | "CAMPAIGN_OWNERSHIP_MISMATCH"
-  | "INVALID_TRAVEL_WATCH_INPUT";
+  | "INVALID_TRAVEL_WATCH_INPUT"
+  | "LEGACY_SUBSYSTEM_DISABLED";
 
 export class WildernessServiceError extends Error {
   constructor(
@@ -225,7 +225,14 @@ const WATCH_NAMES = [
 ] as const;
 
 function resolveDb(input: ResolveTravelWatchInput): WildernessDb {
-  return input.tx ?? input.db ?? (prisma as unknown as WildernessDb);
+  const injectedDb = input.tx ?? input.db;
+  if (!injectedDb) {
+    throw new WildernessServiceError(
+      "LEGACY_SUBSYSTEM_DISABLED",
+      "Legacy wilderness persistence is disabled until it is redesigned for D&D 5e/SRD 2014.",
+    );
+  }
+  return injectedDb;
 }
 
 function determineTerrain(elevation: number, moisture: number): TerrainType {
