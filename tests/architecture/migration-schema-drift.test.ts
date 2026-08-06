@@ -301,3 +301,103 @@ describe("migración 20260806090000_reconcile_character_progression_columns", ()
     expect(all[all.length - 1]).toBe(NEW_MIGRATION);
   });
 });
+
+// ─── Contrato del arnés opt-in de progresión ─────────────────────────────────
+// El arnés llegó a dar un falso verde: una línea con el nombre del contenedor
+// fijado ignoraba SAFETY_PSQL, la siembra no llegaba a la base, las consultas
+// de datos salían vacías y la aserción de idempotencia comparaba dos cadenas
+// vacías. Estas pruebas fijan que eso no pueda repetirse.
+
+describe("scripts/check-progression-migration-safety.sh — parametrización", () => {
+  const file = join(ROOT, "scripts", "check-progression-migration-safety.sh");
+  const sh = existsSync(file) ? readFileSync(file, "utf8") : "";
+  /** Líneas ejecutables: sin comentarios ni líneas en blanco. */
+  const code = sh
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*#/.test(l) && l.trim() !== "")
+    .join("\n");
+
+  it("existe", () => {
+    expect(existsSync(file)).toBe(true);
+    expect(sh.length).toBeGreaterThan(0);
+  });
+
+  it("1. no contiene ninguna referencia ejecutable a un contenedor fijo", () => {
+    expect(code).not.toContain("dc-drift-pg");
+    expect(code).not.toContain("dc-progression-audit-pg");
+    expect(code).not.toMatch(/^\s*docker\s+exec/m);
+  });
+
+  it("1b. no fija usuario, base ni puerto dentro de las funciones", () => {
+    expect(code).not.toMatch(/psql\s+-U\s+\w/);
+    expect(code).not.toMatch(/-p\s+5432/);
+  });
+
+  it("2. toda ejecución pasa por la abstracción parametrizada", () => {
+    // PSQL_CMD se construye desde SAFETY_PSQL y es el único punto de invocación.
+    expect(code).toMatch(/read\s+-r\s+-a\s+PSQL_CMD\s+<<<\s+"\$SAFETY_PSQL"/);
+    const invocations = [...code.matchAll(/"\$\{PSQL_CMD\[@\]\}"/g)];
+    expect(invocations.length).toBeGreaterThanOrEqual(4);
+    // Ninguna llamada suelta a psql fuera de la abstracción.
+    expect(code).not.toMatch(/(^|[^_A-Za-z}])psql\s+-/m);
+  });
+
+  it("2b. no usa eval para interpretar la configuración", () => {
+    expect(code).not.toMatch(/\beval\b/);
+  });
+
+  it("2c. es fail-fast", () => {
+    expect(sh).toMatch(/^set -euo pipefail$/m);
+  });
+
+  it("3. comprueba que la siembra dejó datos", () => {
+    expect(code).toContain("assert_seeded()");
+    expect(code).toMatch(/se esperaba 1 usuario/);
+    expect(code).toMatch(/se esperaban \$expected_chars personaje/);
+    // Y se invoca en cada bloque adversarial.
+    expect([...code.matchAll(/assert_seeded "\$DB"/g)].length).toBeGreaterThanOrEqual(8);
+    expect([...code.matchAll(/assert_row "\$DB"/g)].length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("4. la instantánea de idempotencia es verificable y no puede estar vacía", () => {
+    expect(code).toContain("snapshot()");
+    expect(code).toMatch(/0 filas en/);          // aborta si no hay filas
+    expect(code).toMatch(/md5 vacío en/);        // aborta si el digest es vacío
+    expect(code).toMatch(/\$\{#digest\}" -eq 32/); // estructura verificable
+    // La comparación lleva el recuento de filas dentro del valor comparado.
+    expect(code).toMatch(/count\(\*\)::text \|\| '\|'/);
+  });
+
+  it("5. propaga los errores inesperados en vez de convertirlos en cadena vacía", () => {
+    // Ninguna redirección que descarte stderr en las funciones de consulta.
+    expect(code).not.toContain("2>/dev/null");
+    expect(code).toContain("die()");
+    // qreq aborta ante salida vacía.
+    expect(code).toMatch(/consulta vacía cuando debía devolver una fila/);
+  });
+
+  it("5b. los errores esperados se capturan explícitamente", () => {
+    // Los bloques que esperan un aborto usan `|| true` sobre apply_migration,
+    // nunca una redirección que oculte el fallo.
+    expect([...code.matchAll(/apply_migration "\$DB" \|\| true/g)].length).toBeGreaterThanOrEqual(5);
+    expect(code).toMatch(/apply_migration "\$DB" \|\| die/);
+  });
+
+  it("6. no puede imprimir éxito si falla una precondición", () => {
+    const summaryAt = code.indexOf("RESUMEN:");
+    const firstAssert = code.indexOf("assert_seeded");
+    expect(firstAssert).toBeGreaterThan(-1);
+    expect(summaryAt).toBeGreaterThan(firstAssert);
+    // `die` sale con código != 0 antes de llegar al resumen.
+    expect(code).toMatch(/die\(\)\s*\{[^}]*exit 1/);
+    // El código de salida final es el número de fallos.
+    expect(code).toMatch(/exit \$FAIL/);
+  });
+
+  it("documenta el ejemplo de Docker solo como comentario", () => {
+    const commentLines = sh.split(/\r?\n/).filter((l) => /^\s*#/.test(l));
+    expect(commentLines.join("\n")).toContain("docker exec -i <CONTENEDOR>");
+    // …y ese ejemplo nunca aparece en el código ejecutable.
+    expect(code).not.toContain("<CONTENEDOR>");
+  });
+});
