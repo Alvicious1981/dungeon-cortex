@@ -196,7 +196,7 @@ describe("migración 20260806090000_reconcile_character_progression_columns", ()
     expect(sql).toMatch(/SET "hitDiceTotal" = GREATEST\("level", 1\)/);
     expect(sql).not.toMatch(/SET "hitDiceTotal" = 1\s*$/m);
     // Añadirlas con DEFAULT rellenaría las filas existentes con la constante.
-    expect(sql).not.toMatch(/ADD COLUMN IF NOT EXISTS "hitDice\w+" INTEGER NOT NULL DEFAULT/);
+    expect(sql).not.toMatch(/ADD COLUMN IF NOT EXISTS "hitDice\w+" INTEGER (NOT NULL |)DEFAULT/);
   });
 
   it("10. los defaults finales coinciden con schema.prisma", () => {
@@ -206,11 +206,86 @@ describe("migración 20260806090000_reconcile_character_progression_columns", ()
     expect(declared("hitDiceRemaining")).toBe("1");
     expect(declared("exhaustionLevel")).toBe("0");
 
-    expect(sql).toContain('ALTER COLUMN "hitDiceTotal"     SET DEFAULT 1');
+    expect(sql).toContain('ALTER COLUMN "hitDiceTotal" SET DEFAULT 1');
     expect(sql).toContain('ALTER COLUMN "hitDiceRemaining" SET DEFAULT 1');
-    expect(sql).toContain('ALTER COLUMN "exhaustionLevel"  SET DEFAULT 0');
+    expect(sql).toContain('ALTER COLUMN "exhaustionLevel" SET DEFAULT 0');
     for (const c of ["hitDiceTotal", "hitDiceRemaining", "exhaustionLevel"]) {
       expect(sql).toMatch(new RegExp(`ALTER COLUMN "${c}"\\s+SET NOT NULL`));
+    }
+  });
+
+
+  // ─── Endurecimiento adversarial ────────────────────────────────────────────
+
+  it("11. es una sola sentencia: bloque DO único, sin BEGIN/COMMIT sueltos", () => {
+    // Un bloque DO es atómico en cualquier invocación, incluido psql en
+    // autocommit. Un BEGIN/COMMIT explícito no sirve: anidado bajo la
+    // transacción de Prisma, el COMMIT cae sobre una transacción ya abortada y
+    // sustituye el RAISE por un genérico "current transaction is aborted".
+    const doBlocks = [...sql.matchAll(/^DO \$(\w+)\$/gm)];
+    expect(doBlocks).toHaveLength(1);
+    expect(sql).not.toMatch(/^\s*BEGIN;/m);
+    expect(sql).not.toMatch(/^\s*COMMIT;/m);
+  });
+
+  it("12. todo el DDL vive dentro del bloque DO, así que revierte con él", () => {
+    const start = sql.indexOf("DO $reconcile_character_progression$");
+    const end = sql.lastIndexOf("$reconcile_character_progression$;");
+    for (const m of sql.matchAll(/ALTER TABLE "Character"/g)) {
+      expect(m.index).toBeGreaterThan(start);
+      expect(m.index).toBeLessThan(end);
+    }
+  });
+
+  it("13. la guarda de tipos precede a cualquier ADD COLUMN", () => {
+    const typeGuard = sql.indexOf("data_type <> 'integer'");
+    const firstAdd = sql.indexOf("ADD COLUMN");
+    expect(typeGuard).toBeGreaterThan(-1);
+    expect(typeGuard).toBeLessThan(firstAdd);
+    expect(sql).toContain("no convierte tipos");
+  });
+
+  it("14. no intenta ninguna conversión de tipo", () => {
+    // ALTER COLUMN sí aparece, pero solo para SET DEFAULT y SET NOT NULL.
+    // Lo prohibido es cambiar el tipo o forzar un cast sobre datos existentes.
+    expect(sql).not.toMatch(/ALTER COLUMN\s+"\w+"\s+TYPE/i);
+    expect(sql).not.toMatch(/\bUSING\b/i);
+    expect(sql).not.toMatch(/::\s*(integer|int4|bigint|text|numeric)/i);
+
+    // La única operación sobre columnas existentes es SET; nunca TYPE ni DROP.
+    const verbs = [...sql.matchAll(/ALTER COLUMN\s+"\w+"\s+(\w+)/g)].map((m) => m[1]);
+    expect(new Set(verbs)).toEqual(new Set(["SET"]));
+    // Y cada SET solo fija default o nulabilidad: 3 + 3.
+    expect([...sql.matchAll(/ALTER COLUMN\s+"\w+"\s+SET\s+DEFAULT\b/g)]).toHaveLength(3);
+    expect([...sql.matchAll(/ALTER COLUMN\s+"\w+"\s+SET\s+NOT NULL\b/g)]).toHaveLength(3);
+  });
+
+  it("15. valida las invariantes DESPUÉS del backfill", () => {
+    const lastUpdate = sql.lastIndexOf('UPDATE "Character"');
+    const totalGuard = sql.indexOf('"hitDiceTotal" IS NULL OR "hitDiceTotal" < 1');
+    const negGuard = sql.indexOf('"hitDiceRemaining" IS NULL OR "hitDiceRemaining" < 0');
+    const overGuard = sql.lastIndexOf('"hitDiceRemaining" > "hitDiceTotal"');
+    const notNull = sql.indexOf("SET NOT NULL");
+    for (const g of [totalGuard, negGuard, overGuard]) {
+      expect(g).toBeGreaterThan(lastUpdate);
+      expect(g).toBeLessThan(notNull);
+    }
+  });
+
+  it("16. cubre las cinco invariantes finales del contrato", () => {
+    expect(sql).toContain('"hitDiceTotal" IS NULL OR "hitDiceTotal" < 1');
+    expect(sql).toContain('"hitDiceRemaining" IS NULL OR "hitDiceRemaining" < 0');
+    expect(sql).toContain('"hitDiceRemaining" > "hitDiceTotal"');
+    expect(sql).toContain('"exhaustionLevel" IS NULL');
+    expect([...sql.matchAll(/RAISE EXCEPTION/g)]).toHaveLength(6);
+  });
+
+  it("17. cada aborto lleva un mensaje accionable", () => {
+    const raises = [...sql.matchAll(/RAISE EXCEPTION\s+'([^']+)'/g)].map((m) => m[1]);
+    expect(raises).toHaveLength(6);
+    for (const msg of raises) {
+      expect(msg).toContain("No se puede reconciliar");
+      expect(msg).toMatch(/vuelve a aplicarla|vuelve a aplicar la migración|corrige esas filas|Corrige esas filas|ajusta la columna/);
     }
   });
 
