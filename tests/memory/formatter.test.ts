@@ -292,8 +292,19 @@ describe("formatSurvivalHUD", () => {
     expect(output).toContain("Rations");
   });
 
-  it("shows overdue rest warning when rest is overdue", () => {
+  it("shows an informational rest notice without asserting a false mechanical consequence", () => {
     const output = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 6 });
-    expect(output).toContain("OVERDUE");
+
+    // 1. The informative rest notice still appears, reporting a true fact.
+    expect(output).toContain("Rest:");
+    expect(output).toContain("6 turn(s) since its last rest");
+
+    // 2/3. Anti-regression: the prompt must NOT claim that skipping the
+    // exploration rest cycle causes Exhaustion or any other backend-executed
+    // consequence. executeExplorationTurn no longer increments exhaustionLevel,
+    // so re-introducing this text would imply a mechanic the backend never runs.
+    expect(output).not.toContain("Exhaustion");
+    expect(output).not.toContain("mandatory");
+    expect(output).not.toMatch(/applies on next/i);
   });
 });

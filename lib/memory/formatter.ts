@@ -401,12 +401,13 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   const minutesThisHour = (hud.totalTurns % TURNS_PER_HOUR) * 10;
   lines.push(`**Turn:** ${hud.totalTurns} — ${hud.totalHours}h ${minutesThisHour}min elapsed`);
 
-  // Rest status
-  const turnsUntilRest = REST_INTERVAL_TURNS - hud.turnsSinceRest;
+  // Rest status — informational only. The exploration rest cycle carries no
+  // mechanical consequence (no Exhaustion, no enforced action); report elapsed
+  // exploration turns since the party last rested as a plain fact.
   if (hud.turnsSinceRest >= REST_INTERVAL_TURNS) {
-    lines.push("**Rest:** ⚠️ OVERDUE — mandatory rest not taken. Exhaustion applies on next non-rest action.");
+    lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
   } else {
-    lines.push(`**Rest:** ${turnsUntilRest} turn(s) until mandatory rest`);
+    lines.push(`**Rest:** ${hud.turnsSinceRest} turn(s) since the last rest.`);
   }
 
   // Exhaustion
