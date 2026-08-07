@@ -8,7 +8,9 @@
 
 ## 1. Scope
 
-Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. Every action the party takes in the dungeon consumes time; time triggers torchlight attrition, ration consumption, rest requirements, random encounters, and exhaustion. The AI narrator is forbidden from resolving any of these events — the engine decides, the narrator voices.
+Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. Every action the party takes in the dungeon consumes time; time triggers torchlight attrition, ration consumption, rest requirements, and random encounters. The AI narrator is forbidden from resolving any of these events — the engine decides, the narrator voices.
+
+> **RETIRED (non-canonical):** An earlier version of this system also auto-applied D&D 5e Exhaustion when the party skipped the exploration rest cycle. That trigger is **not** part of the D&D 5e/SRD 2014 baseline and has been removed. `executeExplorationTurn` no longer increments `exhaustionLevel`. The claims below that describe automatic exhaustion-on-skipped-rest are preserved only as historical record and are no longer authoritative.
 
 ---
 
@@ -34,7 +36,7 @@ Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. E
 ```prisma
 exhaustionLevel Int @default(0)
 ```
-Range: 0 (none) – 6 (lethal). Incremented by the `executeExplorationTurn` tool when the party skips a mandatory rest.
+Range: 0 (none) – 6 (lethal). ~~Incremented by the `executeExplorationTurn` tool when the party skips a mandatory rest.~~ **RETIRED:** `executeExplorationTurn` no longer increments this field; increments must come from authoritative 5e mechanics. Still decremented by 1 on long rest.
 
 ### New model: `CampaignTime`
 ```prisma
@@ -85,7 +87,7 @@ All functions are side-effect-free. They accept state and return new state — n
 | `initialPartyInventory(partySize)` | `number` | `PartyInventoryState` | Returns starter kit: `partySize × INITIAL_TORCHES_PER_PLAYER` torches + rations, activeLightSource `"none"` |
 
 **Architect decisions (locked):**
-- Q1: Exhaustion applied immediately when rest is skipped (not deferred)
+- ~~Q1: Exhaustion applied immediately when rest is skipped (not deferred)~~ **RETIRED (non-canonical): skipping the exploration rest cycle no longer applies Exhaustion.**
 - Q2: `partySize` is never accepted from AI input; derived from active encounter combatants in DB
 - Q3: Torches consumed before lantern oil
 - Q4: 5 torches + 7 rations per player at campaign creation
@@ -107,11 +109,10 @@ z.object({
 
 **Execute flow:**
 1. Fetch `campaignRec`, `campaignTime`, `partyInventory`, active encounter (for partySize)
-2. **Rest branch** (`action === "rest"`): call `applyRest()` → upsert `CampaignTime`; restore exhaustion if applicable
+2. **Rest branch** (`action === "rest"`): call `applyRest()` → upsert `CampaignTime`
 3. **Non-rest branch:**
-   - Check `restAlreadyOverdue` (Q1 exhaustion gate)
    - Call `advanceTurn(currentTime, turnsToAdvance)`
-   - If `restAlreadyOverdue && turnResult.restRequired`: increment `character.exhaustionLevel`
+   - ~~If `restAlreadyOverdue && turnResult.restRequired`: increment `character.exhaustionLevel`~~ **RETIRED (non-canonical): no exhaustion is applied here; `exhaustionApplied` is always `false`.**
    - Call `consumeResources(currentInventory, { turnsElapsed, partySize, consumeRations })`
    - Call `checkRandomEncounter(action === "loud")` if encounter check interval reached
    - `prisma.$transaction([upsertTime, upsertInventory])` — atomic write
@@ -120,7 +121,7 @@ z.object({
 {
   action, turnsAdvanced, totalTurns, totalHours,
   restRequired,           // true → next action MUST be rest
-  exhaustionApplied,      // true if exhaustionLevel was incremented
+  exhaustionApplied,      // RETIRED: always false; kept for contract-shape stability
   encounter,              // { triggered: boolean, roll: number } | null
   lightSource,            // "torch" | "lantern" | "none"
   lightSourceTurnsLeft,
@@ -213,6 +214,6 @@ Pre-existing failure: `tests/rules/loot.test.ts > rollMagicItems > all items pas
 
 - **AI tool never invents resource consumption.** All deductions flow through `consumeResources()` → DB transaction.
 - **AI tool never invents encounters.** `checkRandomEncounter()` rolls the d6; result is returned in payload.
-- **AI tool never invents exhaustion.** `exhaustionApplied` flag is set only by the tool; DB write is authoritative.
+- **AI tool never invents exhaustion.** ~~`exhaustionApplied` flag is set only by the tool; DB write is authoritative.~~ **RETIRED:** `executeExplorationTurn` no longer writes exhaustion at all; `exhaustionApplied` is always `false`.
 - **`partySize` is never AI-supplied.** Derived exclusively from active encounter combatant rows.
 - **`SurvivalHUD` is purely presentational.** Zero side effects; renders exactly what the DB contains.

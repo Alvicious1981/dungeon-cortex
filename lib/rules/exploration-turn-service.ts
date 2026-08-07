@@ -1,6 +1,5 @@
 import {
   ExplorationTurnInputSchema,
-  REST_INTERVAL_TURNS,
   advanceTurn,
   applyRest,
   checkRandomEncounter,
@@ -247,50 +246,6 @@ async function resolveCampaign(
   return campaign;
 }
 
-async function applyExhaustionIfNeeded(
-  db: ExplorationTurnDb,
-  campaign: ExplorationTurnCampaignRecord,
-  shouldApply: boolean
-): Promise<boolean> {
-  if (!shouldApply) return false;
-
-  if (!campaign.characterId) {
-    throw new ExplorationTurnServiceError(
-      "CHARACTER_NOT_FOUND",
-      "Campaign has no character for exploration exhaustion."
-    );
-  }
-
-  const character = await db.character.findUnique({
-    where: { id: campaign.characterId },
-    select: { id: true, exhaustionLevel: true },
-  });
-
-  if (!character) {
-    throw new ExplorationTurnServiceError(
-      "CHARACTER_NOT_FOUND",
-      `Character not found: ${campaign.characterId}`
-    );
-  }
-
-  const exhaustionLevel = character.exhaustionLevel ?? 0;
-  if (exhaustionLevel < 0 || exhaustionLevel >= 6) {
-    throw new ExplorationTurnServiceError(
-      "INVALID_EXHAUSTION_STATE",
-      "Exhaustion level cannot be incremented beyond the valid 5e range.",
-      { exhaustionLevel }
-    );
-  }
-
-  await db.character.update({
-    where: { id: character.id },
-    data: { exhaustionLevel: exhaustionLevel + 1 },
-    select: { id: true, exhaustionLevel: true },
-  });
-
-  return true;
-}
-
 function buildResult(input: {
   campaignId: string;
   action: string;
@@ -356,7 +311,9 @@ async function resolveExplorationTurnInTransaction(
   input: ResolveExplorationTurnInput
 ): Promise<ResolveExplorationTurnResult> {
   const parsed = parseInput(input);
-  const campaign = await resolveCampaign(db, input);
+  // Validates campaign existence and ownership (throws on failure); the record
+  // itself is no longer needed now that the exhaustion trigger is retired.
+  await resolveCampaign(db, input);
   const [campaignTimeRecord, partyInventoryRecord, activeEncounter] = await Promise.all([
     db.campaignTime.findUnique({ where: { campaignId: input.campaignId } }),
     db.partyInventory.findUnique({ where: { campaignId: input.campaignId } }),
@@ -394,13 +351,13 @@ async function resolveExplorationTurnInTransaction(
     });
   }
 
-  const restAlreadyOverdue = currentTime.turnsSinceRest >= REST_INTERVAL_TURNS;
   const turnResult = advanceTurn(currentTime, parsed.turnsToAdvance);
-  const exhaustionApplied = await applyExhaustionIfNeeded(
-    db,
-    campaign,
-    restAlreadyOverdue && turnResult.restRequired
-  );
+  // The non-canonical "skip the exploration rest cycle → +1 Exhaustion" trigger
+  // has been retired: it is not part of the D&D 5e/SRD 2014 rules baseline.
+  // Exhaustion increments must come from authoritative 5e mechanics elsewhere.
+  // `exhaustionApplied` stays in the result (always false) to preserve the
+  // existing contract shape without an interface migration.
+  const exhaustionApplied = false;
 
   const partySize = activeEncounter?.combatants?.length ?? 1;
   const resourceResult = consumeResources(

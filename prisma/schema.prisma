@@ -84,8 +84,10 @@ model Character {
   /// Remaining hit dice available for short rest healing.
   /// Reset to hitDiceTotal on long rest. Must satisfy 0 ≤ remaining ≤ total.
   hitDiceRemaining     Int      @default(1)
-  /// D&D 5e 2014 exhaustion level. Range: 0 (none) to 6 (dead).
-  /// Incremented by executeExplorationTurn when a mandatory rest is skipped.
+  /// Persisted D&D 5e 2014 Exhaustion level. Range: 0 (none) to 6 (dead).
+  /// Increments must originate from authoritative 5e mechanics only;
+  /// executeExplorationTurn no longer increments it (the exploration rest-cycle
+  /// trigger was non-canonical and has been retired).
   /// Decremented by 1 on long rest per 5e 2014 rules.
   exhaustionLevel      Int      @default(0)
   /// Monotonic revision used for optimistic concurrency on character-sheet writes.
