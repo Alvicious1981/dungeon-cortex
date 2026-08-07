@@ -18,7 +18,7 @@ Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. E
 |---|---|---|
 | `TURNS_PER_HOUR` | 6 | 1 dungeon turn = 10 minutes |
 | `TORCH_DURATION_TURNS` | 6 | Torch burns for 1 hour (6 turns) |
-| `OIL_DURATION_TURNS` | 24 | Oil flask fuels a lantern for 4 hours |
+| `OIL_DURATION_TURNS` | 36 | Oil flask fuels a lantern for 6 hours |
 | `ENCOUNTER_CHECK_INTERVAL_TURNS` | 2 | Random encounter roll every 2 turns |
 | `ENCOUNTER_TRIGGER_RESULT` | 1 | 1d6 roll of 1 triggers encounter |
 | `REST_INTERVAL_TURNS` | 6 | Party must rest every 6 turns |

@@ -815,8 +815,8 @@ describe("Exploration Time Engine — constants", () => {
   it("TORCH_DURATION_TURNS is 6 (= 1 hour)", () => {
     expect(TORCH_DURATION_TURNS).toBe(6);
   });
-  it("OIL_DURATION_TURNS is 24 (= 4 hours)", () => {
-    expect(OIL_DURATION_TURNS).toBe(24);
+  it("OIL_DURATION_TURNS is 36 (= 6 hours)", () => {
+    expect(OIL_DURATION_TURNS).toBe(36);
   });
   it("ENCOUNTER_CHECK_INTERVAL_TURNS is 2", () => {
     expect(ENCOUNTER_CHECK_INTERVAL_TURNS).toBe(2);
