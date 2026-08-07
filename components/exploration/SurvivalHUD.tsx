@@ -10,7 +10,7 @@
  *
  * Renders:
  *   - Dungeon turn count and elapsed time
- *   - Rest countdown (turns until mandatory rest, or overdue warning)
+ *   - Turns elapsed since the party last rested (informational only)
  *   - Active light source with icon + turns remaining
  *   - Unlit torch and oil flask reserves
  *   - Ration count
@@ -72,7 +72,9 @@ export default function SurvivalHUD({
   exhaustionLevel,
 }: SurvivalHUDProps) {
   const minutesThisHour = (totalTurns % TURNS_PER_HOUR) * 10;
-  const turnsUntilRest  = REST_INTERVAL_TURNS - turnsSinceRest;
+  // Informational only: the exploration rest cycle carries no mechanical
+  // consequence. `restOverdue` is kept solely as a neutral state hook — it must
+  // not change the visible text or trigger an alarm style.
   const restOverdue     = turnsSinceRest >= REST_INTERVAL_TURNS;
 
   const lightIcon  = LIGHT_ICONS[activeLightSource];
@@ -97,19 +99,9 @@ export default function SurvivalHUD({
 
       {/* ── Rest Status ── */}
       <section aria-label="Rest Status">
-        {restOverdue ? (
-          <span
-            className="hud-warning"
-            data-testid="rest-status"
-            data-overdue="true"
-          >
-            ⚠️ Rest Overdue
-          </span>
-        ) : (
-          <span data-testid="rest-status" data-overdue="false">
-            Rest in {turnsUntilRest} turn{turnsUntilRest !== 1 ? "s" : ""}
-          </span>
-        )}
+        <span data-testid="rest-status" data-overdue={restOverdue ? "true" : "false"}>
+          {turnsSinceRest} turn{turnsSinceRest !== 1 ? "s" : ""} since last rest
+        </span>
       </section>
 
       {/* ── Exhaustion ── */}
