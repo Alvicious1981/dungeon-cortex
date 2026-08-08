@@ -1,7 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm exec:*)",
       "Bash(for skill:*)",
       "Bash(do echo:*)",
       "Read(//c/Users/Alvicious/AppData/Local/Temp/awesome-skills/skills/**)",
