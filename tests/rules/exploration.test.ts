@@ -902,9 +902,25 @@ describe("advanceTurn — rest cycle", () => {
     expect(advanceTurn({ ...freshTime, turnsSinceRest: 6 }).restRequired).toBe(true);
   });
 
-  it("turnsSinceRest never exceeds REST_INTERVAL_TURNS (6)", () => {
+  it("turnsSinceRest counts real elapsed turns beyond REST_INTERVAL_TURNS", () => {
     const { next } = advanceTurn({ ...freshTime, turnsSinceRest: 6 }, 6);
-    expect(next.turnsSinceRest).toBe(6);
+    expect(next.turnsSinceRest).toBe(12);
+  });
+
+  it("turnsSinceRest is not capped at REST_INTERVAL_TURNS (no artificial limit)", () => {
+    // Anti-regression: the historical 1-in-6 rest rule capped this counter,
+    // making it report false values once the party explored past the threshold.
+    // Values above REST_INTERVAL_TURNS are valid and must be preserved.
+    let state = freshTime;
+    for (let i = 0; i < 5; i++) {
+      state = advanceTurn(state, 6).next;
+    }
+    expect(state.turnsSinceRest).toBe(30);
+    expect(state.turnsSinceRest).toBeGreaterThan(REST_INTERVAL_TURNS);
+  });
+
+  it("turnsSinceRest never goes negative", () => {
+    expect(advanceTurn(freshTime).next.turnsSinceRest).toBeGreaterThanOrEqual(0);
   });
 
   it("turnsSinceRest accumulates across multiple calls", () => {

@@ -353,7 +353,10 @@ export function advanceTurn(
 
   const rawTurnsSinceRest = state.turnsSinceRest + turnsAdvanced;
   const restRequired = rawTurnsSinceRest >= REST_INTERVAL_TURNS;
-  const turnsSinceRest = clampInt(rawTurnsSinceRest, 0, REST_INTERVAL_TURNS);
+  // Real elapsed count: no upper bound. The former cap at REST_INTERVAL_TURNS
+  // came from the historical 1-in-6 rest rule and reported false values once
+  // the party explored past the threshold. Only the non-negative floor remains.
+  const turnsSinceRest = Math.max(0, rawTurnsSinceRest);
 
   const rawEncounter = state.turnsSinceEncounterCheck + turnsAdvanced;
   const encounterCheckDue = rawEncounter >= ENCOUNTER_CHECK_INTERVAL_TURNS;
