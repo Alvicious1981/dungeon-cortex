@@ -379,8 +379,6 @@ export const OIL_DURATION_TURNS = 36;
 export const ENCOUNTER_CHECK_INTERVAL_TURNS = 2;
 /** A 1d6 result of 1 triggers a random encounter. */
 export const ENCOUNTER_TRIGGER_RESULT = 1;
-/** The party must rest 1 turn out of every 6. */
-export const REST_INTERVAL_TURNS = 6;
 /** Rations are consumed once per 24 hours = 144 turns (6 turns/hour × 24). */
 export const RATION_INTERVAL_TURNS = 144;
 /** Torches given to each player at campaign creation. */

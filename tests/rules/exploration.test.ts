@@ -24,7 +24,6 @@ import {
   OIL_DURATION_TURNS,
   ENCOUNTER_CHECK_INTERVAL_TURNS,
   ENCOUNTER_TRIGGER_RESULT,
-  REST_INTERVAL_TURNS,
   RATION_INTERVAL_TURNS,
   INITIAL_TORCHES_PER_PLAYER,
   INITIAL_RATIONS_PER_PLAYER,
@@ -824,9 +823,6 @@ describe("Exploration Time Engine — constants", () => {
   it("ENCOUNTER_TRIGGER_RESULT is 1 (1-in-6 chance)", () => {
     expect(ENCOUNTER_TRIGGER_RESULT).toBe(1);
   });
-  it("REST_INTERVAL_TURNS is 6", () => {
-    expect(REST_INTERVAL_TURNS).toBe(6);
-  });
   it("RATION_INTERVAL_TURNS is 144 (6 turns/hr × 24 hr)", () => {
     expect(RATION_INTERVAL_TURNS).toBe(6 * 24);
   });
@@ -882,25 +878,24 @@ describe("advanceTurn — turn counter", () => {
 });
 
 // ---------------------------------------------------------------------------
-// advanceTurn — rest cycle
+// advanceTurn — turnsSinceRest counter
 // ---------------------------------------------------------------------------
 
-describe("advanceTurn — rest cycle", () => {
-  it("turnsSinceRest counts real elapsed turns beyond REST_INTERVAL_TURNS", () => {
+describe("advanceTurn — turnsSinceRest counter", () => {
+  it("keeps counting past 6 elapsed turns", () => {
     const { next } = advanceTurn({ ...freshTime, turnsSinceRest: 6 }, 6);
     expect(next.turnsSinceRest).toBe(12);
   });
 
-  it("turnsSinceRest is not capped at REST_INTERVAL_TURNS (no artificial limit)", () => {
-    // Anti-regression: the historical 1-in-6 rest rule capped this counter,
-    // making it report false values once the party explored past the threshold.
-    // Values above REST_INTERVAL_TURNS are valid and must be preserved.
+  it("has no upper bound: 30 accumulated turns are reported exactly", () => {
+    // turnsSinceRest is neutral elapsed time with no threshold and no cap.
+    // Every advanced turn is added and reported verbatim, however large.
     let state = freshTime;
     for (let i = 0; i < 5; i++) {
       state = advanceTurn(state, 6).next;
     }
     expect(state.turnsSinceRest).toBe(30);
-    expect(state.turnsSinceRest).toBeGreaterThan(REST_INTERVAL_TURNS);
+    expect(state.turnsSinceRest).toBeGreaterThan(6);
   });
 
   it("turnsSinceRest never goes negative", () => {
