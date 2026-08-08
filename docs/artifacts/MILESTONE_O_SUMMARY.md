@@ -23,7 +23,7 @@ Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. E
 | `OIL_DURATION_TURNS` | 36 | Oil flask fuels a lantern for 6 hours |
 | `ENCOUNTER_CHECK_INTERVAL_TURNS` | 2 | Random encounter roll every 2 turns |
 | `ENCOUNTER_TRIGGER_RESULT` | 1 | 1d6 roll of 1 triggers encounter |
-| `REST_INTERVAL_TURNS` | 6 | Party must rest every 6 turns |
+| ~~`REST_INTERVAL_TURNS`~~ | ~~6~~ | **RETIRED / historical:** encoded the non-canonical 1-in-6 "party must rest every 6 turns" rule. The constant no longer exists; there is no mandatory 1-in-6 rest. |
 | `RATION_INTERVAL_TURNS` | 144 | One ration consumed per 24 hours (144 turns) |
 | `INITIAL_TORCHES_PER_PLAYER` | 5 | Starting torches per party member |
 | `INITIAL_RATIONS_PER_PLAYER` | 7 | Starting rations per party member |
@@ -80,7 +80,7 @@ All functions are side-effect-free. They accept state and return new state — n
 
 | Function | Inputs | Returns | Notes |
 |---|---|---|---|
-| `advanceTurn(state, turns?)` | `CampaignTimeState`, optional turns (default 1) | `AdvanceTurnResult` | Advances all counters; sets `restRequired` when `turnsSinceRest >= REST_INTERVAL_TURNS` |
+| `advanceTurn(state, turns?)` | `CampaignTimeState`, optional turns (default 1) | `AdvanceTurnResult` | Advances all counters. ~~Sets `restRequired` when `turnsSinceRest >= REST_INTERVAL_TURNS`~~ **RETIRED / historical:** exploration `restRequired` and `REST_INTERVAL_TURNS` no longer exist; `turnsSinceRest` is a neutral elapsed-turn counter with no threshold. |
 | `checkRandomEncounter(loudAction?, forcedRoll?)` | `boolean`, optional override | `EncounterCheckResult` | Rolls 1d6 every `ENCOUNTER_CHECK_INTERVAL_TURNS`; loud actions double the chance |
 | `consumeResources(inventory, options)` | `PartyInventoryState`, `ConsumeResourcesOptions` | `ConsumeResourcesResult` | Handles torch/lantern attrition, chaining torch→lantern→darkness, ration depletion |
 | `applyRest(state)` | `CampaignTimeState` | `CampaignTimeState` | Resets `turnsSinceRest` and `turnsSinceEncounterCheck` to 0 |
@@ -120,7 +120,7 @@ z.object({
 ```typescript
 {
   action, turnsAdvanced, totalTurns, totalHours,
-  restRequired,           // true → next action MUST be rest
+  // restRequired,        // RETIRED / historical: exploration no longer emits this field or any 1-in-6 rest gate
   exhaustionApplied,      // RETIRED: always false; kept for contract-shape stability
   encounter,              // { triggered: boolean, roll: number } | null
   lightSource,            // "torch" | "lantern" | "none"
@@ -168,7 +168,7 @@ Read-only presentational panel. Receives all values via props from the caller (D
 |---|---|---|
 | `totalTurns` | `total-turns` | Raw turn counter |
 | `totalHours` + `totalTurns % 6 * 10` | `elapsed-time` | e.g., "2h 0min" |
-| `turnsSinceRest` | `rest-status` | "Rest in N turn(s)" or "⚠️ Rest Overdue"; `data-overdue="true\|false"` |
+| `turnsSinceRest` | `rest-status` | **RETIRED / historical behavior:** ~~"Rest in N turn(s)" or "⚠️ Rest Overdue"; `data-overdue="true\|false"`~~. SurvivalHUD now renders only neutral "N turn(s) since last rest" — no Rest Overdue, no `data-overdue`. `turnsSinceRest` remains a neutral counter. |
 | `exhaustionLevel` | `exhaustion` (conditional) | Hidden when 0; `data-level={N}` |
 | `activeLightSource` | `light-icon` + `light-label` | 🕯️ Torch / 🏮 Lantern / ⬛ Darkness |
 | `lightSourceTurnsRemaining` | `light-turns-remaining` | Absent when `activeLightSource === "none"` |
