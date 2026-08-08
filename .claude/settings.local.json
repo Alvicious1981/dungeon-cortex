@@ -3,14 +3,14 @@
     "allow": [
       "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"dark fantasy RPG dungeon game dashboard\" --domain style)",
       "Bash(pnpm test:*)",
-      "Skill(update-config)",
       "Bash(pnpm vitest:*)",
       "Bash(npx prisma generate:*)",
       "Skill(commit-commands:commit)"
     ],
     "ask": [
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Skill(update-config)"
     ]
   }
 }
