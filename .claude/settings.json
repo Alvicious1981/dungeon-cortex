@@ -11,7 +11,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd D:/dungeon-cortex && pnpm exec tsc --noEmit 2>&1 | tail -20"
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && pnpm exec tsc --noEmit 2>&1 | tail -20"
           }
         ]
       }
