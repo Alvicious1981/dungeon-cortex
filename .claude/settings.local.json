@@ -18,7 +18,9 @@
       "Bash(pnpm vitest:*)",
       "Bash(npx prisma generate:*)",
       "Bash(python -c \":*)",
-      "Skill(commit-commands:commit)",
+      "Skill(commit-commands:commit)"
+    ],
+    "ask": [
       "Bash(git add:*)",
       "Bash(git commit:*)"
     ]
