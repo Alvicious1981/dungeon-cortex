@@ -18,7 +18,7 @@
  */
 
 import React from "react";
-import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
+import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,10 +72,6 @@ export default function SurvivalHUD({
   exhaustionLevel,
 }: SurvivalHUDProps) {
   const minutesThisHour = (totalTurns % TURNS_PER_HOUR) * 10;
-  // Informational only: the exploration rest cycle carries no mechanical
-  // consequence. `restOverdue` is kept solely as a neutral state hook — it must
-  // not change the visible text or trigger an alarm style.
-  const restOverdue     = turnsSinceRest >= REST_INTERVAL_TURNS;
 
   const lightIcon  = LIGHT_ICONS[activeLightSource];
   const lightLabel = LIGHT_LABELS[activeLightSource];
@@ -99,7 +95,7 @@ export default function SurvivalHUD({
 
       {/* ── Rest Status ── */}
       <section aria-label="Rest Status">
-        <span data-testid="rest-status" data-overdue={restOverdue ? "true" : "false"}>
+        <span data-testid="rest-status">
           {turnsSinceRest} turn{turnsSinceRest !== 1 ? "s" : ""} since last rest
         </span>
       </section>

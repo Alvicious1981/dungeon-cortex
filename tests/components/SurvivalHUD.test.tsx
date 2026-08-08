@@ -122,25 +122,6 @@ describe("SurvivalHUD — rest status (neutral semantics)", () => {
   );
 });
 
-describe("SurvivalHUD — rest status (data-overdue state hook preserved)", () => {
-  it("sets data-overdue='false' below REST_INTERVAL_TURNS", () => {
-    render(<SurvivalHUD {...baseProps} turnsSinceRest={3} />);
-    expect(screen.getByTestId("rest-status").getAttribute("data-overdue")).toBe("false");
-  });
-
-  it("sets data-overdue='true' at REST_INTERVAL_TURNS", () => {
-    render(<SurvivalHUD {...baseProps} turnsSinceRest={6} />);
-    expect(screen.getByTestId("rest-status").getAttribute("data-overdue")).toBe("true");
-  });
-
-  it("sets data-overdue='true' above REST_INTERVAL_TURNS", () => {
-    render(<SurvivalHUD {...baseProps} turnsSinceRest={7} />);
-    const el = screen.getByTestId("rest-status");
-    expect(el.getAttribute("data-overdue")).toBe("true");
-    expect(el.textContent).toBe("7 turns since last rest");
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Exhaustion
 // ---------------------------------------------------------------------------
