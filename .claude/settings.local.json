@@ -14,7 +14,6 @@
       "Bash(grep -r \"ActionStreamFrame\\\\|GameEvent\" /d/dungeon-cortex/lib --include=*.ts --include=*.tsx)",
       "Bash(pnpm vitest:*)",
       "Bash(npx prisma generate:*)",
-      "Bash(python -c \":*)",
       "Skill(commit-commands:commit)"
     ],
     "ask": [
