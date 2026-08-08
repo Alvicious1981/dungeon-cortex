@@ -403,7 +403,6 @@ export interface CampaignTimeState {
 /** Returned by `advanceTurn`. Caller writes `next` to DB and acts on flags. */
 export interface AdvanceTurnResult {
   next:                  CampaignTimeState;
-  restRequired:          boolean;
   encounterCheckDue:     boolean;
   rationConsumptionDue:  boolean;
   turnsAdvanced:         number;

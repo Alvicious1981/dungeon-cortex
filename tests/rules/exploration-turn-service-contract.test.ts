@@ -617,7 +617,6 @@ describe("exploration-turn-service resolveExplorationTurn contract", () => {
     expect(result).toMatchObject({
       ok: true,
       action: "rest",
-      restRequired: false,
     });
   });
 
@@ -832,7 +831,6 @@ describe("exploration-turn-service resolveExplorationTurn contract", () => {
         turnsAdvanced: expect.any(Number),
         totalTurns: expect.any(Number),
         totalHours: expect.any(Number),
-        restRequired: expect.any(Boolean),
         encounter: null,
         lightSource: expect.any(String),
         lightSourceTurnsLeft: expect.any(Number),
@@ -841,6 +839,19 @@ describe("exploration-turn-service resolveExplorationTurn contract", () => {
         warnings: expect.any(Array),
       })
     );
+  });
+
+  it("does not expose restRequired: the 1-in-6 rest gate is not a 5e/SRD 2014 mechanic", async () => {
+    const state = createTx();
+
+    const moveResult = await resolveTurn({}, state);
+    const restResult = await resolveTurn({ turnAction: "rest" }, state);
+
+    expect(moveResult).not.toHaveProperty("restRequired");
+    expect(restResult).not.toHaveProperty("restRequired");
+    // The result is handed to the narrator verbatim: the field must not reach
+    // the AI in any nested position either.
+    expect(JSON.stringify(moveResult)).not.toContain('"restRequired"');
   });
 
   it("does not introduce forbidden retro rules or jargon", async () => {

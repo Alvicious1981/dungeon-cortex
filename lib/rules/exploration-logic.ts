@@ -16,7 +16,6 @@ import type { DungeonMap } from "./dungeon";
 import {
   LOCATION_TEMPLATES,
   TURNS_PER_HOUR,
-  REST_INTERVAL_TURNS,
   ENCOUNTER_CHECK_INTERVAL_TURNS,
   RATION_INTERVAL_TURNS,
   TORCH_DURATION_TURNS,
@@ -352,10 +351,10 @@ export function advanceTurn(
   const totalDays = Math.floor(totalTurns / 144);
 
   const rawTurnsSinceRest = state.turnsSinceRest + turnsAdvanced;
-  const restRequired = rawTurnsSinceRest >= REST_INTERVAL_TURNS;
-  // Real elapsed count: no upper bound. The former cap at REST_INTERVAL_TURNS
-  // came from the historical 1-in-6 rest rule and reported false values once
-  // the party explored past the threshold. Only the non-negative floor remains.
+  // Real elapsed count: no upper bound. The former cap and the `restRequired`
+  // flag both came from the historical 1-in-6 rest rule, which is not part of
+  // the D&D 5e/SRD 2014 baseline. Only the non-negative floor remains.
+  // `turnsSinceRest` stays as neutral elapsed-time state; `applyRest` resets it.
   const turnsSinceRest = Math.max(0, rawTurnsSinceRest);
 
   const rawEncounter = state.turnsSinceEncounterCheck + turnsAdvanced;
@@ -375,7 +374,6 @@ export function advanceTurn(
       turnsSinceEncounterCheck,
       turnsSinceRation,
     },
-    restRequired,
     encounterCheckDue,
     rationConsumptionDue,
     turnsAdvanced,

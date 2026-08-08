@@ -125,7 +125,6 @@ export interface ResolveExplorationTurnResult {
   turnsAdvanced: number;
   totalTurns: number;
   totalHours: number;
-  restRequired: boolean;
   exhaustionApplied: boolean;
   encounter: { triggered: boolean; roll: number } | null;
   randomEncounter: { triggered: boolean; roll: number } | null;
@@ -253,7 +252,6 @@ function buildResult(input: {
   campaignTime: CampaignTimeState;
   inventoryBefore: PartyInventoryState;
   inventoryAfter: PartyInventoryState;
-  restRequired: boolean;
   exhaustionApplied: boolean;
   encounter: { triggered: boolean; roll: number } | null;
   lightExpired: boolean;
@@ -276,7 +274,6 @@ function buildResult(input: {
     turnsAdvanced: input.turnsAdvanced,
     totalTurns: input.campaignTime.totalTurns,
     totalHours: input.campaignTime.totalHours,
-    restRequired: input.restRequired,
     exhaustionApplied: input.exhaustionApplied,
     encounter: input.encounter,
     randomEncounter: input.encounter,
@@ -341,7 +338,6 @@ async function resolveExplorationTurnInTransaction(
       campaignTime: nextTime,
       inventoryBefore: currentInventory,
       inventoryAfter: currentInventory,
-      restRequired: false,
       exhaustionApplied: false,
       encounter: null,
       lightExpired: false,
@@ -396,7 +392,6 @@ async function resolveExplorationTurnInTransaction(
     campaignTime: turnResult.next,
     inventoryBefore: currentInventory,
     inventoryAfter: resourceResult.next,
-    restRequired: turnResult.restRequired,
     exhaustionApplied,
     encounter,
     lightExpired: resourceResult.lightExpired,

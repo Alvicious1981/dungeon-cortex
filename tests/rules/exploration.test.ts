@@ -886,22 +886,6 @@ describe("advanceTurn — turn counter", () => {
 // ---------------------------------------------------------------------------
 
 describe("advanceTurn — rest cycle", () => {
-  it("restRequired = false after turn 1 from fresh state", () => {
-    expect(advanceTurn(freshTime).restRequired).toBe(false);
-  });
-
-  it("restRequired = false after turn 5 from fresh state", () => {
-    expect(advanceTurn(freshTime, 5).restRequired).toBe(false);
-  });
-
-  it("restRequired = true after turn 6 from fresh state", () => {
-    expect(advanceTurn(freshTime, 6).restRequired).toBe(true);
-  });
-
-  it("restRequired = true when turnsSinceRest is already at REST_INTERVAL_TURNS", () => {
-    expect(advanceTurn({ ...freshTime, turnsSinceRest: 6 }).restRequired).toBe(true);
-  });
-
   it("turnsSinceRest counts real elapsed turns beyond REST_INTERVAL_TURNS", () => {
     const { next } = advanceTurn({ ...freshTime, turnsSinceRest: 6 }, 6);
     expect(next.turnsSinceRest).toBe(12);
