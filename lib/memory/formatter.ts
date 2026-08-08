@@ -21,7 +21,7 @@ import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 import { getDispositionBand } from "@/lib/rules/social-logic";
-import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
+import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
 // ---------------------------------------------------------------------------
@@ -401,14 +401,10 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   const minutesThisHour = (hud.totalTurns % TURNS_PER_HOUR) * 10;
   lines.push(`**Turn:** ${hud.totalTurns} — ${hud.totalHours}h ${minutesThisHour}min elapsed`);
 
-  // Rest status — informational only. The exploration rest cycle carries no
-  // mechanical consequence (no Exhaustion, no enforced action); report elapsed
-  // exploration turns since the party last rested as a plain fact.
-  if (hud.turnsSinceRest >= REST_INTERVAL_TURNS) {
-    lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
-  } else {
-    lines.push(`**Rest:** ${hud.turnsSinceRest} turn(s) since the last rest.`);
-  }
+  // Rest status — informational only. `turnsSinceRest` is a neutral elapsed-turn
+  // counter with no mechanical threshold (no Exhaustion, no enforced action);
+  // report it as a plain fact, identically at every value.
+  lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
 
   // Exhaustion
   if (hud.exhaustionLevel > 0) {

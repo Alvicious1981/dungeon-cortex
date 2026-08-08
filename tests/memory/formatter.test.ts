@@ -307,4 +307,16 @@ describe("formatSurvivalHUD", () => {
     expect(output).not.toContain("mandatory");
     expect(output).not.toMatch(/applies on next/i);
   });
+
+  it("reports rest turns with no threshold branching", () => {
+    const below = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 2 });
+    const above = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 9 });
+
+    // Anti-regression: the retired 6-turn rest interval must not produce two
+    // different prompt sentences. The counter is neutral elapsed time, so the
+    // wording is identical on both sides of the old threshold.
+    expect(below).toContain("2 turn(s) since its last rest");
+    expect(above).toContain("9 turn(s) since its last rest");
+    expect(below).not.toContain("since the last rest");
+  });
 });
