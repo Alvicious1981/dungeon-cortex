@@ -28,7 +28,7 @@
       "Bash(grep -r \"audio\\\\|Audio\\\\|sound\\\\|Sound\" /d/dungeon-cortex --include=*.ts --include=*.tsx)",
       "Bash(grep -r \"ActionStreamFrame\\\\|GameEvent\" /d/dungeon-cortex/lib --include=*.ts --include=*.tsx)",
       "Bash(pnpm vitest:*)",
-      "Bash(npx prisma:*)",
+      "Bash(npx prisma generate:*)",
       "Bash(python -c \":*)",
       "Skill(commit-commands:commit)",
       "Bash(git add:*)",
