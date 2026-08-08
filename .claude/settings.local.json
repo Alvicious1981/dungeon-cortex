@@ -1,12 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/Alvicious/AppData/Local/Temp/awesome-skills/skills/**)",
       "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"dark fantasy RPG dungeon game dashboard\" --domain style)",
       "Bash(pnpm test:*)",
       "Skill(update-config)",
-      "Bash(grep -r \"audio\\\\|Audio\\\\|sound\\\\|Sound\" /d/dungeon-cortex --include=*.ts --include=*.tsx)",
-      "Bash(grep -r \"ActionStreamFrame\\\\|GameEvent\" /d/dungeon-cortex/lib --include=*.ts --include=*.tsx)",
       "Bash(pnpm vitest:*)",
       "Bash(npx prisma generate:*)",
       "Skill(commit-commands:commit)"
