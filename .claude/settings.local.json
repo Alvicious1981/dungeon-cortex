@@ -1,10 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(for skill:*)",
-      "Bash(do echo:*)",
       "Read(//c/Users/Alvicious/AppData/Local/Temp/awesome-skills/skills/**)",
-      "Bash(done)",
       "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"dark fantasy RPG dungeon game dashboard\" --domain style)",
       "Bash(pnpm test:*)",
       "Skill(update-config)",
