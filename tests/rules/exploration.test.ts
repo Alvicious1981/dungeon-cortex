@@ -9,6 +9,7 @@ import {
   EdgePayloadSchema,
   LocationPayloadSchema,
   MoveToNodeInputSchema,
+  ExplorationTurnInputSchema,
   rollFeature,
   generateLocationName,
   generateNodeGraph,
@@ -353,6 +354,25 @@ describe("MoveToNodeInputSchema", () => {
 
   it("rejects string index", () => {
     expect(MoveToNodeInputSchema.safeParse({ targetNodeIndex: "3" }).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ExplorationTurnInputSchema — action description neutrality
+// ---------------------------------------------------------------------------
+
+describe("ExplorationTurnInputSchema action description", () => {
+  const actionDescription = ExplorationTurnInputSchema.shape.action.description ?? "";
+
+  it("does not carry retired 1-in-6 rest semantics", () => {
+    // The narrator reads this description verbatim. It must not imply a
+    // mechanical rest obligation the backend no longer enforces.
+    expect(actionDescription).not.toContain("mandatory");
+    expect(actionDescription).not.toContain("rest cycle");
+  });
+
+  it("describes rest as resetting turnsSinceRest", () => {
+    expect(actionDescription).toContain("turnsSinceRest");
   });
 });
 

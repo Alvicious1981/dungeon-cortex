@@ -131,7 +131,7 @@ export const ExplorationTurnInputSchema = z.object({
       "The type of exploration action taken. " +
       "'move': standard movement to adjacent node, 1 turn. " +
       "'search': careful room examination, 1 turn. " +
-      "'rest': mandatory rest turn — resets the rest cycle, no resources consumed. " +
+      "'rest': records an exploration rest by resetting turnsSinceRest — no resources consumed. " +
       "'interact': non-combat interaction with environment or NPC, 1 turn. " +
       "'loud': noisy action (breaking down door, shouting) — forces an immediate encounter check.",
     ),
