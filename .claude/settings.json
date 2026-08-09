@@ -1,7 +1,38 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh auth status:*)"
+      "Bash(gh auth status:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm vitest:*)",
+      "Bash(pnpm generate:*)"
+    ],
+    "ask": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Skill(update-config)",
+      "Skill(commit-commands:commit)",
+      "Bash(npx prisma:*)",
+      "Bash(pnpm prisma:*)",
+      "Bash(pnpm exec:*)"
+    ],
+    "deny": [
+      "Bash(prisma migrate reset:*)",
+      "Bash(* prisma migrate reset:*)",
+      "Bash(prisma migrate deploy:*)",
+      "Bash(* prisma migrate deploy:*)",
+      "Bash(prisma migrate dev:*)",
+      "Bash(* prisma migrate dev:*)",
+      "Bash(prisma migrate resolve:*)",
+      "Bash(* prisma migrate resolve:*)",
+      "Bash(prisma db push:*)",
+      "Bash(* prisma db push:*)",
+      "Bash(prisma db seed:*)",
+      "Bash(* prisma db seed:*)",
+      "Bash(prisma db execute:*)",
+      "Bash(* prisma db execute:*)",
+      "Bash(python -c:*)",
+      "Bash(python3 -c:*)",
+      "Bash(node:*)"
     ]
   },
   "hooks": {
