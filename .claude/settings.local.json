@@ -1,7 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"dark fantasy RPG dungeon game dashboard\" --domain style)",
       "Bash(pnpm test:*)",
       "Bash(pnpm vitest:*)",
       "Bash(npx prisma generate:*)"
