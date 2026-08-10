@@ -29,7 +29,7 @@ export function buildWorldTools(campaignId: string) {
   return {
     getTavernName: tool({
       description:
-        "Get the canonical, deterministic name of a tavern for a given location ID.",
+        "Generate a deterministic reference tavern name for a location already identified and authorized by backend context. This result does not persist or establish a tavern.",
       inputSchema: GetTavernNameInputSchema,
       execute: async ({ locationId }) => {
         return runTool(() => projectTavernName(generateTavernName(locationId)));
