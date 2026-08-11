@@ -15,7 +15,8 @@
     "test:e2e:headed": "playwright test --headed",
     "seed": "tsx prisma/seed-srd.ts",
     "generate": "prisma generate",
-    "check-retro": "tsx scripts/check-retro-jargon.ts"
+    "check-retro": "tsx scripts/check-retro-jargon.ts",
+    "repair:hit-dice": "tsx scripts/repair-character-hit-dice.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed-srd.ts"
