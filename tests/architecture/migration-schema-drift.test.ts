@@ -20,6 +20,7 @@ const MIGRATIONS_DIR = join(ROOT, "prisma", "migrations");
 const SCHEMA = readFileSync(join(ROOT, "prisma", "schema.prisma"), "utf8");
 
 const NEW_MIGRATION = "20260806090000_reconcile_character_progression_columns";
+const GUARD_MIGRATION = "20260807090000_guard_character_hit_dice_contract";
 
 // ─── Parsers ligeros ─────────────────────────────────────────────────────────
 
@@ -97,11 +98,26 @@ const KNOWN_OUTSTANDING_DRIFT: Record<string, string[]> = {};
  *
  * 20260806, que sí sabe derivar hitDiceTotal = GREATEST(level, 1), sólo actúa
  * sobre filas con hitDiceTotal IS NULL — y 20260805, al ejecutarse primero, ya
- * no deja ninguna. La reparación queda pendiente en una migración correctiva
- * aditiva aparte, todavía sin escribir. SEC-AI-001 PR3 (que activa applyLevelUp)
- * NO debe empezar hasta que esa migración exista, porque un hitDiceTotal
- * incorrecto hace que applyLevelUp rechace la subida de nivel con
- * INVALID_LEVEL_UP_STATE de forma permanente para ese personaje.
+ * no deja ninguna.
+ *
+ * ESTADO: 20260807090000_guard_character_hit_dice_contract ya está implementada.
+ * Es guard-only: detecta y aborta ante estados incompatibles o ambiguos, pero NO
+ * repara nada. Cierra la vía por la que el daño podía pasar inadvertido; no
+ * cierra la deuda.
+ *
+ * SEC-AI-001 PR3 (que activa applyLevelUp) SIGUE BLOQUEADO por dos motivos
+ * todavía abiertos:
+ *
+ *   1. No existe la herramienta TypeScript de diagnóstico y reparación. La
+ *      guarda aborta, pero nadie repara: un hitDiceTotal incorrecto sigue
+ *      haciendo que applyLevelUp rechace la subida con INVALID_LEVEL_UP_STATE
+ *      de forma permanente para ese personaje.
+ *
+ *   2. El contrato multinivel entre applyExperienceAward y applyLevelUp sigue
+ *      desajustado: el primero puede subir varios niveles de una sola concesión
+ *      de XP sin tocar hitDiceTotal, y el segundo solo acepta exactamente un
+ *      nivel pendiente. Es la causa raíz de la ambigüedad, y ninguna migración
+ *      puede resolverla.
  */
 
 /** Modelos que el historial no crea en absoluto. Deuda separada, no de progresión. */
@@ -310,9 +326,107 @@ describe("migración 20260806090000_reconcile_character_progression_columns", ()
     expect(sql.toUpperCase()).not.toContain("CHECK (");
   });
 
-  it("es la última migración del historial", () => {
+  it("precede inmediatamente a la migración de guarda", () => {
     const all = readdirSync(MIGRATIONS_DIR).filter((d) => /^\d/.test(d)).sort();
-    expect(all[all.length - 1]).toBe(NEW_MIGRATION);
+    expect(all[all.length - 2]).toBe(NEW_MIGRATION);
+  });
+});
+
+// ─── Contrato de la migración de guarda ──────────────────────────────────────
+// Guard-only: su propiedad de seguridad es no escribir. El repositorio no tiene
+// un punto de entrada único para migraciones (no hay script en package.json, el
+// CI no las aplica y la documentación invoca el CLI directamente), así que un
+// paso previo obligatorio puede saltarse siempre. Una migración que solo puede
+// pasar o abortar es segura por la vía que se aplique. Estos tests fijan
+// exactamente eso.
+
+describe("migración 20260807090000_guard_character_hit_dice_contract", () => {
+  const file = join(MIGRATIONS_DIR, GUARD_MIGRATION, "migration.sql");
+  const sql = existsSync(file) ? readFileSync(file, "utf8") : "";
+  /** SQL sin comentarios: lo único que el motor llega a ejecutar. */
+  const code = sql
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*--/.test(l))
+    .join("\n");
+
+  it("1. existe y es la última del historial", () => {
+    expect(existsSync(file)).toBe(true);
+    expect(sql.length).toBeGreaterThan(0);
+    const all = readdirSync(MIGRATIONS_DIR).filter((d) => /^\d/.test(d)).sort();
+    expect(all[all.length - 1]).toBe(GUARD_MIGRATION);
+  });
+
+  it("2. no contiene ninguna escritura de datos", () => {
+    for (const verb of ["UPDATE", "INSERT", "DELETE", "TRUNCATE", "MERGE", "COPY"]) {
+      expect(code.toUpperCase()).not.toMatch(new RegExp(`\\b${verb}\\b`));
+    }
+  });
+
+  it("3. no contiene ningún DDL", () => {
+    for (const ddl of ["ALTER TABLE", "ALTER COLUMN", "ADD COLUMN", "DROP", "CREATE", "ADD CONSTRAINT"]) {
+      expect(code.toUpperCase()).not.toContain(ddl);
+    }
+    // Ni siquiera de forma indirecta: no hay EXECUTE de SQL dinámico.
+    expect(code.toUpperCase()).not.toMatch(/\bEXECUTE\b/);
+  });
+
+  it("4. solo lee de Character", () => {
+    const tables = new Set([...code.matchAll(/FROM\s+"(\w+)"/g)].map((m) => m[1]));
+    expect([...tables]).toEqual(["Character"]);
+  });
+
+  it("5. guarda el rango de nivel [1, 20]", () => {
+    expect(code).toContain('"level" < 1 OR "level" > 20');
+  });
+
+  it("6. en nivel 1 exige hitDiceTotal = 1", () => {
+    expect(code).toContain('"level" = 1 AND "hitDiceTotal" <> 1');
+  });
+
+  it("7. rechaza hitDiceTotal por encima del nivel", () => {
+    expect(code).toContain('"level" >= 2 AND "hitDiceTotal" > "level"');
+  });
+
+  it("8. rechaza hitDiceTotal por debajo del pendiente legítimo", () => {
+    expect(code).toContain('"level" >= 2 AND "hitDiceTotal" < "level" - 1');
+  });
+
+  it("9. preserva el level-up pendiente y el estado asentado", () => {
+    // La guarda 8 usa `< level - 1`, no `<> level`: total = level - 1 pasa.
+    expect(code).not.toMatch(/"hitDiceTotal"\s*<>\s*"level"/);
+    expect(code).not.toMatch(/"hitDiceTotal"\s*<\s*"level"(?!\s*-)/);
+    // Y la guarda 7 usa `>`, no `>=`: total = level pasa.
+    expect(code).not.toMatch(/"hitDiceTotal"\s*>=\s*"level"/);
+  });
+
+  it("10. acota hitDiceRemaining por ambos extremos", () => {
+    expect(code).toContain('"hitDiceRemaining" < 0');
+    expect(code).toContain('"hitDiceRemaining" > "hitDiceTotal"');
+  });
+
+  it("11. no duplica los umbrales de XP del SRD", () => {
+    // Reimplementar XP_THRESHOLDS en SQL crearía una segunda autoridad mecánica.
+    // La guarda no escribe usando "level", así que no necesita validar el XP.
+    expect(code).not.toContain('"xp"');
+    for (const threshold of ["300", "900", "2700", "6500", "14000", "355000"]) {
+      expect(code).not.toContain(threshold);
+    }
+  });
+
+  it("12. cada guardia aborta con un mensaje accionable", () => {
+    const raises = [...sql.matchAll(/RAISE EXCEPTION\s+'([^']+)'/g)].map((m) => m[1]);
+    expect(raises).toHaveLength(6);
+    for (const msg of raises) {
+      expect(msg).toContain("%");
+      expect(msg).toMatch(/incumplido|ambiguo/);
+      expect(msg).toMatch(/antes de continuar/);
+    }
+  });
+
+  it("13. es una sola sentencia: bloque DO único, sin BEGIN/COMMIT sueltos", () => {
+    expect([...sql.matchAll(/^DO \$(\w+)\$/gm)]).toHaveLength(1);
+    expect(sql).not.toMatch(/^\s*BEGIN;/m);
+    expect(sql).not.toMatch(/^\s*COMMIT;/m);
   });
 });
 

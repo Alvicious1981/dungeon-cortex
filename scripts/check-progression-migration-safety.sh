@@ -42,11 +42,14 @@ set -euo pipefail
 SAFETY_PSQL="${SAFETY_PSQL:-psql}"
 SAFETY_DB="${SAFETY_DB:-progression_safety_check}"
 MIG="prisma/migrations/20260806090000_reconcile_character_progression_columns/migration.sql"
+GUARD="prisma/migrations/20260807090000_guard_character_hit_dice_contract/migration.sql"
 
-if [ ! -f "$MIG" ]; then
-  echo "No se encuentra $MIG. Ejecuta el script desde la raíz del repositorio." >&2
-  exit 1
-fi
+for f in "$MIG" "$GUARD"; do
+  if [ ! -f "$f" ]; then
+    echo "No se encuentra $f. Ejecuta el script desde la raíz del repositorio." >&2
+    exit 1
+  fi
+done
 
 # Única abstracción de ejecución. Sin eval.
 read -r -a PSQL_CMD <<< "$SAFETY_PSQL"
@@ -118,7 +121,7 @@ build_base() {
   exec_sql postgres "CREATE DATABASE $db;"
 
   local d out rc
-  for d in $(ls prisma/migrations | grep '^2' | grep -v 20260806090000 | sort); do
+  for d in $(ls prisma/migrations | grep '^2' | grep -v 20260806090000 | grep -v 20260807090000 | sort); do
     rc=0
     out=$("${PSQL_CMD[@]}" -d "$db" -v ON_ERROR_STOP=1 -q < "prisma/migrations/$d/migration.sql" 2>&1) || rc=$?
     [ $rc -eq 0 ] || die "SIEMBRA: falló la migración previa '$d' (exit $rc): $out"
@@ -174,6 +177,72 @@ cols_present() {
 
 add_progression_columns() {
   exec_sql "$1" 'ALTER TABLE "Character" ADD COLUMN "hitDiceTotal" INTEGER, ADD COLUMN "hitDiceRemaining" INTEGER, ADD COLUMN "exhaustionLevel" INTEGER;'
+}
+
+# ── Arnés de la migración de guarda (20260807090000) ─────────────────────────
+#
+# La guarda es guard-only: no escribe nunca. Por eso cada ensayo comprueba dos
+# cosas distintas — el veredicto (pasa/aborta) y que los datos sintéticos
+# siguen intactos byte a byte después. Un aborto que además hubiera modificado
+# algo sería un fallo aunque el veredicto fuese el correcto.
+
+# Aplica la migración de guarda. Devuelve el código real; MIGOUT lleva la salida.
+apply_guard() {
+  local rc=0
+  MIGOUT=$("${PSQL_CMD[@]}" -d "$1" -v ON_ERROR_STOP=1 -q < "$GUARD" 2>&1) || rc=$?
+  return $rc
+}
+
+# Base con TODAS las migraciones aplicadas, guarda incluida en el historial pero
+# no ejecutada aquí: build_base excluye 20260806, así que se aplica a mano para
+# dejar las columnas en su estado final (NOT NULL, defaults 1/1/0).
+build_guard_base() {
+  local db="$1"
+  build_base "$db"
+  apply_migration "$db" || die "GUARDA: la migración base 20260806 debía aplicarse: $MIGOUT"
+}
+
+# Inserta un Character con hit dice explícitos. $1=db $2=id $3=level $4=total $5=remaining
+ins_hd() {
+  exec_sql "$1" \
+    "INSERT INTO \"Character\"(\"id\",\"userId\",\"name\",\"race\",\"class\",\"level\",\"xp\",\"hp\",\"maxHp\",\"stats\",\"createdAt\",\"hitDiceTotal\",\"hitDiceRemaining\",\"exhaustionLevel\") \
+     VALUES ('$2','u1','it_audit_$2','human','fighter',$3,0,10,10,'{}','2026-01-01',$4,$5,0);"
+}
+
+# Ensayo que DEBE pasar la guarda. $1=etiqueta $2=level $3=total $4=remaining
+guard_ok() {
+  local label="$1" lvl="$2" tot="$3" rem="$4" db="${SAFETY_DB}_guard"
+  build_guard_base "$db"
+  ins_hd "$db" c_g "$lvl" "$tot" "$rem"
+  assert_seeded "$db" 1
+  assert_row "$db" c_g
+  snapshot "$db"; local before="$QOUT"
+
+  apply_guard "$db" || die "GUARDA: '$label' debía pasar y abortó: $MIGOUT"
+  snapshot "$db"
+  chk "PASA $label — sin modificar datos" "$before" "$QOUT"
+  exec_sql postgres "DROP DATABASE IF EXISTS $db WITH (FORCE);"
+}
+
+# Ensayo que DEBE abortar. $1=etiqueta $2=level $3=total $4=remaining
+guard_abort() {
+  local label="$1" lvl="$2" tot="$3" rem="$4" db="${SAFETY_DB}_guard"
+  build_guard_base "$db"
+  # Viola el contrato a propósito: la guarda es justo lo que debe detectarlo.
+  ins_hd "$db" c_g "$lvl" "$tot" "$rem"
+  assert_seeded "$db" 1
+  assert_row "$db" c_g
+  snapshot "$db"; local before="$QOUT"
+  qreq "$db" "SELECT \"level\"::text || ':' || \"hitDiceTotal\"::text || ':' || \"hitDiceRemaining\"::text FROM \"Character\" WHERE \"id\"='c_g';"
+  local raw_before="$QOUT"
+
+  apply_guard "$db" && die "GUARDA: '$label' debía abortar y pasó"
+  chk "ABORTA $label" 1 "$(printf '%s' "$MIGOUT" | grep -c 'incumplido\|ambiguo' || true)"
+  snapshot "$db"
+  chk "  …y deja los datos intactos" "$before" "$QOUT"
+  qreq "$db" "SELECT \"level\"::text || ':' || \"hitDiceTotal\"::text || ':' || \"hitDiceRemaining\"::text FROM \"Character\" WHERE \"id\"='c_g';"
+  chk "  …incluido level/total/remaining" "$raw_before" "$QOUT"
+  exec_sql postgres "DROP DATABASE IF EXISTS $db WITH (FORCE);"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -305,6 +374,28 @@ chk "0 filas violan las invariantes" 0 "$QOUT"
 
 # Limpieza de la base desechable.
 exec_sql postgres "DROP DATABASE IF EXISTS $DB WITH (FORCE);"
+
+echo
+echo "############ 6. GUARDA GUARD-ONLY (20260807090000) ############"
+
+echo "-- Estados válidos: deben pasar sin tocar nada"
+guard_ok    "nivel 1 / total 1"              1 1 1
+guard_ok    "nivel 2 / total 1 (pendiente)"  2 1 1
+guard_ok    "nivel 5 / total 4 (pendiente)"  5 4 4
+guard_ok    "nivel 5 / total 5 (asentado)"   5 5 5
+guard_ok    "remanente en rango (5/5/0)"     5 5 0
+
+echo
+echo "-- Estados inválidos o ambiguos: deben abortar sin tocar nada"
+guard_abort "nivel 0"                        0 1 1
+guard_abort "nivel 21"                      21 20 20
+guard_abort "nivel 1 / total 0"              1 0 0
+guard_abort "nivel 1 / total 2"              1 2 2
+guard_abort "nivel 2 / total 0"              2 0 0
+guard_abort "nivel 5 / total 1 (ambiguo)"    5 1 1
+guard_abort "nivel 5 / total 6"              5 6 5
+guard_abort "remanente negativo"             5 5 -1
+guard_abort "remanente > total"              5 5 8
 
 echo
 echo "############ RESUMEN: $FAIL fallo(s) ############"
