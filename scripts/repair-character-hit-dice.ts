@@ -103,7 +103,6 @@ export interface HitDiceRepairReport {
 function emptyCounts(): HitDiceRepairCounts {
   return {
     VALID_SETTLED: 0,
-    VALID_PENDING: 0,
     REPAIRABLE: 0,
     AMBIGUOUS: 0,
     INVALID_PROGRESSION: 0,
@@ -243,7 +242,6 @@ function printReport(report: HitDiceRepairReport, apply: boolean): void {
   console.log(`Rows scanned: ${report.rows.length}`);
   console.log(
     `  VALID_SETTLED=${report.counts.VALID_SETTLED} ` +
-      `VALID_PENDING=${report.counts.VALID_PENDING} ` +
       `REPAIRABLE=${report.counts.REPAIRABLE} ` +
       `AMBIGUOUS=${report.counts.AMBIGUOUS} ` +
       `INVALID_PROGRESSION=${report.counts.INVALID_PROGRESSION}`

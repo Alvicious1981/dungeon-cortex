@@ -48,9 +48,14 @@ interface ProgressionDb {
       where: { id: string };
       select?: Record<string, boolean>;
     }): Promise<ProgressionCharacterRecord | null | undefined>;
+    /**
+     * XP only. `level` is deliberately absent from the payload type: under
+     * Model E this service may never advance the applied level, and a shape
+     * that cannot express the field cannot write it by accident.
+     */
     update(args: {
       where: { id: string };
-      data: { xp: number; level?: number };
+      data: { xp: number };
     }): Promise<ProgressionCharacterRecord>;
   };
   gameLog?: {
@@ -70,6 +75,18 @@ export interface ApplyExperienceAwardInput {
   db?: ProgressionDb;
 }
 
+/**
+ * The next single ascension the character is entitled to, plus how many remain
+ * in total. `toLevel` is always `fromLevel + 1`: applyLevelUp resolves exactly
+ * one level per invocation, so this never advertises a multi-level jump.
+ */
+export interface LevelUpAvailable {
+  characterId: string;
+  fromLevel: number;
+  toLevel: number;
+  pendingLevels: number;
+}
+
 export interface ProgressionAwardFacts {
   type: "experience_award_applied";
   campaignId: string;
@@ -78,15 +95,17 @@ export interface ProgressionAwardFacts {
   previousXP: number;
   newXP: number;
   previousLevel: number;
+  /** The applied level after this award — unchanged, by contract. */
   newLevel: number;
+  /** getLevelFromXP(newXP): the level the XP now supports. */
+  targetLevel: number;
+  /** targetLevel - newLevel: ascensions earned but not yet applied. */
+  pendingLevels: number;
+  /** True when at least one ascension is pending. */
   leveledUp: boolean;
   reason?: string;
   source?: string;
-  levelUpAvailable?: {
-    characterId: string;
-    fromLevel: number;
-    toLevel: number;
-  };
+  levelUpAvailable?: LevelUpAvailable;
 }
 
 export interface ApplyExperienceAwardResult {
@@ -98,12 +117,10 @@ export interface ApplyExperienceAwardResult {
   newXP: number;
   previousLevel: number;
   newLevel: number;
+  targetLevel: number;
+  pendingLevels: number;
   leveledUp: boolean;
-  levelUpAvailable?: {
-    characterId: string;
-    fromLevel: number;
-    toLevel: number;
-  };
+  levelUpAvailable?: LevelUpAvailable;
   facts: ProgressionAwardFacts;
 }
 
@@ -139,11 +156,14 @@ function assertValidCharacterProgression(character: ProgressionCharacterRecord):
     );
   }
 
+  // Model E: XP running ahead of the applied level is the normal pending
+  // state, not an anomaly. Only the reverse — an applied level the XP cannot
+  // support — is impossible under every authorized path.
   const levelFromCurrentXP = getLevelFromXP(character.xp);
-  if (levelFromCurrentXP > character.level) {
+  if (character.level > levelFromCurrentXP) {
     throw new ProgressionServiceError(
       "INVALID_LEVEL_JUMP",
-      `Character ${character.id} has XP for level ${levelFromCurrentXP} but is level ${character.level}.`
+      `Character ${character.id} is level ${character.level} but only has XP for level ${levelFromCurrentXP}.`
     );
   }
 }
@@ -191,15 +211,20 @@ function buildResult(
     previousXP: number;
     newXP: number;
     previousLevel: number;
-    newLevel: number;
-    leveledUp: boolean;
+    targetLevel: number;
   }
 ): ApplyExperienceAwardResult {
-  const levelUpAvailable = details.leveledUp
+  // The applied level never moves here — see applyExperienceAwardInTransaction.
+  const newLevel = details.previousLevel;
+  const pendingLevels = details.targetLevel - newLevel;
+  const leveledUp = pendingLevels > 0;
+
+  const levelUpAvailable = leveledUp
     ? {
         characterId: input.characterId,
-        fromLevel: details.previousLevel,
-        toLevel: details.newLevel,
+        fromLevel: newLevel,
+        toLevel: newLevel + 1,
+        pendingLevels,
       }
     : undefined;
 
@@ -211,8 +236,10 @@ function buildResult(
     previousXP: details.previousXP,
     newXP: details.newXP,
     previousLevel: details.previousLevel,
-    newLevel: details.newLevel,
-    leveledUp: details.leveledUp,
+    newLevel,
+    targetLevel: details.targetLevel,
+    pendingLevels,
+    leveledUp,
     reason: input.reason,
     source: input.source,
     levelUpAvailable,
@@ -226,8 +253,10 @@ function buildResult(
     previousXP: details.previousXP,
     newXP: details.newXP,
     previousLevel: details.previousLevel,
-    newLevel: details.newLevel,
-    leveledUp: details.leveledUp,
+    newLevel,
+    targetLevel: details.targetLevel,
+    pendingLevels,
+    leveledUp,
     levelUpAvailable,
     facts,
   };
@@ -278,33 +307,33 @@ async function applyExperienceAwardInTransaction(
 
   const previousXP = character.xp;
   const previousLevel = character.level;
-  const { newXP, newLevel, leveledUp } = computeXPAward(
+  const { newXP, newLevel: targetLevel } = computeXPAward(
     previousXP,
     previousLevel,
     input.xpAmount
   );
 
-  if (newLevel < previousLevel) {
+  if (targetLevel < previousLevel) {
     throw new ProgressionServiceError(
       "INVALID_LEVEL_JUMP",
-      `Progression cannot lower level from ${previousLevel} to ${newLevel}.`
+      `Progression cannot lower level from ${previousLevel} to ${targetLevel}.`
     );
   }
 
+  // Model E: the award persists XP and nothing else. `level` is the last
+  // mechanically applied level and only applyLevelUp may move it, one level at
+  // a time, together with hitDiceTotal. Awarding XP therefore grants no HP, no
+  // hit dice, no features and no proficiency — only the right to ascend.
   await db.character.update({
     where: { id: input.characterId },
-    data: {
-      xp: newXP,
-      ...(leveledUp && { level: newLevel }),
-    },
+    data: { xp: newXP },
   });
 
   const result = buildResult(input, {
     previousXP,
     newXP,
     previousLevel,
-    newLevel,
-    leveledUp,
+    targetLevel,
   });
 
   await writeProgressionLog(db, result.facts);

@@ -17,7 +17,7 @@ import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import type { Monster } from "@/lib/rules/srd";
 import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
-import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
+import { xpForLevel, getLevelFromXP, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 import { getDispositionBand } from "@/lib/rules/social-logic";
@@ -96,8 +96,21 @@ function formatCharacter(character: CampaignContext["character"]): string {
   );
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
 
-  // XP progress — show next threshold so the AI knows how close a level-up is.
-  if (character.level < MAX_LEVEL) {
+  // XP progress. `character.level` is the last MECHANICALLY APPLIED level;
+  // `targetLevel` is what the XP already supports. When they differ the
+  // character has unapplied ascensions, and the "next threshold" is not
+  // level + 1 — it has already been passed. Report the pending count as a
+  // plain fact and leave resolution to the backend; the narrator must never
+  // present a pending level as if it were applied.
+  const targetLevel = getLevelFromXP(character.xp);
+  const pendingLevels = Math.max(0, targetLevel - character.level);
+
+  if (pendingLevels > 0) {
+    lines.push(
+      `**XP:** ${character.xp} (supports level ${targetLevel}; ` +
+        `${pendingLevels} level-up(s) pending backend resolution)`
+    );
+  } else if (character.level < MAX_LEVEL) {
     const nextThreshold = xpForLevel(character.level + 1);
     lines.push(`**XP:** ${character.xp} / ${nextThreshold} (next level)`);
   } else {

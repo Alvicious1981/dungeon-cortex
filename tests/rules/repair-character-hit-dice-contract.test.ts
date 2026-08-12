@@ -80,20 +80,29 @@ const settled: HitDiceCharacterRow = {
   hitDiceRemaining: 5,
 };
 
+/**
+ * Model E settled state with XP running ahead of the applied level: four
+ * ascensions are pending, but the persisted hit dice agree with the level, so
+ * there is nothing for this tool to repair.
+ */
 const pending: HitDiceCharacterRow = {
   id: "pending-1",
   xp: 6500,
-  level: 5,
-  hitDiceTotal: 4,
-  hitDiceRemaining: 4,
+  level: 1,
+  hitDiceTotal: 1,
+  hitDiceRemaining: 1,
 };
 
-const repairableExcess: HitDiceCharacterRow = {
+/**
+ * hitDiceTotal already agrees with level — the only remaining divergence with
+ * a single correct value under Model E's fail-closed contract.
+ */
+const repairableRemaining: HitDiceCharacterRow = {
   id: "repairable-1",
   xp: 6500,
   level: 5,
-  hitDiceTotal: 7,
-  hitDiceRemaining: 7,
+  hitDiceTotal: 5,
+  hitDiceRemaining: 9,
 };
 
 const ambiguous: HitDiceCharacterRow = {
@@ -102,6 +111,15 @@ const ambiguous: HitDiceCharacterRow = {
   level: 5,
   hitDiceTotal: 1,
   hitDiceRemaining: 1,
+};
+
+/** hitDiceTotal above level — AMBIGUOUS, never auto-repaired under Model E. */
+const ambiguousExcessTotal: HitDiceCharacterRow = {
+  id: "ambiguous-excess-1",
+  xp: 6500,
+  level: 5,
+  hitDiceTotal: 7,
+  hitDiceRemaining: 7,
 };
 
 const ambiguousWithBadRemaining: HitDiceCharacterRow = {
@@ -126,7 +144,7 @@ describe("runHitDiceRepair", () => {
   });
 
   it("1. dry-run with REPAIRABLE rows -> zero updates, resultCode 2", async () => {
-    const { db, topLevelUpdate } = createFakeDb([settled, repairableExcess]);
+    const { db, topLevelUpdate } = createFakeDb([settled, repairableRemaining]);
     const report = await runHitDiceRepair({ db, apply: false });
 
     expect(report.resultCode).toBe(2);
@@ -154,7 +172,7 @@ describe("runHitDiceRepair", () => {
   });
 
   it("4. apply with one AMBIGUOUS among several rows -> zero updates", async () => {
-    const { db, lastTxUpdateCalls } = createFakeDb([settled, repairableExcess, ambiguous]);
+    const { db, lastTxUpdateCalls } = createFakeDb([settled, repairableRemaining, ambiguous]);
     const report = await runHitDiceRepair({ db, apply: true });
 
     expect(report.blocked).toBe(true);
@@ -173,7 +191,7 @@ describe("runHitDiceRepair", () => {
   });
 
   it("6. report includes all rows in scope before blocking", async () => {
-    const { db } = createFakeDb([settled, repairableExcess, ambiguous, invalidProgression]);
+    const { db } = createFakeDb([settled, repairableRemaining, ambiguous, invalidProgression]);
     const report = await runHitDiceRepair({ db, apply: true });
 
     expect(report.rows.map((r) => r.characterId).sort()).toEqual(
@@ -181,7 +199,6 @@ describe("runHitDiceRepair", () => {
     );
     expect(report.counts).toEqual({
       VALID_SETTLED: 1,
-      VALID_PENDING: 0,
       REPAIRABLE: 1,
       AMBIGUOUS: 1,
       INVALID_PROGRESSION: 1,
@@ -189,26 +206,19 @@ describe("runHitDiceRepair", () => {
   });
 
   it("7. apply with all repairable -> updates happen inside a single transaction", async () => {
-    const { db, lastTxUpdateCalls } = createFakeDb([repairableExcess]);
+    const { db, lastTxUpdateCalls } = createFakeDb([repairableRemaining]);
     const report = await runHitDiceRepair({ db, apply: true });
 
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     expect(report.applied).toBe(true);
     expect(report.updatedCount).toBe(1);
     expect(lastTxUpdateCalls()).toEqual([
-      { id: "repairable-1", data: { hitDiceTotal: 5, hitDiceRemaining: 5 } },
+      { id: "repairable-1", data: { hitDiceRemaining: 5 } },
     ]);
   });
 
   it("8. update payloads contain exclusively fields from the classifier's patch", async () => {
-    const remainingOnly: HitDiceCharacterRow = {
-      id: "remaining-only-1",
-      xp: 6500,
-      level: 5,
-      hitDiceTotal: 5,
-      hitDiceRemaining: 9,
-    };
-    const { db, lastTxUpdateCalls } = createFakeDb([remainingOnly]);
+    const { db, lastTxUpdateCalls } = createFakeDb([repairableRemaining]);
     await runHitDiceRepair({ db, apply: true });
 
     const calls = lastTxUpdateCalls();
@@ -219,8 +229,8 @@ describe("runHitDiceRepair", () => {
   });
 
   it("9. a simulated failure on the second update rolls back everything", async () => {
-    const repairableA: HitDiceCharacterRow = { ...repairableExcess, id: "repairable-a" };
-    const repairableB: HitDiceCharacterRow = { ...repairableExcess, id: "repairable-b" };
+    const repairableA: HitDiceCharacterRow = { ...repairableRemaining, id: "repairable-a" };
+    const repairableB: HitDiceCharacterRow = { ...repairableRemaining, id: "repairable-b" };
     const { db, store } = createFakeDb([repairableA, repairableB], { failOnUpdateNumber: 2 });
 
     await expect(runHitDiceRepair({ db, apply: true })).rejects.toThrow(
@@ -233,7 +243,7 @@ describe("runHitDiceRepair", () => {
   });
 
   it("10. a second run after a successful repair is a no-op", async () => {
-    const { db, store } = createFakeDb([repairableExcess]);
+    const { db, store } = createFakeDb([repairableRemaining]);
     await runHitDiceRepair({ db, apply: true });
 
     const second = await runHitDiceRepair({ db, apply: true });
@@ -251,17 +261,17 @@ describe("runHitDiceRepair", () => {
   });
 
   it("11. --character-id scopes the operation to a single row", async () => {
-    const { db, lastTxUpdateCalls } = createFakeDb([repairableExcess, settled]);
+    const { db, lastTxUpdateCalls } = createFakeDb([repairableRemaining, settled]);
     const report = await runHitDiceRepair({ db, apply: true, characterId: "repairable-1" });
 
     expect(report.rows).toHaveLength(1);
     expect(report.rows[0].characterId).toBe("repairable-1");
     expect(lastTxUpdateCalls()).toEqual([
-      { id: "repairable-1", data: { hitDiceTotal: 5, hitDiceRemaining: 5 } },
+      { id: "repairable-1", data: { hitDiceRemaining: 5 } },
     ]);
   });
 
-  it("12. VALID_SETTLED and VALID_PENDING rows never receive an update", async () => {
+  it("12. VALID_SETTLED rows never receive an update", async () => {
     const { db, lastTxUpdateCalls } = createFakeDb([settled, pending]);
     await runHitDiceRepair({ db, apply: true });
 
@@ -274,6 +284,20 @@ describe("runHitDiceRepair", () => {
 
     expect(report.rows[0].status).toBe("AMBIGUOUS");
     expect(report.rows[0].patch).toBeUndefined();
+    expect(lastTxUpdateCalls()).toEqual([]);
+  });
+
+  it("15. hitDiceTotal above level is AMBIGUOUS, not auto-lowered, and blocks the run", async () => {
+    const { db, lastTxUpdateCalls } = createFakeDb([settled, ambiguousExcessTotal]);
+    const report = await runHitDiceRepair({ db, apply: true });
+
+    expect(report.resultCode).toBe(1);
+    expect(report.blocked).toBe(true);
+    expect(report.counts.AMBIGUOUS).toBe(1);
+    expect(report.rows.find((r) => r.characterId === "ambiguous-excess-1")).toMatchObject({
+      status: "AMBIGUOUS",
+      patch: undefined,
+    });
     expect(lastTxUpdateCalls()).toEqual([]);
   });
 

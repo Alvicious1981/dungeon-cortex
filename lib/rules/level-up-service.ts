@@ -16,7 +16,13 @@ export type LevelUpServiceErrorCode =
   | "INVALID_CHARACTER_LEVEL"
   | "INVALID_CHARACTER_CLASS"
   | "INVALID_LEVEL_UP_STATE"
-  | "INVALID_LEVEL_JUMP";
+  | "INVALID_LEVEL_JUMP"
+  /**
+   * The conditional write found no row still in the pre-ascension state.
+   * Raised when a concurrent request applied the same level first; the losing
+   * caller has mutated nothing and its HP roll is discarded.
+   */
+  | "LEVEL_UP_ALREADY_APPLIED";
 
 export class LevelUpServiceError extends Error {
   constructor(
@@ -59,15 +65,25 @@ interface LevelUpDb {
       where: { id: string };
       select?: Record<string, boolean>;
     }): Promise<LevelUpCharacterRecord | null | undefined>;
-    update(args: {
-      where: { id: string };
+    /**
+     * Conditional write. `where` repeats the pre-ascension state so the
+     * database, not the caller, decides whether the state that authorised this
+     * level-up is still in place. Returns how many rows matched.
+     */
+    updateMany(args: {
+      where: {
+        id: string;
+        level: number;
+        hitDiceTotal: number;
+      };
       data: {
+        level: number;
         maxHp: number;
         hp: number;
         hitDiceTotal: number;
         hitDiceRemaining: number;
       };
-    }): Promise<LevelUpCharacterRecord>;
+    }): Promise<{ count: number }>;
   };
 }
 
@@ -186,93 +202,81 @@ function assertValidProgressionState(character: LevelUpCharacterRecord): void {
       `Character ${character.id} has invalid hit dice total: ${character.hitDiceTotal}.`
     );
   }
-}
 
-function resolveTargetLevel(input: ApplyLevelUpInput, character: LevelUpCharacterRecord): number {
-  const targetLevel = input.targetLevel ?? character.level;
-
-  if (!Number.isInteger(targetLevel) || targetLevel < MIN_LEVEL || targetLevel > MAX_LEVEL) {
-    throw new LevelUpServiceError(
-      "INVALID_CHARACTER_LEVEL",
-      `Target level must be between ${MIN_LEVEL} and ${MAX_LEVEL}; got ${targetLevel}.`
-    );
-  }
-
-  if (targetLevel < character.level) {
-    throw new LevelUpServiceError(
-      "INVALID_LEVEL_JUMP",
-      `Level-up cannot lower level from ${character.level} to ${targetLevel}.`
-    );
-  }
-
-  if (targetLevel !== character.level) {
-    throw new LevelUpServiceError(
-      "INVALID_LEVEL_JUMP",
-      `Level-up target ${targetLevel} must match persisted level ${character.level}.`
-    );
-  }
-
-  if (targetLevel <= MIN_LEVEL) {
+  // Model E settled state. applyLevelUp advances `level` and `hitDiceTotal`
+  // together, so any disagreement means the row was never resolved by this
+  // service — old-contract residue or corruption. Either way its applied level
+  // cannot be trusted as the base for the next ascension.
+  if (character.hitDiceTotal !== character.level) {
     throw new LevelUpServiceError(
       "INVALID_LEVEL_UP_STATE",
-      `Character ${character.id} has no level-up pending at level ${targetLevel}.`
+      `Character ${character.id} has hitDiceTotal ${character.hitDiceTotal} but level ${character.level}; the two must agree before a level-up.`
     );
   }
-
-  if (character.hitDiceTotal !== targetLevel - 1) {
-    throw new LevelUpServiceError(
-      "INVALID_LEVEL_UP_STATE",
-      `Character ${character.id} must have exactly one physical level-up pending.`
-    );
-  }
-
-  return targetLevel;
 }
 
-function assertXPSupportsLevel(character: LevelUpCharacterRecord, targetLevel: number): void {
+/**
+ * Resolves the single level this invocation may apply.
+ *
+ * Model E: exactly one level per call, always `level + 1`, and only when the
+ * XP already supports it. `input.targetLevel` is accepted purely as an
+ * optional assertion by the caller — it must equal the level the backend
+ * derived, so no caller (least of all the narrator) can choose a level.
+ */
+function resolveNextLevel(
+  input: ApplyLevelUpInput,
+  character: LevelUpCharacterRecord
+): number {
+  if (character.level >= MAX_LEVEL) {
+    throw new LevelUpServiceError(
+      "INVALID_LEVEL_UP_STATE",
+      `Character ${character.id} is already at the maximum level ${MAX_LEVEL}.`
+    );
+  }
+
+  const nextLevel = character.level + 1;
   const xpLevel = getLevelFromXP(character.xp);
 
-  if (xpLevel < targetLevel) {
+  if (nextLevel > xpLevel) {
     throw new LevelUpServiceError(
       "INVALID_LEVEL_UP_STATE",
-      `Character ${character.id} does not have enough XP for level ${targetLevel}.`
+      `Character ${character.id} has no pending level-up: XP supports level ${xpLevel} and level ${character.level} is already applied.`
     );
   }
+
+  if (input.targetLevel !== undefined && input.targetLevel !== nextLevel) {
+    throw new LevelUpServiceError(
+      "INVALID_LEVEL_JUMP",
+      `Level-up applies exactly one level at a time; expected ${nextLevel}, got ${input.targetLevel}.`
+    );
+  }
+
+  return nextLevel;
 }
 
 function buildResult(
   input: ApplyLevelUpInput,
   character: LevelUpCharacterRecord,
-  payload: LevelUpPayload
+  payload: LevelUpPayload,
+  newHp: number,
+  newHitDiceRemaining: number
 ): ApplyLevelUpResult {
-  const facts: LevelUpFacts = {
-    type: "level_up_applied",
+  const common = {
     campaignId: input.campaignId,
     source: input.source,
     previousXP: character.xp,
     newXP: character.xp,
     previousHp: character.hp,
-    newHp: payload.newMaxHp,
+    newHp,
     previousHitDiceTotal: character.hitDiceTotal,
-    newHitDiceRemaining: payload.newHitDiceTotal,
+    newHitDiceRemaining,
     previousHitDiceRemaining: character.hitDiceRemaining,
     ...payload,
   };
 
-  return {
-    ok: true,
-    campaignId: input.campaignId,
-    source: input.source,
-    previousXP: character.xp,
-    newXP: character.xp,
-    previousHp: character.hp,
-    newHp: payload.newMaxHp,
-    previousHitDiceTotal: character.hitDiceTotal,
-    newHitDiceRemaining: payload.newHitDiceTotal,
-    previousHitDiceRemaining: character.hitDiceRemaining,
-    ...payload,
-    facts,
-  };
+  const facts: LevelUpFacts = { type: "level_up_applied", ...common };
+
+  return { ok: true, ...common, facts };
 }
 
 async function applyLevelUpInTransaction(
@@ -315,30 +319,59 @@ async function applyLevelUpInTransaction(
   assertValidProgressionState(character);
   assertCharacterClass(character.class);
 
-  const targetLevel = resolveTargetLevel(input, character);
-  assertXPSupportsLevel(character, targetLevel);
+  const fromLevel = character.level;
+  const nextLevel = resolveNextLevel(input, character);
 
   const payload = buildLevelUpPayload({
     characterId: input.characterId,
     className: character.class,
-    previousLevel: targetLevel - 1,
-    newLevel: targetLevel,
+    previousLevel: fromLevel,
+    newLevel: nextLevel,
     currentMaxHp: character.maxHp,
     conModifier: getConstitutionModifier(character.stats),
     useAverage: input.useAverage,
   });
 
-  const result = buildResult(input, character, payload);
+  // HP policy: the new hit die raises the ceiling and heals the same amount.
+  // Damage already suffered is preserved — a level-up is not a rest.
+  const newHp = Math.min(character.hp + payload.hpGained, payload.newMaxHp);
+  // One new hit die becomes available, capped at the new total.
+  const newHitDiceRemaining = Math.min(character.hitDiceRemaining + 1, nextLevel);
 
-  await db.character.update({
-    where: { id: input.characterId },
+  const result = buildResult(input, character, payload, newHp, newHitDiceRemaining);
+
+  // Compare-and-set. The guards above were evaluated against a row another
+  // request may have changed in the meantime, so the write repeats the
+  // pre-ascension state — `level` and `hitDiceTotal`, both still at
+  // `fromLevel` — inside its own WHERE clause. Under READ COMMITTED the second
+  // writer blocks on the row lock, re-evaluates the predicate against the
+  // committed row, and matches nothing.
+  //
+  // The winner moves `level` and `hitDiceTotal` to `nextLevel` in the same
+  // statement, so exactly one request can ever match. No extra column, table or
+  // migration is involved: the pre-ascension state is its own lock.
+  const applied = await db.character.updateMany({
+    where: {
+      id: input.characterId,
+      level: fromLevel,
+      hitDiceTotal: fromLevel,
+    },
     data: {
+      level: nextLevel,
       maxHp: payload.newMaxHp,
-      hp: payload.newMaxHp,
+      hp: newHp,
       hitDiceTotal: payload.newHitDiceTotal,
-      hitDiceRemaining: payload.newHitDiceTotal,
+      hitDiceRemaining: newHitDiceRemaining,
     },
   });
+
+  if (applied.count !== 1) {
+    // The losing caller discards its roll here, before any caller can see it.
+    throw new LevelUpServiceError(
+      "LEVEL_UP_ALREADY_APPLIED",
+      `Character ${input.characterId} is no longer at level ${fromLevel}; a concurrent request applied this level-up first.`
+    );
+  }
 
   return result;
 }

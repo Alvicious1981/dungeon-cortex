@@ -13,15 +13,16 @@ describe("classifyHitDiceIntegrity", () => {
     expect(result.patch).toBeUndefined();
   });
 
-  it("2. level 1 / xp 0 / total 0 / remaining 0 -> REPAIRABLE total->1, remaining stays 0", () => {
+  it("2. level 1 / xp 0 / total 0 / remaining 0 -> AMBIGUOUS (total below level, never auto-repaired)", () => {
     const result = classifyHitDiceIntegrity({
       xp: 0,
       level: 1,
       hitDiceTotal: 0,
       hitDiceRemaining: 0,
     });
-    expect(result.status).toBe("REPAIRABLE");
-    expect(result.patch).toEqual({ hitDiceTotal: 1 });
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_BELOW_LEVEL");
+    expect(result.patch).toBeUndefined();
   });
 
   it("3. level 5 / xp 6500 / total 5 / remaining 5 -> VALID_SETTLED", () => {
@@ -35,14 +36,17 @@ describe("classifyHitDiceIntegrity", () => {
     expect(result.patch).toBeUndefined();
   });
 
-  it("4. level 5 / xp 6500 / total 4 / remaining 4 -> VALID_PENDING", () => {
+  it("4. level 5 / xp 6500 / total 4 / remaining 4 -> AMBIGUOUS (old-contract residue)", () => {
     const result = classifyHitDiceIntegrity({
       xp: 6500,
       level: 5,
       hitDiceTotal: 4,
       hitDiceRemaining: 4,
     });
-    expect(result.status).toBe("VALID_PENDING");
+    // Under Model E level and hitDiceTotal advance together, so a lagging
+    // total is never a legitimate persisted state.
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_BELOW_LEVEL");
     expect(result.patch).toBeUndefined();
   });
 
@@ -57,7 +61,7 @@ describe("classifyHitDiceIntegrity", () => {
     expect(result.patch).toBeUndefined();
   });
 
-  it("6. level 5 / xp 0 / total 5 -> INVALID_PROGRESSION (xp/level mismatch)", () => {
+  it("6. level 5 / xp 0 / total 5 -> INVALID_PROGRESSION (XP behind the applied level)", () => {
     const result = classifyHitDiceIntegrity({
       xp: 0,
       level: 5,
@@ -65,7 +69,18 @@ describe("classifyHitDiceIntegrity", () => {
       hitDiceRemaining: 5,
     });
     expect(result.status).toBe("INVALID_PROGRESSION");
-    expect(result.reason).toBe("XP_LEVEL_MISMATCH");
+    expect(result.reason).toBe("XP_BELOW_APPLIED_LEVEL");
+    expect(result.patch).toBeUndefined();
+  });
+
+  it("6b. XP ahead of the applied level is valid Model E progression", () => {
+    const result = classifyHitDiceIntegrity({
+      xp: 6500,
+      level: 3,
+      hitDiceTotal: 3,
+      hitDiceRemaining: 3,
+    });
+    expect(result.status).toBe("VALID_SETTLED");
     expect(result.patch).toBeUndefined();
   });
 
@@ -102,15 +117,19 @@ describe("classifyHitDiceIntegrity", () => {
     expect(result.patch).toEqual({ hitDiceRemaining: 0 });
   });
 
-  it("10. level 5 / total 7 / remaining 7 -> REPAIRABLE total->5 and remaining->5", () => {
+  it("10. level 5 / total 7 / remaining 7 -> AMBIGUOUS (total above level, never auto-repaired)", () => {
     const result = classifyHitDiceIntegrity({
       xp: 6500,
       level: 5,
       hitDiceTotal: 7,
       hitDiceRemaining: 7,
     });
-    expect(result.status).toBe("REPAIRABLE");
-    expect(result.patch).toEqual({ hitDiceTotal: 5, hitDiceRemaining: 5 });
+    // Lowering the total to match `level` would assert a settled level this
+    // classifier cannot verify — that decision belongs to the Model E
+    // transition tool, not to an automatic repair.
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_ABOVE_LEVEL");
+    expect(result.patch).toBeUndefined();
   });
 
   it("11. level 5 / total 1 / remaining -3 -> AMBIGUOUS, no partial repair", () => {
@@ -124,26 +143,28 @@ describe("classifyHitDiceIntegrity", () => {
     expect(result.patch).toBeUndefined();
   });
 
-  it("12. level 2 / total 1 -> VALID_PENDING", () => {
+  it("12. level 2 / total 1 -> AMBIGUOUS", () => {
     const result = classifyHitDiceIntegrity({
       xp: 300,
       level: 2,
       hitDiceTotal: 1,
       hitDiceRemaining: 1,
     });
-    expect(result.status).toBe("VALID_PENDING");
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_BELOW_LEVEL");
     expect(result.patch).toBeUndefined();
   });
 
-  it("13. level 1 / total 2 -> REPAIRABLE to total 1", () => {
+  it("13. level 1 / total 2 -> AMBIGUOUS (total above level, never auto-repaired)", () => {
     const result = classifyHitDiceIntegrity({
       xp: 0,
       level: 1,
       hitDiceTotal: 2,
       hitDiceRemaining: 2,
     });
-    expect(result.status).toBe("REPAIRABLE");
-    expect(result.patch).toEqual({ hitDiceTotal: 1, hitDiceRemaining: 1 });
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_ABOVE_LEVEL");
+    expect(result.patch).toBeUndefined();
   });
 
   it("14a. non-integer xp -> INVALID_PROGRESSION", () => {
@@ -223,39 +244,50 @@ describe("classifyHitDiceIntegrity", () => {
     expect(result.patch).toBeUndefined();
   });
 
-  it("boundary: level MAX_LEVEL (20) pending is valid", () => {
+  it("boundary: level MAX_LEVEL (20) with a lagging total is AMBIGUOUS", () => {
     const result = classifyHitDiceIntegrity({
       xp: 355_000,
       level: 20,
       hitDiceTotal: 19,
       hitDiceRemaining: 19,
     });
-    expect(result.status).toBe("VALID_PENDING");
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_BELOW_LEVEL");
     expect(result.patch).toBeUndefined();
   });
 
-  it("boundary: xp exactly at level 1 threshold with mismatched level is INVALID_PROGRESSION", () => {
+  it("boundary: xp past the level-2 threshold at applied level 1 is valid and pending", () => {
     const result = classifyHitDiceIntegrity({
       xp: 300,
       level: 1,
       hitDiceTotal: 1,
       hitDiceRemaining: 1,
     });
-    expect(result.status).toBe("INVALID_PROGRESSION");
-    expect(result.reason).toBe("XP_LEVEL_MISMATCH");
+    expect(result.status).toBe("VALID_SETTLED");
+    expect(result.patch).toBeUndefined();
   });
 
-  it("patch never contains xp or level fields", () => {
+  it("patch never contains xp, level, or hitDiceTotal fields", () => {
+    const result = classifyHitDiceIntegrity({
+      xp: 6500,
+      level: 5,
+      hitDiceTotal: 5,
+      hitDiceRemaining: -1,
+    });
+    expect(result.status).toBe("REPAIRABLE");
+    expect(Object.keys(result.patch ?? {})).toEqual(["hitDiceRemaining"]);
+  });
+
+  it("a lagging total with an out-of-range remaining is AMBIGUOUS, not a partial repair", () => {
     const result = classifyHitDiceIntegrity({
       xp: 6500,
       level: 5,
       hitDiceTotal: 7,
       hitDiceRemaining: -1,
     });
-    expect(result.status).toBe("REPAIRABLE");
-    expect(Object.keys(result.patch ?? {}).sort()).toEqual(
-      ["hitDiceRemaining", "hitDiceTotal"].sort()
-    );
+    expect(result.status).toBe("AMBIGUOUS");
+    expect(result.reason).toBe("TOTAL_ABOVE_LEVEL");
+    expect(result.patch).toBeUndefined();
   });
 
   it("AMBIGUOUS never carries a patch even with an out-of-range remaining", () => {

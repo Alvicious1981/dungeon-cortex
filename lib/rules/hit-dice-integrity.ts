@@ -7,6 +7,18 @@
  * the row is in a valid state, unambiguously repairable, ambiguous, or
  * carrying an untrustworthy `level`.
  *
+ * Model E contract:
+ *   - `level` is the last mechanically applied level;
+ *   - `getLevelFromXP(xp) >= level` (XP may run ahead by any number of levels);
+ *   - the settled hit-dice state is `hitDiceTotal === level`, because
+ *     applyLevelUp advances both fields in the same conditional write;
+ *   - `0 <= hitDiceRemaining <= hitDiceTotal`.
+ *
+ * Fail-closed: any disagreement between `hitDiceTotal` and `level`, in either
+ * direction, is AMBIGUOUS and never auto-repaired. Only `hitDiceRemaining`
+ * drifting out of `[0, hitDiceTotal]` while the total already agrees with the
+ * level has a single provably correct value.
+ *
  * Reuses MIN_LEVEL / MAX_LEVEL / getLevelFromXP from progression.ts — the
  * single mechanical authority for SRD XP thresholds. This module does not
  * duplicate that table.
@@ -16,18 +28,15 @@ import { MIN_LEVEL, MAX_LEVEL, getLevelFromXP } from "@/lib/rules/progression";
 
 export type HitDiceIntegrityStatus =
   | "VALID_SETTLED"
-  | "VALID_PENDING"
   | "REPAIRABLE"
   | "AMBIGUOUS"
   | "INVALID_PROGRESSION";
 
 export type HitDiceIntegrityReasonCode =
   | "SETTLED"
-  | "PENDING_LEVEL_UP"
-  | "LEVEL_ONE_TOTAL_MISMATCH"
-  | "TOTAL_EXCEEDS_LEVEL"
   | "REMAINING_OUT_OF_RANGE"
-  | "PENDING_BELOW_LEVEL_MINUS_ONE"
+  | "TOTAL_BELOW_LEVEL"
+  | "TOTAL_ABOVE_LEVEL"
   | "NON_INTEGER_XP"
   | "NEGATIVE_XP"
   | "NON_INTEGER_LEVEL"
@@ -35,7 +44,7 @@ export type HitDiceIntegrityReasonCode =
   | "LEVEL_ABOVE_MAX"
   | "NON_INTEGER_HIT_DICE_TOTAL"
   | "NON_INTEGER_HIT_DICE_REMAINING"
-  | "XP_LEVEL_MISMATCH";
+  | "XP_BELOW_APPLIED_LEVEL";
 
 export interface HitDiceIntegrityInput {
   xp: number;
@@ -71,13 +80,15 @@ function invalid(
  * Evaluation order (first match wins):
  *   1. INVALID_PROGRESSION — `level` cannot be trusted, so it cannot be used
  *      to judge hit dice at all.
- *   2. AMBIGUOUS — `hitDiceTotal` below the legitimate pending threshold;
- *      indistinguishable from a multi-level XP award that never granted
- *      physical hit dice. Never auto-repaired.
- *   3. VALID_SETTLED / VALID_PENDING — hitDiceTotal matches the contract and
- *      hitDiceRemaining is in range.
- *   4. REPAIRABLE — hitDiceTotal and/or hitDiceRemaining diverge from the
- *      contract in a way with exactly one correct value.
+ *   2. AMBIGUOUS — `hitDiceTotal !== level`, in either direction. A total
+ *      below the level is indistinguishable from old-contract residue or
+ *      corruption; a total above the level is indistinguishable from a
+ *      manual edit or a rebased `level` that lost its own history. Neither
+ *      direction has a single correct value this classifier can prove, so
+ *      neither is ever auto-repaired.
+ *   3. VALID_SETTLED — hitDiceTotal === level and hitDiceRemaining is in range.
+ *   4. REPAIRABLE — hitDiceRemaining out of range while hitDiceTotal already
+ *      agrees with level; the only remaining divergence with one correct value.
  */
 export function classifyHitDiceIntegrity(
   input: HitDiceIntegrityInput
@@ -97,63 +108,38 @@ export function classifyHitDiceIntegrity(
     return invalid(current, "NON_INTEGER_HIT_DICE_TOTAL");
   if (!Number.isInteger(hitDiceRemaining))
     return invalid(current, "NON_INTEGER_HIT_DICE_REMAINING");
-  if (getLevelFromXP(xp) !== level) return invalid(current, "XP_LEVEL_MISMATCH");
+  // Model E: XP may run ahead of the applied level by any number of levels;
+  // only XP *behind* the applied level is impossible.
+  if (getLevelFromXP(xp) < level) return invalid(current, "XP_BELOW_APPLIED_LEVEL");
 
   // ─── 2. AMBIGUOUS ──────────────────────────────────────────────────────────
-  // Below the legitimate pending threshold: could be a multi-level XP award
-  // that never granted physical hit dice, or historical corruption. Neither
-  // hitDiceTotal nor hitDiceRemaining is touched.
-  if (level >= 2 && hitDiceTotal < level - 1) {
-    return { status: "AMBIGUOUS", reason: "PENDING_BELOW_LEVEL_MINUS_ONE", current };
+  // Under Model E the settled state is hitDiceTotal === level, because
+  // applyLevelUp advances both in the same write. Any disagreement is
+  // therefore old-contract residue, historical corruption, or a manual edit —
+  // never something this classifier may resolve on its own:
+  //   - raising a lagging total would grant a hit die never earned;
+  //   - lowering an excess total would assert a settled level this classifier
+  //     cannot verify, and belongs to classifyModelETransition, not here.
+  // Neither hitDiceTotal nor hitDiceRemaining is touched in either direction.
+  if (hitDiceTotal < level) {
+    return { status: "AMBIGUOUS", reason: "TOTAL_BELOW_LEVEL", current };
+  }
+  if (hitDiceTotal > level) {
+    return { status: "AMBIGUOUS", reason: "TOTAL_ABOVE_LEVEL", current };
   }
 
-  // ─── 3. Determine the contractually correct total ─────────────────────────
-  let totalFinal: number;
-  let settledReason: HitDiceIntegrityReasonCode;
-  const patch: HitDiceIntegrityPatch = {};
+  // ─── 3. hitDiceTotal === level from here on — determine remaining ─────────
+  const remainingFinal = Math.min(Math.max(hitDiceRemaining, 0), hitDiceTotal);
 
-  if (level === 1) {
-    totalFinal = 1;
-    settledReason = "SETTLED";
-    if (hitDiceTotal !== 1) {
-      patch.hitDiceTotal = 1;
-    }
-  } else if (hitDiceTotal > level) {
-    totalFinal = level;
-    settledReason = "SETTLED";
-    patch.hitDiceTotal = level;
-  } else if (hitDiceTotal === level) {
-    totalFinal = level;
-    settledReason = "SETTLED";
-  } else {
-    // level >= 2 && hitDiceTotal === level - 1 (AMBIGUOUS already ruled out
-    // hitDiceTotal < level - 1 above).
-    totalFinal = level - 1;
-    settledReason = "PENDING_LEVEL_UP";
+  if (remainingFinal === hitDiceRemaining) {
+    return { status: "VALID_SETTLED", reason: "SETTLED", current };
   }
 
-  // ─── 4. Determine the contractually correct remaining ─────────────────────
-  const remainingFinal = Math.min(Math.max(hitDiceRemaining, 0), totalFinal);
-  if (remainingFinal !== hitDiceRemaining) {
-    patch.hitDiceRemaining = remainingFinal;
-  }
-
-  const hasPatch = patch.hitDiceTotal !== undefined || patch.hitDiceRemaining !== undefined;
-
-  if (!hasPatch) {
-    return {
-      status: settledReason === "PENDING_LEVEL_UP" ? "VALID_PENDING" : "VALID_SETTLED",
-      reason: settledReason,
-      current,
-    };
-  }
-
-  const reason: HitDiceIntegrityReasonCode =
-    patch.hitDiceTotal !== undefined
-      ? level === 1
-        ? "LEVEL_ONE_TOTAL_MISMATCH"
-        : "TOTAL_EXCEEDS_LEVEL"
-      : "REMAINING_OUT_OF_RANGE";
-
-  return { status: "REPAIRABLE", reason, current, patch };
+  // ─── 4. REPAIRABLE — only hitDiceRemaining diverges, with one correct value.
+  return {
+    status: "REPAIRABLE",
+    reason: "REMAINING_OUT_OF_RANGE",
+    current,
+    patch: { hitDiceRemaining: remainingFinal },
+  };
 }
