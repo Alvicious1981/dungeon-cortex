@@ -16,7 +16,8 @@
     "seed": "tsx prisma/seed-srd.ts",
     "generate": "prisma generate",
     "check-retro": "tsx scripts/check-retro-jargon.ts",
-    "repair:hit-dice": "tsx scripts/repair-character-hit-dice.ts"
+    "repair:hit-dice": "tsx scripts/repair-character-hit-dice.ts",
+    "diagnose:model-e": "tsx scripts/diagnose-model-e-transition.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed-srd.ts"
