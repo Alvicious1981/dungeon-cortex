@@ -33,6 +33,7 @@ import {
   type PipelineCombatant,
 } from "@/lib/rules/combat-pipeline";
 import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact-adapter";
+import { detectPendingLevelUp } from "@/lib/actions/backend-presentation-resolution";
 import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
@@ -721,7 +722,40 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
   }
 
-  // ── State is now safely mutated.  Start the narrative stream. ────────────────
+  // ── State is now safely mutated. ─────────────────────────────────────────────
+  // Every gate above either committed its transaction or returned a 4xx, so this
+  // is the only safe point to check for a pending level-up: earlier would risk a
+  // later gate rejecting the request after the player was already shown an
+  // outcome, and reusing the pre-gate `context.character` snapshot would be an
+  // accidental equivalence a future gate could silently break.
+  //
+  // This is presentation, not resolution: detection never applies the level-up,
+  // never rolls hit points, and never touches level/xp/maxHp/hitDiceTotal. A
+  // failure here must not fail an already-valid mechanical turn — whatever is
+  // pending will simply be detected again on the next turn.
+  let levelUpAvailablePayload: ReturnType<typeof detectPendingLevelUp> = null;
+  try {
+    const freshCharacter = await prisma.character.findUnique({
+      where: { id: context.character.id },
+      select: {
+        id: true,
+        class: true,
+        level: true,
+        xp: true,
+        maxHp: true,
+        hitDiceTotal: true,
+        stats: true,
+      },
+    });
+
+    if (freshCharacter) {
+      levelUpAvailablePayload = detectPendingLevelUp(freshCharacter);
+    }
+  } catch (err) {
+    console.error("[action] Level-up presentation detection failed:", err);
+  }
+
+  // ── Start the narrative stream. ──────────────────────────────────────────────
 
   const narrativeContext = adaptCombatEventsToNarrativeContext(gameEvents);
   const { textStream, textPromise, levelUpPayload, merchantPayload } = await streamNarrative(
@@ -763,15 +797,27 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   });
 
   // Build the SSE response:
-  //   Phase 1 — all deterministic game events (instant, before any LLM latency)
-  //   Phase 2 — AI narrator tokens, streamed as they arrive
-  //   Phase 3 — done sentinel so the client knows to call router.refresh()
+  //   Phase 1   — all deterministic game events (instant, before any LLM latency)
+  //   Phase 1.5 — a backend-detected pending level-up, if any (not applied)
+  //   Phase 2   — AI narrator tokens, streamed as they arrive
+  //   Phase 3   — done sentinel so the client knows to call router.refresh()
   const sseStream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
         // Phase 1: flush game events immediately
         for (const ev of gameEvents) {
           controller.enqueue(sseFrame({ t: "evt", e: ev }));
+        }
+
+        // Phase 1.5: a pending level-up the backend detected from canonical
+        // state. Emitted before any narrator token so the UI learns this from
+        // backend state, never from prose. Detection only — see the try/catch
+        // above where this payload was derived; applying it is a separate,
+        // player-confirmed operation behind POST /api/campaign/[id]/level-up.
+        if (levelUpAvailablePayload) {
+          controller.enqueue(
+            sseFrame({ t: "level_up_available", payload: levelUpAvailablePayload })
+          );
         }
 
         // Phase 2: stream narrative tokens
