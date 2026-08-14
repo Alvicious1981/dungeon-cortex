@@ -18,6 +18,7 @@ import type {
   ItemType,
 } from "@/lib/rules/inventory";
 import AscensionOverlayController from "@/components/character/AscensionOverlay";
+import LevelUpConfirmationController from "@/components/character/LevelUpConfirmation";
 import XPProgressBar from "@/components/character/XPProgressBar";
 import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
@@ -324,6 +325,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     <div
       className="dc-campaign-shell dc-page-shell min-h-screen pb-20 lg:pb-0"
     >
+      {/* Level-up confirmation — listens for dungeon-level-up-available and asks
+          the player how to resolve hit points before anything is applied */}
+      <LevelUpConfirmationController campaignId={campaign.id} />
       {/* Ascension Overlay — self-wiring, listens for dungeon-level-up events */}
       <AscensionOverlayController />
       {/* Trade Overlay — self-wiring, listens for dungeon-merchant events */}

@@ -153,7 +153,16 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             window.dispatchEvent(
               new CustomEvent("dungeon-token", { detail: { chunk: parsed.d } })
             );
+          } else if (parsed.t === "level_up_available") {
+            // A level-up the backend detected but has NOT applied. Kept on its
+            // own event so nothing downstream can mistake a pending payload for
+            // an applied one — it carries no roll, no gain and no new maximum.
+            window.dispatchEvent(
+              new CustomEvent("dungeon-level-up-available", { detail: parsed.payload })
+            );
           } else if (parsed.t === "level_up") {
+            // An applied level-up. Unchanged: the celebration overlay still
+            // listens here and still receives a resolved LevelUpPayload.
             window.dispatchEvent(
               new CustomEvent("dungeon-level-up", { detail: parsed.payload })
             );
