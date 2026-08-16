@@ -13,6 +13,7 @@
 
 // ─── Event catalogue ────────────────────────────────────────────────────────
 import type { MerchantPayload } from "@/lib/rules/trade";
+import type { LevelUpAvailablePayload } from "@/lib/actions/backend-presentation-resolution";
 
 export type GameEventType =
   | "CRITICAL_HIT"         // Natural 20 on an attack roll
@@ -149,6 +150,11 @@ export interface DialogueOpenPayload {
  * Discriminated union for frames sent over the action SSE stream.
  *
  *   t:"evt"      — a deterministic game event (fires before any LLM tokens)
+ *   t:"level_up_available" — the backend detected a pending level-up but has
+ *                  NOT applied it; the player must confirm via the level-up
+ *                  route before any mechanical effect exists. Emitted after
+ *                  the `evt` frames and before the first `txt` token, so the
+ *                  UI learns this from backend state, never from prose.
  *   t:"txt"      — a text delta from the AI narrator
  *   t:"level_up" — reserved for a backend-authorised level-up resolution
  *   t:"merchant" — reserved for a backend-authorised merchant resolution
@@ -158,6 +164,7 @@ export interface DialogueOpenPayload {
  */
 export type ActionStreamFrame =
   | { t: "evt"; e: GameEvent }
+  | { t: "level_up_available"; payload: LevelUpAvailablePayload }
   | { t: "txt"; d: string }
   | { t: "level_up"; payload: LevelUpResolvedPayload }
   | { t: "merchant"; payload: MerchantPayload }

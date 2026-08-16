@@ -1,169 +1,58 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
-import { User, X } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { BookOpenText, History, LockKeyhole, PencilLine, User, X } from "lucide-react";
 import CharacterSheetVTT, { type CharacterSheetProps } from "./CharacterSheetVTT";
-import { type ItemType } from "@/lib/rules/inventory";
+import CharacterProfileEditor from "./sheet/CharacterProfileEditor";
+import type { CharacterEditableSnapshot } from "@/lib/character-sheet/contracts";
 import { useModalFocus } from "@/lib/hooks/useModalFocus";
 
 interface CharacterSheetControllerProps {
-  character: {
-    id: string;
-    name: string;
-    race: string;
-    class: string;
-    level: number;
-    hp: number;
-    maxHp: number;
-    xp: number;
-    stats: unknown; // Json
-    spellSlots?: unknown; // Json
-  };
-  inventory: Array<{
-    id: string;
-    name: string;
-    type: string;
-    quantity: number;
-    equipped?: boolean;
-    equippedSlot?: string | null;
-    properties: unknown; // Json
-  }>;
+  sheet: CharacterSheetProps;
+  profile: CharacterEditableSnapshot;
+  nameLocked: boolean;
 }
 
-interface CharacterWeaponProperties {
-  damageDice?: string;
-  damageType?: string;
-  properties?: string[];
-}
+type SheetTab = "mechanics" | "profile" | "history";
 
-function getModifier(score: number): number {
-  return Math.floor((score - 10) / 2);
-}
+const tabs: Array<{ id: SheetTab; label: string; icon: typeof User }> = [
+  { id: "mechanics", label: "Mecánica", icon: LockKeyhole },
+  { id: "profile", label: "Perfil", icon: PencilLine },
+  { id: "history", label: "Historial", icon: History },
+];
 
-function formatModifier(mod: number): string {
-  return mod >= 0 ? `+${mod}` : `${mod}`;
-}
-
-export default function CharacterSheetController({ character, inventory }: CharacterSheetControllerProps) {
+export default function CharacterSheetController({
+  sheet,
+  profile: initialProfile,
+  nameLocked,
+}: CharacterSheetControllerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [tab, setTab] = useState<SheetTab>("mechanics");
+  const [profile, setProfile] = useState(initialProfile);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeSheet = useCallback(() => setIsOpen(false), []);
-  const toggleSheet = useCallback(() => setIsOpen(prev => !prev), []);
   useModalFocus({ open: isOpen, onClose: closeSheet, dialogRef, initialFocusRef: closeRef, returnFocusRef: triggerRef });
 
-  // ─── Data Mapping ───────────────────────────────────────────────────────────
-  
-  const stats = (character.stats as Record<string, number>) || {
-    STR: 10, DEX: 10, CON: 10, INT: 10, WIS: 10, CHA: 10
-  };
-
-  const proficiencyBonus = 2 + Math.floor((character.level - 1) / 4);
-  const dexMod = getModifier(stats.DEX || 10);
-  const wisMod = getModifier(stats.WIS || 10);
-
-  // Basic AC calculation: 10 + DEX (plus armor if we had logic for it, but let's keep it simple for now or check inventory)
-  let armorClass = 10 + dexMod;
-  const equippedArmor = inventory.find(i => i.type === "armor" && i.equipped);
-  if (equippedArmor?.properties) {
-    const props = equippedArmor.properties as { baseAC?: number; addDexModifier?: boolean; maxDexBonus?: number };
-    if (props.baseAC) {
-      armorClass = props.baseAC;
-      if (props.addDexModifier) {
-        const bonus = props.maxDexBonus !== undefined ? Math.min(dexMod, props.maxDexBonus) : dexMod;
-        armorClass += bonus;
-      }
-    }
-  }
-
-  const sheetProps: CharacterSheetProps = {
-    identity: {
-      name: character.name,
-      className: character.class,
-      level: character.level,
-      race: character.race,
-      // background and alignment not in DB yet
-    },
-    core: {
-      armorClass,
-      hitPoints: { current: character.hp, max: character.maxHp },
-      initiative: dexMod,
-      speedFeet: 30, // Human fallback
-      proficiencyBonus,
-      passivePerception: 10 + wisMod,
-    },
-    abilities: {
-      str: { score: stats.STR, modifier: getModifier(stats.STR) },
-      dex: { score: stats.DEX, modifier: getModifier(stats.DEX) },
-      con: { score: stats.CON, modifier: getModifier(stats.CON) },
-      int: { score: stats.INT, modifier: getModifier(stats.INT) },
-      wis: { score: stats.WIS, modifier: getModifier(stats.WIS) },
-      cha: { score: stats.CHA, modifier: getModifier(stats.CHA) },
-    },
-    savingThrows: [
-      { label: "Strength", value: formatModifier(getModifier(stats.STR)) },
-      { label: "Dexterity", value: formatModifier(getModifier(stats.DEX)) },
-      { label: "Constitution", value: formatModifier(getModifier(stats.CON)) },
-      { label: "Intelligence", value: formatModifier(getModifier(stats.INT)) },
-      { label: "Wisdom", value: formatModifier(getModifier(stats.WIS)) },
-      { label: "Charisma", value: formatModifier(getModifier(stats.CHA)) },
-    ],
-    skills: [
-      { label: "Athletics", value: formatModifier(getModifier(stats.STR)) },
-      { label: "Acrobatics", value: formatModifier(getModifier(stats.DEX)) },
-      { label: "Stealth", value: formatModifier(getModifier(stats.DEX)) },
-      { label: "Perception", value: formatModifier(getModifier(stats.WIS)) },
-      { label: "Insight", value: formatModifier(getModifier(stats.WIS)) },
-      { label: "Persuasion", value: formatModifier(getModifier(stats.CHA)) },
-    ],
-    attacks: inventory.filter(i => i.type === "weapon").map(w => {
-      const props = w.properties as CharacterWeaponProperties;
-      const isFinesse = (props.properties as string[])?.includes("finesse");
-      const attackMod = isFinesse ? Math.max(getModifier(stats.STR), getModifier(stats.DEX)) : getModifier(stats.STR);
-      
-      return {
-        id: w.id,
-        name: w.name,
-        bonus: attackMod + proficiencyBonus,
-        damage: `${props.damageDice || "1d6"}${formatModifier(attackMod)} ${props.damageType || "slashing"}`,
-        traits: props.properties || [],
-      };
-    }),
-    inventory: inventory.map(i => ({
-      id: i.id,
-      name: i.name,
-      quantity: i.quantity,
-      category: i.type as ItemType,
-      equipped: i.equipped,
-      summary: i.name, // Fallback
-    })),
-    notes: [],
+  const currentSheet: CharacterSheetProps = {
+    ...sheet,
+    identity: { ...sheet.identity, name: profile.name },
   };
 
   return (
     <>
-      {/* Floating Toggle Button */}
       <button
         ref={triggerRef}
         type="button"
-        onClick={toggleSheet}
-        className="fixed bottom-20 right-4 z-40 lg:bottom-6 lg:right-6 flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all hover:scale-110 active:scale-95"
-        style={{
-          background: "linear-gradient(135deg, #B38B2D 0%, #8A6510 100%)",
-          border: "2px solid rgba(232,200,74,0.4)",
-          boxShadow: "0 0 20px rgba(179,139,45,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
-        }}
-        aria-label={isOpen ? "Close character sheet" : "View character sheet"}
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-amber-300/40 bg-amber-700 text-amber-50 shadow-xl transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 lg:bottom-6 lg:right-6"
+        aria-label="Abrir hoja de personaje"
+        title="Abrir hoja de personaje"
       >
-        {isOpen ? (
-          <X className="h-7 w-7 text-amber-50" />
-        ) : (
-          <User className="h-7 w-7 text-amber-50" />
-        )}
+        <BookOpenText className="h-7 w-7" aria-hidden="true" />
       </button>
 
-      {/* Overlay Sheet */}
       {isOpen && (
         <div
           ref={dialogRef}
@@ -171,30 +60,67 @@ export default function CharacterSheetController({ character, inventory }: Chara
           aria-modal="true"
           aria-labelledby="character-sheet-dialog-title"
           tabIndex={-1}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
-          style={{ background: "rgba(5,5,10,0.85)", backdropFilter: "blur(8px)" }}
+          className="fixed inset-0 z-50 bg-black/85 sm:p-4"
         >
-          <div 
-            className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)]"
-            style={{ 
-              background: "#0A0A14",
-              border: "1px solid rgba(179,139,45,0.3)",
-            }}
-          >
-            <h2 id="character-sheet-dialog-title" className="sr-only">Character sheet for {character.name}</h2>
-            {/* Close button inside modal */}
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={closeSheet}
-              className="absolute top-4 right-4 z-[60] p-2 rounded-full hover:bg-neutral-800 transition-colors"
-              aria-label="Close character sheet"
-            >
-              <X className="h-6 w-6 text-neutral-400" />
-            </button>
+          <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden border border-neutral-700 bg-neutral-950 shadow-2xl sm:h-[calc(100vh-2rem)] sm:rounded-lg">
+            <header className="flex min-h-16 items-center gap-3 border-b border-neutral-800 px-4">
+              <div className="min-w-0 flex-1">
+                <h2 id="character-sheet-dialog-title" className="truncate text-lg font-semibold text-neutral-50">
+                  {profile.name}
+                </h2>
+                <p className="truncate text-sm text-neutral-400">
+                  Nivel {sheet.identity.level} · {sheet.identity.race} · {sheet.identity.className}
+                </p>
+              </div>
+              <button
+                ref={closeRef}
+                type="button"
+                onClick={closeSheet}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-neutral-300 hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                aria-label="Cerrar hoja"
+                title="Cerrar"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
 
-            <div className="p-1 sm:p-4">
-              <CharacterSheetVTT {...sheetProps} />
+            <nav className="grid grid-cols-3 border-b border-neutral-800" aria-label="Secciones de la hoja">
+              {tabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  className={`flex min-h-12 items-center justify-center gap-2 border-b-2 px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-300 ${
+                    tab === id
+                      ? "border-amber-400 bg-amber-400/10 text-amber-100"
+                      : "border-transparent text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+                  }`}
+                  aria-current={tab === id ? "page" : undefined}
+                >
+                  <Icon size={17} aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </nav>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+              {tab === "mechanics" ? (
+                <div>
+                  <div className="mb-3 flex items-center gap-2 text-sm text-neutral-400" role="status">
+                    <LockKeyhole size={16} aria-hidden="true" />
+                    <span>Valores calculados y controlados por el servidor</span>
+                  </div>
+                  <CharacterSheetVTT {...currentSheet} />
+                </div>
+              ) : (
+                <CharacterProfileEditor
+                  characterId={profile.id}
+                  initialSnapshot={profile}
+                  nameLocked={nameLocked}
+                  mode={tab}
+                  onSnapshotChange={setProfile}
+                />
+              )}
             </div>
           </div>
         </div>

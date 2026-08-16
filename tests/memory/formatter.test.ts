@@ -12,7 +12,6 @@ import {
   type ActiveNPC,
   type ExplorationHUDContext,
   type WildernessHUDContext,
-  type HavenHUDContext,
 } from "@/lib/memory/formatter";
 import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 
@@ -236,12 +235,6 @@ const baseWildernessHUD: WildernessHUDContext = {
   featureHere: false,
 };
 
-const baseHavenHUD: HavenHUDContext = {
-  currentWealth: 120,
-  havenUpkeep: 10,
-  retainerMorale: "confident",
-};
-
 describe("formatSystemPrompt — relevance clipping", () => {
   it("injects exploration HUD only in dungeon/location scenes", () => {
     const withDungeon = formatSystemPrompt({
@@ -273,21 +266,6 @@ describe("formatSystemPrompt — relevance clipping", () => {
     expect(dungeonPrompt).not.toContain("Wilderness & Travel Status");
   });
 
-  it("injects haven HUD only in haven-like out-of-location scenes", () => {
-    const havenPrompt = formatSystemPrompt({
-      ...baseContext,
-      havenHUD: baseHavenHUD,
-    });
-    expect(havenPrompt).toContain("Haven & Downtime Status");
-
-    const locationPrompt = formatSystemPrompt({
-      ...baseContext,
-      currentExploration: makeExploration("dungeon"),
-      havenHUD: baseHavenHUD,
-    });
-    expect(locationPrompt).not.toContain("Haven & Downtime Status");
-  });
-
   it("injects NPC context only when activeNPC exists and no active encounter", () => {
     const socialPrompt = formatSystemPrompt({ ...baseContext, activeNPC: metNPC });
     expect(socialPrompt).toContain("🎭 NPC");
@@ -316,8 +294,31 @@ describe("formatSurvivalHUD", () => {
     expect(output).toContain("Rations");
   });
 
-  it("shows overdue rest warning when rest is overdue", () => {
+  it("shows an informational rest notice without asserting a false mechanical consequence", () => {
     const output = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 6 });
-    expect(output).toContain("OVERDUE");
+
+    // 1. The informative rest notice still appears, reporting a true fact.
+    expect(output).toContain("Rest:");
+    expect(output).toContain("6 turn(s) since its last rest");
+
+    // 2/3. Anti-regression: the prompt must NOT claim that skipping the
+    // exploration rest cycle causes Exhaustion or any other backend-executed
+    // consequence. executeExplorationTurn no longer increments exhaustionLevel,
+    // so re-introducing this text would imply a mechanic the backend never runs.
+    expect(output).not.toContain("Exhaustion");
+    expect(output).not.toContain("mandatory");
+    expect(output).not.toMatch(/applies on next/i);
+  });
+
+  it("reports rest turns with no threshold branching", () => {
+    const below = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 2 });
+    const above = formatSurvivalHUD({ ...baseHUD, turnsSinceRest: 9 });
+
+    // Anti-regression: the retired 6-turn rest interval must not produce two
+    // different prompt sentences. The counter is neutral elapsed time, so the
+    // wording is identical on both sides of the old threshold.
+    expect(below).toContain("2 turn(s) since its last rest");
+    expect(above).toContain("9 turn(s) since its last rest");
+    expect(below).not.toContain("since the last rest");
   });
 });

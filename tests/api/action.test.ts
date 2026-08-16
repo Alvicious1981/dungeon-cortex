@@ -218,3 +218,208 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     }));
   });
 });
+
+describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () => {
+  const campaignId = "camp_123";
+  const mockUser = { id: "user_123" };
+  const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
+  const characterId = "char-1";
+
+  // Full canonical context so formatSystemPrompt (real, unmocked) can render
+  // it. Only `character` fields are varied per test; everything else stays
+  // fixed and empty/absent.
+  function buildContext(character: Record<string, unknown>) {
+    return {
+      character: {
+        id: characterId,
+        name: "Hero",
+        race: "human",
+        class: "fighter",
+        hp: 10,
+        maxHp: 10,
+        xp: 0,
+        hitDiceRemaining: 1,
+        hitDiceTotal: 1,
+        stats: { STR: 10, CON: 10 },
+        spellSlots: null,
+        concentrationSpellId: null,
+        exhaustionLevel: 0,
+        inventory: [],
+        level: 1,
+        ...character,
+      },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: null,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    // A benign, unmatched intent so none of the mechanical gates fire —
+    // this test suite is only exercising the presentation frame, not combat,
+    // rest, spellcasting, or movement.
+    (parseIntent as any).mockResolvedValue({ actionType: "look" });
+  });
+
+  async function postAction(character: Record<string, unknown>) {
+    (buildCampaignContext as any).mockResolvedValue(buildContext(character));
+
+    const req = new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action: "Look around the room" }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
+    const body = await res.text();
+    const frames = body
+      .split("\n\n")
+      .filter((chunk) => chunk.startsWith("data: "))
+      .map((chunk) => JSON.parse(chunk.slice(6)));
+
+    return { res, body, frames };
+  }
+
+  it("1. pending level-up: emits exactly one level_up_available frame", async () => {
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 1,
+      xp: 300, // xpForLevel(2) — one ascension earned
+      maxHp: 10,
+      hitDiceTotal: 1, // settled: hitDiceTotal === level
+      stats: { CON: 10 },
+    });
+
+    const { frames } = await postAction({ level: 1, xp: 300, hitDiceTotal: 1 });
+
+    const levelUpFrames = frames.filter((f) => f.t === "level_up_available");
+    expect(levelUpFrames).toHaveLength(1);
+    expect(levelUpFrames[0].payload).toMatchObject({
+      characterId,
+      fromLevel: 1,
+      toLevel: 2,
+      targetLevel: 2,
+      pendingLevels: 1,
+      requiresPlayerConfirmation: true,
+    });
+  });
+
+  it("2. order: level_up_available appears after evt frames and before the first txt frame", async () => {
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 1,
+      xp: 300,
+      maxHp: 10,
+      hitDiceTotal: 1,
+      stats: { CON: 10 },
+    });
+
+    const { frames } = await postAction({ level: 1, xp: 300, hitDiceTotal: 1 });
+
+    const types = frames.map((f) => f.t);
+    const luIndex = types.indexOf("level_up_available");
+    const firstTxtIndex = types.indexOf("txt");
+    const lastEvtIndex = types.lastIndexOf("evt");
+
+    expect(luIndex).toBeGreaterThan(-1);
+    expect(luIndex).toBeGreaterThan(lastEvtIndex);
+    if (firstTxtIndex !== -1) {
+      expect(luIndex).toBeLessThan(firstTxtIndex);
+    }
+  });
+
+  it("3. settled state (pendingLevels = 0): emits zero level_up_available frames", async () => {
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 1,
+      xp: 0,
+      maxHp: 10,
+      hitDiceTotal: 1,
+      stats: { CON: 10 },
+    });
+
+    const { frames } = await postAction({ level: 1, xp: 0, hitDiceTotal: 1 });
+
+    expect(frames.filter((f) => f.t === "level_up_available")).toHaveLength(0);
+  });
+
+  it("4. Model E with a multi-level backlog: reports the single next step and the full target", async () => {
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 2,
+      xp: 6_500, // xpForLevel(5)
+      maxHp: 18,
+      hitDiceTotal: 2, // settled: hitDiceTotal === level
+      stats: { CON: 10 },
+    });
+
+    const { frames } = await postAction({ level: 2, xp: 6_500, hitDiceTotal: 2, maxHp: 18 });
+
+    const levelUpFrames = frames.filter((f) => f.t === "level_up_available");
+    expect(levelUpFrames).toHaveLength(1);
+    expect(levelUpFrames[0].payload).toMatchObject({
+      fromLevel: 2,
+      toLevel: 3, // never a multi-level jump
+      targetLevel: 5,
+      pendingLevels: 3,
+    });
+  });
+
+  it("5. payload never carries an applied outcome", async () => {
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 1,
+      xp: 300,
+      maxHp: 10,
+      hitDiceTotal: 1,
+      stats: { CON: 10 },
+    });
+
+    const { frames } = await postAction({ level: 1, xp: 300, hitDiceTotal: 1 });
+
+    const payload = frames.find((f) => f.t === "level_up_available")?.payload;
+    expect(payload).toBeDefined();
+    for (const appliedField of ["hpRoll", "hpGained", "newMaxHp", "newHitDiceTotal"]) {
+      expect(payload).not.toHaveProperty(appliedField);
+    }
+  });
+
+  it("6. invalid state (hitDiceTotal !== level): fails closed with zero frames", async () => {
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 2,
+      xp: 6_500,
+      maxHp: 18,
+      hitDiceTotal: 1, // mismatch — old-contract residue, not trustworthy
+      stats: { CON: 10 },
+    });
+
+    const { frames } = await postAction({ level: 2, xp: 6_500, hitDiceTotal: 1, maxHp: 18 });
+
+    expect(frames.filter((f) => f.t === "level_up_available")).toHaveLength(0);
+  });
+
+  it("7. detection failure: no frame is emitted, the stream still completes, and nothing mechanical is written", async () => {
+    (prisma.character.findUnique as any).mockRejectedValue(new Error("db unavailable"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { res, frames } = await postAction({ level: 1, xp: 300, hitDiceTotal: 1 });
+
+    expect(res.status).toBe(200);
+    expect(frames.filter((f) => f.t === "level_up_available")).toHaveLength(0);
+    expect(frames.some((f) => f.t === "done")).toBe(true);
+    expect(prisma.character.update).not.toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
+});

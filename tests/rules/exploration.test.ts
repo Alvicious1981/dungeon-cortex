@@ -9,6 +9,7 @@ import {
   EdgePayloadSchema,
   LocationPayloadSchema,
   MoveToNodeInputSchema,
+  ExplorationTurnInputSchema,
   rollFeature,
   generateLocationName,
   generateNodeGraph,
@@ -24,7 +25,6 @@ import {
   OIL_DURATION_TURNS,
   ENCOUNTER_CHECK_INTERVAL_TURNS,
   ENCOUNTER_TRIGGER_RESULT,
-  REST_INTERVAL_TURNS,
   RATION_INTERVAL_TURNS,
   INITIAL_TORCHES_PER_PLAYER,
   INITIAL_RATIONS_PER_PLAYER,
@@ -354,6 +354,25 @@ describe("MoveToNodeInputSchema", () => {
 
   it("rejects string index", () => {
     expect(MoveToNodeInputSchema.safeParse({ targetNodeIndex: "3" }).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ExplorationTurnInputSchema — action description neutrality
+// ---------------------------------------------------------------------------
+
+describe("ExplorationTurnInputSchema action description", () => {
+  const actionDescription = ExplorationTurnInputSchema.shape.action.description ?? "";
+
+  it("does not carry retired 1-in-6 rest semantics", () => {
+    // The narrator reads this description verbatim. It must not imply a
+    // mechanical rest obligation the backend no longer enforces.
+    expect(actionDescription).not.toContain("mandatory");
+    expect(actionDescription).not.toContain("rest cycle");
+  });
+
+  it("describes rest as resetting turnsSinceRest", () => {
+    expect(actionDescription).toContain("turnsSinceRest");
   });
 });
 
@@ -815,17 +834,14 @@ describe("Exploration Time Engine — constants", () => {
   it("TORCH_DURATION_TURNS is 6 (= 1 hour)", () => {
     expect(TORCH_DURATION_TURNS).toBe(6);
   });
-  it("OIL_DURATION_TURNS is 24 (= 4 hours)", () => {
-    expect(OIL_DURATION_TURNS).toBe(24);
+  it("OIL_DURATION_TURNS is 36 (= 6 hours)", () => {
+    expect(OIL_DURATION_TURNS).toBe(36);
   });
   it("ENCOUNTER_CHECK_INTERVAL_TURNS is 2", () => {
     expect(ENCOUNTER_CHECK_INTERVAL_TURNS).toBe(2);
   });
   it("ENCOUNTER_TRIGGER_RESULT is 1 (1-in-6 chance)", () => {
     expect(ENCOUNTER_TRIGGER_RESULT).toBe(1);
-  });
-  it("REST_INTERVAL_TURNS is 6", () => {
-    expect(REST_INTERVAL_TURNS).toBe(6);
   });
   it("RATION_INTERVAL_TURNS is 144 (6 turns/hr × 24 hr)", () => {
     expect(RATION_INTERVAL_TURNS).toBe(6 * 24);
@@ -882,29 +898,28 @@ describe("advanceTurn — turn counter", () => {
 });
 
 // ---------------------------------------------------------------------------
-// advanceTurn — rest cycle
+// advanceTurn — turnsSinceRest counter
 // ---------------------------------------------------------------------------
 
-describe("advanceTurn — rest cycle", () => {
-  it("restRequired = false after turn 1 from fresh state", () => {
-    expect(advanceTurn(freshTime).restRequired).toBe(false);
-  });
-
-  it("restRequired = false after turn 5 from fresh state", () => {
-    expect(advanceTurn(freshTime, 5).restRequired).toBe(false);
-  });
-
-  it("restRequired = true after turn 6 from fresh state", () => {
-    expect(advanceTurn(freshTime, 6).restRequired).toBe(true);
-  });
-
-  it("restRequired = true when turnsSinceRest is already at REST_INTERVAL_TURNS", () => {
-    expect(advanceTurn({ ...freshTime, turnsSinceRest: 6 }).restRequired).toBe(true);
-  });
-
-  it("turnsSinceRest never exceeds REST_INTERVAL_TURNS (6)", () => {
+describe("advanceTurn — turnsSinceRest counter", () => {
+  it("keeps counting past 6 elapsed turns", () => {
     const { next } = advanceTurn({ ...freshTime, turnsSinceRest: 6 }, 6);
-    expect(next.turnsSinceRest).toBe(6);
+    expect(next.turnsSinceRest).toBe(12);
+  });
+
+  it("has no upper bound: 30 accumulated turns are reported exactly", () => {
+    // turnsSinceRest is neutral elapsed time with no threshold and no cap.
+    // Every advanced turn is added and reported verbatim, however large.
+    let state = freshTime;
+    for (let i = 0; i < 5; i++) {
+      state = advanceTurn(state, 6).next;
+    }
+    expect(state.turnsSinceRest).toBe(30);
+    expect(state.turnsSinceRest).toBeGreaterThan(6);
+  });
+
+  it("turnsSinceRest never goes negative", () => {
+    expect(advanceTurn(freshTime).next.turnsSinceRest).toBeGreaterThanOrEqual(0);
   });
 
   it("turnsSinceRest accumulates across multiple calls", () => {

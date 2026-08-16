@@ -1,7 +1,5 @@
-import { prisma } from "@/lib/db/prisma";
 import {
   ExplorationTurnInputSchema,
-  REST_INTERVAL_TURNS,
   advanceTurn,
   applyRest,
   checkRandomEncounter,
@@ -16,7 +14,8 @@ export type ExplorationTurnServiceErrorCode =
   | "CAMPAIGN_OWNERSHIP_MISMATCH"
   | "CHARACTER_NOT_FOUND"
   | "INVALID_EXPLORATION_TURN_INPUT"
-  | "INVALID_EXHAUSTION_STATE";
+  | "INVALID_EXHAUSTION_STATE"
+  | "LEGACY_SUBSYSTEM_DISABLED";
 
 export class ExplorationTurnServiceError extends Error {
   constructor(
@@ -126,7 +125,6 @@ export interface ResolveExplorationTurnResult {
   turnsAdvanced: number;
   totalTurns: number;
   totalHours: number;
-  restRequired: boolean;
   exhaustionApplied: boolean;
   encounter: { triggered: boolean; roll: number } | null;
   randomEncounter: { triggered: boolean; roll: number } | null;
@@ -165,7 +163,14 @@ const emptyPartyInventory: PartyInventoryState = {
 };
 
 function resolveDb(input: ResolveExplorationTurnInput): ExplorationTurnDb {
-  return input.tx ?? input.db ?? (prisma as unknown as ExplorationTurnDb);
+  const injectedDb = input.tx ?? input.db;
+  if (!injectedDb) {
+    throw new ExplorationTurnServiceError(
+      "LEGACY_SUBSYSTEM_DISABLED",
+      "Legacy exploration-turn persistence is disabled until it is redesigned for D&D 5e/SRD 2014.",
+    );
+  }
+  return injectedDb;
 }
 
 function normalizeTime(
@@ -240,50 +245,6 @@ async function resolveCampaign(
   return campaign;
 }
 
-async function applyExhaustionIfNeeded(
-  db: ExplorationTurnDb,
-  campaign: ExplorationTurnCampaignRecord,
-  shouldApply: boolean
-): Promise<boolean> {
-  if (!shouldApply) return false;
-
-  if (!campaign.characterId) {
-    throw new ExplorationTurnServiceError(
-      "CHARACTER_NOT_FOUND",
-      "Campaign has no character for exploration exhaustion."
-    );
-  }
-
-  const character = await db.character.findUnique({
-    where: { id: campaign.characterId },
-    select: { id: true, exhaustionLevel: true },
-  });
-
-  if (!character) {
-    throw new ExplorationTurnServiceError(
-      "CHARACTER_NOT_FOUND",
-      `Character not found: ${campaign.characterId}`
-    );
-  }
-
-  const exhaustionLevel = character.exhaustionLevel ?? 0;
-  if (exhaustionLevel < 0 || exhaustionLevel >= 6) {
-    throw new ExplorationTurnServiceError(
-      "INVALID_EXHAUSTION_STATE",
-      "Exhaustion level cannot be incremented beyond the valid 5e range.",
-      { exhaustionLevel }
-    );
-  }
-
-  await db.character.update({
-    where: { id: character.id },
-    data: { exhaustionLevel: exhaustionLevel + 1 },
-    select: { id: true, exhaustionLevel: true },
-  });
-
-  return true;
-}
-
 function buildResult(input: {
   campaignId: string;
   action: string;
@@ -291,7 +252,6 @@ function buildResult(input: {
   campaignTime: CampaignTimeState;
   inventoryBefore: PartyInventoryState;
   inventoryAfter: PartyInventoryState;
-  restRequired: boolean;
   exhaustionApplied: boolean;
   encounter: { triggered: boolean; roll: number } | null;
   lightExpired: boolean;
@@ -314,7 +274,6 @@ function buildResult(input: {
     turnsAdvanced: input.turnsAdvanced,
     totalTurns: input.campaignTime.totalTurns,
     totalHours: input.campaignTime.totalHours,
-    restRequired: input.restRequired,
     exhaustionApplied: input.exhaustionApplied,
     encounter: input.encounter,
     randomEncounter: input.encounter,
@@ -349,7 +308,9 @@ async function resolveExplorationTurnInTransaction(
   input: ResolveExplorationTurnInput
 ): Promise<ResolveExplorationTurnResult> {
   const parsed = parseInput(input);
-  const campaign = await resolveCampaign(db, input);
+  // Validates campaign existence and ownership (throws on failure); the record
+  // itself is no longer needed now that the exhaustion trigger is retired.
+  await resolveCampaign(db, input);
   const [campaignTimeRecord, partyInventoryRecord, activeEncounter] = await Promise.all([
     db.campaignTime.findUnique({ where: { campaignId: input.campaignId } }),
     db.partyInventory.findUnique({ where: { campaignId: input.campaignId } }),
@@ -377,7 +338,6 @@ async function resolveExplorationTurnInTransaction(
       campaignTime: nextTime,
       inventoryBefore: currentInventory,
       inventoryAfter: currentInventory,
-      restRequired: false,
       exhaustionApplied: false,
       encounter: null,
       lightExpired: false,
@@ -387,13 +347,13 @@ async function resolveExplorationTurnInTransaction(
     });
   }
 
-  const restAlreadyOverdue = currentTime.turnsSinceRest >= REST_INTERVAL_TURNS;
   const turnResult = advanceTurn(currentTime, parsed.turnsToAdvance);
-  const exhaustionApplied = await applyExhaustionIfNeeded(
-    db,
-    campaign,
-    restAlreadyOverdue && turnResult.restRequired
-  );
+  // The non-canonical "skip the exploration rest cycle → +1 Exhaustion" trigger
+  // has been retired: it is not part of the D&D 5e/SRD 2014 rules baseline.
+  // Exhaustion increments must come from authoritative 5e mechanics elsewhere.
+  // `exhaustionApplied` stays in the result (always false) to preserve the
+  // existing contract shape without an interface migration.
+  const exhaustionApplied = false;
 
   const partySize = activeEncounter?.combatants?.length ?? 1;
   const resourceResult = consumeResources(
@@ -432,7 +392,6 @@ async function resolveExplorationTurnInTransaction(
     campaignTime: turnResult.next,
     inventoryBefore: currentInventory,
     inventoryAfter: resourceResult.next,
-    restRequired: turnResult.restRequired,
     exhaustionApplied,
     encounter,
     lightExpired: resourceResult.lightExpired,

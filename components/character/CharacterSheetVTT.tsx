@@ -29,7 +29,7 @@ export interface CharacterCoreStats {
   armorClass: number;
   hitPoints: { current: number; max: number };
   initiative: number;
-  speedFeet: number;
+  speedFeet: number | null;
   proficiencyBonus: number;
   passivePerception: number;
 }
@@ -184,7 +184,7 @@ export default function CharacterSheetVTT({
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
             <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Speed</p>
-            <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Wind size={15} />{core.speedFeet} ft</p>
+            <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Wind size={15} />{core.speedFeet === null ? "N/D" : `${core.speedFeet} ft`}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
             <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Prof</p>

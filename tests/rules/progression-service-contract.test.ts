@@ -39,9 +39,15 @@ type ProgressionAwardResult = {
   previousXP?: number;
   newXP?: number;
   previousLevel?: number;
+  /** The applied level after the award — unchanged under Model E. */
   newLevel?: number;
+  /** getLevelFromXP(newXP): the level the XP now supports. */
+  targetLevel?: number;
+  /** targetLevel - newLevel: ascensions earned but not yet applied. */
+  pendingLevels?: number;
   leveledUp?: boolean;
   pendingLevelUp?: unknown;
+  levelUpAvailable?: unknown;
   facts?: unknown;
   narrative?: unknown;
   text?: unknown;
@@ -283,9 +289,9 @@ describe("applyExperienceAward service contract", () => {
     expect(result.newLevel ?? 4).toBeGreaterThanOrEqual(result.previousLevel ?? 4);
   });
 
-  it("does not allow invalid multi-level jumps from a malformed current level", async () => {
+  it("rejects an applied level the XP cannot support", async () => {
     const { tx } = createTx({
-      characters: [{ ...baseCharacters[0], xp: xpForLevel(5), level: 1 }],
+      characters: [{ ...baseCharacters[0], xp: 0, level: 5 }],
     });
 
     await expect(
@@ -295,7 +301,19 @@ describe("applyExperienceAward service contract", () => {
     expect(tx.character.update).not.toHaveBeenCalled();
   });
 
-  it("uses the project's 5e XP threshold table for progression", async () => {
+  it("accepts XP running ahead of the applied level as normal pending progression", async () => {
+    const { characters, tx } = createTx({
+      characters: [{ ...baseCharacters[0], xp: xpForLevel(5), level: 1 }],
+    });
+
+    const result = await applyExperienceAward(awardInput(tx, { xpAmount: 1 }));
+
+    expect(findCharacter(characters, "character-1").level).toBe(1);
+    expect(result.targetLevel).toBe(5);
+    expect(result.pendingLevels).toBe(4);
+  });
+
+  it("uses the project's 5e XP threshold table to derive the target level", async () => {
     const { characters, tx } = createTx({
       characters: [{ ...baseCharacters[0], xp: xpForLevel(2) - 25, level: 1 }],
     });
@@ -303,24 +321,33 @@ describe("applyExperienceAward service contract", () => {
     const result = await applyExperienceAward(awardInput(tx, { xpAmount: 25 }));
 
     expect(findCharacter(characters, "character-1").xp).toBe(xpForLevel(2));
-    expect(result.newLevel).toBe(2);
+    // The threshold is crossed, but the applied level does not move.
+    expect(findCharacter(characters, "character-1").level).toBe(1);
+    expect(result.newLevel).toBe(1);
+    expect(result.targetLevel).toBe(2);
   });
 
-  it("returns deterministic level-up state when automatic level updates are enabled", async () => {
+  it("crossing a threshold reports an available ascension without applying it", async () => {
     const { characters, tx } = createTx({
       characters: [{ ...baseCharacters[0], xp: 299, level: 1 }],
     });
 
     const result = await applyExperienceAward(awardInput(tx, { xpAmount: 1 }));
 
-    if (result.pendingLevelUp === undefined) {
-      expect(findCharacter(characters, "character-1").level).toBe(2);
-      expect(result).toMatchObject({
-        previousLevel: 1,
-        newLevel: 2,
-        leveledUp: true,
-      });
-    }
+    expect(findCharacter(characters, "character-1").level).toBe(1);
+    expect(result).toMatchObject({
+      previousLevel: 1,
+      newLevel: 1,
+      targetLevel: 2,
+      pendingLevels: 1,
+      leveledUp: true,
+    });
+    expect(result.levelUpAvailable).toMatchObject({
+      characterId: "character-1",
+      fromLevel: 1,
+      toLevel: 2,
+      pendingLevels: 1,
+    });
   });
 
   it("returns pendingLevelUp instead of changing level when level-up is deferred", async () => {

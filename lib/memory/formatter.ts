@@ -17,11 +17,11 @@ import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
 import type { Monster } from "@/lib/rules/srd";
 import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
-import { xpForLevel, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
+import { xpForLevel, getLevelFromXP, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
 import { getDispositionBand } from "@/lib/rules/social-logic";
-import { REST_INTERVAL_TURNS, TURNS_PER_HOUR } from "@/lib/rules/exploration";
+import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
 // ---------------------------------------------------------------------------
@@ -96,8 +96,21 @@ function formatCharacter(character: CampaignContext["character"]): string {
   );
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
 
-  // XP progress — show next threshold so the AI knows how close a level-up is.
-  if (character.level < MAX_LEVEL) {
+  // XP progress. `character.level` is the last MECHANICALLY APPLIED level;
+  // `targetLevel` is what the XP already supports. When they differ the
+  // character has unapplied ascensions, and the "next threshold" is not
+  // level + 1 — it has already been passed. Report the pending count as a
+  // plain fact and leave resolution to the backend; the narrator must never
+  // present a pending level as if it were applied.
+  const targetLevel = getLevelFromXP(character.xp);
+  const pendingLevels = Math.max(0, targetLevel - character.level);
+
+  if (pendingLevels > 0) {
+    lines.push(
+      `**XP:** ${character.xp} (supports level ${targetLevel}; ` +
+        `${pendingLevels} level-up(s) pending backend resolution)`
+    );
+  } else if (character.level < MAX_LEVEL) {
     const nextThreshold = xpForLevel(character.level + 1);
     lines.push(`**XP:** ${character.xp} / ${nextThreshold} (next level)`);
   } else {
@@ -402,13 +415,10 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   const minutesThisHour = (hud.totalTurns % TURNS_PER_HOUR) * 10;
   lines.push(`**Turn:** ${hud.totalTurns} — ${hud.totalHours}h ${minutesThisHour}min elapsed`);
 
-  // Rest status
-  const turnsUntilRest = REST_INTERVAL_TURNS - hud.turnsSinceRest;
-  if (hud.turnsSinceRest >= REST_INTERVAL_TURNS) {
-    lines.push("**Rest:** ⚠️ OVERDUE — mandatory rest not taken. Exhaustion applies on next non-rest action.");
-  } else {
-    lines.push(`**Rest:** ${turnsUntilRest} turn(s) until mandatory rest`);
-  }
+  // Rest status — informational only. `turnsSinceRest` is a neutral elapsed-turn
+  // counter with no mechanical threshold (no Exhaustion, no enforced action);
+  // report it as a plain fact, identically at every value.
+  lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
 
   // Exhaustion
   if (hud.exhaustionLevel > 0) {
@@ -525,25 +535,6 @@ function formatWildernessHUD(ctx: WildernessHUDContext): string {
 }
 
 // ---------------------------------------------------------------------------
-// Haven HUD
-// ---------------------------------------------------------------------------
-
-export interface HavenHUDContext {
-  currentWealth: number;
-  havenUpkeep: number;
-  retainerMorale: string;
-}
-
-export function formatHavenHUD(ctx: HavenHUDContext): string {
-  return [
-    "## Haven & Downtime Status",
-    `**Party Wealth:** ${ctx.currentWealth} GP`,
-    `**Haven Upkeep:** ${ctx.havenUpkeep} GP/day`,
-    `**Retainer Morale:** ${ctx.retainerMorale}`,
-  ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -553,7 +544,6 @@ export type FormatterContext = CampaignContext & {
   activeNPC?: ActiveNPC;
   explorationHUD?: ExplorationHUDContext;
   wildernessHUD?: WildernessHUDContext;
-  havenHUD?: HavenHUDContext;
 };
 
 /**
@@ -572,7 +562,6 @@ export function formatCanonicalState(context: FormatterContext): string {
   const hasLocation = Boolean(context.currentExploration?.location);
   const isOverworldScene = locationType === "wilderness" || (!hasLocation && Boolean(context.wildernessHUD));
   const isDungeonScene = hasLocation && locationType !== "wilderness";
-  const isHavenScene = !hasLocation && !context.activeEncounter && Boolean(context.havenHUD);
   const shouldShowNPCContext = Boolean(context.activeNPC) && !context.activeEncounter;
 
   const questSection = formatQuests(context.quests);
@@ -591,8 +580,6 @@ export function formatCanonicalState(context: FormatterContext): string {
     // Wilderness HUD — hex position, terrain, weather, pace, rations, watch clock.
     // Injected only in overworld scenes to avoid irrelevant context.
     ...(context.wildernessHUD && isOverworldScene ? [formatWildernessHUD(context.wildernessHUD)] : []),
-    // Haven-only economics and morale context.
-    ...(context.havenHUD && isHavenScene ? [formatHavenHUD(context.havenHUD)] : []),
     formatEncounter(context.activeEncounter),
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.

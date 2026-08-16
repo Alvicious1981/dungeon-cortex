@@ -83,37 +83,43 @@ describe("SurvivalHUD — dungeon clock", () => {
 // Rest Status
 // ---------------------------------------------------------------------------
 
-describe("SurvivalHUD — rest status (not overdue)", () => {
-  it("renders 'Rest in 3 turns' when turnsSinceRest=3 (6-3=3 remaining)", () => {
-    render(<SurvivalHUD {...baseProps} />);
-    const el = screen.getByTestId("rest-status");
-    expect(el.textContent).toContain("3");
-    expect(el.getAttribute("data-overdue")).toBe("false");
+describe("SurvivalHUD — rest status (elapsed turns)", () => {
+  it("renders '0 turns since last rest' when turnsSinceRest = 0", () => {
+    render(<SurvivalHUD {...baseProps} turnsSinceRest={0} />);
+    expect(screen.getByTestId("rest-status").textContent).toBe("0 turns since last rest");
   });
 
-  it("renders 'Rest in 1 turn' (singular) when 1 turn left", () => {
-    render(<SurvivalHUD {...baseProps} turnsSinceRest={5} />);
-    expect(screen.getByTestId("rest-status").textContent).toContain("1 turn");
+  it("renders '1 turn since last rest' (singular) when turnsSinceRest = 1", () => {
+    render(<SurvivalHUD {...baseProps} turnsSinceRest={1} />);
+    expect(screen.getByTestId("rest-status").textContent).toBe("1 turn since last rest");
   });
 
-  it("does NOT show overdue indicator", () => {
-    render(<SurvivalHUD {...baseProps} />);
-    expect(screen.getByTestId("rest-status").getAttribute("data-overdue")).toBe("false");
+  it("renders '3 turns since last rest' when turnsSinceRest = 3", () => {
+    render(<SurvivalHUD {...baseProps} turnsSinceRest={3} />);
+    expect(screen.getByTestId("rest-status").textContent).toBe("3 turns since last rest");
+  });
+
+  it("renders '6 turns since last rest' when turnsSinceRest = 6", () => {
+    render(<SurvivalHUD {...baseProps} turnsSinceRest={6} />);
+    expect(screen.getByTestId("rest-status").textContent).toBe("6 turns since last rest");
   });
 });
 
-describe("SurvivalHUD — rest status (overdue)", () => {
-  it("shows overdue warning when turnsSinceRest = 6", () => {
-    render(<SurvivalHUD {...baseProps} turnsSinceRest={6} />);
-    const el = screen.getByTestId("rest-status");
-    expect(el.getAttribute("data-overdue")).toBe("true");
-    expect(el.textContent).toContain("Overdue");
-  });
+describe("SurvivalHUD — rest status (neutral semantics)", () => {
+  // Anti-regression: the exploration rest cycle has no mechanical consequence.
+  // The HUD must never present it as mandatory, overdue, or Exhaustion-causing.
+  it.each([0, 1, 3, 5, 6])(
+    "states no obligation or consequence at turnsSinceRest = %i",
+    (turns) => {
+      render(<SurvivalHUD {...baseProps} turnsSinceRest={turns} />);
+      const restStatus = screen.getByTestId("rest-status");
 
-  it("shows overdue warning when turnsSinceRest > 6 (capped state)", () => {
-    render(<SurvivalHUD {...baseProps} turnsSinceRest={6} />);
-    expect(screen.getByTestId("rest-status").getAttribute("data-overdue")).toBe("true");
-  });
+      expect(restStatus.textContent).not.toMatch(/overdue/i);
+      expect(restStatus.textContent).not.toMatch(/mandatory/i);
+      expect(restStatus.textContent).not.toMatch(/exhaustion/i);
+      expect(restStatus.className).not.toContain("hud-warning");
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------

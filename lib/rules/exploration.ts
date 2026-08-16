@@ -131,7 +131,7 @@ export const ExplorationTurnInputSchema = z.object({
       "The type of exploration action taken. " +
       "'move': standard movement to adjacent node, 1 turn. " +
       "'search': careful room examination, 1 turn. " +
-      "'rest': mandatory rest turn — resets the rest cycle, no resources consumed. " +
+      "'rest': records an exploration rest by resetting turnsSinceRest — no resources consumed. " +
       "'interact': non-combat interaction with environment or NPC, 1 turn. " +
       "'loud': noisy action (breaking down door, shouting) — forces an immediate encounter check.",
     ),
@@ -369,14 +369,16 @@ export const LOCATION_TEMPLATES: Record<LocationType, LocationTemplate> = {
 export const TURNS_PER_HOUR = 6;
 /** A lit torch burns for 6 turns (1 hour). */
 export const TORCH_DURATION_TURNS = 6;
-/** A lantern burning on one oil flask lasts 24 turns (4 hours). */
-export const OIL_DURATION_TURNS = 24;
+/**
+ * A lantern burning on one oil flask lasts 36 turns (6 hours).
+ * Per D&D 5e/SRD 2014 (dnd5eapi.co lamp / lantern-hooded / lantern-bullseye):
+ * a lamp or lantern burns for 6 hours on a flask (1 pint) of oil.
+ */
+export const OIL_DURATION_TURNS = 36;
 /** An encounter check roll fires every 2 turns. */
 export const ENCOUNTER_CHECK_INTERVAL_TURNS = 2;
 /** A 1d6 result of 1 triggers a random encounter. */
 export const ENCOUNTER_TRIGGER_RESULT = 1;
-/** The party must rest 1 turn out of every 6. */
-export const REST_INTERVAL_TURNS = 6;
 /** Rations are consumed once per 24 hours = 144 turns (6 turns/hour × 24). */
 export const RATION_INTERVAL_TURNS = 144;
 /** Torches given to each player at campaign creation. */
@@ -399,7 +401,6 @@ export interface CampaignTimeState {
 /** Returned by `advanceTurn`. Caller writes `next` to DB and acts on flags. */
 export interface AdvanceTurnResult {
   next:                  CampaignTimeState;
-  restRequired:          boolean;
   encounterCheckDue:     boolean;
   rationConsumptionDue:  boolean;
   turnsAdvanced:         number;

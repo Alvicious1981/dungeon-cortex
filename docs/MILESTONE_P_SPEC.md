@@ -48,8 +48,10 @@ The three design pillars inherited from Milestone O apply without exception:
 | 5 — Night | 00:00–04:00 | Rest (mandatory) |
 
 **Night Watch Rule:** `currentWatch === 5` is mandatory rest. Any non-rest action is refused by
-`executeTravelWatch` with `{ error: "restRequired" }`. No state mutation on refusal. Mirrors the
-`restRequired` gate already in `executeExplorationTurn`.
+`executeTravelWatch` with `{ error: "restRequired" }`. No state mutation on refusal. This wilderness
+`restRequired` belongs to the watch/night cycle and is derived from `NIGHT_WATCH_INDEX`. It is
+independent of the retired exploration `restRequired` (the non-canonical 1-in-6 rest gate, now
+removed) and does not depend on `REST_INTERVAL_TURNS`.
 
 ### Cross-System Handoff (Dungeon ↔ Wilderness)
 

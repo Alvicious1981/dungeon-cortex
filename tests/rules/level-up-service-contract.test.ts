@@ -22,6 +22,7 @@ type LevelUpTx = {
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
   gameLog: {
     create: ReturnType<typeof vi.fn>;
@@ -65,12 +66,14 @@ type ApplyLevelUpResult = {
 
 type ApplyLevelUp = (input: ApplyLevelUpInput) => Promise<ApplyLevelUpResult>;
 
+// Model E fixtures: `level` is the last mechanically applied level and
+// `hitDiceTotal` always agrees with it. XP running ahead is the pending state.
 const baseCharacters: CharacterFixture[] = [
   {
     id: "character-1",
     campaignId: "campaign-1",
     xp: xpForLevel(2),
-    level: 2,
+    level: 1,
     class: "fighter",
     stats: { STR: 14, DEX: 12, CON: 14, INT: 10, WIS: 11, CHA: 8 },
     hp: 4,
@@ -82,7 +85,7 @@ const baseCharacters: CharacterFixture[] = [
     id: "character-2",
     campaignId: "campaign-1",
     xp: 100,
-    level: 2,
+    level: 1,
     class: "cleric",
     stats: { STR: 10, DEX: 10, CON: 12, INT: 10, WIS: 16, CHA: 10 },
     hp: 8,
@@ -138,15 +141,19 @@ function createTx(options?: {
             (where.campaignId === undefined || character.campaignId === where.campaignId)
         ) ?? null
       ),
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
-        characters.find((character) => character.id === where.id) ?? null
-      ),
-      update: vi.fn(
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
+        const found = characters.find((character) => character.id === where.id);
+        return found ? { ...found, stats: { ...found.stats } } : null;
+      }),
+      update: vi.fn(),
+      // Conditional write: only matches rows still in the state named by
+      // `where`, exactly as the compare-and-set relies on PostgreSQL doing.
+      updateMany: vi.fn(
         async ({
           where,
           data,
         }: {
-          where: { id: string };
+          where: { id: string; level?: number; hitDiceTotal?: number };
           data: Partial<
             Pick<
               CharacterFixture,
@@ -154,11 +161,17 @@ function createTx(options?: {
             >
           >;
         }) => {
-          const character = characters.find((candidate) => candidate.id === where.id);
-          if (!character) throw new Error(`Missing character ${where.id}`);
+          const character = characters.find(
+            (candidate) =>
+              candidate.id === where.id &&
+              (where.level === undefined || candidate.level === where.level) &&
+              (where.hitDiceTotal === undefined ||
+                candidate.hitDiceTotal === where.hitDiceTotal)
+          );
+          if (!character) return { count: 0 };
 
           Object.assign(character, data);
-          return { ...character, stats: { ...character.stats } };
+          return { count: 1 };
         }
       ),
     },
@@ -257,26 +270,45 @@ describe("applyLevelUp service contract", () => {
 
   it("rejects lowering a level", async () => {
     const { tx } = createTx({
-      characters: [{ ...baseCharacters[0], xp: xpForLevel(2), level: 2 }],
+      characters: [
+        { ...baseCharacters[0], xp: xpForLevel(3), level: 2, hitDiceTotal: 2 },
+      ],
     });
 
     await expect(
       applyLevelUp(levelUpInput(tx, { targetLevel: 1 }))
     ).rejects.toThrow(/level/i);
 
-    expect(tx.character.update).not.toHaveBeenCalled();
+    expect(tx.character.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects invalid jumps when the service allows only one level per call", async () => {
     const { tx } = createTx({
-      characters: [{ ...baseCharacters[0], xp: xpForLevel(3), level: 2 }],
+      characters: [
+        { ...baseCharacters[0], xp: xpForLevel(5), level: 2, hitDiceTotal: 2 },
+      ],
+    });
+
+    // XP supports level 5, but a single call may only ever apply level 3.
+    await expect(
+      applyLevelUp(levelUpInput(tx, { targetLevel: 4 }))
+    ).rejects.toThrow(/level/i);
+
+    expect(tx.character.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a row whose hitDiceTotal disagrees with its level", async () => {
+    const { tx } = createTx({
+      characters: [
+        { ...baseCharacters[0], xp: xpForLevel(5), level: 3, hitDiceTotal: 2 },
+      ],
     });
 
     await expect(
-      applyLevelUp(levelUpInput(tx, { targetLevel: 3 }))
-    ).rejects.toThrow(/level/i);
+      applyLevelUp(levelUpInput(tx, { targetLevel: undefined }))
+    ).rejects.toThrow(/hitDiceTotal/i);
 
-    expect(tx.character.update).not.toHaveBeenCalled();
+    expect(tx.character.updateMany).not.toHaveBeenCalled();
   });
 
   it("applies exactly one pending physical level-up for a valid character", async () => {
@@ -289,12 +321,14 @@ describe("applyLevelUp service contract", () => {
     });
   });
 
-  it("preserves the level already persisted by the XP award service", async () => {
+  it("advances the applied level itself, together with hitDiceTotal", async () => {
     const { characters, tx } = await applyValidLevelUp(applyLevelUp);
-    const updateData = tx.character.update.mock.calls[0]?.[0]?.data ?? {};
+    const call = tx.character.updateMany.mock.calls[0]?.[0] ?? {};
 
     expect(findCharacter(characters, "character-1").level).toBe(2);
-    expect(updateData).not.toHaveProperty("level");
+    // Compare-and-set on the pre-ascension state.
+    expect(call.where).toMatchObject({ id: "character-1", level: 1, hitDiceTotal: 1 });
+    expect(call.data).toMatchObject({ level: 2, hitDiceTotal: 2 });
   });
 
   it("updates maxHp deterministically from class hit die average plus CON modifier", async () => {
@@ -308,13 +342,14 @@ describe("applyLevelUp service contract", () => {
     });
   });
 
-  it("updates hp according to the existing project rule: full heal to new maxHp", async () => {
+  it("raises hp by exactly hpGained, preserving damage already suffered", async () => {
     const { characters, result } = await applyValidLevelUp(applyLevelUp);
 
-    expect(findCharacter(characters, "character-1").hp).toBe(18);
+    // 4 hp of 10 before; +8 gained -> 12 of 18. The 6 points of damage remain.
+    expect(findCharacter(characters, "character-1").hp).toBe(12);
     expect(result).toMatchObject({
       previousHp: 4,
-      newHp: 18,
+      newHp: 12,
     });
   });
 
@@ -328,13 +363,14 @@ describe("applyLevelUp service contract", () => {
     });
   });
 
-  it("updates hitDiceRemaining according to the existing project rule: reset to total", async () => {
+  it("grants exactly one new hit die rather than resetting the pool", async () => {
     const { characters, result } = await applyValidLevelUp(applyLevelUp);
 
-    expect(findCharacter(characters, "character-1").hitDiceRemaining).toBe(2);
+    // 0 remaining before; the new level adds one, capped at the new total.
+    expect(findCharacter(characters, "character-1").hitDiceRemaining).toBe(1);
     expect(result).toMatchObject({
       previousHitDiceRemaining: 0,
-      newHitDiceRemaining: 2,
+      newHitDiceRemaining: 1,
     });
   });
 
@@ -352,7 +388,7 @@ describe("applyLevelUp service contract", () => {
 
   it("does not modify XP while applying level-up mechanics", async () => {
     const { characters, result, tx } = await applyValidLevelUp(applyLevelUp);
-    const updateData = tx.character.update.mock.calls[0]?.[0]?.data ?? {};
+    const updateData = tx.character.updateMany.mock.calls[0]?.[0]?.data ?? {};
 
     expect(findCharacter(characters, "character-1").xp).toBe(xpForLevel(2));
     expect(updateData).not.toHaveProperty("xp");

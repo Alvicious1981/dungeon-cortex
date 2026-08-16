@@ -18,16 +18,17 @@ import type {
   ItemType,
 } from "@/lib/rules/inventory";
 import AscensionOverlayController from "@/components/character/AscensionOverlay";
+import LevelUpConfirmationController from "@/components/character/LevelUpConfirmation";
 import XPProgressBar from "@/components/character/XPProgressBar";
 import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
-import { WildernessMapController } from "@/components/exploration/map/WildernessMapController";
-import WildernessHUD from "@/components/exploration/WildernessHUD";
 import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
 import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
+import { getAuthUser } from "@/lib/auth/session";
+import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,8 @@ function itemStatLine(type: string, properties: unknown): string {
 
 export async function generateMetadata({ params }: CampaignPageProps) {
   const { id } = await params;
-  const campaign = await prisma.campaign.findUnique({ where: { id } });
+  const user = await getAuthUser();
+  const campaign = await prisma.campaign.findFirst({ where: { id, userId: user.id } });
   return {
     title: campaign
       ? `${campaign.title} — Dungeon Cortex`
@@ -140,27 +142,34 @@ export async function generateMetadata({ params }: CampaignPageProps) {
 
 export default async function CampaignPage({ params }: CampaignPageProps) {
   const { id } = await params;
+  const user = await getAuthUser();
 
-  const [campaign, memories, quests, npcs, wildernessHexes, travelState, partyInventory] = await Promise.all([
-    prisma.campaign.findUnique({
-      where: { id },
-      include: {
-        character: {
-          include: {
-            inventory: {
-              orderBy: [{ type: "asc" }, { name: "asc" }],
-            },
-          },
-        },
-        logs: { orderBy: { createdAt: "asc" } },
-        encounters: {
-          where: { status: "active" },
-          include: {
-            combatants: { orderBy: { initiativeTotal: "desc" } },
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, userId: user.id },
+    include: {
+      character: {
+        include: {
+          profile: true,
+          inventory: {
+            orderBy: [{ type: "asc" }, { name: "asc" }],
           },
         },
       },
-    }),
+      logs: { orderBy: { createdAt: "asc" } },
+      encounters: {
+        where: { status: "active" },
+        include: {
+          combatants: { orderBy: { initiativeTotal: "desc" } },
+        },
+      },
+    },
+  });
+
+  if (!campaign) {
+    notFound();
+  }
+
+  const [memories, quests, npcs] = await Promise.all([
     // Fetch recent consolidated memories for the journal (newest first, no vector column)
     prisma.memoryEntry.findMany({
       where: { campaignId: id },
@@ -207,23 +216,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         seed: true,
       },
     }),
-    // Fetch all discovered/scouted hexes for the wilderness map
-    prisma.wildernessMap.findMany({
-      where: { campaignId: id, OR: [{ discovered: true }, { scouted: true }] },
-    }),
-    // Fetch travel state for the wilderness engine
-    prisma.travelState.findUnique({
-      where: { campaignId: id },
-    }),
-    // Fetch party inventory for rations check
-    prisma.partyInventory.findUnique({
-      where: { campaignId: id },
-    }),
   ]);
-
-  if (!campaign) {
-    notFound();
-  }
 
   // ── Exploration data (conditional — only when campaign has an active location) ──
   type ExplorationData = {
@@ -237,8 +230,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   let explorationData: ExplorationData = null;
   if (campaign.currentLocationId && campaign.currentNodeId) {
-    const loc = await prisma.location.findUnique({
-      where: { id: campaign.currentLocationId },
+    const loc = await prisma.location.findFirst({
+      where: { id: campaign.currentLocationId, campaignId: campaign.id },
       include: {
         nodes: { orderBy: { index: "asc" } },
         edges: true,
@@ -269,18 +262,19 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   const { character, logs } = campaign;
   const activeEncounter = campaign.encounters[0] ?? null;
-
-  // ── Wilderness & Mode Detection ─────────────────────────────────────────────
-  
-  // Decide if we are in Wilderness Mode (TravelState exists and not in a dungeon node)
-  const isWildernessMode = travelState !== null && !explorationData;
-
-  // Robustly find current location details for HUD if in wilderness
-  const activeHex = isWildernessMode && travelState
-    ? wildernessHexes.find(
-        (h) => h.q === travelState.currentQ && h.r === travelState.currentR
-      )
-    : null;
+  const sheetViewModel = buildSheetViewModel({ character, inventory: character.inventory });
+  const characterProfile = {
+    id: character.id,
+    name: character.name,
+    revision: character.revision,
+    updatedAt: character.updatedAt.toISOString(),
+    appearance: character.profile?.appearance ?? "",
+    backstory: character.profile?.backstory ?? "",
+    personalityTraits: character.profile?.personalityTraits ?? "",
+    ideals: character.profile?.ideals ?? "",
+    bonds: character.profile?.bonds ?? "",
+    flaws: character.profile?.flaws ?? "",
+  };
 
   const spellSlots = parseSpellSlots(character.spellSlots);
   const hpPercent = character.maxHp > 0
@@ -331,6 +325,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     <div
       className="dc-campaign-shell dc-page-shell min-h-screen pb-20 lg:pb-0"
     >
+      {/* Level-up confirmation — listens for dungeon-level-up-available and asks
+          the player how to resolve hit points before anything is applied */}
+      <LevelUpConfirmationController campaignId={campaign.id} />
       {/* Ascension Overlay — self-wiring, listens for dungeon-level-up events */}
       <AscensionOverlayController />
       {/* Trade Overlay — self-wiring, listens for dungeon-merchant events */}
@@ -339,24 +336,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
       
       {/* Detailed Character Sheet — Floating toggle (mobile / expanded view) */}
-      <CharacterSheetController character={character} inventory={character.inventory} />
+      <CharacterSheetController
+        sheet={sheetViewModel}
+        profile={characterProfile}
+        nameLocked={activeEncounter !== null}
+      />
 
-      {/* Wilderness HUD — Only visible in Wilderness Mode */}
-      {isWildernessMode && travelState && (
-        <WildernessHUD
-          currentQ={travelState.currentQ}
-          currentR={travelState.currentR}
-          terrain={activeHex?.terrain ?? "unknown"}
-          biome={activeHex?.biome ?? "The Great Unknown"}
-          watchIndex={travelState.currentWatch}
-          totalDays={travelState.totalDays}
-          weatherCondition={travelState.weatherCondition}
-          weatherIntensity={travelState.weatherIntensity}
-          partyPace={travelState.partyPace}
-          rations={partyInventory?.rations ?? 0}
-          featureHere={!!activeHex?.feature}
-        />
-      )}
       {/* Ambient glow — purely decorative */}
       <div
         aria-hidden="true"
@@ -765,7 +750,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 <span className="rounded-full border border-[#4f4264] px-2 py-1 text-[10px] uppercase tracking-wider text-[#a78bfa]">Estado confirmado</span>
               </header>
               <div className="relative min-h-56 bg-[linear-gradient(rgba(7,7,16,.42),rgba(7,7,16,.72)),url('/assets/atmosphere/tactical-table-idle.webp')] bg-cover bg-center p-3 sm:p-4">
-                {!explorationData && !isWildernessMode && !activeEncounter && (
+                {!explorationData && !activeEncounter && (
                   <div className="flex min-h-56 items-center justify-center text-center">
                     <p className="dc-copy max-w-sm rounded-sm bg-[#070710]/80 px-5 py-4 text-sm italic">La bitácora mantiene el contexto hasta que el servidor confirme una localización táctica.</p>
                   </div>
@@ -792,22 +777,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   visitedNodeIndices={explorationData.initialVisitedNodeIndices}
                 />
               </div>
-            )}
-
-            {/* ── Wilderness VTT — visible when in Wilderness Mode ── */}
-            {isWildernessMode && travelState && (
-              <WildernessMapController
-                hexes={wildernessHexes.map(h => ({
-                  q: h.q,
-                  r: h.r,
-                  terrain: h.terrain,
-                  feature: h.feature,
-                  discovered: h.discovered,
-                  scouted: h.scouted
-                }))}
-                currentQ={travelState.currentQ}
-                currentR={travelState.currentR}
-              />
             )}
 
             {/* Legacy zone-based combat map removed in Phase 1.5. */}

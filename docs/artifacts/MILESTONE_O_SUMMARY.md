@@ -8,7 +8,9 @@
 
 ## 1. Scope
 
-Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. Every action the party takes in the dungeon consumes time; time triggers torchlight attrition, ration consumption, rest requirements, random encounters, and exhaustion. The AI narrator is forbidden from resolving any of these events — the engine decides, the narrator voices.
+Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. Every action the party takes in the dungeon consumes time; time triggers torchlight attrition, ration consumption, rest requirements, and random encounters. The AI narrator is forbidden from resolving any of these events — the engine decides, the narrator voices.
+
+> **RETIRED (non-canonical):** An earlier version of this system also auto-applied D&D 5e Exhaustion when the party skipped the exploration rest cycle. That trigger is **not** part of the D&D 5e/SRD 2014 baseline and has been removed. `executeExplorationTurn` no longer increments `exhaustionLevel`. The claims below that describe automatic exhaustion-on-skipped-rest are preserved only as historical record and are no longer authoritative.
 
 ---
 
@@ -18,10 +20,10 @@ Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. E
 |---|---|---|
 | `TURNS_PER_HOUR` | 6 | 1 dungeon turn = 10 minutes |
 | `TORCH_DURATION_TURNS` | 6 | Torch burns for 1 hour (6 turns) |
-| `OIL_DURATION_TURNS` | 24 | Oil flask fuels a lantern for 4 hours |
+| `OIL_DURATION_TURNS` | 36 | Oil flask fuels a lantern for 6 hours |
 | `ENCOUNTER_CHECK_INTERVAL_TURNS` | 2 | Random encounter roll every 2 turns |
 | `ENCOUNTER_TRIGGER_RESULT` | 1 | 1d6 roll of 1 triggers encounter |
-| `REST_INTERVAL_TURNS` | 6 | Party must rest every 6 turns |
+| ~~`REST_INTERVAL_TURNS`~~ | ~~6~~ | **RETIRED / historical:** encoded the non-canonical 1-in-6 "party must rest every 6 turns" rule. The constant no longer exists; there is no mandatory 1-in-6 rest. |
 | `RATION_INTERVAL_TURNS` | 144 | One ration consumed per 24 hours (144 turns) |
 | `INITIAL_TORCHES_PER_PLAYER` | 5 | Starting torches per party member |
 | `INITIAL_RATIONS_PER_PLAYER` | 7 | Starting rations per party member |
@@ -34,7 +36,7 @@ Milestone O implements a faithful OSR/AD&D 1e dungeon exploration time system. E
 ```prisma
 exhaustionLevel Int @default(0)
 ```
-Range: 0 (none) – 6 (lethal). Incremented by the `executeExplorationTurn` tool when the party skips a mandatory rest.
+Range: 0 (none) – 6 (lethal). ~~Incremented by the `executeExplorationTurn` tool when the party skips a mandatory rest.~~ **RETIRED:** `executeExplorationTurn` no longer increments this field; increments must come from authoritative 5e mechanics. Still decremented by 1 on long rest.
 
 ### New model: `CampaignTime`
 ```prisma
@@ -78,14 +80,14 @@ All functions are side-effect-free. They accept state and return new state — n
 
 | Function | Inputs | Returns | Notes |
 |---|---|---|---|
-| `advanceTurn(state, turns?)` | `CampaignTimeState`, optional turns (default 1) | `AdvanceTurnResult` | Advances all counters; sets `restRequired` when `turnsSinceRest >= REST_INTERVAL_TURNS` |
+| `advanceTurn(state, turns?)` | `CampaignTimeState`, optional turns (default 1) | `AdvanceTurnResult` | Advances all counters. ~~Sets `restRequired` when `turnsSinceRest >= REST_INTERVAL_TURNS`~~ **RETIRED / historical:** exploration `restRequired` and `REST_INTERVAL_TURNS` no longer exist; `turnsSinceRest` is a neutral elapsed-turn counter with no threshold. |
 | `checkRandomEncounter(loudAction?, forcedRoll?)` | `boolean`, optional override | `EncounterCheckResult` | Rolls 1d6 every `ENCOUNTER_CHECK_INTERVAL_TURNS`; loud actions double the chance |
 | `consumeResources(inventory, options)` | `PartyInventoryState`, `ConsumeResourcesOptions` | `ConsumeResourcesResult` | Handles torch/lantern attrition, chaining torch→lantern→darkness, ration depletion |
 | `applyRest(state)` | `CampaignTimeState` | `CampaignTimeState` | Resets `turnsSinceRest` and `turnsSinceEncounterCheck` to 0 |
 | `initialPartyInventory(partySize)` | `number` | `PartyInventoryState` | Returns starter kit: `partySize × INITIAL_TORCHES_PER_PLAYER` torches + rations, activeLightSource `"none"` |
 
 **Architect decisions (locked):**
-- Q1: Exhaustion applied immediately when rest is skipped (not deferred)
+- ~~Q1: Exhaustion applied immediately when rest is skipped (not deferred)~~ **RETIRED (non-canonical): skipping the exploration rest cycle no longer applies Exhaustion.**
 - Q2: `partySize` is never accepted from AI input; derived from active encounter combatants in DB
 - Q3: Torches consumed before lantern oil
 - Q4: 5 torches + 7 rations per player at campaign creation
@@ -107,11 +109,10 @@ z.object({
 
 **Execute flow:**
 1. Fetch `campaignRec`, `campaignTime`, `partyInventory`, active encounter (for partySize)
-2. **Rest branch** (`action === "rest"`): call `applyRest()` → upsert `CampaignTime`; restore exhaustion if applicable
+2. **Rest branch** (`action === "rest"`): call `applyRest()` → upsert `CampaignTime`
 3. **Non-rest branch:**
-   - Check `restAlreadyOverdue` (Q1 exhaustion gate)
    - Call `advanceTurn(currentTime, turnsToAdvance)`
-   - If `restAlreadyOverdue && turnResult.restRequired`: increment `character.exhaustionLevel`
+   - ~~If `restAlreadyOverdue && turnResult.restRequired`: increment `character.exhaustionLevel`~~ **RETIRED (non-canonical): no exhaustion is applied here; `exhaustionApplied` is always `false`.**
    - Call `consumeResources(currentInventory, { turnsElapsed, partySize, consumeRations })`
    - Call `checkRandomEncounter(action === "loud")` if encounter check interval reached
    - `prisma.$transaction([upsertTime, upsertInventory])` — atomic write
@@ -119,8 +120,8 @@ z.object({
 ```typescript
 {
   action, turnsAdvanced, totalTurns, totalHours,
-  restRequired,           // true → next action MUST be rest
-  exhaustionApplied,      // true if exhaustionLevel was incremented
+  // restRequired,        // RETIRED / historical: exploration no longer emits this field or any 1-in-6 rest gate
+  exhaustionApplied,      // RETIRED: always false; kept for contract-shape stability
   encounter,              // { triggered: boolean, roll: number } | null
   lightSource,            // "torch" | "lantern" | "none"
   lightSourceTurnsLeft,
@@ -167,7 +168,7 @@ Read-only presentational panel. Receives all values via props from the caller (D
 |---|---|---|
 | `totalTurns` | `total-turns` | Raw turn counter |
 | `totalHours` + `totalTurns % 6 * 10` | `elapsed-time` | e.g., "2h 0min" |
-| `turnsSinceRest` | `rest-status` | "Rest in N turn(s)" or "⚠️ Rest Overdue"; `data-overdue="true\|false"` |
+| `turnsSinceRest` | `rest-status` | **RETIRED / historical behavior:** ~~"Rest in N turn(s)" or "⚠️ Rest Overdue"; `data-overdue="true\|false"`~~. SurvivalHUD now renders only neutral "N turn(s) since last rest" — no Rest Overdue, no `data-overdue`. `turnsSinceRest` remains a neutral counter. |
 | `exhaustionLevel` | `exhaustion` (conditional) | Hidden when 0; `data-level={N}` |
 | `activeLightSource` | `light-icon` + `light-label` | 🕯️ Torch / 🏮 Lantern / ⬛ Darkness |
 | `lightSourceTurnsRemaining` | `light-turns-remaining` | Absent when `activeLightSource === "none"` |
@@ -213,6 +214,6 @@ Pre-existing failure: `tests/rules/loot.test.ts > rollMagicItems > all items pas
 
 - **AI tool never invents resource consumption.** All deductions flow through `consumeResources()` → DB transaction.
 - **AI tool never invents encounters.** `checkRandomEncounter()` rolls the d6; result is returned in payload.
-- **AI tool never invents exhaustion.** `exhaustionApplied` flag is set only by the tool; DB write is authoritative.
+- **AI tool never invents exhaustion.** ~~`exhaustionApplied` flag is set only by the tool; DB write is authoritative.~~ **RETIRED:** `executeExplorationTurn` no longer writes exhaustion at all; `exhaustionApplied` is always `false`.
 - **`partySize` is never AI-supplied.** Derived exclusively from active encounter combatant rows.
 - **`SurvivalHUD` is purely presentational.** Zero side effects; renders exactly what the DB contains.
