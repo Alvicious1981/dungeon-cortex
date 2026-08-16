@@ -501,10 +501,36 @@ export async function finalizeEncounterTurn(
   const resolution = resolveEncounterEnd(allCombatants);
 
   if (resolution.shouldEnd) {
-    await tx.encounter.update({
-      where: { id: encounterId },
+    // Conditional claim, not a plain update: only a transaction that still finds
+    // this encounter "active" may transition it to "resolved". `updateMany`'s
+    // affected-row count is what makes the claim idempotent — a losing or
+    // duplicate caller matches zero rows and this becomes a no-op instead of a
+    // second transition.
+    const claim = await tx.encounter.updateMany({
+      where: { id: encounterId, status: "active" },
       data: { status: "resolved" },
     });
+
+    if (claim.count === 1) {
+      // Winner path: this transaction owns the active → resolved claim and is
+      // the only one with the future right to evaluate an XP award
+      // (docs/DECISION_XP_AWARD_AUTHORITY.md §9). Insert that evaluation here,
+      // inside this branch, once implemented — no award exists yet.
+      return {
+        events,
+        encounterResolved: true,
+      };
+    }
+
+    // Fail-closed: claim.count !== 1 — the claim was already won elsewhere
+    // (or, defensively, an unexpected match count). This transaction never
+    // reaches the winner branch above, so no future reward path can open
+    // from here. The encounter is still mechanically resolved from the
+    // caller's point of view.
+    return {
+      events,
+      encounterResolved: true,
+    };
   } else {
     const { nextTurnIndex, nextRound, roundAdvanced } = advanceTurn({
       currentTurnIndex,
@@ -531,10 +557,5 @@ export async function finalizeEncounterTurn(
       nextRound,
     };
   }
-
-  return {
-    events,
-    encounterResolved: true,
-  };
 }
 

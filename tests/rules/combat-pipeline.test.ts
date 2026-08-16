@@ -76,6 +76,7 @@ function buildMockTx(opts: { characterHp?: number; characterMaxHp?: number } = {
     },
     encounter: {
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     inventoryItem: {
       delete: vi.fn().mockResolvedValue({}),
@@ -983,12 +984,13 @@ describe("executeCombatAction", () => {
 describe("finalizeEncounterTurn", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("marks encounter as resolved when all enemies are dead", async () => {
+  it("takes the winner path (claim.count === 1) and marks encounter as resolved when all enemies are dead", async () => {
     const tx = buildMockTx();
     (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: "player-1", isPlayer: true, hp: 15 },
       { id: "enemy-1", isPlayer: false, hp: 0 },
     ]);
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
 
     const result = await finalizeEncounterTurn({
       tx,
@@ -999,10 +1001,11 @@ describe("finalizeEncounterTurn", () => {
     });
 
     expect(result.encounterResolved).toBe(true);
-    expect(tx.encounter.update).toHaveBeenCalledWith({
-      where: { id: "enc-1" },
+    expect(tx.encounter.updateMany).toHaveBeenCalledWith({
+      where: { id: "enc-1", status: "active" },
       data: { status: "resolved" },
     });
+    expect(tx.encounter.update).not.toHaveBeenCalled();
   });
 
   it("marks encounter as resolved when the player is dead", async () => {
@@ -1017,6 +1020,53 @@ describe("finalizeEncounterTurn", () => {
       encounterId: "enc-1",
       currentTurnIndex: 0,
       round: 1,
+    });
+
+    expect(result.encounterResolved).toBe(true);
+  });
+
+  it("takes the fail-closed path (claim.count === 0) without throwing when another transaction already won the claim", async () => {
+    const tx = buildMockTx();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 15 },
+      { id: "enemy-1", isPlayer: false, hp: 0 },
+    ]);
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+
+    const result = await finalizeEncounterTurn({
+      tx,
+      encounterId: "enc-1",
+      currentTurnIndex: 0,
+      round: 1,
+      collectEvents: false,
+    });
+
+    // The encounter is still mechanically resolved from the caller's point of
+    // view, but this transaction never reached the count === 1 winner branch —
+    // the only branch a future award may be inserted into.
+    expect(result.encounterResolved).toBe(true);
+    expect(tx.encounter.updateMany).toHaveBeenCalledWith({
+      where: { id: "enc-1", status: "active" },
+      data: { status: "resolved" },
+    });
+    expect(tx.encounter.update).not.toHaveBeenCalled();
+  });
+
+  it("takes the fail-closed path for any claim.count other than exactly 1", async () => {
+    const tx = buildMockTx();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 15 },
+      { id: "enemy-1", isPlayer: false, hp: 0 },
+    ]);
+    // Defensive case: an unexpected match count must not be treated as a win.
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 2 });
+
+    const result = await finalizeEncounterTurn({
+      tx,
+      encounterId: "enc-1",
+      currentTurnIndex: 0,
+      round: 1,
+      collectEvents: false,
     });
 
     expect(result.encounterResolved).toBe(true);
@@ -1040,6 +1090,7 @@ describe("finalizeEncounterTurn", () => {
     expect(result.encounterResolved).toBe(false);
     expect(result.nextTurnIndex).toBe(1);
     expect(result.nextRound).toBe(1);
+    expect(tx.encounter.updateMany).not.toHaveBeenCalled();
     expect(tx.encounter.update).toHaveBeenCalledWith({
       where: { id: "enc-1" },
       data: { currentTurnIndex: 1, round: 1 },
