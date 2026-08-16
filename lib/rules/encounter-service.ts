@@ -75,6 +75,9 @@ interface EncounterDb {
             maxHp: number;
             ac: number;
             initiativeTotal: number;
+            /// Backend-authorized XP snapshot (docs/DECISION_XP_AWARD_AUTHORITY.md §5-§6).
+            /// null = unavailable; never derived from adjustedXP/xpForCR/encounterMultiplier.
+            xpValue: number | null;
           }>;
         };
       };
@@ -210,6 +213,9 @@ export async function spawnCombatEncounter(
         maxHp: campaign.character.maxHp,
         ac: playerAC,
         initiativeTotal: entry.initiative,
+        // The player is never a source of the combat XP award (§7 of the decision only
+        // sums isPlayer === false combatants), so it never carries an authorized value.
+        xpValue: null,
       };
     }
 
@@ -222,6 +228,9 @@ export async function spawnCombatEncounter(
       maxHp: monster.hit_points,
       ac: acFromMonsterData(buildMonsterRawData(monster)),
       initiativeTotal: entry.initiative,
+      // Backend-authorized SRD figure already resolved in memory by queryMonsters;
+      // never xpForCR/adjustedXP/encounterMultiplier.
+      xpValue: monster.xp ?? null,
     };
   });
 

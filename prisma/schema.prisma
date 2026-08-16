@@ -262,6 +262,10 @@ model Combatant {
   x                    Int     @default(0)
   /// Precise grid row (0-based). Relative to the encounter's global space.
   y                    Int     @default(0)
+  /// Backend-authorized XP snapshot, fixed once at encounter creation (docs/DECISION_XP_AWARD_AUTHORITY.md §5).
+  /// NULL = no authorized source (unavailable). Distinct from 0, which is a legitimate CR-0 award.
+  /// Never populated from the client request or from AI narration.
+  xpValue              Int?
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
   zone      Zone?     @relation(fields: [zoneId], references: [id])

@@ -93,14 +93,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     );
   }
 
-  // Resolve HP, DEX, and AC for enemies from SRD or inputs
+  // Resolve HP, DEX, AC, and the backend-authorized XP snapshot for enemies from SRD or inputs.
+  // `srdXp` is assigned after every spread of the client-supplied `e` below, so no request field
+  // can ever populate it — it always reflects only what the backend itself resolved.
   const resolvedEnemies = await Promise.all(
     enemies.map(async (e) => {
-      if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
+      if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 }, srdXp: null };
       const srdMonster = await prisma.srdMonster.findUnique({
         where: { id: e.monsterIndex },
       });
-      if (!srdMonster) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 } };
+      if (!srdMonster) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 }, srdXp: null };
       const data = srdMonster.data as Record<string, unknown>;
       const abilityScores = (data.ability_scores || {}) as Record<string, number>;
       return {
@@ -113,6 +115,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             : e.dexModifier,
         ac: acFromMonsterData(data),
         stats: abilityScores,
+        srdXp: srdMonster.xp ?? null,
       };
     })
   );
@@ -219,9 +222,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           concentrationSpellId: campaign.character.concentrationSpellId,
           x: posX,
           y: posY,
+          // The player is never a source of the combat XP award (§7 of the decision only
+          // sums isPlayer === false combatants), so it never carries an authorized value.
+          xpValue: null,
         };
       }
-      
+
       const idx = parseInt(entry.id.replace("enemy-", ""), 10);
       const enemy = resolvedEnemies[idx];
 
@@ -237,6 +243,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         stats: enemy.stats || {},
         x: posX,
         y: posY,
+        // Backend-authorized snapshot resolved above; never derived from the request body.
+        xpValue: enemy.srdXp,
       };
     });
 

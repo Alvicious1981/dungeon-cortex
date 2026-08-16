@@ -21,6 +21,11 @@ const SCHEMA = readFileSync(join(ROOT, "prisma", "schema.prisma"), "utf8");
 
 const NEW_MIGRATION = "20260806090000_reconcile_character_progression_columns";
 const GUARD_MIGRATION = "20260807090000_guard_character_hit_dice_contract";
+// Migración posterior no relacionada con progresión (añade Combatant.xpValue). Su sola
+// existencia bastaría para invalidar cualquier aserción que asuma que GUARD_MIGRATION es
+// literalmente la última migración del historial completo — de ahí que las dos comprobaciones
+// de abajo verifiquen orden relativo entre estas tres migraciones, no posición absoluta.
+const XP_SNAPSHOT_MIGRATION = "20260814120000_add_combatant_xp_value_snapshot";
 
 // ─── Parsers ligeros ─────────────────────────────────────────────────────────
 
@@ -327,8 +332,13 @@ describe("migración 20260806090000_reconcile_character_progression_columns", ()
   });
 
   it("precede inmediatamente a la migración de guarda", () => {
+    // Orden relativo entre las dos migraciones de progresión, no posición absoluta en el
+    // historial completo: migraciones posteriores no relacionadas (p.ej. XP_SNAPSHOT_MIGRATION)
+    // no deben poder romper esta aserción.
     const all = readdirSync(MIGRATIONS_DIR).filter((d) => /^\d/.test(d)).sort();
-    expect(all[all.length - 2]).toBe(NEW_MIGRATION);
+    expect(all).toContain(NEW_MIGRATION);
+    expect(all).toContain(GUARD_MIGRATION);
+    expect(all.indexOf(GUARD_MIGRATION)).toBe(all.indexOf(NEW_MIGRATION) + 1);
   });
 });
 
@@ -349,11 +359,20 @@ describe("migración 20260807090000_guard_character_hit_dice_contract", () => {
     .filter((l) => !/^\s*--/.test(l))
     .join("\n");
 
-  it("1. existe y es la última del historial", () => {
+  it("1. existe y precede a cualquier migración posterior no relacionada con progresión", () => {
+    // No se afirma que GUARD_MIGRATION sea la última del historial completo — eso es un hecho
+    // temporal, no una invariante de seguridad, y una migración no relacionada (como
+    // XP_SNAPSHOT_MIGRATION, que añade Combatant.xpValue) puede aparecer legítimamente después.
+    // Lo que sí debe seguir siendo cierto: existe, y el contrato de progresión sigue siendo el
+    // último eslabón de SU PROPIA cadena (NEW_MIGRATION -> GUARD_MIGRATION), sin que nada se
+    // haya insertado entre medias.
     expect(existsSync(file)).toBe(true);
     expect(sql.length).toBeGreaterThan(0);
     const all = readdirSync(MIGRATIONS_DIR).filter((d) => /^\d/.test(d)).sort();
-    expect(all[all.length - 1]).toBe(GUARD_MIGRATION);
+    expect(all).toContain(GUARD_MIGRATION);
+    if (all.includes(XP_SNAPSHOT_MIGRATION)) {
+      expect(all.indexOf(XP_SNAPSHOT_MIGRATION)).toBeGreaterThan(all.indexOf(GUARD_MIGRATION));
+    }
   });
 
   it("2. no contiene ninguna escritura de datos", () => {

@@ -10,6 +10,18 @@ const wolf: Monster = {
   type: "beast",
   challenge_rating: 0.25,
   dexterity: 12,
+  // Deliberately no `xp` — proves the null/unavailable path for a monster missing it.
+};
+
+const goblin: Monster = {
+  index: "goblin",
+  name: "Goblin",
+  hit_points: 7,
+  armor_class: [{ type: "natural", value: 15 }],
+  type: "humanoid",
+  challenge_rating: 0.25,
+  dexterity: 14,
+  xp: 50,
 };
 
 function mockRandom(values: number[]): void {
@@ -59,10 +71,11 @@ function createDb(options?: {
       create: vi.fn(async ({ data }) => ({
         id: "enc-1",
         combatants: data.combatants.create
-          .map((combatant: { name: string; initiativeTotal: number; isPlayer: boolean }) => ({
+          .map((combatant: { name: string; initiativeTotal: number; isPlayer: boolean; xpValue: number | null }) => ({
             name: combatant.name,
             initiativeTotal: combatant.initiativeTotal,
             isPlayer: combatant.isPlayer,
+            xpValue: combatant.xpValue,
           }))
           .sort(
             (
@@ -131,6 +144,7 @@ describe("spawnCombatEncounter service contract", () => {
               maxHp: 20,
               ac: 13,
               initiativeTotal: 21,
+              xpValue: null,
             },
             {
               name: "Wolf",
@@ -139,12 +153,38 @@ describe("spawnCombatEncounter service contract", () => {
               maxHp: 11,
               ac: 13,
               initiativeTotal: 6,
+              xpValue: null,
             },
           ],
         },
       },
       include: { combatants: { orderBy: { initiativeTotal: "desc" } } },
     });
+  });
+
+  it("persists the monster's exact SrdMonster-authorized xp as the combatant's xpValue snapshot", async () => {
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [goblin]);
+    mockRandom([0.9, 0.2]);
+
+    await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      theme: "humanoid",
+      db,
+      queryMonsters,
+    });
+
+    const call = (db.encounter.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const combatants = call.data.combatants.create as Array<{
+      name: string;
+      isPlayer: boolean;
+      xpValue: number | null;
+    }>;
+    const player = combatants.find((c) => c.isPlayer)!;
+    const enemy = combatants.find((c) => !c.isPlayer)!;
+    expect(player.xpValue).toBeNull();
+    expect(enemy.xpValue).toBe(50);
   });
 
   it("returns an active-encounter error before querying monsters or creating records", async () => {
