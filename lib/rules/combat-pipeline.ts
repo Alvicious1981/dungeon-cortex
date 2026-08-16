@@ -501,10 +501,65 @@ export async function finalizeEncounterTurn(
   const resolution = resolveEncounterEnd(allCombatants);
 
   if (resolution.shouldEnd) {
-    await tx.encounter.update({
-      where: { id: encounterId },
+    // Conditional claim, not a plain update: only a transaction that still finds
+    // this encounter "active" may transition it to "resolved". `updateMany`'s
+    // affected-row count is what makes the claim idempotent — a losing or
+    // duplicate caller matches zero rows and this becomes a no-op instead of a
+    // second transition.
+    const claim = await tx.encounter.updateMany({
+      where: { id: encounterId, status: "active" },
       data: { status: "resolved" },
     });
+
+    if (claim.count === 1) {
+      // Winner path: this transaction owns the active → resolved claim and is
+      // the only one with the right to evaluate an XP award
+      // (docs/DECISION_XP_AWARD_AUTHORITY.md §9). Phase 1 pays only on a
+      // certified victory (§2) — player_dead and ongoing never reach this.
+      if (resolution.reason === "all_enemies_dead") {
+        const enemies = allCombatants.filter((c) => !c.isPlayer);
+        // Fail-closed at the encounter level (§6, §11): a single relevant
+        // enemy without an authorized xpValue snapshot zeroes the whole
+        // award — never a partial sum with the missing creature dropped.
+        const combatAward = enemies.some((c) => c.xpValue === null)
+          ? 0
+          : enemies.reduce((total, c) => total + (c.xpValue as number), 0);
+
+        if (combatAward > 0) {
+          // Recipient derived exclusively from persisted state
+          // (Encounter → Campaign → characterId, §4) — never from the
+          // client, the AI, or a combatant id.
+          const encounterCampaign = await tx.encounter.findUnique({
+            where: { id: encounterId },
+            select: { campaign: { select: { characterId: true } } },
+          });
+
+          if (encounterCampaign) {
+            // Atomic increment (§12) — never a value computed from a prior
+            // read. Only Character.xp moves; no level-up is applied here.
+            await tx.character.update({
+              where: { id: encounterCampaign.campaign.characterId },
+              data: { xp: { increment: combatAward } },
+            });
+          }
+        }
+      }
+
+      return {
+        events,
+        encounterResolved: true,
+      };
+    }
+
+    // Fail-closed: claim.count !== 1 — the claim was already won elsewhere
+    // (or, defensively, an unexpected match count). This transaction never
+    // reaches the winner branch above, so no future reward path can open
+    // from here. The encounter is still mechanically resolved from the
+    // caller's point of view.
+    return {
+      events,
+      encounterResolved: true,
+    };
   } else {
     const { nextTurnIndex, nextRound, roundAdvanced } = advanceTurn({
       currentTurnIndex,
@@ -531,10 +586,5 @@ export async function finalizeEncounterTurn(
       nextRound,
     };
   }
-
-  return {
-    events,
-    encounterResolved: true,
-  };
 }
 

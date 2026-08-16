@@ -76,6 +76,8 @@ function buildMockTx(opts: { characterHp?: number; characterMaxHp?: number } = {
     },
     encounter: {
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue({ campaign: { characterId: "char-1" } }),
     },
     inventoryItem: {
       delete: vi.fn().mockResolvedValue({}),
@@ -983,12 +985,13 @@ describe("executeCombatAction", () => {
 describe("finalizeEncounterTurn", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("marks encounter as resolved when all enemies are dead", async () => {
+  it("takes the winner path (claim.count === 1) and marks encounter as resolved when all enemies are dead", async () => {
     const tx = buildMockTx();
     (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: "player-1", isPlayer: true, hp: 15 },
       { id: "enemy-1", isPlayer: false, hp: 0 },
     ]);
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
 
     const result = await finalizeEncounterTurn({
       tx,
@@ -999,17 +1002,18 @@ describe("finalizeEncounterTurn", () => {
     });
 
     expect(result.encounterResolved).toBe(true);
-    expect(tx.encounter.update).toHaveBeenCalledWith({
-      where: { id: "enc-1" },
+    expect(tx.encounter.updateMany).toHaveBeenCalledWith({
+      where: { id: "enc-1", status: "active" },
       data: { status: "resolved" },
     });
+    expect(tx.encounter.update).not.toHaveBeenCalled();
   });
 
-  it("marks encounter as resolved when the player is dead", async () => {
+  it("marks encounter as resolved when the player is dead, and never grants XP even though an enemy carries a positive xpValue", async () => {
     const tx = buildMockTx();
     (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: "player-1", isPlayer: true, hp: 0 },
-      { id: "enemy-1", isPlayer: false, hp: 10 },
+      { id: "enemy-1", isPlayer: false, hp: 10, xpValue: 50 },
     ]);
 
     const result = await finalizeEncounterTurn({
@@ -1020,6 +1024,199 @@ describe("finalizeEncounterTurn", () => {
     });
 
     expect(result.encounterResolved).toBe(true);
+    // player_dead never reaches the award evaluation, regardless of xpValue.
+    expect(tx.encounter.findUnique).not.toHaveBeenCalled();
+    expect(tx.character.update).not.toHaveBeenCalled();
+  });
+
+  describe("XP award (docs/DECISION_XP_AWARD_AUTHORITY.md)", () => {
+    it("grants the exact sum of enemy xpValue via an atomic increment, never an absolute value, when all enemies are dead", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+        { id: "enemy-2", isPlayer: false, hp: 0, xpValue: 25 },
+      ]);
+
+      const result = await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(result.encounterResolved).toBe(true);
+      // Recipient derived from Encounter → Campaign → characterId, never a
+      // client/AI/combatant-supplied id.
+      expect(tx.encounter.findUnique).toHaveBeenCalledWith({
+        where: { id: "enc-1" },
+        select: { campaign: { select: { characterId: true } } },
+      });
+      // Exact shape: an atomic `increment`, nothing else in `data` — never
+      // `xp: <computed absolute number>`, and `level` is never touched.
+      expect(tx.character.update).toHaveBeenCalledWith({
+        where: { id: "char-1" },
+        data: { xp: { increment: 75 } },
+      });
+    });
+
+    it("treats a single enemy missing xpValue as fail-closed: total 0, no partial award", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+        { id: "enemy-2", isPlayer: false, hp: 0, xpValue: null },
+      ]);
+
+      const result = await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(result.encounterResolved).toBe(true);
+      // The 50 from enemy-1 is never paid out just because enemy-2 is unrated.
+      expect(tx.character.update).not.toHaveBeenCalled();
+    });
+
+    it("treats xpValue: 0 as a valid, non-unavailable amount and sums it normally", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+        { id: "enemy-2", isPlayer: false, hp: 0, xpValue: 0 },
+      ]);
+
+      const result = await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(result.encounterResolved).toBe(true);
+      // xpValue: 0 is not "unavailable" — it contributes 0, it does not zero
+      // the whole encounter the way xpValue: null does above.
+      expect(tx.character.update).toHaveBeenCalledWith({
+        where: { id: "char-1" },
+        data: { xp: { increment: 50 } },
+      });
+    });
+
+    it("resolves normally without touching Character.xp when the total award is exactly 0", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 0 },
+      ]);
+
+      const result = await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(result.encounterResolved).toBe(true);
+      expect(tx.character.update).not.toHaveBeenCalled();
+    });
+
+    it("grants independent increments across two distinct awards without reconstructing XP from a prior snapshot", async () => {
+      const firstTx = buildMockTx();
+      (firstTx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 40 },
+      ]);
+
+      await finalizeEncounterTurn({
+        tx: firstTx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      const secondTx = buildMockTx();
+      (secondTx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 15 },
+      ]);
+
+      await finalizeEncounterTurn({
+        tx: secondTx,
+        encounterId: "enc-2",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      // Each award is an independent `increment` call scoped to its own
+      // transaction — neither reads nor depends on the other's outcome.
+      expect(firstTx.character.update).toHaveBeenCalledWith({
+        where: { id: "char-1" },
+        data: { xp: { increment: 40 } },
+      });
+      expect(secondTx.character.update).toHaveBeenCalledWith({
+        where: { id: "char-1" },
+        data: { xp: { increment: 15 } },
+      });
+    });
+  });
+
+  it("takes the fail-closed path (claim.count === 0) without throwing when another transaction already won the claim, and never grants XP", async () => {
+    const tx = buildMockTx();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 15 },
+      { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+    ]);
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+
+    const result = await finalizeEncounterTurn({
+      tx,
+      encounterId: "enc-1",
+      currentTurnIndex: 0,
+      round: 1,
+      collectEvents: false,
+    });
+
+    // The encounter is still mechanically resolved from the caller's point of
+    // view, but this transaction never reached the count === 1 winner branch —
+    // the only branch the award producer may run in — so the 50 xpValue on
+    // enemy-1 is never paid out.
+    expect(result.encounterResolved).toBe(true);
+    expect(tx.encounter.updateMany).toHaveBeenCalledWith({
+      where: { id: "enc-1", status: "active" },
+      data: { status: "resolved" },
+    });
+    expect(tx.encounter.update).not.toHaveBeenCalled();
+    expect(tx.encounter.findUnique).not.toHaveBeenCalled();
+    expect(tx.character.update).not.toHaveBeenCalled();
+  });
+
+  it("takes the fail-closed path for any claim.count other than exactly 1, and never grants XP", async () => {
+    const tx = buildMockTx();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 15 },
+      { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+    ]);
+    // Defensive case: an unexpected match count must not be treated as a win.
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 2 });
+
+    const result = await finalizeEncounterTurn({
+      tx,
+      encounterId: "enc-1",
+      currentTurnIndex: 0,
+      round: 1,
+      collectEvents: false,
+    });
+
+    expect(result.encounterResolved).toBe(true);
+    expect(tx.character.update).not.toHaveBeenCalled();
   });
 
   it("advances the turn index and emits TURN_ADVANCE when encounter is ongoing", async () => {
@@ -1040,6 +1237,7 @@ describe("finalizeEncounterTurn", () => {
     expect(result.encounterResolved).toBe(false);
     expect(result.nextTurnIndex).toBe(1);
     expect(result.nextRound).toBe(1);
+    expect(tx.encounter.updateMany).not.toHaveBeenCalled();
     expect(tx.encounter.update).toHaveBeenCalledWith({
       where: { id: "enc-1" },
       data: { currentTurnIndex: 1, round: 1 },
