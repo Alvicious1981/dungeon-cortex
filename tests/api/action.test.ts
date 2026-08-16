@@ -20,7 +20,7 @@ vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     campaign: { findUnique: vi.fn() },
     gameLog: { create: vi.fn(), count: vi.fn(() => 1), findMany: vi.fn() },
-    encounter: { update: vi.fn() },
+    encounter: { update: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
     combatant: { findMany: vi.fn(), update: vi.fn() },
     inventoryItem: { delete: vi.fn(), update: vi.fn() },
     character: { findUnique: vi.fn(), update: vi.fn() },
@@ -421,5 +421,117 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
     expect(prisma.character.update).not.toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("Action Route - combat victory grants XP and surfaces level_up_available in the same response (docs/DECISION_XP_AWARD_AUTHORITY.md)", () => {
+  const campaignId = "camp_123";
+  const mockUser = { id: "user_123" };
+  const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
+  const characterId = "char-1";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+  });
+
+  it("increments Character.xp inside the resolving transaction, and the same response's fresh Character read surfaces level_up_available", async () => {
+    const mockContext = {
+      character: {
+        id: characterId,
+        name: "Hero",
+        class: "fighter",
+        level: 1,
+        xp: 250, // xpForLevel(2) = 300 — 50 short of the next ascension
+        maxHp: 20,
+        hp: 20,
+        hitDiceTotal: 1,
+        hitDiceRemaining: 1,
+        stats: { STR: 16, DEX: 10, CON: 10 },
+        spellSlots: null,
+        concentrationSpellId: null,
+        exhaustionLevel: 0,
+        inventory: [],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: {
+        id: "enc_1",
+        currentTurnIndex: 0,
+        round: 1,
+        totalDamageDealt: 0,
+        combatants: [
+          { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: [], concentrationSpellId: null },
+          { id: "t1", name: "Goblin", isPlayer: false, hp: 1, maxHp: 7, conditions: [], concentrationSpellId: null },
+        ],
+      },
+    };
+
+    (buildCampaignContext as any).mockResolvedValue(mockContext);
+
+    // finalizeEncounterTurn re-reads combatants fresh, inside the transaction —
+    // this snapshot (not the attack's own damage math) is what drives
+    // "all_enemies_dead". The enemy already carries its backend-authorized
+    // xpValue snapshot (docs/DECISION_XP_AWARD_AUTHORITY.md §5-§6).
+    (prisma.combatant.findMany as any).mockResolvedValue([
+      { id: "p1", isPlayer: true, hp: 20 },
+      { id: "t1", isPlayer: false, hp: 0, xpValue: 50 },
+    ]);
+    (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
+    // Recipient derived exclusively from persisted state: Encounter → Campaign
+    // → characterId (§4) — never from the client, the AI, or a combatant id.
+    (prisma.encounter.findUnique as any).mockResolvedValue({
+      campaign: { characterId },
+    });
+    // The fresh, post-transaction read that drives detectPendingLevelUp —
+    // reflects Character.xp already incremented by the atomic
+    // `xp: { increment: 50 } }` write made inside the transaction (250 + 50 = 300).
+    (prisma.character.findUnique as any).mockResolvedValue({
+      id: characterId,
+      class: "fighter",
+      level: 1,
+      xp: 300,
+      maxHp: 20,
+      hitDiceTotal: 1,
+      stats: { CON: 10 },
+    });
+
+    const req = new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const frames = body
+      .split("\n\n")
+      .filter((chunk) => chunk.startsWith("data: "))
+      .map((chunk) => JSON.parse(chunk.slice(6)));
+
+    // The award itself: derived from Encounter → Campaign → characterId,
+    // applied as an atomic increment, never an absolute computed value.
+    expect(prisma.encounter.findUnique).toHaveBeenCalledWith({
+      where: { id: "enc_1" },
+      select: { campaign: { select: { characterId: true } } },
+    });
+    expect(prisma.character.update).toHaveBeenCalledWith({
+      where: { id: characterId },
+      data: { xp: { increment: 50 } },
+    });
+
+    // Same response, same request cycle: level_up_available appears because
+    // the fresh post-transaction read already reflects the incremented XP.
+    const levelUpFrames = frames.filter((f: any) => f.t === "level_up_available");
+    expect(levelUpFrames).toHaveLength(1);
+    expect(levelUpFrames[0].payload).toMatchObject({
+      characterId,
+      fromLevel: 1,
+      toLevel: 2,
+    });
   });
 });
