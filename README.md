@@ -60,7 +60,6 @@ Copy `.env.example` to `.env` and fill the local values before running the app.
 | --- | --- | --- | --- |
 | `DATABASE_URL` | Yes | Yes | Main PostgreSQL connection string used by Prisma. |
 | `DIRECT_URL` | Yes | Usually yes | Direct database connection used by Prisma workflows. |
-| `DEV_USER_ID` | Yes for local no-auth dev | No | Local development user fallback. |
 | `PRIVATE_MODE_ENABLED` | Yes for current single-user private mode; set to true | No; safe default is `false` | Fail-closed gate. Set to literal `true` to enable single-user private mode (development only). This is not authentication and does not provide multi-user isolation. Never enable in public deployments. |
 | `OPENAI_API_KEY` | Optional; app uses mock narration without it | Yes | Enables real AI DM narration and authenticated embedding requests. |
 | `NEXT_PUBLIC_SUPABASE_URL` | No; transitional until real auth exists | No; inactive until real Supabase Auth wiring exists | Public Supabase project URL reserved for future auth wiring. |
@@ -106,7 +105,6 @@ Confirm that PostgreSQL is running and that `.env` contains valid local values:
 ```text
 DATABASE_URL=
 DIRECT_URL=
-DEV_USER_ID=
 ```
 
 ### Prisma client errors
