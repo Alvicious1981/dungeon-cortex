@@ -27,7 +27,7 @@ import CharacterSheetController from "@/components/character/CharacterSheetContr
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
 import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
-import { getAuthUser } from "@/lib/auth/session";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -39,6 +39,22 @@ interface CampaignPageProps {
 type SpellSlotData = Record<string, { total: number; used: number }>;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Resolves the current user or triggers the segment's not-found boundary
+ * when private mode isn't enabled — an expected fail-closed state, not a
+ * server error.
+ */
+async function requireCampaignUser() {
+  try {
+    return await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      notFound();
+    }
+    throw e;
+  }
+}
 
 function parseSpellSlots(raw: unknown): SpellSlotData | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -129,7 +145,7 @@ function itemStatLine(type: string, properties: unknown): string {
 
 export async function generateMetadata({ params }: CampaignPageProps) {
   const { id } = await params;
-  const user = await getAuthUser();
+  const user = await requireCampaignUser();
   const campaign = await prisma.campaign.findFirst({ where: { id, userId: user.id } });
   return {
     title: campaign
@@ -142,7 +158,7 @@ export async function generateMetadata({ params }: CampaignPageProps) {
 
 export default async function CampaignPage({ params }: CampaignPageProps) {
   const { id } = await params;
-  const user = await getAuthUser();
+  const user = await requireCampaignUser();
 
   const campaign = await prisma.campaign.findFirst({
     where: { id, userId: user.id },

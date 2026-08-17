@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/db/prisma";
-import { getAuthUser } from "@/lib/auth/session";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { buildMerchantPayload, MerchantArchetype, TradeResult } from "@/lib/rules/trade";
 import { revalidatePath } from "next/cache";
 
@@ -14,9 +14,14 @@ export async function executeTradeAction(
   npcSeed: string,
   archetype: MerchantArchetype
 ): Promise<TradeResult> {
-  const user = await getAuthUser();
-  if (!user) {
-    return { success: false, action, itemName: "Unknown", quantity: 0, goldDelta: 0, newGoldBalance: 0, error: "Unauthorized" };
+  let user;
+  try {
+    user = await getAuthUser();
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return { success: false, action, itemName: "Unknown", quantity: 0, goldDelta: 0, newGoldBalance: 0, error: "Unauthorized" };
+    }
+    throw e;
   }
 
   try {
