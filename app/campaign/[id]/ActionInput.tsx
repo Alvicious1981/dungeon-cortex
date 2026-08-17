@@ -28,6 +28,7 @@ import {
   dispatchDungeonActionEnd,
   dispatchDungeonActionError,
   dispatchDungeonActionStart,
+  dispatchDungeonTargetSelection,
   type DungeonActionRequestDetail,
 } from "@/lib/events/action-transport";
 
@@ -77,11 +78,15 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
     });
   }, [aliveHostileTargets]);
 
+  useEffect(() => {
+    dispatchDungeonTargetSelection(selectedTargetIds);
+  }, [selectedTargetIds]);
+
   function toggleTarget(targetId: string) {
     setSelectedTargetIds((current) =>
       current.includes(targetId)
-        ? []
-        : [targetId]
+        ? current.filter((id) => id !== targetId)
+        : [...current, targetId]
     );
   }
 
@@ -207,7 +212,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
       const targetAwareDetail =
         detail.request.action.trim() === "Attack" &&
         detail.request.targetIds === undefined &&
-        selectedTargetIds.length > 0
+        selectedTargetIds.length === 1
           ? {
               ...detail,
               request: {
@@ -336,7 +341,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
                     }`}
                   >
                     <input
-                      type="radio"
+                      type="checkbox"
                       name="action-target"
                       checked={selected}
                       disabled={submitting}

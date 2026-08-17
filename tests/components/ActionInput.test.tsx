@@ -123,8 +123,7 @@ describe("ActionInput shared SSE transport", () => {
       />
     );
 
-    fireEvent.click(getByRole("radio", { name: "Goblin Alpha10/10" }));
-    fireEvent.click(getByRole("radio", { name: "Goblin Beta10/10" }));
+    fireEvent.click(getByRole("checkbox", { name: "Goblin Alpha10/10" }));
     act(() => {
       requestDungeonAction({ action: "Attack" });
     });
@@ -135,9 +134,47 @@ describe("ActionInput shared SSE transport", () => {
       expect.objectContaining({ method: "POST" })
     );
     expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toMatchObject({
-      action: "Attack", targetIds: ["enemy-2"], requestId: expect.any(String),
+      action: "Attack", targetIds: ["enemy-1"], requestId: expect.any(String),
     });
 
     window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
+  });
+
+  it("preserves multiple selected targets for actions that allow them", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ t: "done" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+    const { getByRole, getByLabelText } = render(
+      <ActionInput
+        campaignId="campaign-1"
+        selectableTargets={[
+          {
+            id: "enemy-1", name: "Goblin Alpha", hp: 10, maxHp: 10,
+            isPlayer: false,
+          },
+          {
+            id: "enemy-2", name: "Goblin Beta", hp: 10, maxHp: 10,
+            isPlayer: false,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.click(getByRole("checkbox", { name: "Goblin Alpha10/10" }));
+    fireEvent.click(getByRole("checkbox", { name: "Goblin Beta10/10" }));
+    fireEvent.change(getByLabelText("Tu acción"), {
+      target: { value: "Cast Magic Missile" },
+    });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toMatchObject({
+      action: "Cast Magic Missile",
+      targetIds: ["enemy-1", "enemy-2"],
+      requestId: expect.any(String),
+    });
   });
 });

@@ -13,6 +13,7 @@ describe("deterministic intent parser", () => {
 
   it.each([
     ["attack the goblin", "attack", "goblin"],
+    ["I shoot the goblin", "attack", "goblin"],
     ["atacar al goblin", "attack", "goblin"],
     ["use the Potion of Healing", "use_item", "Potion of Healing"],
     ["equip the longsword", "equip", "longsword"],
@@ -39,6 +40,24 @@ describe("deterministic intent parser", () => {
   it("keeps non-mechanical roleplay as general narration", async () => {
     await expect(parseIntent("I greet the innkeeper", "ignored")).resolves.toEqual({
       actionType: "general",
+    });
+    await expect(
+      parseIntent("I tell the innkeeper I am ready", "ignored")
+    ).resolves.toEqual({
+      actionType: "general",
+    });
+  });
+
+  it("flags an unsupported mechanical action for structured clarification", async () => {
+    await expect(
+      parseIntent("I try to disarm the goblin", "ignored")
+    ).resolves.toEqual({
+      actionType: "mechanical_ambiguous",
+    });
+    await expect(
+      parseIntent("I poison the goblin", "ignored")
+    ).resolves.toEqual({
+      actionType: "mechanical_ambiguous",
     });
   });
 });

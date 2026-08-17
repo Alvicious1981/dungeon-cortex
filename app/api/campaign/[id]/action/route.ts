@@ -496,6 +496,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     // LLM Intent Parsing (for natural language actions)
     const intent = await parseIntent(trimmedAction, systemContext);
     actionTypeForSession = intent.actionType;
+    if (intent.actionType === "mechanical_ambiguous") {
+      return NextResponse.json(
+        {
+          error:
+            "That sounds like a mechanical action, but it could not be resolved safely. State the exact action and target.",
+          code: "MECHANICAL_CLARIFICATION_REQUIRED",
+        },
+        { status: 400 }
+      );
+    }
     if (intent.actionType === "cast_spell" && !intent.spellName) {
       return NextResponse.json(
         { error: "An exact spell name is required for backend resolution." },
@@ -803,21 +813,49 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
-    if (intent.actionType === "attack" && intent.targetName) {
+    if (intent.actionType === "attack") {
       if (!context.activeEncounter) {
         return NextResponse.json({ error: "No active encounter. You must be in combat to attack." }, { status: 400 });
       }
 
-      const normalizedTarget = intent.targetName.toLowerCase();
-      const targets = context.activeEncounter.combatants.filter(
-        (combatant) =>
-          !combatant.isPlayer &&
-          combatant.hp > 0 &&
-          combatant.name.toLowerCase().includes(normalizedTarget)
-      );
+      let targets: ContextCombatant[];
+      if (body.targetIds?.length) {
+        if (body.targetIds.length !== 1) {
+          return NextResponse.json(
+            { error: "A weapon attack requires exactly one target." },
+            { status: 400 }
+          );
+        }
+        targets = context.activeEncounter.combatants.filter(
+          (combatant) =>
+            combatant.id === body.targetIds![0] &&
+            !combatant.isPlayer &&
+            combatant.hp > 0
+        );
+      } else if (intent.targetName) {
+        const normalizedTarget = intent.targetName.toLowerCase();
+        targets = context.activeEncounter.combatants.filter(
+          (combatant) =>
+            !combatant.isPlayer &&
+            combatant.hp > 0 &&
+            combatant.name.toLowerCase().includes(normalizedTarget)
+        );
+      } else {
+        return NextResponse.json(
+          { error: "Attack requires one exact target." },
+          { status: 400 }
+        );
+      }
 
       if (targets.length !== 1) {
-        return NextResponse.json({ error: `Target "${intent.targetName}" not found.` }, { status: 400 });
+        return NextResponse.json(
+          {
+            error: intent.targetName
+              ? `Target "${intent.targetName}" was not found or is ambiguous.`
+              : "The selected hostile target is invalid.",
+          },
+          { status: 400 }
+        );
       }
 
       const foundWeapon = findMainHandWeapon(context.character.inventory);

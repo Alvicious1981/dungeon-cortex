@@ -4,10 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   DUNGEON_ACTION_END,
   DUNGEON_ACTION_ERROR,
+  DUNGEON_TARGET_SELECTION_CHANGE,
   createDungeonActionRequestId,
+  requestDungeonAttack,
   requestDungeonAction,
   type DungeonActionErrorDetail,
   type DungeonActionRequestDetail,
+  type DungeonTargetSelectionDetail,
 } from "@/lib/events/action-transport";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -131,6 +134,7 @@ const ACTION_META: Record<string, ActionMeta> = {
 export default function MacroDeck({ inCombat }: Props) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const pendingRequestId = useRef<string | null>(null);
 
   const actions = inCombat ? COMBAT_ACTIONS : EXPLORATION_ACTIONS;
@@ -152,24 +156,44 @@ export default function MacroDeck({ inCombat }: Props) {
       }
     }
 
+    function handleTargetSelection(event: Event) {
+      const detail = (event as CustomEvent<DungeonTargetSelectionDetail>).detail;
+      setSelectedTargetIds(detail.targetIds);
+    }
+
     window.addEventListener(DUNGEON_ACTION_ERROR, handleActionError);
     window.addEventListener(DUNGEON_ACTION_END, handleActionEnd);
+    window.addEventListener(
+      DUNGEON_TARGET_SELECTION_CHANGE,
+      handleTargetSelection
+    );
     return () => {
       window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
       window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);
+      window.removeEventListener(
+        DUNGEON_TARGET_SELECTION_CHANGE,
+        handleTargetSelection
+      );
     };
   }, []);
 
   function handleAction(actionText: string) {
     if (isAnyLoading) return;
+    const canonicalAction = COMBAT_ACTION_REQUESTS[actionText] ?? actionText;
+    if (canonicalAction === "Attack" && selectedTargetIds.length !== 1) {
+      setError("Selecciona exactamente un objetivo para atacar.");
+      return;
+    }
+
     const requestId = createDungeonActionRequestId();
     pendingRequestId.current = requestId;
     setError(null);
     setLoadingAction(actionText);
-    requestDungeonAction(
-      { action: COMBAT_ACTION_REQUESTS[actionText] ?? actionText },
-      requestId
-    );
+    if (canonicalAction === "Attack") {
+      requestDungeonAttack(selectedTargetIds[0]!, requestId);
+    } else {
+      requestDungeonAction({ action: canonicalAction }, requestId);
+    }
   }
 
   const sectionLabel = inCombat ? "Acciones de combate" : "Acciones de exploración";

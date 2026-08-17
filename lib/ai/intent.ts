@@ -8,6 +8,7 @@
  *   - "cast_spell"  → validate spell slots via lib/rules/magic
  *   - "attack"      → resolve attack roll via lib/rules/combat
  *   - "use_item"    → validate inventory via lib/rules/inventory
+ *   - "mechanical_ambiguous" → request clarification; never narrate as resolved
  *   - "general"     → no mechanical gate; pass straight to narration
  *
  * Architecture contract:
@@ -36,9 +37,21 @@ export const IntentSchema = z.object({
    * - "rest"       — player is attempting to take a short or long rest
    * - "explore"    — player is interacting with the environment (search, move, etc.)
    * - "travel"     — player is traveling overland
+   * - "mechanical_ambiguous" — potentially mechanical, but not safely classifiable
    * - "general"    — roleplay, dialogue, or anything non-mechanical
    */
-  actionType: z.enum(["cast_spell", "attack", "use_item", "equip", "rest", "explore", "travel", "move", "general"]),
+  actionType: z.enum([
+    "cast_spell",
+    "attack",
+    "use_item",
+    "equip",
+    "rest",
+    "explore",
+    "travel",
+    "move",
+    "mechanical_ambiguous",
+    "general",
+  ]),
 
   /**
    * Name of the target (creature, NPC, object) if one is present in the input.
@@ -98,7 +111,7 @@ export async function parseIntent(
   void systemContext;
   const input = playerInput.trim().replace(/\s+/g, " ");
   const lower = input.toLocaleLowerCase("en");
-  let intent: Intent = { actionType: "general" };
+  let intent: Intent = { actionType: "mechanical_ambiguous" };
 
   const prefixedValue = (pattern: RegExp): string | undefined => {
     const match = input.match(pattern);
@@ -141,11 +154,15 @@ export async function parseIntent(
       ...(spellLevel !== undefined ? { spellLevel } : {}),
       ...(targetName ? { targetName } : {}),
     };
-  } else if (/^(?:i\s+)?(?:attack|strike|hit|ataco|atacar|golpeo|golpear)\b/i.test(input)) {
+  } else if (
+    /^(?:i\s+)?(?:attack|strike|hit|shoot|fire|stab|slash|punch|kick|ataco|atacar|golpeo|golpear|disparo|disparar|apuñalo|apuñalar)\b/i.test(
+      input
+    )
+  ) {
     intent = {
       actionType: "attack",
       targetName: prefixedValue(
-        /^(?:i\s+)?(?:attack|strike|hit|ataco|atacar|golpeo|golpear)(?:\s+(?:at|al|a|contra))?\s*(.*)$/i
+        /^(?:i\s+)?(?:attack|strike|hit|shoot|fire|stab|slash|punch|kick|ataco|atacar|golpeo|golpear|disparo|disparar|apuñalo|apuñalar)(?:\s+(?:at|al|a|contra))?\s*(.*)$/i
       ),
     };
   } else if (/^(?:i\s+)?(?:use|drink|usar|uso|beber|bebo)\b/i.test(input)) {
@@ -192,6 +209,12 @@ export async function parseIntent(
     intent = { actionType: "explore" };
   } else if (lower === "rest" || lower === "descansar" || lower === "descanso") {
     intent = { actionType: "rest", restType: "short" };
+  } else if (
+    /^(?:(?:i\s+)?(?:say|ask|tell|greet|speak|talk|reply|answer|smile|laugh|cry|nod|bow|wave|sing|whisper|shout)|(?:digo|pregunto|saludo|hablo|respondo|sonrío|rio|río|lloro|asiento|me\s+inclino|canto|susurro|grito))\b|^(?:hello|hi|greetings|hola|buenas)\b/i.test(
+      input
+    )
+  ) {
+    intent = { actionType: "general" };
   }
 
   intent = IntentSchema.parse(intent);

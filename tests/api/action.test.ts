@@ -7,6 +7,7 @@ import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
 import { resolveCachedSpell } from "@/lib/rules/spell-resolution-service";
 import { checkpointAcceptedAction } from "@/lib/db/session-journal";
+import { streamNarrative } from "@/lib/ai/narrator";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -93,6 +94,103 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     vi.clearAllMocks();
     (getAuthUser as any).mockResolvedValue(mockUser);
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+  });
+
+  function createAttackContext() {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20,
+        ac: 14, conditions: [], x: 0, y: 0, size: "Medium",
+      },
+      {
+        id: "t1", name: "Goblin", isPlayer: false, hp: 10, maxHp: 10,
+        ac: 12, conditions: [], x: 1, y: 0, size: "Medium",
+      },
+    ];
+    return {
+      character: {
+        id: "char-1", name: "Hero", level: 1,
+        stats: { STR: 10, DEX: 10 }, inventory: [],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        map: { gridType: "SQUARE", width: 8, height: 8, cellSize: 5 },
+        combatants,
+      },
+    };
+  }
+
+  it("rejects an ambiguous mechanical action before narration", async () => {
+    (buildCampaignContext as any).mockResolvedValue(createAttackContext());
+    (parseIntent as any).mockResolvedValue({
+      actionType: "mechanical_ambiguous",
+    });
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action: "I try to disarm the goblin" }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "MECHANICAL_CLARIFICATION_REQUIRED",
+    });
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+  });
+
+  it("resolves a classified Attack from targetIds before narrating backend facts", async () => {
+    const context = createAttackContext();
+    (buildCampaignContext as any).mockResolvedValue(context);
+    (parseIntent as any).mockResolvedValue({ actionType: "attack" });
+    (prisma.combatant.findMany as any).mockResolvedValue(
+      context.activeEncounter.combatants
+    );
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "I shoot",
+          targetIds: ["t1"],
+        }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(200);
+    expect(prisma.combatant.update).toHaveBeenCalled();
+    const narrativeCall = (streamNarrative as any).mock.calls.at(-1);
+    expect(narrativeCall?.[1]).toBe("I shoot");
+    expect(narrativeCall?.[2]?.facts.length).toBeGreaterThan(0);
+  });
+
+  it("rejects a classified Attack without a target before narration", async () => {
+    (buildCampaignContext as any).mockResolvedValue(createAttackContext());
+    (parseIntent as any).mockResolvedValue({ actionType: "attack" });
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action: "I attack" }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Attack requires one exact target.",
+    });
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
   });
 
   it("resolves a weapon attack against exactly one selected target", async () => {
@@ -610,5 +708,67 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(stream).toContain('"targetId":"t1"');
     expect(stream).toContain('"targetId":"t2"');
     expect(stream).not.toContain('"targetId":"t3"');
+  });
+
+  it("preserves explicitly allowed multi-target spell requests", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+        initiativeTotal: 18, conditions: [], stats: { DEX: 12 },
+        concentrationSpellId: null, x: 0, y: 0, size: "Medium",
+      },
+      {
+        id: "t1", name: "Goblin One", isPlayer: false, hp: 10, maxHp: 10, ac: 12,
+        initiativeTotal: 12, conditions: [], stats: { DEX: 10 },
+        concentrationSpellId: null, x: 1, y: 0, size: "Medium",
+      },
+      {
+        id: "t2", name: "Goblin Two", isPlayer: false, hp: 10, maxHp: 10, ac: 12,
+        initiativeTotal: 10, conditions: [], stats: { DEX: 10 },
+        concentrationSpellId: null, x: 2, y: 0, size: "Medium",
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1", name: "Hero", class: "wizard", level: 1,
+        stats: { INT: 16 }, inventory: [],
+        spellSlots: { "1": { current: 1, max: 1 } },
+        concentrationSpellId: null,
+      },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        map: { gridType: "SQUARE", width: 8, height: 8, cellSize: 5 },
+        combatants,
+      },
+    });
+    (parseIntent as any).mockResolvedValue({
+      actionType: "cast_spell", spellName: "Magic Missile", spellLevel: 1,
+    });
+    (resolveCachedSpell as any).mockResolvedValue({
+      id: "magic-missile", name: "Magic Missile", level: 1,
+      concentration: false,
+      sourceEndpoint: "https://www.dnd5eapi.co/api/2014/spells/magic-missile",
+      type: "damage", dice: "1d2", damageType: "force",
+      hasSavingThrow: false, saveAbility: null, saveDamage: "none",
+      condition: null, areaOfEffect: null,
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const response = await POST(new NextRequest(
+      `http://localhost/api/campaign/${campaignId}/action`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: "Cast Magic Missile",
+          targetIds: ["t1", "t2"],
+        }),
+      }
+    ), { params: Promise.resolve({ id: campaignId }) });
+
+    expect(response.status).toBe(200);
+    const updatedIds = (prisma.combatant.update as any).mock.calls
+      .map(([args]: [{ where?: { id?: string } }]) => args.where?.id);
+    expect(updatedIds).toEqual(expect.arrayContaining(["t1", "t2"]));
   });
 });
