@@ -67,6 +67,20 @@ export interface ImprovisedAction {
   readonly opposedBy?: ImprovisedOpposition;
 }
 
+export interface ImprovisedMatch {
+  /** The table entry the phrasing matched. */
+  readonly action: ImprovisedAction;
+  /**
+   * Whatever followed the verb, trimmed. "shove the goblin" leaves "the
+   * goblin"; "hide" leaves nothing.
+   *
+   * Reported raw: naming the creature is the caller's problem, because
+   * stripping articles and prepositions is language handling and this module
+   * owns rules. Undefined when the verb stood alone.
+   */
+  readonly rest?: string;
+}
+
 export interface ImprovisedOpposition {
   /**
    * Skills the resisting creature may use. The best passive score among them
@@ -77,14 +91,16 @@ export interface ImprovisedOpposition {
   /**
    * Who resists.
    *
-   * - "observers": everyone present could notice, so the most alert of them
-   *   sets the difficulty. Sneaking past a patrol is as hard as its sharpest
-   *   sentry.
-   * - "single": the attempt is directed at one creature. Applied only when
-   *   exactly one candidate is present; with several the caller cannot know
-   *   which one is meant, so it falls back to the band rather than guessing.
+   * - "observers": anyone present could notice, so the most alert of them sets
+   *   the difficulty. Hiding is like this — naming one guard does not stop a
+   *   second one seeing you.
+   * - "target": exactly one creature resists, the one the action names. The SRD
+   *   contests pickpocketing against *the mark's* passive Perception and a lie
+   *   against *the listener's* Insight, not against the sharpest bystander. If
+   *   the named creature cannot be identified, the attempt falls back to its
+   *   band rather than contesting against a guess.
    */
-  readonly scope: "observers" | "single";
+  readonly scope: "observers" | "target";
 }
 
 /**
@@ -114,7 +130,7 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
     band: "medium",
     // SRD resolves shoving and grappling as a contest against the target's
     // Athletics, or its Acrobatics if that serves it better.
-    opposedBy: { skills: ["Athletics", "Acrobatics"], scope: "single" },
+    opposedBy: { skills: ["Athletics", "Acrobatics"], scope: "target" },
   },
   {
     // Overcoming something built or weighted to resist: a barred door, a
@@ -138,8 +154,9 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:pickpocket|steal|palm|swipe)\b|^(?:robo|robar|hurto|hurtar|birlo|birlar)\b/i,
     skill: "Sleight of Hand",
     band: "hard",
-    // SRD: contested by the target's passive Perception.
-    opposedBy: { skills: ["Perception"], scope: "observers" },
+    // SRD: contested by the mark's own passive Perception — not by whoever
+    // happens to be standing nearby with the sharpest eyes.
+    opposedBy: { skills: ["Perception"], scope: "target" },
   },
   {
     pattern:
@@ -194,8 +211,9 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:lie|deceive|bluff|trick|disguise)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir|disfrazo|disfrazarme)\b/i,
     skill: "Deception",
     band: "hard",
-    // SRD: contested by the listener's Insight.
-    opposedBy: { skills: ["Insight"], scope: "observers" },
+    // SRD: contested by the listener's Insight. The lie is told to someone
+    // specific; an unrelated creature overhearing it is not the contest.
+    opposedBy: { skills: ["Insight"], scope: "target" },
   },
   {
     pattern:
@@ -223,16 +241,24 @@ const ATTEMPT_PREFIX =
  * task a check can settle, and the caller is expected to ask the player what
  * they are actually doing rather than invent an outcome.
  */
-export function matchImprovisedAction(input: string): ImprovisedAction | null {
+export function matchImprovisedAction(input: string): ImprovisedMatch | null {
   // Normalised here rather than by the caller so that every caller matches the
   // same way. The action route looks the entry up a second time to read its
   // opposition, and the two lookups must not disagree because one of them
   // collapsed runs of whitespace and the other did not.
   const normalised = input.trim().replace(/\s+/g, " ");
   const attempted = normalised.replace(ATTEMPT_PREFIX, "");
-  return (
-    IMPROVISED_ACTIONS.find(
-      (action) => action.pattern.test(normalised) || action.pattern.test(attempted)
-    ) ?? null
-  );
+
+  for (const action of IMPROVISED_ACTIONS) {
+    // Both forms are tried, and the remainder is taken from whichever matched,
+    // so "I try to shove the goblin" yields the same remainder as "I shove the
+    // goblin" instead of one that still carries the attempt framing.
+    const match = action.pattern.exec(normalised) ?? action.pattern.exec(attempted);
+    if (!match) continue;
+
+    const rest = match.input.slice(match.index + match[0].length).trim();
+    return { action, ...(rest ? { rest } : {}) };
+  }
+
+  return null;
 }

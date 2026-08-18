@@ -297,22 +297,99 @@ describe("una contienda deriva la CD del que se resiste", () => {
     expect(payload.band).toBe("medium");
   });
 
-  it("un empujón con varios candidatos cae a la banda en vez de adivinar objetivo", async () => {
-    // Alcance "single": con dos hostiles no se puede saber a cuál empuja, así
-    // que no se contiende contra una suposición.
+  it("un observador inconsciente no vigila, aunque siga en pie", async () => {
+    // hp > 0 no basta: un centinela dormido por un conjuro conserva sus puntos
+    // de golpe y no se entera de nada. Antes fijaba la CD completa.
     withHostiles([
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
-      { id: "t2", name: "Orc", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: ["unconscious"], stats: { WIS: 18 } },
     ]);
-    expect((await checkPayload("I shove the goblin")).dcSource).toBe("band");
 
-    // Con uno solo no hay ambigüedad y sí se contiende.
+    expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
+  });
+
+  it("un observador aturdido sí vigila: no puede actuar, pero mira", async () => {
+    withHostiles([
+      { id: "t1", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: ["stunned"], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I hide behind the crates")).dc).toBe(14);
+  });
+
+  it("robar a alguien lo resiste ese alguien, no el testigo más agudo", async () => {
+    // El SRD enfrenta el hurto a la Percepción del propio incauto. Antes la CD
+    // salía del guardia de al lado, que ni siquiera era el objetivo.
+    withHostiles([
+      { id: "t1", name: "Merchant", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 8 } },
+      { id: "t2", name: "Guard", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
+    ]);
+
+    const payload = await checkPayload("I pickpocket the Merchant");
+    expect(payload.dcSource).toBe("contest");
+    expect(payload.dc).toBe(9); // Merchant WIS 8 → 10 - 1
+  });
+
+  it("mentir lo resiste quien escucha, no un hostil ajeno", async () => {
+    withHostiles([
+      { id: "t1", name: "Innkeeper", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 10 } },
+      { id: "t2", name: "Inquisitor", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
+    ]);
+
+    expect((await checkPayload("I lie to the Innkeeper")).dc).toBe(10);
+  });
+
+  it("esconderse sigue siendo cosa de todos: nombrar a uno no ciega al otro", async () => {
+    // Contraste deliberado con los dos anteriores. Decir de quién te escondes no
+    // impide que el segundo centinela te vea.
+    withHostiles([
+      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I hide from the Drunk")).dc).toBe(14);
+  });
+
+  it("un objetivo nombrado que no existe cae a la banda, no adivina", async () => {
+    withHostiles([
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I pickpocket the Merchant")).dcSource).toBe("band");
+  });
+
+  it("nombrar al empujado lo distingue entre varios candidatos", async () => {
+    // Antes de extraer objetivo, dos hostiles bastaban para renunciar a la
+    // contienda. El nombre resuelve la ambigüedad: se empuja al goblin, y la CD
+    // sale de la Fuerza del goblin, no de la del orco.
+    withHostiles([
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18, DEX: 8 } },
+      { id: "t2", name: "Orc", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4, DEX: 4 } },
+    ]);
+
+    const payload = await checkPayload("I shove the Goblin");
+    expect(payload.dcSource).toBe("contest");
+    expect(payload.dc).toBe(14);
+  });
+
+  it("dos criaturas con el mismo nombre siguen siendo ambiguas", async () => {
+    // El nombre ya no basta para distinguirlas, así que no se contiende contra
+    // una suposición — la regla que ya aplica la puerta de ataque.
+    withHostiles([
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+      { id: "t2", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4 } },
+    ]);
+
+    expect((await checkPayload("I shove the Goblin")).dcSource).toBe("band");
+  });
+
+  it("sin nombrar objetivo, un único candidato es inequívoco", async () => {
     withHostiles([
       { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
     ]);
-    const single = await checkPayload("I shove the goblin");
-    expect(single.dcSource).toBe("contest");
-    expect(single.dc).toBe(14);
+
+    const payload = await checkPayload("I shove");
+    expect(payload.dcSource).toBe("contest");
+    expect(payload.dc).toBe(14);
   });
 
   it("la línea del registro distingue una contienda de una banda", async () => {
