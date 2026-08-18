@@ -5,6 +5,7 @@ import { getAuthUser } from "@/lib/auth/session";
 import { NextRequest } from "next/server";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
+import { streamNarrative } from "@/lib/ai/narrator";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -76,6 +77,34 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     vi.clearAllMocks();
     (getAuthUser as any).mockResolvedValue(mockUser);
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+  });
+
+  it("rejects an ambiguous mechanical action before narration", async () => {
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
+      characterStats: { conditions: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: null,
+    });
+    (parseIntent as any).mockResolvedValue({ actionType: "mechanical_ambiguous" });
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "I try to disarm the goblin" }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      code: "MECHANICAL_CLARIFICATION_REQUIRED",
+    });
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
   });
 
   it("handles multi-target Attack via targetIds", async () => {

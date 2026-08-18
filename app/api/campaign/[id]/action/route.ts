@@ -375,6 +375,21 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     // LLM Intent Parsing (for natural language actions)
     const intent = await parseIntent(trimmedAction, systemContext);
 
+    // ── Gate: unclassifiable mechanical intent ──────────────────────────────────
+    // Fail closed. The parser could not positively classify this input, so it may
+    // be a mechanical action the rules engine never resolved. Ask for a precise
+    // restatement instead of letting the narrator describe an unresolved outcome.
+    if (intent.actionType === "mechanical_ambiguous") {
+      return NextResponse.json(
+        {
+          error:
+            "That sounds like a mechanical action, but it could not be resolved safely. State the exact action and target.",
+          code: "MECHANICAL_CLARIFICATION_REQUIRED",
+        },
+        { status: 400 }
+      );
+    }
+
     // ── Gate: cast_spell ────────────────────────────────────────────────────────
     if (intent.actionType === "cast_spell" && intent.spellLevel !== undefined) {
       if (!intent.spellName) {
