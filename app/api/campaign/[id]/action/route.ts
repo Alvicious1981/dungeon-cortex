@@ -18,8 +18,10 @@ import {
 } from "@/lib/rules/spell-resolution-service";
 import {
   extractConditions,
+  weaponAttackModifier,
   type DamageType,
 } from "@/lib/rules/combat";
+import { evaluateAbilityCheckAdvantage } from "@/lib/rules/conditions";
 import {
   applyShortRest,
   applyLongRest,
@@ -228,7 +230,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = strMod + 2; // Proficiency baseline
+      const attackModifier = weaponAttackModifier(strMod, context.character.level);
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({
@@ -380,7 +382,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     // After mechanical resolution, proceed to narration using the NEW state.
     // The buildCampaignContext inside streamNarrative will see the updated DB.
   } else {
-    // LLM Intent Parsing (for natural language actions)
+    // Deterministic intent classification for natural-language actions. No
+    // model call: parseIntent resolves by pattern and fails closed, so the same
+    // input always reaches the same gate.
     const intent = await parseIntent(trimmedAction, systemContext);
 
     // ── Gate: improvised action → ability check ─────────────────────────────────
@@ -390,8 +394,22 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     // backend already determined instead of inventing one.
     if (intent.actionType === "ability_check" && intent.skill) {
       const charData = context.character;
+
+      // Advantage and disadvantage come from persisted state, never from the
+      // wording of the action. Exhaustion applies everywhere; conditions live on
+      // the Combatant, so outside an encounter there are none to read.
+      const checkConditions = context.activeEncounter
+        ? extractConditions(
+            context.activeEncounter.combatants.find((c) => c.isPlayer)?.conditions
+          )
+        : [];
+      const { advantage, disadvantage } = evaluateAbilityCheckAdvantage(
+        checkConditions,
+        charData.exhaustionLevel
+      );
+
       const result = resolveAbilityCheck(
-        { skill: intent.skill },
+        { skill: intent.skill, band: intent.band, advantage, disadvantage },
         {
           stats: (charData.stats ?? {}) as Partial<Record<Ability, number>>,
           level: charData.level,
@@ -399,6 +417,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         }
       );
 
+      // The log line states where the DC came from and how the die was rolled,
+      // so the player can audit the number instead of being handed a bare "DC
+      // 15" with no provenance.
       await prisma.gameLog.create({
         data: {
           campaignId,
@@ -407,7 +428,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             `🎲 ${result.skill} check (${result.ability}): rolled ${result.roll} ` +
             `${result.abilityModifier >= 0 ? "+" : ""}${result.abilityModifier}` +
             `${result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : ""}` +
-            ` = ${result.total} vs DC ${result.dc} → ` +
+            `${result.rollMode !== "normal" ? ` with ${result.rollMode}` : ""}` +
+            ` = ${result.total} vs DC ${result.dc} (${result.band}) → ` +
             `${result.success ? "SUCCESS" : "FAILURE"}` +
             `${result.isCriticalSuccess ? " (natural 20)" : ""}` +
             `${result.isCriticalFailure ? " (natural 1)" : ""}.`,
@@ -436,7 +458,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     // ── Gate: cast_spell ────────────────────────────────────────────────────────
-    if (intent.actionType === "cast_spell" && intent.spellLevel !== undefined) {
+    if (intent.actionType === "cast_spell") {
       if (!intent.spellName) {
         return NextResponse.json(
           { error: "An exact spell name is required for backend resolution." },
@@ -444,8 +466,48 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
+      // Resolution comes first, because the SRD record is what decides the cost.
+      // A player who names no level — "I cast Fireball", the ordinary case — is
+      // casting at the spell's own level, not casting for free. This gate used
+      // to be skipped outright whenever intent.spellLevel was undefined, so the
+      // slot went unspent, nothing was rolled, and the narrator described a
+      // spell the rules engine never resolved.
+      const charStats = context.character.stats as Record<string, number>;
+      const spellAbilityKey = spellcastingAbility(context.character.class);
+      const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
+      const profBonus = calculateProficiency(context.character.level);
+
+      const effect: ResolvedSpellEffect | null = await resolveCachedSpell({
+        query: intent.spellName,
+        ...(intent.spellLevel !== undefined ? { slotLevel: intent.spellLevel } : {}),
+        spellcastingMod: abilityMod,
+        characterLevel: context.character.level,
+      });
+
+      if (!effect) {
+        return NextResponse.json(
+          { error: `Spell "${intent.spellName}" is unavailable in the SRD cache.` },
+          { status: 400 }
+        );
+      }
+
+      // Upcasting is legal; downcasting is not. Without this the requested slot
+      // was charged verbatim, so a level-1 slot could pay for a Fireball.
+      if (effect.slotLevel < effect.level) {
+        return NextResponse.json(
+          {
+            error:
+              `${effect.name} is a level ${effect.level} spell and cannot be cast ` +
+              `from a level ${effect.slotLevel} slot.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      const saveDC = calculateSpellSaveDC(abilityMod, profBonus);
       const rawSlots = context.character.spellSlots;
-      const usesSpellSlot = intent.spellLevel > 0;
+      const effectiveSlotLevel = effect.slotLevel;
+      const usesSpellSlot = effectiveSlotLevel > 0;
 
       if (usesSpellSlot && !isSpellSlots(rawSlots)) {
         return NextResponse.json(
@@ -457,38 +519,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       if (
         usesSpellSlot &&
         isSpellSlots(rawSlots) &&
-        !hasAvailableSlot(rawSlots, intent.spellLevel)
+        !hasAvailableSlot(rawSlots, effectiveSlotLevel)
       ) {
         return NextResponse.json(
-          { error: `No available spell slots remaining at level ${intent.spellLevel}.` },
+          { error: `No available spell slots remaining at level ${effectiveSlotLevel}.` },
           { status: 400 }
         );
-      }
-
-      let effect: ResolvedSpellEffect | null = null;
-      let saveDC: number | undefined = undefined;
-
-      {
-        const charStats = context.character.stats as Record<string, number>;
-        const spellAbilityKey = spellcastingAbility(context.character.class);
-        const abilityMod = abilityModifier(charStats[spellAbilityKey] ?? 10);
-        const profBonus = calculateProficiency(context.character.level);
-        const spellEffect = await resolveCachedSpell({
-          query: intent.spellName,
-          slotLevel: intent.spellLevel,
-          spellcastingMod: abilityMod,
-          characterLevel: context.character.level,
-        });
-
-        if (!spellEffect) {
-          return NextResponse.json(
-            { error: `Spell "${intent.spellName}" is unavailable in the SRD cache.` },
-            { status: 400 }
-          );
-        }
-
-        saveDC = calculateSpellSaveDC(abilityMod, profBonus);
-        effect = spellEffect;
       }
 
       let targets: ContextCombatant[] = [];
@@ -519,8 +555,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorConditions: playerConditions,
           targetCombatants: targets,
           spellName: intent.spellName,
-          spellLevel: intent.spellLevel,
-          spellEffect: effect ?? undefined,
+          spellLevel: effectiveSlotLevel,
+          spellEffect: effect,
           spellSaveDC: saveDC,
           rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
           playerCharacterId: context.character.id,
@@ -692,7 +728,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const strMod = abilityModifier(charStats.STR ?? 10);
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = strMod + 2;
+      const attackModifier = weaponAttackModifier(strMod, context.character.level);
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({

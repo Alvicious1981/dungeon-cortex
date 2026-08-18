@@ -20,6 +20,14 @@ export interface ConditionRegistryEntry {
   attackerAdvantage?: boolean;
   /** Attackers suffer disadvantage against a target with this condition. */
   attackerDisadvantage?: boolean;
+  /**
+   * Disadvantage on the creature's own ability checks.
+   *
+   * Distinct from `selfDisadvantageOnAttack`: the SRD applies these to different
+   * sets of conditions, so a single flag cannot serve both. Poisoned imposes
+   * both; Restrained imposes only the attack penalty.
+   */
+  selfDisadvantageOnAbilityCheck?: boolean;
   /** Combatant cannot take actions or reactions. */
   incapacitated?: boolean;
 }
@@ -85,11 +93,17 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     id: "frightened",
     name: "Frightened",
     selfDisadvantageOnAttack: true,
+    // SRD conditions this on the source of the fear being within line of sight.
+    // Line of sight is not modelled, so the penalty is applied whenever the
+    // condition is present. The approximation is deliberate and errs towards the
+    // stricter reading rather than silently dropping the rule.
+    selfDisadvantageOnAbilityCheck: true,
   },
   poisoned: {
     id: "poisoned",
     name: "Poisoned",
     selfDisadvantageOnAttack: true,
+    selfDisadvantageOnAbilityCheck: true,
   },
   // ── No direct attack-roll modifier (tracked for state completeness) ────────
   charmed: {
@@ -183,4 +197,48 @@ export function evaluateAdvantage(
   }
 
   return { advantage: hasAdvantage, disadvantage: hasDisadvantage };
+}
+
+/**
+ * Evaluates the net advantage/disadvantage for an ability check.
+ *
+ * Sibling of evaluateAdvantage, and separate on purpose: the SRD applies
+ * different conditions to attack rolls and to ability checks, so one function
+ * cannot serve both without quietly applying the wrong rule to one of them.
+ *
+ * Exhaustion arrives as a level rather than a condition because that is how it
+ * is persisted (Character.exhaustionLevel), and it is the only source available
+ * outside combat — conditions live on Combatant, which exists only during an
+ * encounter.
+ *
+ * Not covered, deliberately: Blinded and Deafened make a creature automatically
+ * *fail* checks that rely on sight or hearing. Applying that needs to know which
+ * sense a given check uses, which is not modelled; inventing that classification
+ * would be worse than leaving the rule out and saying so.
+ *
+ * @param conditions      Conditions currently affecting the creature.
+ * @param exhaustionLevel D&D 5e exhaustion level (0-6). 1 or more imposes
+ *                        disadvantage on all ability checks.
+ */
+export function evaluateAbilityCheckAdvantage(
+  conditions: readonly string[],
+  exhaustionLevel = 0
+): { advantage: boolean; disadvantage: boolean } {
+  // Multiple sources of disadvantage do not stack in 5e — one is the same as
+  // three — so this is a boolean, not a count.
+  let hasDisadvantage = exhaustionLevel >= 1;
+
+  for (const condId of conditions) {
+    const entry = CONDITION_REGISTRY[condId.toLowerCase()];
+    if (!entry) continue;
+
+    if (entry.selfDisadvantageOnAbilityCheck) hasDisadvantage = true;
+  }
+
+  // No neutralization step, unlike evaluateAdvantage: no condition in the 5e
+  // 2014 SRD grants advantage on ability checks, so there is never anything to
+  // cancel against. `advantage` is reported anyway so the result can be handed
+  // straight to resolveAbilityCheck, and so that adding a future source of
+  // advantage is a change here rather than at every call site.
+  return { advantage: false, disadvantage: hasDisadvantage };
 }

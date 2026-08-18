@@ -8,8 +8,12 @@
  *   - "cast_spell"  → validate spell slots via lib/rules/magic
  *   - "attack"      → resolve attack roll via lib/rules/combat
  *   - "use_item"    → validate inventory via lib/rules/inventory
+ *   - "ability_check" → settle an improvised action via lib/rules/ability-check
  *   - "mechanical_ambiguous" → request clarification; never narrate as resolved
  *   - "general"     → no mechanical gate; pass straight to narration
+ *
+ * Every classification except "general" must have a gate. See the note on
+ * IntentSchema.actionType.
  *
  * Architecture contract:
  *   - This module ONLY classifies intent. It never validates rules or mutates state.
@@ -18,71 +22,8 @@
 
 import { z } from "zod";
 import { getSpellInfo, type SpellEffect } from "@/lib/ai/tools/srd-lookup";
-import { SKILLS, type Skill } from "@/lib/rules/ability-check";
-
-// ---------------------------------------------------------------------------
-// Improvised action vocabulary
-// ---------------------------------------------------------------------------
-
-/**
- * Verbs that describe an improvised action, mapped to the SRD skill that
- * adjudicates it. Checked only after every specific mechanic has been ruled
- * out, so this never shadows a dedicated gate.
- *
- * This is the free, deterministic tier: it costs no model call and always
- * classifies the same input the same way. Anything it does not cover falls
- * through to "mechanical_ambiguous".
- */
-const IMPROVISED_SKILL_PATTERNS: ReadonlyArray<readonly [RegExp, Skill]> = [
-  [
-    /^(?:i\s+)?(?:push|shove|force|pry|break|smash|climb|jump|leap|lift|drag|grapple|wrestle|disarm|swim)\b|^(?:empujo|empujar|fuerzo|forzar|rompo|romper|trepo|trepar|escalo|escalar|salto|saltar|levanto|levantar|arrastro|arrastrar|agarro|agarrar|derribo|derribar|desarmo|desarmar|nado|nadar)\b/i,
-    "Athletics",
-  ],
-  [
-    /^(?:i\s+)?(?:tumble|balance|vault|somersault|dodge)\b|^(?:hago\s+una\s+voltereta|me\s+equilibro|equilibrarme|esquivo|esquivar)\b/i,
-    "Acrobatics",
-  ],
-  [
-    /^(?:i\s+)?(?:pickpocket|steal|palm|swipe)\b|^(?:robo|robar|hurto|hurtar|birlo|birlar)\b/i,
-    "Sleight of Hand",
-  ],
-  [
-    /^(?:i\s+)?(?:sneak|creep|skulk|slip\s+past)\b|^(?:me\s+escabullo|escabullirme|me\s+cuelo|colarme)\b/i,
-    "Stealth",
-  ],
-  [
-    /^(?:i\s+)?(?:listen|spot|notice|watch|peek)\b|^(?:escucho|escuchar|observo|observar|vigilo|vigilar|atisbo|atisbar)\b/i,
-    "Perception",
-  ],
-  [
-    /^(?:i\s+)?(?:examine|inspect|study|analyse|analyze)\b|^(?:examino|examinar|inspecciono|inspeccionar|estudio|estudiar|analizo|analizar)\b/i,
-    "Investigation",
-  ],
-  [
-    /^(?:i\s+)?(?:track|forage|navigate|forrage)\b|^(?:rastreo|rastrear|forrajeo|forrajear|oriento|orientarme)\b/i,
-    "Survival",
-  ],
-  [
-    /^(?:i\s+)?(?:heal|treat|bandage|stabilise|stabilize)\b|^(?:curo|curar|sano|sanar|vendo|vendar|estabilizo|estabilizar)\b/i,
-    "Medicine",
-  ],
-  [
-    /^(?:i\s+)?(?:calm|tame|soothe|ride)\b|^(?:calmo|calmar|domo|domar|monto|montar)\b/i,
-    "Animal Handling",
-  ],
-  [
-    /^(?:i\s+)?(?:persuade|convince|plead|negotiate)\b|^(?:persuado|persuadir|convenzo|convencer|negocio|negociar|suplico|suplicar)\b/i,
-    "Persuasion",
-  ],
-  [
-    /^(?:i\s+)?(?:lie|deceive|bluff|trick|disguise)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir|disfrazo|disfrazarme)\b/i,
-    "Deception",
-  ],
-  [
-    /^(?:i\s+)?(?:intimidate|threaten|menace|scare)\b|^(?:intimido|intimidar|amenazo|amenazar|asusto|asustar)\b/i,
-    "Intimidation",
-  ],
-];
+import { DIFFICULTY_BANDS, SKILLS, type Skill } from "@/lib/rules/ability-check";
+import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -100,10 +41,14 @@ export const IntentSchema = z.object({
    * - "use_item"   — player is attempting to use an inventory item
    * - "equip"      — player is attempting to equip an item
    * - "rest"       — player is attempting to take a short or long rest
-   * - "explore"    — player is interacting with the environment (search, move, etc.)
-   * - "travel"     — player is traveling overland
    * - "mechanical_ambiguous" — potentially mechanical, but not safely classifiable
    * - "general"    — roleplay, dialogue, or anything non-mechanical
+   *
+   * Every value here except "general" MUST have a gate in
+   * app/api/campaign/[id]/action/route.ts that resolves it or refuses it.
+   * Adding one without a gate lets the narrator describe an outcome the rules
+   * engine never determined — enforced by
+   * tests/architecture/intent-gate-exhaustiveness.test.ts.
    */
   actionType: z.enum([
     "cast_spell",
@@ -111,8 +56,6 @@ export const IntentSchema = z.object({
     "use_item",
     "equip",
     "rest",
-    "explore",
-    "travel",
     "move",
     "ability_check",
     "mechanical_ambiguous",
@@ -127,6 +70,19 @@ export const IntentSchema = z.object({
   skill: z.enum(SKILLS as [Skill, ...Skill[]]).optional(),
 
   /**
+   * Difficulty band for an improvised action, from lib/rules/improvised-actions.
+   * Only present when actionType is "ability_check".
+   *
+   * A band, never a raw DC: the enum makes an illegal difficulty
+   * unrepresentable, and lib/rules/ability-check.ts is the only place that turns
+   * a band into a number. Nothing outside the rules layer can widen the range of
+   * possible DCs.
+   */
+  band: z
+    .enum(DIFFICULTY_BANDS as [(typeof DIFFICULTY_BANDS)[number], ...typeof DIFFICULTY_BANDS])
+    .optional(),
+
+  /**
    * Name of the target (creature, NPC, object) if one is present in the input.
    * Omitted for untargeted or general actions.
    */
@@ -139,11 +95,16 @@ export const IntentSchema = z.object({
   spellName: z.string().optional(),
 
   /**
-   * Spell slot level the player intends to use (1–9).
+   * Spell slot level the player intends to use (0–9), where 0 is a cantrip.
    * Only relevant when actionType is "cast_spell".
-   * Omitted for cantrips (slot-free) and all other action types.
+   *
+   * Omitted when the player did not name a level. That is the common case —
+   * "I cast Fireball" — and it does NOT mean "no level": the gate resolves the
+   * spell's own SRD level and charges that. The bound starts at 0 so a cantrip
+   * is representable; a `min(1)` here previously made the slot-free case
+   * impossible to express, leaving the gate's cantrip branch unreachable.
    */
-  spellLevel: z.number().int().min(1).max(9).optional(),
+  spellLevel: z.number().int().min(0).max(9).optional(),
 
   /**
    * Whether the player is taking a "short" or "long" rest.
@@ -281,14 +242,6 @@ export async function parseIntent(
         /^(?:i\s+)?(?:move|go|walk)\s+to\s+(.+)$|^(?:moverme|mover|ir|caminar)\s+(?:a|hacia)\s+(.+)$/i
       ),
     };
-  } else if (/^(?:i\s+)?(?:travel|journey|viajar|viajo)\b/i.test(input)) {
-    intent = { actionType: "travel" };
-  } else if (
-    /^(?:i\s+)?(?:explore|search|investigate|scout|hide|explorar|buscar|investigar|registrar|ocultarme)\b/i.test(
-      input
-    )
-  ) {
-    intent = { actionType: "explore" };
   } else if (lower === "rest" || lower === "descansar" || lower === "descanso") {
     intent = { actionType: "rest", restType: "short" };
   } else if (
@@ -301,19 +254,25 @@ export async function parseIntent(
     // No dedicated mechanic matched. Before giving up, try to adjudicate the
     // action as an improvised skill check — the SRD's own answer to "the player
     // tried something the rules do not name".
-    // Players commonly phrase an improvised action as an attempt ("I try to
-    // disarm the goblin"). Strip that framing before matching, so the verb is
-    // reachable. Only the improvised tier sees the stripped form; the dedicated
-    // gates above keep matching the input exactly as typed.
-    const attempted = input.replace(
-      /^(?:i\s+(?:try|attempt)\s+to\s+|intento\s+|trato\s+de\s+|pruebo\s+a\s+)/i,
-      ""
-    );
-    const improvised = IMPROVISED_SKILL_PATTERNS.find(
-      ([pattern]) => pattern.test(input) || pattern.test(attempted)
-    );
+    //
+    // This tier is also where "search", "investigate" and "hide" now land.
+    // They used to be caught earlier by an "explore" branch that no gate
+    // consumed, so searching a room reached the narrator with nothing rolled.
+    // Here they get the skill the SRD actually assigns them. The verbs too
+    // vague to adjudicate ("I explore", "I travel north") deliberately match
+    // nothing and fall through to clarification: the SRD has no roll for them
+    // either, and asking beats inventing an outcome.
+    //
+    // The vocabulary and its difficulties live in lib/rules, not here: how hard
+    // an action is, is a rules question. This layer only reports which entry the
+    // player's wording matched.
+    const improvised = matchImprovisedAction(input);
     if (improvised) {
-      intent = { actionType: "ability_check", skill: improvised[1] };
+      intent = {
+        actionType: "ability_check",
+        skill: improvised.skill,
+        band: improvised.band,
+      };
     }
   }
 

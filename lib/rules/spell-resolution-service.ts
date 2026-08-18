@@ -31,14 +31,33 @@ interface SpellResolutionDb {
 export interface ResolvedSpellEffect extends SpellEffect {
   id: string;
   name: string;
+  /** The spell's own level in the SRD. 0 for a cantrip. */
   level: number;
+  /**
+   * The slot level this effect was actually resolved at, and therefore the one
+   * the caller must charge. Equals the requested `slotLevel` when the caller
+   * named one, and the spell's own level otherwise.
+   *
+   * Reported rather than left implicit because the caller cannot recompute it:
+   * a caller that omitted `slotLevel` does not know what it got.
+   */
+  slotLevel: number;
   concentration: boolean;
   sourceEndpoint: string;
 }
 
 export interface ResolveSpellInput {
   query: string;
-  slotLevel: number;
+  /**
+   * Slot level to cast at. Omit when the player did not name one — the spell's
+   * own SRD level is then used, which is the level a caster spends by default.
+   *
+   * Leaving this optional is what lets "I cast Fireball" resolve at all. The
+   * caller used to skip the whole resolution when the player named no level,
+   * so nothing was charged, nothing was rolled, and the narrator described a
+   * spell the rules engine never cast.
+   */
+  slotLevel?: number;
   spellcastingMod: number;
   characterLevel: number;
   db?: SpellResolutionDb;
@@ -90,9 +109,14 @@ export async function resolveCachedSpell(
   const spell = await findCachedSpell(db, input.query);
   if (!spell) return null;
 
+  // The SRD record is the authority on what the spell costs. A caller that
+  // named no slot level gets the spell's own level, not a guess and not a skip.
+  const spellLevel = spell.level ?? input.slotLevel ?? 0;
+  const slotLevel = input.slotLevel ?? spellLevel;
+
   const effect = resolveSpellEffect(
     spell.data as Record<string, unknown>,
-    input.slotLevel,
+    slotLevel,
     input.spellcastingMod,
     input.characterLevel
   );
@@ -102,7 +126,8 @@ export async function resolveCachedSpell(
     ...effect,
     id: spell.id,
     name: spell.name,
-    level: spell.level ?? input.slotLevel,
+    level: spellLevel,
+    slotLevel,
     concentration: spell.concentration ?? false,
     sourceEndpoint: `https://www.dnd5eapi.co/api/2014/spells/${sourceSlug}`,
   };

@@ -144,6 +144,7 @@ describe("spawnCombatEncounter service contract", () => {
               maxHp: 20,
               ac: 13,
               initiativeTotal: 21,
+              stats: { DEX: 14 },
               xpValue: null,
             },
             {
@@ -153,12 +154,52 @@ describe("spawnCombatEncounter service contract", () => {
               maxHp: 11,
               ac: 13,
               initiativeTotal: 6,
+              stats: { STR: 10, DEX: 12, CON: 10, INT: 10, WIS: 10, CHA: 10 },
               xpValue: null,
             },
           ],
         },
       },
       include: { combatants: { orderBy: { initiativeTotal: "desc" } } },
+    });
+  });
+
+  it("persists ability scores on every combatant instead of leaving the column empty", async () => {
+    // Combatant.stats existed but nothing ever wrote it, so every combatant sat
+    // on the schema default {} and any rule reading a creature's ability score
+    // silently got 10. The column was there; the write was missing.
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [wolf]);
+    mockRandom([0.9, 0.2]);
+
+    await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      theme: "beast",
+      db,
+      queryMonsters,
+    });
+
+    const call = (db.encounter.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const combatants = call.data.combatants.create as Array<{
+      isPlayer: boolean;
+      stats: Record<string, number>;
+    }>;
+
+    // The player carries the character's own scores, unchanged.
+    expect(combatants.find((c) => c.isPlayer)!.stats).toMatchObject({ DEX: 14 });
+
+    // The monster carries its SRD scores under the same three-letter convention
+    // the rest of the engine reads (charStats.STR, combatant.stats.DEX, ...).
+    // The wolf fixture only declares dexterity, so the rest fall back to 10 —
+    // the SRD average — rather than being absent.
+    expect(combatants.find((c) => !c.isPlayer)!.stats).toEqual({
+      STR: 10,
+      DEX: 12,
+      CON: 10,
+      INT: 10,
+      WIS: 10,
+      CHA: 10,
     });
   });
 

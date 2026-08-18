@@ -10,6 +10,7 @@ import { z } from "zod";
 import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
 import { evaluateAdvantage, isKnownCondition } from "./conditions";
+import { proficiencyBonus } from "./proficiency";
 
 import { calculateDistance, type GridZone } from "./spatial";
 
@@ -880,6 +881,36 @@ export interface AttackRollResult {
  *
  * @pure — uses Math.random() via dice.ts helpers.
  */
+/**
+ * The attack bonus a character adds to a weapon attack roll.
+ *
+ * SRD: ability modifier + proficiency bonus, and the proficiency bonus scales
+ * with level. Both call sites in the action route used to inline this as
+ * `strMod + 2` — the level 1-4 value — so every attack from level 5 onwards
+ * rolled short, and the two routes could drift apart independently.
+ *
+ * Proficiency is applied unconditionally. Whether the character is proficient
+ * with this particular weapon needs its simple/martial category, which
+ * WeaponProperties does not carry, so isWeaponProficient cannot be consulted
+ * yet; assuming proficiency is the pre-existing behaviour.
+ *
+ * A level outside 1-20 degrades to the level 1 bonus rather than throwing or
+ * producing NaN: the conservative floor never inflates an attack, matching how
+ * the rest of the engine treats unusable persisted values.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function weaponAttackModifier(
+  abilityModifier: number,
+  characterLevel: number
+): number {
+  const level =
+    Number.isFinite(characterLevel) && characterLevel >= 1 && characterLevel <= 20
+      ? characterLevel
+      : 1;
+  return abilityModifier + proficiencyBonus(level);
+}
+
 export function resolveAttackRoll(
   attackModifier: number,
   targetAC: number,

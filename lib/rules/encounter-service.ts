@@ -131,6 +131,28 @@ function characterStats(character: EncounterCharacterRecord): Record<string, num
   return {};
 }
 
+/**
+ * Projects an SRD monster's ability scores onto the combatant stats convention.
+ *
+ * The engine reads creature ability scores as three-letter uppercase keys
+ * (`stats.STR`, `stats.DEX`, …) — the same shape Character.stats uses — so a
+ * monster's SRD fields are mapped rather than copied verbatim.
+ *
+ * A missing score becomes 10, the SRD average, instead of being left absent.
+ * Callers apply `?? 10` anyway; making the fallback explicit here means a
+ * persisted combatant always carries a complete, readable stat block.
+ */
+export function monsterAbilityScores(monster: Monster): Record<string, number> {
+  return {
+    STR: monster.strength ?? 10,
+    DEX: monster.dexterity ?? 10,
+    CON: monster.constitution ?? 10,
+    INT: monster.intelligence ?? 10,
+    WIS: monster.wisdom ?? 10,
+    CHA: monster.charisma ?? 10,
+  };
+}
+
 function monsterMaxCr(targetCR: number): number {
   return targetCR === 0 ? 1 : Math.min(targetCR * 2, 30);
 }
@@ -213,6 +235,10 @@ export async function spawnCombatEncounter(
         maxHp: campaign.character.maxHp,
         ac: playerAC,
         initiativeTotal: entry.initiative,
+        // Persisted so rules that resolve against a creature's ability scores
+        // read real numbers. Without this the column kept its {} default and
+        // every such rule silently saw 10 for everyone.
+        stats,
         // The player is never a source of the combat XP award (§7 of the decision only
         // sums isPlayer === false combatants), so it never carries an authorized value.
         xpValue: null,
@@ -228,6 +254,7 @@ export async function spawnCombatEncounter(
       maxHp: monster.hit_points,
       ac: acFromMonsterData(buildMonsterRawData(monster)),
       initiativeTotal: entry.initiative,
+      stats: monsterAbilityScores(monster),
       // Backend-authorized SRD figure already resolved in memory by queryMonsters;
       // never xpForCR/adjustedXP/encounterMultiplier.
       xpValue: monster.xp ?? null,
