@@ -18,6 +18,7 @@ import {
 } from "@/lib/rules/spell-resolution-service";
 import {
   extractConditions,
+  weaponAttackModifier,
   type DamageType,
 } from "@/lib/rules/combat";
 import { evaluateAbilityCheckAdvantage } from "@/lib/rules/conditions";
@@ -229,7 +230,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = strMod + 2; // Proficiency baseline
+      const attackModifier = weaponAttackModifier(strMod, context.character.level);
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({
@@ -727,7 +728,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const strMod = abilityModifier(charStats.STR ?? 10);
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = strMod + 2;
+      const attackModifier = weaponAttackModifier(strMod, context.character.level);
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({

@@ -4,6 +4,7 @@ import {
   CONDITION_REGISTRY,
   evaluateAbilityCheckAdvantage,
 } from "@/lib/rules/conditions";
+import { weaponAttackModifier } from "@/lib/rules/combat";
 
 /**
  * El agotamiento y varias condiciones dan desventaja en TODA prueba de
@@ -67,4 +68,33 @@ describe("evaluateAbilityCheckAdvantage", () => {
     expect(CONDITION_REGISTRY.restrained?.selfDisadvantageOnAbilityCheck).toBeUndefined();
     expect(CONDITION_REGISTRY.poisoned?.selfDisadvantageOnAbilityCheck).toBe(true);
   });
+});
+
+describe("weaponAttackModifier", () => {
+  it.each([
+    [1, 2],
+    [4, 2],
+    [5, 3],
+    [9, 4],
+    [13, 5],
+    [20, 6],
+  ])("a nivel %i el bono de competencia es +%i", (level, expected) => {
+    // Estaba fijo a +2 en las dos rutas de ataque, así que desde nivel 5 toda
+    // tirada salía corta. Con modificador 0, lo devuelto es la competencia.
+    expect(weaponAttackModifier(0, level)).toBe(expected);
+  });
+
+  it("suma el modificador de característica a la competencia", () => {
+    expect(weaponAttackModifier(3, 5)).toBe(6);
+    expect(weaponAttackModifier(-1, 1)).toBe(1);
+  });
+
+  it.each([0, 21, NaN, undefined as unknown as number])(
+    "un nivel inutilizable (%s) cae al suelo de nivel 1, nunca a NaN",
+    (level) => {
+      // Degradar conservador: nunca infla el ataque, y no propaga NaN a la
+      // tirada como haría una fórmula aplicada a un nivel ausente.
+      expect(weaponAttackModifier(0, level)).toBe(2);
+    }
+  );
 });
