@@ -48,14 +48,46 @@ describe("deterministic intent parser", () => {
     });
   });
 
-  it("flags an unsupported mechanical action for structured clarification", async () => {
+  it.each([
+    ["I push the boulder", "Athletics"],
+    ["empujo la roca", "Athletics"],
+    ["I try to disarm the goblin", "Athletics"],
+    ["intento desarmar al goblin", "Athletics"],
+    ["I attempt to climb the wall", "Athletics"],
+    ["I sneak past the guard", "Stealth"],
+    ["I lie to the guard", "Deception"],
+    ["miento al guardia", "Deception"],
+    ["I intimidate the merchant", "Intimidation"],
+    ["I persuade the innkeeper", "Persuasion"],
+    ["I examine the runes", "Investigation"],
+    ["I listen at the door", "Perception"],
+  ])("adjudicates %s as an improvised skill check", async (input, skill) => {
+    await expect(parseIntent(input, "ignored")).resolves.toEqual({
+      actionType: "ability_check",
+      skill,
+    });
+  });
+
+  it("never lets an improvised check shadow a dedicated mechanic", async () => {
+    // "attack" and "search" have their own gates and must keep them.
+    await expect(parseIntent("attack the goblin", "ignored")).resolves.toMatchObject({
+      actionType: "attack",
+    });
+    await expect(parseIntent("I search the room", "ignored")).resolves.toMatchObject({
+      actionType: "explore",
+    });
+  });
+
+  it("still flags a genuinely unmappable mechanical action for clarification", async () => {
+    // Clarification is now the last resort, not the default: it applies only to
+    // input that matches no dedicated mechanic and no improvised skill either.
     await expect(
-      parseIntent("I try to disarm the goblin", "ignored")
+      parseIntent("I poison the goblin", "ignored")
     ).resolves.toEqual({
       actionType: "mechanical_ambiguous",
     });
     await expect(
-      parseIntent("I poison the goblin", "ignored")
+      parseIntent("I sabotage the mechanism somehow", "ignored")
     ).resolves.toEqual({
       actionType: "mechanical_ambiguous",
     });

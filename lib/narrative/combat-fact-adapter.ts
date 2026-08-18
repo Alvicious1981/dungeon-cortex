@@ -215,6 +215,9 @@ export function adaptCombatEventsToNarrativeContext(
         'REST_COMPLETED',
         'EXPLORATION_WARNING',
         'PLAYER_MOVE',
+        // Not a combat fact. The resolved check reaches the narrator through the
+        // system game log written by the action route, in the same way trades do.
+        'ABILITY_CHECK_RESOLVED',
         () => undefined
       )
       .exhaustive();

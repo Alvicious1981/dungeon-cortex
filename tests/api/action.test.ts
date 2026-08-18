@@ -79,6 +79,43 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
   });
 
+  it("settles an improvised action with an ability check, logged before narration", async () => {
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "c1", name: "Hero", level: 5, stats: { STR: 16 }, inventory: [] },
+      characterStats: { conditions: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: null,
+    });
+    (parseIntent as any).mockResolvedValue({
+      actionType: "ability_check",
+      skill: "Athletics",
+    });
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "I try to disarm the goblin" }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    // Not refused: the dice settle it and narration proceeds.
+    expect(res.status).toBe(200);
+
+    // The resolved result reaches the narrator as an already-decided fact.
+    expect(prisma.gameLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: "system",
+          content: expect.stringMatching(/Athletics check \(STR\).*vs DC 15 → (SUCCESS|FAILURE)/),
+        }),
+      })
+    );
+  });
+
   it("rejects an ambiguous mechanical action before narration", async () => {
     (buildCampaignContext as any).mockResolvedValue({
       character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
