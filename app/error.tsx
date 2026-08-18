@@ -11,7 +11,7 @@ export default function RootError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log the error to an error reporting service
+    // Registro para diagnóstico; no se muestra al jugador.
     console.error("Root Error Boundary caught:", error);
   }, [error]);
 
@@ -39,14 +39,14 @@ export default function RootError({
           className="text-2xl font-bold uppercase tracking-widest"
           style={{ color: "#E8C84A" }}
         >
-          A Tear in the Weave
+          Se ha roto el hilo
         </h1>
         
         <p 
           className="text-sm"
           style={{ fontFamily: "var(--font-crimson), serif", color: "#C8B898", lineHeight: "1.6" }}
         >
-          The fundamental magic of the realm has been disrupted. Our chroniclers attempt to mend the fabric of reality, but for now, this path is sealed.
+          Algo ha fallado al preparar esta pantalla y no hemos podido mostrarla. Tu partida no se ha perdido: sigue guardada tal y como estaba. Puedes reintentar aquí mismo o volver al inicio.
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 pt-4">
@@ -59,7 +59,7 @@ export default function RootError({
               border: "1px solid rgba(245,158,11,0.3)"
             }}
           >
-            Attempt Recovery
+            Reintentar
           </button>
           <Link
             href="/"
@@ -70,7 +70,7 @@ export default function RootError({
               border: "1px solid rgba(255,255,255,0.1)"
             }}
           >
-            Return to Hub
+            Volver al inicio
           </Link>
         </div>
       </div>
