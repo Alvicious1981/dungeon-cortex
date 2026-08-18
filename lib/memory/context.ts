@@ -35,6 +35,8 @@ export interface ContextCharacter {
   stats: Prisma.JsonValue;
   /** Raw JSON spell slot map, or null if the character has no spellcasting. */
   spellSlots: Prisma.JsonValue | null;
+  /** Raw JSON array of SRD skill names the character is proficient in, or null. */
+  skillProficiencies: Prisma.JsonValue | null;
   /** ID of the currently concentrated-on spell, or null. */
   concentrationSpellId: string | null;
   /** Total hit dice the character possesses (= level). */
@@ -289,6 +291,7 @@ export async function buildCampaignContext(
             xp: true,
             stats: true,
             spellSlots: true,
+            skillProficiencies: true,
             concentrationSpellId: true,
             hitDiceTotal: true,
             hitDiceRemaining: true,

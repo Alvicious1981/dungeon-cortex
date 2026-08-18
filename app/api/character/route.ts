@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { CLASS_HIT_DICE, ABILITY_SCORES, type AbilityScore } from "@/lib/dnd-api/constants";
+import { defaultSkillProficiencies } from "@/lib/rules/class-skills";
 
 interface CreateCharacterBody {
   name: string;
@@ -82,6 +83,7 @@ export async function POST(req: NextRequest) {
       maxHp,
       stats,
       spellSlots,
+      skillProficiencies: defaultSkillProficiencies(characterClass),
       inventory: {
         create: [
           {

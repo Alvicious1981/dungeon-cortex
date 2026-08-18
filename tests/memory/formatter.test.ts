@@ -26,6 +26,7 @@ const baseCharacter: CampaignContext["character"] = {
   xp: 6500,
   stats: { STR: 8, DEX: 14, CON: 12, INT: 18, WIS: 14, CHA: 10 },
   spellSlots: null,
+  skillProficiencies: null,
   concentrationSpellId: null,
   hitDiceTotal: 5,
   hitDiceRemaining: 3,

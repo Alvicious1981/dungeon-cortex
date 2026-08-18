@@ -27,6 +27,7 @@ import {
 } from "@/lib/rules/exploration";
 import { moveToNode } from "@/lib/rules/navigation";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
+import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
@@ -394,6 +395,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         {
           stats: (charData.stats ?? {}) as Partial<Record<Ability, number>>,
           level: charData.level,
+          skillProficiencies: parseSkillProficiencies(charData.skillProficiencies),
         }
       );
 
