@@ -190,12 +190,17 @@ export async function parseIntent(
   // to the narrator as if it had already resolved.
   let intent: Intent = { actionType: "mechanical_ambiguous" };
 
+  // Callers match target names against combatant and item names by substring, so
+  // a leading article makes the lookup fail: "the goblin" is not contained in
+  // "Goblin". Every extracted name goes through here.
+  const cleanName = (raw: string | undefined): string | undefined => {
+    const value = raw?.trim().replace(/^(?:the|el|la|los|las|al)\s+/i, "");
+    return value || undefined;
+  };
+
   const prefixedValue = (pattern: RegExp): string | undefined => {
     const match = input.match(pattern);
-    const value = (match?.[1] ?? match?.[2])
-      ?.trim()
-      .replace(/^(?:the|el|la|los|las|al)\s+/i, "");
-    return value || undefined;
+    return cleanName(match?.[1] ?? match?.[2]);
   };
 
   const castMatch = input.match(
@@ -216,7 +221,7 @@ export async function parseIntent(
     const targetMatch = remainder.match(
       /\s+(?:on|against|at|sobre|contra|hacia)\s+(.+)$/i
     );
-    const targetName = targetMatch?.[1]?.trim();
+    const targetName = cleanName(targetMatch?.[1]);
     const spellName = (
       targetMatch?.index === undefined
         ? remainder

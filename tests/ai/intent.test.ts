@@ -24,6 +24,19 @@ describe("deterministic intent parser", () => {
     });
   });
 
+  it.each([
+    ["cast Fireball on the goblin", "goblin"],
+    ["cast Fireball on goblin", "goblin"],
+    ["lanzo Bola de Fuego contra el goblin", "goblin"],
+  ])("strips the article from a spell target in %s", async (input, targetName) => {
+    // Callers match by substring against combatant names, so "the goblin" would
+    // never be found inside "Goblin".
+    await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
+      actionType: "cast_spell",
+      targetName,
+    });
+  });
+
   it("extracts an SRD spell, slot level, and target", async () => {
     getSpellInfo.mockResolvedValue({ name: "Fireball", level: 3 });
     await expect(
