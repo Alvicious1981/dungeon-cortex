@@ -193,7 +193,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       
       let targets: ContextCombatant[] = [];
       if (targetIds.length > 0) {
-        targets = activeEncounter.combatants.filter(c => targetIds.includes(c.id));
+        // targetIds arrive from the client, so membership in the encounter is not
+        // enough: restrict to living hostiles, matching the auto-target branch
+        // below. Otherwise a caller could name the player or an already-downed
+        // combatant and have the attack resolve against them.
+        targets = activeEncounter.combatants.filter(
+          c => targetIds.includes(c.id) && !c.isPlayer && c.hp > 0
+        );
         if (targets.length === 0) {
           return NextResponse.json({ error: "None of the specified targets were found in this encounter." }, { status: 400 });
         }
@@ -630,18 +636,48 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────
-    if (intent.actionType === "attack" && intent.targetName) {
+    if (intent.actionType === "attack") {
       if (!context.activeEncounter) {
         return NextResponse.json({ error: "No active encounter. You must be in combat to attack." }, { status: 400 });
       }
 
-      const normalizedTarget = intent.targetName.toLowerCase();
-      const targets = context.activeEncounter.combatants.filter(c => 
-        c.name.toLowerCase().includes(normalizedTarget)
+      // Resolve the target before anything is rolled. A weapon attack names one
+      // creature, so an attack that cannot be pinned to exactly one living
+      // hostile is refused rather than resolved against a guess — or, as before,
+      // silently skipped past this gate and left to the narrator.
+      const living = context.activeEncounter.combatants.filter(
+        c => !c.isPlayer && c.hp > 0
       );
 
-      if (targets.length === 0) {
-        return NextResponse.json({ error: `Target "${intent.targetName}" not found.` }, { status: 400 });
+      let targets: typeof living;
+      if (body.targetIds?.length) {
+        // An explicit selection from the tactical map (see MacroDeck).
+        if (body.targetIds.length !== 1) {
+          return NextResponse.json(
+            { error: "A weapon attack requires exactly one target." },
+            { status: 400 }
+          );
+        }
+        targets = living.filter(c => c.id === body.targetIds![0]);
+      } else if (intent.targetName) {
+        const normalizedTarget = intent.targetName.toLowerCase();
+        targets = living.filter(c => c.name.toLowerCase().includes(normalizedTarget));
+      } else {
+        return NextResponse.json(
+          { error: "Attack requires one exact target." },
+          { status: 400 }
+        );
+      }
+
+      if (targets.length !== 1) {
+        return NextResponse.json(
+          {
+            error: intent.targetName
+              ? `Target "${intent.targetName}" was not found or is ambiguous.`
+              : "The selected hostile target is invalid.",
+          },
+          { status: 400 }
+        );
       }
 
       const foundWeapon = context.character.inventory.find(item => item.type === "weapon");

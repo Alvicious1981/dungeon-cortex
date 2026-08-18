@@ -79,6 +79,94 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
   });
 
+  describe("free-text attack targeting", () => {
+    const hostile = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
+    const downed = { id: "t2", name: "Goblin", hp: 0, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
+    const hero = { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
+
+    const contextWith = (combatants: unknown[]) => ({
+      character: {
+        id: "char-1",
+        name: "Hero",
+        level: 1,
+        stats: { STR: 14 },
+        inventory: [
+          { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
+        ],
+      },
+      characterStats: { conditions: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: {
+        id: "enc_123",
+        currentTurnIndex: 0,
+        round: 1,
+        totalDamageDealt: 0,
+        combatants,
+      },
+    });
+
+    const attackWith = async (intent: Record<string, unknown>, body: Record<string, unknown> = {}) => {
+      (parseIntent as any).mockResolvedValue({ actionType: "attack", ...intent });
+      return POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "I swing at it", ...body }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+    };
+
+    it("refuses an attack with no target instead of falling through to narration", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
+
+      const res = await attackWith({});
+
+      expect(res.status).toBe(400);
+      expect(streamNarrative).not.toHaveBeenCalled();
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses an ambiguous name rather than attacking every match", async () => {
+      const second = { ...hostile, id: "t3" };
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, second]));
+
+      const res = await attackWith({ targetName: "Goblin" });
+
+      expect(res.status).toBe(400);
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+    });
+
+    it("never resolves a free-text attack against the player", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
+
+      const res = await attackWith({ targetName: "Hero" });
+
+      expect(res.status).toBe(400);
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+    });
+
+    it("never resolves a free-text attack against a downed combatant", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, downed]));
+
+      const res = await attackWith({ targetName: "Goblin" });
+
+      expect(res.status).toBe(400);
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects a targetIds selection naming more than one creature", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, { ...hostile, id: "t3" }]));
+
+      const res = await attackWith({}, { targetIds: ["t1", "t3"] });
+
+      expect(res.status).toBe(400);
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+    });
+  });
+
   it("settles an improvised action with an ability check, logged before narration", async () => {
     (buildCampaignContext as any).mockResolvedValue({
       character: { id: "c1", name: "Hero", level: 5, stats: { STR: 16 }, inventory: [] },
