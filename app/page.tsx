@@ -68,6 +68,15 @@ export default function Home() {
                 Crear personaje
                 <ArrowRight aria-hidden="true" size={18} />
               </Link>
+              <Link
+                href="/campaigns"
+                className={buttonClassName({
+                  variant: "secondary",
+                  className: "w-full sm:w-auto sm:px-6",
+                })}
+              >
+                Continuar campaña
+              </Link>
               <a
                 href="#principios"
                 className={buttonClassName({

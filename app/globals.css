@@ -4,6 +4,13 @@
   --font-ui-sans: "Segoe UI", Arial, Helvetica, sans-serif;
   --font-ui-mono: Consolas, "Courier New", monospace;
 
+  /* Alias editoriales heredados. Los componentes de dominio los referencian en
+     ~149 sitios pero nunca estuvieron definidos, así que caían a la serif
+     genérica del navegador. Resuelven a la misma pila que docs/DESIGN.md §3 fija
+     para encabezados; no se descarga ninguna fuente externa. */
+  --font-cinzel: Georgia, "Times New Roman", serif;
+  --font-crimson: Georgia, "Times New Roman", serif;
+
   color-scheme: dark;
 
   --dc-canvas: #0b0d10;
