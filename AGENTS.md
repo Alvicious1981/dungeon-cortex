@@ -88,6 +88,24 @@ Ask before running commands that:
 - push to GitHub,
 - deploy the app.
 
+## Dormant defects
+
+The defects that survived longest in this repository were not broken code. They were correct data read with the wrong shape, or values written and never read: inert until something started depending on them. Tests passed throughout, because nothing checked the result.
+
+Three that reached `master` and were only found later:
+
+- `lib/ai/intent.ts` classified `explore` and `travel`, and no gate in `app/api/campaign/[id]/action/route.ts` consumed either. Those actions crossed the route with nothing rolled and reached the narrator.
+- `Combatant.stats` existed with a `{}` default and was never written. Every rule reading a creature's ability score silently saw 10.
+- The encounter route read ability scores from `data.ability_scores`, a key the stored SRD JSON does not have. The flat `wisdom` and `dexterity` fields were right there, and the adjacent line already used them.
+
+So, when inspecting:
+
+- For every value produced, confirm something consumes it. For every value consumed, confirm something produces it. A field that only one side touches is the shape of this defect.
+- Prefer a guard that binds both ends over a test that asserts one. `tests/architecture/intent-gate-exhaustiveness.test.ts` and `tests/api/action-intent-contract.test.ts` exist for that reason.
+- Distrust a test that mocks the thing it appears to be testing. Mocking `@/lib/ai/intent` in a route test verifies the gates against hand-written intents and never exercises the classifier that feeds them.
+- `vi.mock` of a module does not intercept calls that module makes to itself. Mocking `resolveAttackRoll` does not affect `lib/rules/combat.ts` calling it internally, so an assertion on the mock silently proves nothing.
+- Before trusting a field, check the data. A read-only query against the real table settles in seconds what a type annotation only claims.
+
 ## Work style
 
 For non-trivial tasks, Codex should:
