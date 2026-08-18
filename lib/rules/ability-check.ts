@@ -103,17 +103,42 @@ export interface AbilityCheckInput {
    * Ignored when `skill` is present, since the skill determines its own ability.
    */
   ability?: Ability;
-  /** Difficulty band. Defaults to "medium". */
+  /** Difficulty band. Defaults to "medium". Ignored when `opposition` is set. */
   band?: DifficultyBand;
+  /**
+   * Creatures resisting the attempt. When present the DC is derived from their
+   * own ability scores instead of a band — hiding from an alert guard is harder
+   * than hiding from an oblivious one, and the difference comes from the
+   * guard's real statistics rather than from a label.
+   */
+  opposition?: ContestedOpposition;
   /** Roll two dice and keep the higher / lower. */
   advantage?: boolean;
   disadvantage?: boolean;
 }
 
+export interface ContestedOpposition {
+  /** Ability scores of each creature resisting. Missing entries default to 10. */
+  opponents: ReadonlyArray<Partial<Record<Ability, number>>>;
+  /**
+   * Skills the opposition may resist with. The best passive score among every
+   * opponent and every listed skill sets the DC, so a contest is only as easy
+   * as the most capable creature makes it.
+   */
+  skills: readonly Skill[];
+}
+
 export interface AbilityCheckResult {
   ability: Ability;
   skill: Skill | null;
-  band: DifficultyBand;
+  /** The band that set the DC, or null when a contest set it instead. */
+  band: DifficultyBand | null;
+  /**
+   * Where the DC came from. Reported so the outcome can be audited: a player
+   * shown "DC 14" is entitled to know whether that is a difficulty label or a
+   * specific creature resisting.
+   */
+  dcSource: "band" | "contest";
   dc: number;
   /** The natural d20 result, before modifiers. */
   roll: number;
@@ -144,6 +169,48 @@ export function computeAbilityCheckDC(band?: DifficultyBand): number {
 }
 
 /**
+ * The passive score for a skill: 10 + the relevant ability modifier.
+ *
+ * SRD passive checks are 10 + every modifier that applies, proficiency
+ * included. Monster skill proficiencies are not persisted anywhere in this
+ * project, so only the ability modifier is available and a creature trained in
+ * Perception is rated as if it were not. That understates alert guards; it is
+ * recorded here rather than papered over with an invented bonus, and stops
+ * being an approximation the day monster proficiencies are stored.
+ */
+export function passiveSkillScore(
+  stats: Partial<Record<Ability, number>>,
+  skill: Skill
+): number {
+  return 10 + abilityModifier(stats[SKILL_ABILITY[skill]] ?? 10);
+}
+
+/**
+ * The DC an opposed attempt must beat.
+ *
+ * Every opponent is rated on every skill they may resist with, and the best
+ * result wins: sneaking past a patrol is as hard as its sharpest sentry, and
+ * the SRD lets a creature resist a shove with either Athletics or Acrobatics,
+ * whichever serves it better.
+ *
+ * ─── A deliberate simplification ─────────────────────────────────────────────
+ * The SRD resolves shoving and grappling as an *active* contest: both sides
+ * roll. This uses the passive score instead, as the SRD itself does for Stealth
+ * and Sleight of Hand. One player action then resolves with one die, and there
+ * is no tie rule to invent. The trade is that a shoved creature never rolls
+ * well or badly — it defends at its average.
+ *
+ * With no opponents the attempt is unopposed, and the caller should fall back
+ * to a difficulty band rather than treat DC 10 as "nobody is watching".
+ */
+export function contestedCheckDC(opposition: ContestedOpposition): number {
+  const scores = opposition.opponents.flatMap((opponent) =>
+    opposition.skills.map((skill) => passiveSkillScore(opponent, skill))
+  );
+  return scores.length > 0 ? Math.max(...scores) : DIFFICULTY_DC[DEFAULT_DIFFICULTY_BAND];
+}
+
+/**
  * Resolves an ability or skill check for an improvised action.
  *
  * @example
@@ -156,8 +223,15 @@ export function resolveAbilityCheck(
 ): AbilityCheckResult {
   const skill = input.skill ?? null;
   const ability: Ability = skill ? SKILL_ABILITY[skill] : input.ability ?? "STR";
-  const band = input.band ?? DEFAULT_DIFFICULTY_BAND;
-  const dc = computeAbilityCheckDC(band);
+
+  // A contest overrides the band: when a specific creature is resisting, its
+  // own statistics are a better answer to "how hard is this" than a label.
+  // With no opponents listed there is nothing to contest, so the band stands.
+  const isContested = (input.opposition?.opponents.length ?? 0) > 0;
+  const band = isContested ? null : input.band ?? DEFAULT_DIFFICULTY_BAND;
+  const dc = isContested
+    ? contestedCheckDC(input.opposition!)
+    : computeAbilityCheckDC(band ?? undefined);
 
   const abilityMod = abilityModifier(actor.stats[ability] ?? 10);
 
@@ -197,6 +271,7 @@ export function resolveAbilityCheck(
     ability,
     skill,
     band,
+    dcSource: isContested ? "contest" : "band",
     dc,
     roll: natural,
     abilityModifier: abilityMod,

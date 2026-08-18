@@ -31,11 +31,20 @@
  * Where the SRD does give a number, it anchors the scale:
  *   - Stabilising a dying creature is explicitly DC 10 → "easy".
  *
+ * ─── When a creature resists ─────────────────────────────────────────────────
+ * A band is only the right answer when nothing is pushing back. Some of these
+ * actions are contests in the SRD — hiding, pickpocketing, lying, shoving — and
+ * for those the entry names who resists and with what. The DC then comes from
+ * that creature's own ability scores, so hiding from an alert sentry is harder
+ * than hiding from a dull one for a reason the rules can point at, rather than
+ * because someone picked a label.
+ *
  * ─── Architecture ────────────────────────────────────────────────────────────
- * This module is pure: it matches text and reports. It never rolls, never picks
- * a raw DC (only a band, which lib/rules/ability-check.ts maps to a number), and
- * never mutates state. lib/ai/intent.ts consumes it; the dependency runs ai →
- * rules and never the other way.
+ * This module is pure: it matches text and reports. It never rolls and never
+ * mutates state, and it never picks a raw DC — it names a band or an
+ * opposition, and lib/rules/ability-check.ts turns either into a number.
+ * lib/ai/intent.ts consumes it; the dependency runs ai → rules, never the
+ * other way.
  */
 
 import type { DifficultyBand } from "./ability-check";
@@ -46,8 +55,36 @@ export interface ImprovisedAction {
   readonly pattern: RegExp;
   /** SRD skill that adjudicates the attempt. */
   readonly skill: Skill;
-  /** Difficulty band. Mapped to a DC by computeAbilityCheckDC. */
+  /**
+   * Difficulty band, used when nothing is actively resisting. Mapped to a DC by
+   * computeAbilityCheckDC.
+   */
   readonly band: DifficultyBand;
+  /**
+   * Present when creatures resist the attempt, in which case their own ability
+   * scores set the DC and the band is not used.
+   */
+  readonly opposedBy?: ImprovisedOpposition;
+}
+
+export interface ImprovisedOpposition {
+  /**
+   * Skills the resisting creature may use. The best passive score among them
+   * wins — the SRD lets a creature resist a shove with Athletics or Acrobatics,
+   * whichever serves it better.
+   */
+  readonly skills: readonly Skill[];
+  /**
+   * Who resists.
+   *
+   * - "observers": everyone present could notice, so the most alert of them
+   *   sets the difficulty. Sneaking past a patrol is as hard as its sharpest
+   *   sentry.
+   * - "single": the attempt is directed at one creature. Applied only when
+   *   exactly one candidate is present; with several the caller cannot know
+   *   which one is meant, so it falls back to the band rather than guessing.
+   */
+  readonly scope: "observers" | "single";
 }
 
 /**
@@ -75,6 +112,9 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:push|shove|drag|grapple|wrestle)\b|^(?:empujo|empujar|arrastro|arrastrar|agarro|agarrar|derribo|derribar)\b/i,
     skill: "Athletics",
     band: "medium",
+    // SRD resolves shoving and grappling as a contest against the target's
+    // Athletics, or its Acrobatics if that serves it better.
+    opposedBy: { skills: ["Athletics", "Acrobatics"], scope: "single" },
   },
   {
     // Overcoming something built or weighted to resist: a barred door, a
@@ -98,12 +138,17 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:pickpocket|steal|palm|swipe)\b|^(?:robo|robar|hurto|hurtar|birlo|birlar)\b/i,
     skill: "Sleight of Hand",
     band: "hard",
+    // SRD: contested by the target's passive Perception.
+    opposedBy: { skills: ["Perception"], scope: "observers" },
   },
   {
     pattern:
       /^(?:i\s+)?(?:sneak|creep|skulk|hide|slip\s+past)\b|^(?:me\s+escabullo|escabullirme|me\s+cuelo|colarme|me\s+oculto|ocultarme|me\s+escondo|esconderme)\b/i,
     skill: "Stealth",
     band: "medium",
+    // SRD: a Stealth check is contested by the passive Perception of every
+    // creature that might notice, so the most alert one sets the difficulty.
+    opposedBy: { skills: ["Perception"], scope: "observers" },
   },
   {
     // Noticing what is there to be noticed, rather than deducing what is hidden.
@@ -149,6 +194,8 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:lie|deceive|bluff|trick|disguise)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir|disfrazo|disfrazarme)\b/i,
     skill: "Deception",
     band: "hard",
+    // SRD: contested by the listener's Insight.
+    opposedBy: { skills: ["Insight"], scope: "observers" },
   },
   {
     pattern:
@@ -177,10 +224,15 @@ const ATTEMPT_PREFIX =
  * they are actually doing rather than invent an outcome.
  */
 export function matchImprovisedAction(input: string): ImprovisedAction | null {
-  const attempted = input.replace(ATTEMPT_PREFIX, "");
+  // Normalised here rather than by the caller so that every caller matches the
+  // same way. The action route looks the entry up a second time to read its
+  // opposition, and the two lookups must not disagree because one of them
+  // collapsed runs of whitespace and the other did not.
+  const normalised = input.trim().replace(/\s+/g, " ");
+  const attempted = normalised.replace(ATTEMPT_PREFIX, "");
   return (
     IMPROVISED_ACTIONS.find(
-      (action) => action.pattern.test(input) || action.pattern.test(attempted)
+      (action) => action.pattern.test(normalised) || action.pattern.test(attempted)
     ) ?? null
   );
 }

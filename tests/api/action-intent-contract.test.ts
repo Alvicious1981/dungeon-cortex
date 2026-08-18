@@ -216,6 +216,97 @@ describe("la dificultad depende de la acción, no es una constante", () => {
   });
 });
 
+describe("una contienda deriva la CD del que se resiste", () => {
+  const player = {
+    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20,
+    conditions: [], concentrationSpellId: null, stats: {},
+  };
+
+  function withHostiles(hostiles: Array<Record<string, unknown>>) {
+    const base = contextFor();
+    (buildCampaignContext as any).mockResolvedValue({
+      ...base,
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants: [player, ...hostiles],
+      },
+    });
+  }
+
+  async function checkPayload(action: string) {
+    const { res, frames } = await post(action);
+    expect(res.status).toBe(200);
+    const event = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED");
+    expect(event).toBeDefined();
+    return event.e.payload;
+  }
+
+  it("esconderse de un centinela despierto es más difícil que de uno obtuso", async () => {
+    // Lo que las puntuaciones persistidas en Combatant hacen posible: hasta
+    // ahora stats era {} para todos y ambos casos habrían dado el mismo número.
+    withHostiles([{ id: "t1", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
+    const alert = await checkPayload("I hide behind the crates");
+
+    withHostiles([{ id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } }]);
+    const oblivious = await checkPayload("I hide behind the crates");
+
+    expect(alert.dcSource).toBe("contest");
+    expect(alert.dc).toBe(14);
+    expect(oblivious.dc).toBe(8);
+  });
+
+  it("ante varios observadores manda el más despierto", async () => {
+    withHostiles([
+      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I hide behind the crates")).dc).toBe(14);
+  });
+
+  it("ignora a los caídos: un centinela inconsciente no vigila", async () => {
+    withHostiles([
+      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", isPlayer: false, hp: 0, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
+  });
+
+  it("sin encuentro activo no hay contienda y manda la banda", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextFor());
+
+    const payload = await checkPayload("I hide behind the crates");
+    expect(payload.dcSource).toBe("band");
+    expect(payload.band).toBe("medium");
+  });
+
+  it("un empujón con varios candidatos cae a la banda en vez de adivinar objetivo", async () => {
+    // Alcance "single": con dos hostiles no se puede saber a cuál empuja, así
+    // que no se contiende contra una suposición.
+    withHostiles([
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+      { id: "t2", name: "Orc", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+    ]);
+    expect((await checkPayload("I shove the goblin")).dcSource).toBe("band");
+
+    // Con uno solo no hay ambigüedad y sí se contiende.
+    withHostiles([
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+    ]);
+    const single = await checkPayload("I shove the goblin");
+    expect(single.dcSource).toBe("contest");
+    expect(single.dc).toBe(14);
+  });
+
+  it("la línea del registro distingue una contienda de una banda", async () => {
+    withHostiles([{ id: "t1", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
+    await post("I hide behind the crates");
+
+    expect(systemLogs().some((line) => line.includes("(contested)"))).toBe(true);
+  });
+});
+
 describe("el estado del personaje modula la tirada", () => {
   it("el agotamiento impone desventaja en toda prueba, también fuera de combate", async () => {
     (buildCampaignContext as any).mockResolvedValue(contextFor({ exhaustionLevel: 1 }));
