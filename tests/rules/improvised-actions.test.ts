@@ -48,8 +48,8 @@ describe("tabla de acciones improvisadas", () => {
 
   it("ancla la escala en el único número que el SRD fija: estabilizar es CD 10", () => {
     const stabilise = matchImprovisedAction("I stabilize the dying scout");
-    expect(stabilise?.skill).toBe("Medicine");
-    expect(computeAbilityCheckDC(stabilise?.band)).toBe(DIFFICULTY_DC.easy);
+    expect(stabilise?.action.skill).toBe("Medicine");
+    expect(computeAbilityCheckDC(stabilise?.action.band)).toBe(DIFFICULTY_DC.easy);
     expect(DIFFICULTY_DC.easy).toBe(10);
   });
 });
@@ -63,17 +63,17 @@ describe("matchImprovisedAction", () => {
     ["I pickpocket the merchant", "Sleight of Hand", "hard"],
     ["I listen at the door", "Perception", "easy"],
   ])("resuelve %s como %s/%s", (input, skill, band) => {
-    expect(matchImprovisedAction(input)).toMatchObject({ skill, band });
+    expect(matchImprovisedAction(input)?.action).toMatchObject({ skill, band });
   });
 
   it("atraviesa el envoltorio de intento sin cambiar la dificultad", () => {
     // "I try to force the door" debe costar lo mismo que "I force the door":
     // el marco de la frase no altera la dificultad de la tarea.
-    expect(matchImprovisedAction("I try to force the door")).toMatchObject({
+    expect(matchImprovisedAction("I try to force the door")?.action).toMatchObject({
       skill: "Athletics",
       band: "hard",
     });
-    expect(matchImprovisedAction("intento forzar la puerta")).toMatchObject({
+    expect(matchImprovisedAction("intento forzar la puerta")?.action).toMatchObject({
       skill: "Athletics",
       band: "hard",
     });

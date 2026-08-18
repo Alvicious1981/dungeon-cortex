@@ -28,6 +28,14 @@ export interface ConditionRegistryEntry {
    * both; Restrained imposes only the attack penalty.
    */
   selfDisadvantageOnAbilityCheck?: boolean;
+  /**
+   * The creature is unaware of its surroundings and cannot notice anything.
+   *
+   * Reserved for the two conditions whose SRD text says exactly that. It is not
+   * a synonym for `incapacitated`: a stunned creature cannot act but is still
+   * watching the room.
+   */
+  unawareOfSurroundings?: boolean;
   /** Combatant cannot take actions or reactions. */
   incapacitated?: boolean;
 }
@@ -64,6 +72,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     name: "Petrified",
     attackerAdvantage: true,
     incapacitated: true,
+    // SRD: "the creature ... is unaware of its surroundings".
+    unawareOfSurroundings: true,
   },
   stunned: {
     id: "stunned",
@@ -76,6 +86,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     name: "Unconscious",
     attackerAdvantage: true,
     incapacitated: true,
+    // SRD: "the creature ... is unaware of its surroundings".
+    unawareOfSurroundings: true,
   },
   restrained: {
     id: "restrained",
@@ -241,4 +253,29 @@ export function evaluateAbilityCheckAdvantage(
   // straight to resolveAbilityCheck, and so that adding a future source of
   // advantage is a change here rather than at every call site.
   return { advantage: false, disadvantage: hasDisadvantage };
+}
+
+/**
+ * Whether a creature can notice anything at all.
+ *
+ * Used to decide who may oppose a contested check: a creature that is unaware
+ * of its surroundings sets no difficulty for someone sneaking past it.
+ *
+ * ─── Why only two conditions ─────────────────────────────────────────────────
+ * Only Unconscious and Petrified say, in the SRD's own words, that the creature
+ * is unaware of its surroundings. Incapacitated, Stunned and Paralyzed stop a
+ * creature acting, not perceiving — a stunned guard still sees you walk past.
+ *
+ * Blinded and Deafened are deliberately not included. Each removes one sense
+ * and leaves the other, so a blinded creature still hears and a deafened one
+ * still looks. Excluding them would let a player hide in plain sight from a
+ * creature whose hearing is untouched, which is further from the rules than
+ * leaving them in. Modelling them properly needs to know which sense a given
+ * check relies on, which is not represented anywhere in this codebase — the
+ * same limit recorded on evaluateAbilityCheckAdvantage.
+ */
+export function isUnawareOfSurroundings(conditions: readonly string[]): boolean {
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.unawareOfSurroundings === true
+  );
 }

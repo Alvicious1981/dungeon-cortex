@@ -159,6 +159,15 @@ export async function parseIntent(
     return value || undefined;
   };
 
+  // "lie to the guard" and "robo al mercader" name the creature after a
+  // preposition. cleanName strips the article that follows; this strips the
+  // preposition first so the two compose into a bare name.
+  const stripLeadingPreposition = (raw: string | undefined): string | undefined =>
+    raw?.replace(
+      /^(?:to|at|on|from|off|against|behind|past|a|al|a\s+la|de|del|contra|hacia|tras|detrás\s+de)\s+/i,
+      ""
+    );
+
   const prefixedValue = (pattern: RegExp): string | undefined => {
     const match = input.match(pattern);
     return cleanName(match?.[1] ?? match?.[2]);
@@ -268,10 +277,18 @@ export async function parseIntent(
     // player's wording matched.
     const improvised = matchImprovisedAction(input);
     if (improvised) {
+      // The creature the action names, when it names one. Contests that resist
+      // with a single creature — pickpocketing a mark, lying to a listener,
+      // shoving an opponent — need to know which one; without it the backend
+      // would have to contest against whoever else happened to be standing
+      // there. Absent or unrecognisable, the gate falls back to a band.
+      const targetName = cleanName(stripLeadingPreposition(improvised.rest));
+
       intent = {
         actionType: "ability_check",
-        skill: improvised.skill,
-        band: improvised.band,
+        skill: improvised.action.skill,
+        band: improvised.action.band,
+        ...(targetName ? { targetName } : {}),
       };
     }
   }

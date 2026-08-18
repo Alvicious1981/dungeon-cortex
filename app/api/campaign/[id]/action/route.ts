@@ -21,7 +21,10 @@ import {
   weaponAttackModifier,
   type DamageType,
 } from "@/lib/rules/combat";
-import { evaluateAbilityCheckAdvantage } from "@/lib/rules/conditions";
+import {
+  evaluateAbilityCheckAdvantage,
+  isUnawareOfSurroundings,
+} from "@/lib/rules/conditions";
 import {
   applyShortRest,
   applyLongRest,
@@ -414,19 +417,41 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       // question, and the AI layer's schema should not be the place it lives.
       // matchImprovisedAction normalises its input, so this lookup and the
       // parser's agree by construction.
-      const opposedBy = matchImprovisedAction(trimmedAction)?.opposedBy;
-      const livingHostiles = (context.activeEncounter?.combatants ?? []).filter(
-        (c) => !c.isPlayer && c.hp > 0
+      const opposedBy = matchImprovisedAction(trimmedAction)?.action.opposedBy;
+
+      // A creature that is unaware of its surroundings resists nothing: an
+      // unconscious sentry sets no difficulty for sneaking past it. Only the two
+      // conditions the SRD describes that way are excluded — a stunned guard
+      // cannot act but is still watching.
+      const candidates = (context.activeEncounter?.combatants ?? []).filter(
+        (c) =>
+          !c.isPlayer &&
+          c.hp > 0 &&
+          !isUnawareOfSurroundings(extractConditions(c.conditions))
       );
-      // "single" needs exactly one candidate: with several, which one the player
-      // meant is unknowable here, so the attempt falls back to its band instead
-      // of contesting against a guess. Same rule the attack gate applies.
-      const opponents =
-        opposedBy && (opposedBy.scope === "observers" || livingHostiles.length === 1)
-          ? livingHostiles.map(
-              (c) => (c.stats ?? {}) as Partial<Record<Ability, number>>
-            )
-          : [];
+
+      // "observers" is anyone who might notice; "target" is the one creature the
+      // action names, since the SRD contests a pickpocket against the mark and a
+      // lie against the listener, not against the sharpest bystander. A named
+      // target that matches no one, or more than one, falls back to the band
+      // rather than contesting against a guess — the rule the attack gate uses.
+      let resisting: typeof candidates = [];
+      if (opposedBy?.scope === "observers") {
+        resisting = candidates;
+      } else if (opposedBy?.scope === "target") {
+        if (intent.targetName) {
+          const needle = intent.targetName.toLowerCase();
+          const named = candidates.filter((c) => c.name.toLowerCase().includes(needle));
+          if (named.length === 1) resisting = named;
+        } else if (candidates.length === 1) {
+          // Unnamed but unambiguous: only one creature it could be.
+          resisting = candidates;
+        }
+      }
+
+      const opponents = resisting.map(
+        (c) => (c.stats ?? {}) as Partial<Record<Ability, number>>
+      );
 
       const result = resolveAbilityCheck(
         {

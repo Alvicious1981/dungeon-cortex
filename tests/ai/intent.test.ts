@@ -79,13 +79,44 @@ describe("deterministic intent parser", () => {
   ])(
     "adjudicates %s as an improvised skill check with its own difficulty",
     async (input, skill, band) => {
-      await expect(parseIntent(input, "ignored")).resolves.toEqual({
+      // toMatchObject, not toEqual: these phrasings also name a creature, and
+      // the extracted targetName varies per case. It is pinned separately below.
+      await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
         actionType: "ability_check",
         skill,
         band,
       });
     }
   );
+
+  it("keeps a bare verb free of an invented target", async () => {
+    // Strict: nothing beyond the three fields may appear when the player named
+    // no creature. A stray targetName here would send the gate contesting
+    // against something nobody mentioned.
+    await expect(parseIntent("I hide", "ignored")).resolves.toEqual({
+      actionType: "ability_check",
+      skill: "Stealth",
+      band: "medium",
+    });
+  });
+
+  it.each([
+    ["I pickpocket the merchant", "merchant"],
+    ["I lie to the guard", "guard"],
+    ["I shove the goblin", "goblin"],
+    ["I try to shove the goblin", "goblin"],
+    ["I hide from the sentry", "sentry"],
+    ["robo al mercader", "mercader"],
+    ["miento al guardia", "guardia"],
+    ["empujo al goblin", "goblin"],
+  ])("names the creature in %s as %s", async (input, targetName) => {
+    // Contests that resist with one creature need to know which. Without this
+    // the backend contested against whoever else was standing there.
+    await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
+      actionType: "ability_check",
+      targetName,
+    });
+  });
 
   it("gives one skill different difficulties depending on the task", async () => {
     // The point of keying difficulty to the verb: Athletics used to be a single
@@ -122,7 +153,7 @@ describe("deterministic intent parser", () => {
   ])(
     "adjudicates %s with a real skill check instead of narrating it",
     async (input, skill, band) => {
-      await expect(parseIntent(input, "ignored")).resolves.toEqual({
+      await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
         actionType: "ability_check",
         skill,
         band,
