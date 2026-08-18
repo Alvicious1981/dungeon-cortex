@@ -3,6 +3,10 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { rollInitiative, acFromMonsterData, acFromInventory } from "@/lib/rules/combat";
 import { abilityModifier } from "@/lib/rules/dice";
+import {
+  monsterAbilityScores,
+  type MonsterAbilityFields,
+} from "@/lib/rules/encounter-service";
 
 interface EnemyInput {
   name: string;
@@ -98,13 +102,24 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // can ever populate it — it always reflects only what the backend itself resolved.
   const resolvedEnemies = await Promise.all(
     enemies.map(async (e) => {
-      if (!e.monsterIndex) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 }, srdXp: null };
+      // No SRD record to draw from, so every score is the 10 average rather
+      // than a partial block. A missing WIS used to leave the creature with no
+      // Perception at all, which any contested check reads as "unknown".
+      if (!e.monsterIndex) {
+        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null };
+      }
       const srdMonster = await prisma.srdMonster.findUnique({
         where: { id: e.monsterIndex },
       });
-      if (!srdMonster) return { ...e, ac: 10, stats: { DEX: 10, CON: 10 }, srdXp: null };
+      if (!srdMonster) {
+        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null };
+      }
       const data = srdMonster.data as Record<string, unknown>;
-      const abilityScores = (data.ability_scores || {}) as Record<string, number>;
+      // The stored SRD JSON spells ability scores as flat top-level fields
+      // ("wisdom": 15), exactly as the `dexterity` read below already assumes.
+      // Reading a nested `ability_scores` object found nothing, every time, so
+      // each enemy was persisted with an empty stat block.
+      const abilityScores = monsterAbilityScores(data as MonsterAbilityFields);
       return {
         ...e,
         hp: typeof data.hit_points === "number" ? data.hit_points : e.hp,

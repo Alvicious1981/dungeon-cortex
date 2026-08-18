@@ -103,17 +103,42 @@ export interface AbilityCheckInput {
    * Ignored when `skill` is present, since the skill determines its own ability.
    */
   ability?: Ability;
-  /** Difficulty band. Defaults to "medium". */
+  /** Difficulty band. Defaults to "medium". Ignored when `opposition` is set. */
   band?: DifficultyBand;
+  /**
+   * Creatures resisting the attempt. When present the DC is derived from their
+   * own ability scores instead of a band — hiding from an alert guard is harder
+   * than hiding from an oblivious one, and the difference comes from the
+   * guard's real statistics rather than from a label.
+   */
+  opposition?: ContestedOpposition;
   /** Roll two dice and keep the higher / lower. */
   advantage?: boolean;
   disadvantage?: boolean;
 }
 
+export interface ContestedOpposition {
+  /** Ability scores of each creature resisting. Missing entries default to 10. */
+  opponents: ReadonlyArray<Partial<Record<Ability, number>>>;
+  /**
+   * Skills the opposition may resist with. The best passive score among every
+   * opponent and every listed skill sets the DC, so a contest is only as easy
+   * as the most capable creature makes it.
+   */
+  skills: readonly Skill[];
+}
+
 export interface AbilityCheckResult {
   ability: Ability;
   skill: Skill | null;
-  band: DifficultyBand;
+  /** The band that set the DC, or null when a contest set it instead. */
+  band: DifficultyBand | null;
+  /**
+   * Where the DC came from. Reported so the outcome can be audited: a player
+   * shown "DC 14" is entitled to know whether that is a difficulty label or a
+   * specific creature resisting.
+   */
+  dcSource: "band" | "contest";
   dc: number;
   /** The natural d20 result, before modifiers. */
   roll: number;
@@ -144,6 +169,70 @@ export function computeAbilityCheckDC(band?: DifficultyBand): number {
 }
 
 /**
+ * The passive score for a skill: 10 + the relevant ability modifier, or null
+ * when the creature's score for that ability is unknown.
+ *
+ * SRD passive checks are 10 + every modifier that applies, proficiency
+ * included. Monster skill proficiencies are not persisted anywhere in this
+ * project, so only the ability modifier is available and a creature trained in
+ * Perception is rated as if it were not. That understates alert guards; it is
+ * recorded here rather than papered over with an invented bonus, and stops
+ * being an approximation the day monster proficiencies are stored.
+ *
+ * ─── Why "unknown" is not 10 ─────────────────────────────────────────────────
+ * Defaulting a missing score to 10 reads "we have no data" as "an average
+ * creature", which produces a confident passive 10 out of nothing. That is
+ * worse than useless here: a contest against it lands at DC 10, *below* the
+ * DC 15 the same action gets when nobody opposes it at all, so being watched
+ * would make hiding easier than being alone. Absent data yields null and the
+ * caller falls back to a difficulty band.
+ *
+ * `stats` arrives as unvalidated JSON, so a value that is not a finite number
+ * counts as unknown rather than being fed to the arithmetic. Left unchecked it
+ * would propagate NaN into the DC and make every roll fail while the log
+ * printed "vs DC NaN".
+ */
+export function passiveSkillScore(
+  stats: Partial<Record<Ability, number>>,
+  skill: Skill
+): number | null {
+  const score = stats[SKILL_ABILITY[skill]];
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
+  return 10 + abilityModifier(score);
+}
+
+/**
+ * The DC an opposed attempt must beat.
+ *
+ * Every opponent is rated on every skill they may resist with, and the best
+ * result wins: sneaking past a patrol is as hard as its sharpest sentry, and
+ * the SRD lets a creature resist a shove with either Athletics or Acrobatics,
+ * whichever serves it better.
+ *
+ * ─── A deliberate simplification ─────────────────────────────────────────────
+ * The SRD resolves shoving and grappling as an *active* contest: both sides
+ * roll. This uses the passive score instead, as the SRD itself does for Stealth
+ * and Sleight of Hand. One player action then resolves with one die, and there
+ * is no tie rule to invent. The trade is that a shoved creature never rolls
+ * well or badly — it defends at its average.
+ *
+ * Returns null when nothing can be contested — either no opponents at all, or
+ * none whose relevant ability scores are known. Both mean the same thing: there
+ * is no creature this attempt can be measured against, so the caller must fall
+ * back to a difficulty band. Inventing a number here would be strictly worse
+ * than the band, because the invented one is DC 10 and the band is DC 15.
+ */
+export function contestedCheckDC(opposition: ContestedOpposition): number | null {
+  const scores = opposition.opponents
+    .flatMap((opponent) =>
+      opposition.skills.map((skill) => passiveSkillScore(opponent, skill))
+    )
+    .filter((score): score is number => score !== null);
+
+  return scores.length > 0 ? Math.max(...scores) : null;
+}
+
+/**
  * Resolves an ability or skill check for an improvised action.
  *
  * @example
@@ -156,8 +245,17 @@ export function resolveAbilityCheck(
 ): AbilityCheckResult {
   const skill = input.skill ?? null;
   const ability: Ability = skill ? SKILL_ABILITY[skill] : input.ability ?? "STR";
-  const band = input.band ?? DEFAULT_DIFFICULTY_BAND;
-  const dc = computeAbilityCheckDC(band);
+
+  // A contest overrides the band: when a specific creature is resisting, its
+  // own statistics are a better answer to "how hard is this" than a label.
+  //
+  // Only when the contest actually produced a number, though. Opponents whose
+  // relevant scores are unknown yield null, and the band stands — otherwise an
+  // encounter full of statless combatants would resolve every attempt at DC 10.
+  const contestedDC = input.opposition ? contestedCheckDC(input.opposition) : null;
+  const isContested = contestedDC !== null;
+  const band = isContested ? null : input.band ?? DEFAULT_DIFFICULTY_BAND;
+  const dc = isContested ? contestedDC : computeAbilityCheckDC(band ?? undefined);
 
   const abilityMod = abilityModifier(actor.stats[ability] ?? 10);
 
@@ -197,6 +295,7 @@ export function resolveAbilityCheck(
     ability,
     skill,
     band,
+    dcSource: isContested ? "contest" : "band",
     dc,
     roll: natural,
     abilityModifier: abilityMod,

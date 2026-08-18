@@ -30,6 +30,7 @@ import {
 import { moveToNode } from "@/lib/rules/navigation";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
+import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
 import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
@@ -408,8 +409,35 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         charData.exhaustionLevel
       );
 
+      // Who, if anyone, is resisting. The rules table is consulted again rather
+      // than carried on the intent: which creature opposes a shove is a rules
+      // question, and the AI layer's schema should not be the place it lives.
+      // matchImprovisedAction normalises its input, so this lookup and the
+      // parser's agree by construction.
+      const opposedBy = matchImprovisedAction(trimmedAction)?.opposedBy;
+      const livingHostiles = (context.activeEncounter?.combatants ?? []).filter(
+        (c) => !c.isPlayer && c.hp > 0
+      );
+      // "single" needs exactly one candidate: with several, which one the player
+      // meant is unknowable here, so the attempt falls back to its band instead
+      // of contesting against a guess. Same rule the attack gate applies.
+      const opponents =
+        opposedBy && (opposedBy.scope === "observers" || livingHostiles.length === 1)
+          ? livingHostiles.map(
+              (c) => (c.stats ?? {}) as Partial<Record<Ability, number>>
+            )
+          : [];
+
       const result = resolveAbilityCheck(
-        { skill: intent.skill, band: intent.band, advantage, disadvantage },
+        {
+          skill: intent.skill,
+          band: intent.band,
+          advantage,
+          disadvantage,
+          ...(opposedBy && opponents.length > 0
+            ? { opposition: { opponents, skills: opposedBy.skills } }
+            : {}),
+        },
         {
           stats: (charData.stats ?? {}) as Partial<Record<Ability, number>>,
           level: charData.level,
@@ -429,7 +457,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             `${result.abilityModifier >= 0 ? "+" : ""}${result.abilityModifier}` +
             `${result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : ""}` +
             `${result.rollMode !== "normal" ? ` with ${result.rollMode}` : ""}` +
-            ` = ${result.total} vs DC ${result.dc} (${result.band}) → ` +
+            ` = ${result.total} vs DC ${result.dc} ` +
+            `(${result.dcSource === "contest" ? "contested" : result.band}) → ` +
             `${result.success ? "SUCCESS" : "FAILURE"}` +
             `${result.isCriticalSuccess ? " (natural 20)" : ""}` +
             `${result.isCriticalFailure ? " (natural 1)" : ""}.`,
