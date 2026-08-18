@@ -26,9 +26,25 @@ const COMBAT_ACTIONS = [
   "Finalizar turno",
 ] as const;
 
-const COMBAT_ACTION_REQUESTS: Record<string, string> = {
+/**
+ * Button label → the canonical command sent to /api/campaign/[id]/action.
+ *
+ * The label is presentation and may be reworded freely; the command is a
+ * contract with the backend's deterministic classifier. Every button must
+ * appear here. Sending the Spanish label verbatim — which the exploration
+ * buttons used to do — makes the classification depend on the copy: "Buscar
+ * trampas" happened to reach a classification no gate consumed, and "Moverse
+ * con sigilo" matched no pattern at all and returned 400.
+ */
+const CANONICAL_ACTION_REQUESTS: Record<string, string> = {
+  // Combat — resolved by the authoritative macro path.
   "Atacar con arma": "Attack",
   "Finalizar turno": "End Turn",
+  // Exploration — resolved as SRD ability checks or a rest.
+  "Buscar trampas": "search for traps",
+  "Investigar la zona": "investigate the area",
+  "Moverse con sigilo": "sneak",
+  "Tomar descanso corto": "short rest",
 };
 
 const EXPLORATION_ACTIONS = [
@@ -179,7 +195,7 @@ export default function MacroDeck({ inCombat }: Props) {
 
   function handleAction(actionText: string) {
     if (isAnyLoading) return;
-    const canonicalAction = COMBAT_ACTION_REQUESTS[actionText] ?? actionText;
+    const canonicalAction = CANONICAL_ACTION_REQUESTS[actionText] ?? actionText;
     if (canonicalAction === "Attack" && selectedTargetIds.length !== 1) {
       setError("Selecciona exactamente un objetivo para atacar.");
       return;

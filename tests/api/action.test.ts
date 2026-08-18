@@ -94,7 +94,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
           { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
         ],
       },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -177,7 +176,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
         skillProficiencies: ["Athletics"],
         inventory: [],
       },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -207,7 +205,9 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
           role: "system",
           // +3 STR and +3 proficiency (level 5), so the stored proficiencies
           // reach the roll rather than being silently dropped.
-          content: expect.stringMatching(/Athletics check \(STR\): rolled \d+ \+3 \+3 prof = \d+ vs DC 15 → (SUCCESS|FAILURE)/),
+          // No band on the intent, so the check falls back to "medium" (DC 15)
+          // and the line names the band it used.
+          content: expect.stringMatching(/Athletics check \(STR\): rolled \d+ \+3 \+3 prof = \d+ vs DC 15 \(medium\) → (SUCCESS|FAILURE)/),
         }),
       })
     );
@@ -216,7 +216,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   it("rejects an ambiguous mechanical action before narration", async () => {
     (buildCampaignContext as any).mockResolvedValue({
       character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -247,7 +246,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     
     const mockContext = {
       character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -309,7 +307,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
           },
         ],
       },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -349,7 +346,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
     const mockContext = {
       character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -423,10 +419,15 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
     vi.clearAllMocks();
     (getAuthUser as any).mockResolvedValue(mockUser);
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
-    // A benign, unmatched intent so none of the mechanical gates fire —
+    // A benign, non-mechanical intent so none of the mechanical gates fire —
     // this test suite is only exercising the presentation frame, not combat,
     // rest, spellcasting, or movement.
-    (parseIntent as any).mockResolvedValue({ actionType: "look" });
+    //
+    // Must be a value IntentSchema can actually produce. This used to be
+    // "look", which the schema rejects: the whole suite was asserting the
+    // behaviour of a request that cannot exist. "general" is the real
+    // classification for input with no mechanical gate.
+    (parseIntent as any).mockResolvedValue({ actionType: "general" });
   });
 
   async function postAction(character: Record<string, unknown>) {
@@ -617,7 +618,6 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
         exhaustionLevel: 0,
         inventory: [],
       },
-      characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
