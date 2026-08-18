@@ -18,6 +18,71 @@
 
 import { z } from "zod";
 import { getSpellInfo, type SpellEffect } from "@/lib/ai/tools/srd-lookup";
+import { SKILLS, type Skill } from "@/lib/rules/ability-check";
+
+// ---------------------------------------------------------------------------
+// Improvised action vocabulary
+// ---------------------------------------------------------------------------
+
+/**
+ * Verbs that describe an improvised action, mapped to the SRD skill that
+ * adjudicates it. Checked only after every specific mechanic has been ruled
+ * out, so this never shadows a dedicated gate.
+ *
+ * This is the free, deterministic tier: it costs no model call and always
+ * classifies the same input the same way. Anything it does not cover falls
+ * through to "mechanical_ambiguous".
+ */
+const IMPROVISED_SKILL_PATTERNS: ReadonlyArray<readonly [RegExp, Skill]> = [
+  [
+    /^(?:i\s+)?(?:push|shove|force|pry|break|smash|climb|jump|leap|lift|drag|grapple|wrestle|disarm|swim)\b|^(?:empujo|empujar|fuerzo|forzar|rompo|romper|trepo|trepar|escalo|escalar|salto|saltar|levanto|levantar|arrastro|arrastrar|agarro|agarrar|derribo|derribar|desarmo|desarmar|nado|nadar)\b/i,
+    "Athletics",
+  ],
+  [
+    /^(?:i\s+)?(?:tumble|balance|vault|somersault|dodge)\b|^(?:hago\s+una\s+voltereta|me\s+equilibro|equilibrarme|esquivo|esquivar)\b/i,
+    "Acrobatics",
+  ],
+  [
+    /^(?:i\s+)?(?:pickpocket|steal|palm|swipe)\b|^(?:robo|robar|hurto|hurtar|birlo|birlar)\b/i,
+    "Sleight of Hand",
+  ],
+  [
+    /^(?:i\s+)?(?:sneak|creep|skulk|slip\s+past)\b|^(?:me\s+escabullo|escabullirme|me\s+cuelo|colarme)\b/i,
+    "Stealth",
+  ],
+  [
+    /^(?:i\s+)?(?:listen|spot|notice|watch|peek)\b|^(?:escucho|escuchar|observo|observar|vigilo|vigilar|atisbo|atisbar)\b/i,
+    "Perception",
+  ],
+  [
+    /^(?:i\s+)?(?:examine|inspect|study|analyse|analyze)\b|^(?:examino|examinar|inspecciono|inspeccionar|estudio|estudiar|analizo|analizar)\b/i,
+    "Investigation",
+  ],
+  [
+    /^(?:i\s+)?(?:track|forage|navigate|forrage)\b|^(?:rastreo|rastrear|forrajeo|forrajear|oriento|orientarme)\b/i,
+    "Survival",
+  ],
+  [
+    /^(?:i\s+)?(?:heal|treat|bandage|stabilise|stabilize)\b|^(?:curo|curar|sano|sanar|vendo|vendar|estabilizo|estabilizar)\b/i,
+    "Medicine",
+  ],
+  [
+    /^(?:i\s+)?(?:calm|tame|soothe|ride)\b|^(?:calmo|calmar|domo|domar|monto|montar)\b/i,
+    "Animal Handling",
+  ],
+  [
+    /^(?:i\s+)?(?:persuade|convince|plead|negotiate)\b|^(?:persuado|persuadir|convenzo|convencer|negocio|negociar|suplico|suplicar)\b/i,
+    "Persuasion",
+  ],
+  [
+    /^(?:i\s+)?(?:lie|deceive|bluff|trick|disguise)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir|disfrazo|disfrazarme)\b/i,
+    "Deception",
+  ],
+  [
+    /^(?:i\s+)?(?:intimidate|threaten|menace|scare)\b|^(?:intimido|intimidar|amenazo|amenazar|asusto|asustar)\b/i,
+    "Intimidation",
+  ],
+];
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -49,9 +114,17 @@ export const IntentSchema = z.object({
     "explore",
     "travel",
     "move",
+    "ability_check",
     "mechanical_ambiguous",
     "general",
   ]),
+
+  /**
+   * SRD skill that adjudicates an improvised action.
+   * Only present when actionType is "ability_check". Constrained to the SRD
+   * skill list, so an intent can never name a skill the rules engine lacks.
+   */
+  skill: z.enum(SKILLS as [Skill, ...Skill[]]).optional(),
 
   /**
    * Name of the target (creature, NPC, object) if one is present in the input.
@@ -219,6 +292,24 @@ export async function parseIntent(
     )
   ) {
     intent = { actionType: "general" };
+  } else {
+    // No dedicated mechanic matched. Before giving up, try to adjudicate the
+    // action as an improvised skill check — the SRD's own answer to "the player
+    // tried something the rules do not name".
+    // Players commonly phrase an improvised action as an attempt ("I try to
+    // disarm the goblin"). Strip that framing before matching, so the verb is
+    // reachable. Only the improvised tier sees the stripped form; the dedicated
+    // gates above keep matching the input exactly as typed.
+    const attempted = input.replace(
+      /^(?:i\s+(?:try|attempt)\s+to\s+|intento\s+|trato\s+de\s+|pruebo\s+a\s+)/i,
+      ""
+    );
+    const improvised = IMPROVISED_SKILL_PATTERNS.find(
+      ([pattern]) => pattern.test(input) || pattern.test(attempted)
+    );
+    if (improvised) {
+      intent = { actionType: "ability_check", skill: improvised[1] };
+    }
   }
 
   intent = IntentSchema.parse(intent);

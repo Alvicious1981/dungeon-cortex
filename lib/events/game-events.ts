@@ -35,7 +35,8 @@ export type GameEventType =
   | "EQUIP_ITEM"           // Item was equipped/unequipped
   | "REST_COMPLETED"       // Short or long rest completed
   | "EXPLORATION_WARNING"   // Resource depletion or other exploration danger
-  | "PLAYER_MOVE";         // Player moved between dungeon nodes
+  | "PLAYER_MOVE"          // Player moved between dungeon nodes
+  | "ABILITY_CHECK_RESOLVED"; // Improvised action settled by an ability check
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.

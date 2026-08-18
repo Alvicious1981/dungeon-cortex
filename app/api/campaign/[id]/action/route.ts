@@ -26,6 +26,7 @@ import {
   type CharacterState,
 } from "@/lib/rules/exploration";
 import { moveToNode } from "@/lib/rules/navigation";
+import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
@@ -374,6 +375,42 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   } else {
     // LLM Intent Parsing (for natural language actions)
     const intent = await parseIntent(trimmedAction, systemContext);
+
+    // ── Gate: improvised action → ability check ─────────────────────────────────
+    // The SRD's universal fallback. The action has no dedicated rule, so the
+    // dice settle it rather than the narrator. The result is written to the log
+    // as a resolved fact before narration, so the AI describes an outcome the
+    // backend already determined instead of inventing one.
+    if (intent.actionType === "ability_check" && intent.skill) {
+      const charData = context.character;
+      const result = resolveAbilityCheck(
+        { skill: intent.skill },
+        {
+          stats: (charData.stats ?? {}) as Partial<Record<Ability, number>>,
+          level: charData.level,
+        }
+      );
+
+      await prisma.gameLog.create({
+        data: {
+          campaignId,
+          role: "system",
+          content:
+            `🎲 ${result.skill} check (${result.ability}): rolled ${result.roll} ` +
+            `${result.abilityModifier >= 0 ? "+" : ""}${result.abilityModifier}` +
+            `${result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : ""}` +
+            ` = ${result.total} vs DC ${result.dc} → ` +
+            `${result.success ? "SUCCESS" : "FAILURE"}` +
+            `${result.isCriticalSuccess ? " (natural 20)" : ""}` +
+            `${result.isCriticalFailure ? " (natural 1)" : ""}.`,
+        },
+      });
+
+      gameEvents.push({
+        type: "ABILITY_CHECK_RESOLVED",
+        payload: { ...result },
+      });
+    }
 
     // ── Gate: unclassifiable mechanical intent ──────────────────────────────────
     // Fail closed. The parser could not positively classify this input, so it may
