@@ -75,6 +75,10 @@ model Character {
   maxHp                Int
   stats                Json
   spellSlots           Json?
+  /// SRD skills the character is proficient in, as a JSON array of skill names
+  /// (e.g. ["Athletics","Perception"]). Seeded from the class at creation.
+  /// Null or malformed means no proficiency; it never grants an unearned bonus.
+  skillProficiencies   Json?
   xp                   Int      @default(0)
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?

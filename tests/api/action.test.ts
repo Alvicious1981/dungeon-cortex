@@ -169,7 +169,14 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
   it("settles an improvised action with an ability check, logged before narration", async () => {
     (buildCampaignContext as any).mockResolvedValue({
-      character: { id: "c1", name: "Hero", level: 5, stats: { STR: 16 }, inventory: [] },
+      character: {
+        id: "c1",
+        name: "Hero",
+        level: 5,
+        stats: { STR: 16 },
+        skillProficiencies: ["Athletics"],
+        inventory: [],
+      },
       characterStats: { conditions: [] },
       relevantMemories: [],
       recentLogs: [],
@@ -198,7 +205,9 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           role: "system",
-          content: expect.stringMatching(/Athletics check \(STR\).*vs DC 15 → (SUCCESS|FAILURE)/),
+          // +3 STR and +3 proficiency (level 5), so the stored proficiencies
+          // reach the roll rather than being silently dropped.
+          content: expect.stringMatching(/Athletics check \(STR\): rolled \d+ \+3 \+3 prof = \d+ vs DC 15 → (SUCCESS|FAILURE)/),
         }),
       })
     );
