@@ -273,6 +273,22 @@ describe("una contienda deriva la CD del que se resiste", () => {
     expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
   });
 
+  it("un hostil sin características no abarata la acción por debajo de la banda", async () => {
+    // La regresión que encontró la revisión: los enemigos creados por la ruta de
+    // encuentro se guardaban con stats vacío, y tratarlos como criatura promedio
+    // daba CD 10 — más fácil que esconderse sin nadie delante (CD 15).
+    withHostiles([
+      { id: "t1", name: "Unknown", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: {} },
+    ]);
+    const watched = await checkPayload("I hide behind the crates");
+
+    (buildCampaignContext as any).mockResolvedValue(contextFor());
+    const alone = await checkPayload("I hide behind the crates");
+
+    expect(watched.dcSource).toBe("band");
+    expect(watched.dc).toBe(alone.dc);
+  });
+
   it("sin encuentro activo no hay contienda y manda la banda", async () => {
     (buildCampaignContext as any).mockResolvedValue(contextFor());
 

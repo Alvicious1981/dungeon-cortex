@@ -21,8 +21,19 @@ describe("passiveSkillScore", () => {
     expect(passiveSkillScore({ WIS: 6 }, "Perception")).toBe(8);
   });
 
-  it("trata una característica ausente como 10", () => {
-    expect(passiveSkillScore({}, "Perception")).toBe(10);
+  it("informa de una característica ausente como desconocida, no como 10", () => {
+    // Un 10 inventado se lee como "criatura del montón" y produce CD 10, por
+    // debajo de la CD 15 sin oposición: ser vigilado saldría más barato que
+    // estar solo. Falta de dato es null.
+    expect(passiveSkillScore({}, "Perception")).toBeNull();
+    expect(passiveSkillScore({ STR: 18 }, "Perception")).toBeNull();
+  });
+
+  it("descarta valores que no son números finitos", () => {
+    // stats es JSON sin validar. Sin esto, NaN se propaga a la CD y ninguna
+    // tirada puede tener éxito, con "vs DC NaN" en el registro.
+    expect(passiveSkillScore({ WIS: "14" } as never, "Perception")).toBeNull();
+    expect(passiveSkillScore({ WIS: NaN }, "Perception")).toBeNull();
   });
 
   it("usa la característica correcta de cada habilidad", () => {
@@ -54,12 +65,20 @@ describe("contestedCheckDC", () => {
     ).toBe(14);
   });
 
-  it("sin oposición devuelve la banda por defecto en vez de un DC 10 engañoso", () => {
-    // Nadie resistiendo no significa "trivial": significa que no había contienda
-    // y que quien llama debería haber usado una banda.
-    expect(contestedCheckDC({ opponents: [], skills: ["Perception"] })).toBe(
-      DIFFICULTY_DC.medium
-    );
+  it("sin oponentes no hay número que devolver", () => {
+    expect(contestedCheckDC({ opponents: [], skills: ["Perception"] })).toBeNull();
+  });
+
+  it("oponentes sin datos relevantes cuentan como ausencia de contienda", () => {
+    // El caso real: los enemigos creados por la ruta de encuentro se guardaban
+    // con stats vacío. Tratarlos como promedio daba CD 10 a todo.
+    expect(contestedCheckDC({ opponents: [{}, {}], skills: ["Perception"] })).toBeNull();
+  });
+
+  it("un oponente con datos manda aunque otro no los tenga", () => {
+    expect(
+      contestedCheckDC({ opponents: [{}, { WIS: 16 }], skills: ["Perception"] })
+    ).toBe(13);
   });
 });
 
@@ -90,6 +109,20 @@ describe("resolveAbilityCheck con oposición", () => {
     expect(result.dcSource).toBe("band");
     expect(result.band).toBe("hard");
     expect(result.dc).toBe(DIFFICULTY_DC.hard);
+  });
+
+  it("oponentes sin características no abaratan la acción por debajo de la banda", () => {
+    // La regresión concreta: esconderse ante un combatiente con stats vacío
+    // daba CD 10, más fácil que esconderse sin nadie delante (CD 15).
+    const watched = resolveAbilityCheck(
+      { skill: "Stealth", band: "medium", opposition: { opponents: [{}], skills: ["Perception"] } },
+      hero
+    );
+    const alone = resolveAbilityCheck({ skill: "Stealth", band: "medium" }, hero);
+
+    expect(watched.dcSource).toBe("band");
+    expect(watched.dc).toBe(alone.dc);
+    expect(watched.dc).toBe(DIFFICULTY_DC.medium);
   });
 
   it("la misma acción cuesta distinto según a quién se enfrenta", () => {

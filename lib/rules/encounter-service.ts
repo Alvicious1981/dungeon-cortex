@@ -132,6 +132,24 @@ function characterStats(character: EncounterCharacterRecord): Record<string, num
 }
 
 /**
+ * The ability-score fields of an SRD monster, however it reached us.
+ *
+ * Deliberately looser than `Monster`: the same six scores arrive both as a
+ * parsed Monster and as the raw `SrdMonster.data` JSON, which is untyped. Both
+ * spell the fields the same way, so one projection serves both and the two
+ * encounter-creation paths cannot drift into disagreeing about a creature's
+ * statistics.
+ */
+export interface MonsterAbilityFields {
+  strength?: unknown;
+  dexterity?: unknown;
+  constitution?: unknown;
+  intelligence?: unknown;
+  wisdom?: unknown;
+  charisma?: unknown;
+}
+
+/**
  * Projects an SRD monster's ability scores onto the combatant stats convention.
  *
  * The engine reads creature ability scores as three-letter uppercase keys
@@ -142,14 +160,19 @@ function characterStats(character: EncounterCharacterRecord): Record<string, num
  * Callers apply `?? 10` anyway; making the fallback explicit here means a
  * persisted combatant always carries a complete, readable stat block.
  */
-export function monsterAbilityScores(monster: Monster): Record<string, number> {
+export function monsterAbilityScores(
+  monster: MonsterAbilityFields
+): Record<string, number> {
+  const score = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : 10;
+
   return {
-    STR: monster.strength ?? 10,
-    DEX: monster.dexterity ?? 10,
-    CON: monster.constitution ?? 10,
-    INT: monster.intelligence ?? 10,
-    WIS: monster.wisdom ?? 10,
-    CHA: monster.charisma ?? 10,
+    STR: score(monster.strength),
+    DEX: score(monster.dexterity),
+    CON: score(monster.constitution),
+    INT: score(monster.intelligence),
+    WIS: score(monster.wisdom),
+    CHA: score(monster.charisma),
   };
 }
 

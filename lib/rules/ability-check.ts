@@ -169,7 +169,8 @@ export function computeAbilityCheckDC(band?: DifficultyBand): number {
 }
 
 /**
- * The passive score for a skill: 10 + the relevant ability modifier.
+ * The passive score for a skill: 10 + the relevant ability modifier, or null
+ * when the creature's score for that ability is unknown.
  *
  * SRD passive checks are 10 + every modifier that applies, proficiency
  * included. Monster skill proficiencies are not persisted anywhere in this
@@ -177,12 +178,27 @@ export function computeAbilityCheckDC(band?: DifficultyBand): number {
  * Perception is rated as if it were not. That understates alert guards; it is
  * recorded here rather than papered over with an invented bonus, and stops
  * being an approximation the day monster proficiencies are stored.
+ *
+ * ─── Why "unknown" is not 10 ─────────────────────────────────────────────────
+ * Defaulting a missing score to 10 reads "we have no data" as "an average
+ * creature", which produces a confident passive 10 out of nothing. That is
+ * worse than useless here: a contest against it lands at DC 10, *below* the
+ * DC 15 the same action gets when nobody opposes it at all, so being watched
+ * would make hiding easier than being alone. Absent data yields null and the
+ * caller falls back to a difficulty band.
+ *
+ * `stats` arrives as unvalidated JSON, so a value that is not a finite number
+ * counts as unknown rather than being fed to the arithmetic. Left unchecked it
+ * would propagate NaN into the DC and make every roll fail while the log
+ * printed "vs DC NaN".
  */
 export function passiveSkillScore(
   stats: Partial<Record<Ability, number>>,
   skill: Skill
-): number {
-  return 10 + abilityModifier(stats[SKILL_ABILITY[skill]] ?? 10);
+): number | null {
+  const score = stats[SKILL_ABILITY[skill]];
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
+  return 10 + abilityModifier(score);
 }
 
 /**
@@ -200,14 +216,20 @@ export function passiveSkillScore(
  * is no tie rule to invent. The trade is that a shoved creature never rolls
  * well or badly — it defends at its average.
  *
- * With no opponents the attempt is unopposed, and the caller should fall back
- * to a difficulty band rather than treat DC 10 as "nobody is watching".
+ * Returns null when nothing can be contested — either no opponents at all, or
+ * none whose relevant ability scores are known. Both mean the same thing: there
+ * is no creature this attempt can be measured against, so the caller must fall
+ * back to a difficulty band. Inventing a number here would be strictly worse
+ * than the band, because the invented one is DC 10 and the band is DC 15.
  */
-export function contestedCheckDC(opposition: ContestedOpposition): number {
-  const scores = opposition.opponents.flatMap((opponent) =>
-    opposition.skills.map((skill) => passiveSkillScore(opponent, skill))
-  );
-  return scores.length > 0 ? Math.max(...scores) : DIFFICULTY_DC[DEFAULT_DIFFICULTY_BAND];
+export function contestedCheckDC(opposition: ContestedOpposition): number | null {
+  const scores = opposition.opponents
+    .flatMap((opponent) =>
+      opposition.skills.map((skill) => passiveSkillScore(opponent, skill))
+    )
+    .filter((score): score is number => score !== null);
+
+  return scores.length > 0 ? Math.max(...scores) : null;
 }
 
 /**
@@ -226,12 +248,14 @@ export function resolveAbilityCheck(
 
   // A contest overrides the band: when a specific creature is resisting, its
   // own statistics are a better answer to "how hard is this" than a label.
-  // With no opponents listed there is nothing to contest, so the band stands.
-  const isContested = (input.opposition?.opponents.length ?? 0) > 0;
+  //
+  // Only when the contest actually produced a number, though. Opponents whose
+  // relevant scores are unknown yield null, and the band stands — otherwise an
+  // encounter full of statless combatants would resolve every attempt at DC 10.
+  const contestedDC = input.opposition ? contestedCheckDC(input.opposition) : null;
+  const isContested = contestedDC !== null;
   const band = isContested ? null : input.band ?? DEFAULT_DIFFICULTY_BAND;
-  const dc = isContested
-    ? contestedCheckDC(input.opposition!)
-    : computeAbilityCheckDC(band ?? undefined);
+  const dc = isContested ? contestedDC : computeAbilityCheckDC(band ?? undefined);
 
   const abilityMod = abilityModifier(actor.stats[ability] ?? 10);
 
