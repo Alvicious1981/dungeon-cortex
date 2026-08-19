@@ -34,6 +34,7 @@ import { moveToNode } from "@/lib/rules/navigation";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
+import { resolveAreaTargets } from "@/lib/rules/spell-targeting";
 import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
@@ -69,6 +70,20 @@ interface RouteContext {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Coerces a persisted `Combatant.size` into a SizeCategory.
+ *
+ * The column is a plain string, so an unrecognised value degrades to Medium
+ * rather than throwing: a malformed row should resolve as an ordinary creature,
+ * not fail a legal turn. Shared by the movement gate and the spell gate so the
+ * two cannot disagree about how big a creature is.
+ */
+const VALID_SIZES: SizeCategory[] = ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"];
+
+function toSizeCategory(raw: unknown): SizeCategory {
+  return VALID_SIZES.includes(raw as SizeCategory) ? (raw as SizeCategory) : "Medium";
+}
 
 const encoder = new TextEncoder();
 
@@ -336,10 +351,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       // ── Collision validation (size-aware footprint) ────────────────────────
       // Build a list of all other combatants as GridCombatants, then check
       // every square the mover's footprint would cover at the destination.
-      const VALID_SIZES: SizeCategory[] = ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"];
-      const moverSize: SizeCategory = VALID_SIZES.includes(playerCombatant.size as SizeCategory)
-        ? (playerCombatant.size as SizeCategory)
-        : "Medium";
+      const moverSize: SizeCategory = toSizeCategory(playerCombatant.size);
 
       const otherCombatants: GridCombatant[] = context.activeEncounter.combatants
         .filter(c => c.id !== playerCombatant.id)
@@ -347,9 +359,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           id: c.id,
           x: c.x,
           y: c.y,
-          size: VALID_SIZES.includes(c.size as SizeCategory)
-            ? (c.size as SizeCategory)
-            : "Medium",
+          size: toSizeCategory(c.size),
         }));
 
       const footprintSide = sizeToSquares(moverSize);
@@ -581,8 +591,82 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
+      // ── Who the spell reaches ───────────────────────────────────────────────
+      // An area spell's targets are not the caller's to choose. The SRD says the
+      // area decides, so the client's list can at most say where to aim.
+      if (effect.unsupportedAreaType) {
+        return NextResponse.json(
+          {
+            error:
+              `${effect.name} has an area of type "${effect.unsupportedAreaType}", which the ` +
+              `rules engine does not know how to resolve.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      const encounterCombatants = context.activeEncounter?.combatants ?? [];
       let targets: ContextCombatant[] = [];
-      if (body.targetIds && body.targetIds.length > 0 && context.activeEncounter) {
+
+      if (effect.area && context.activeEncounter) {
+        // Aim: an explicit square wins; otherwise the named creature's square.
+        // The search covers every combatant, not only living hostiles — centring
+        // a blast on an ally or a fallen creature is a legal aim.
+        let aim: { x: number; y: number } | null = null;
+        if (Number.isInteger(body.targetX) && Number.isInteger(body.targetY)) {
+          aim = { x: body.targetX!, y: body.targetY! };
+        } else {
+          const named = intent.targetName
+            ? encounterCombatants.filter((c) =>
+                c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
+              )
+            : body.targetIds?.length
+              ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
+              : [];
+
+          // Several candidates and no coordinates: where the caster meant to aim
+          // is unknowable, so refuse rather than pick one. Distinct from "no aim
+          // at all" because the fix differs — name one creature, or send a square.
+          if (named.length > 1) {
+            return NextResponse.json(
+              {
+                error:
+                  "That names more than one creature, so the point of origin is ambiguous. " +
+                  "Name a single creature or pick a square.",
+                code: "AIM_AMBIGUOUS",
+              },
+              { status: 400 }
+            );
+          }
+          if (named.length === 1) aim = { x: named[0]!.x, y: named[0]!.y };
+        }
+
+        const casterCombatant = encounterCombatants.find((c) => c.isPlayer);
+        const outcome = resolveAreaTargets({
+          area: effect.area,
+          aim,
+          caster: { x: casterCombatant?.x ?? 0, y: casterCombatant?.y ?? 0 },
+          combatants: encounterCombatants.map((c) => ({
+            id: c.id,
+            x: c.x,
+            y: c.y,
+            size: toSizeCategory(c.size),
+          })),
+        });
+
+        if (!outcome.ok) {
+          return NextResponse.json(
+            { error: outcome.message, code: outcome.code },
+            { status: 400 }
+          );
+        }
+
+        const hitIds = new Set(outcome.targets.map((t) => t.id));
+        targets = encounterCombatants.filter((c) => hitIds.has(c.id));
+      } else if (body.targetIds && body.targetIds.length > 0 && context.activeEncounter) {
+        // Spells with no area still take the caller's selection: the SRD cache
+        // stores no target count, so there is no field to validate against.
+        // Recorded as a remaining leak in the design doc.
         targets = context.activeEncounter.combatants.filter(c => body.targetIds!.includes(c.id));
       } else if (intent.targetName && context.activeEncounter) {
         const normalizedTarget = intent.targetName.toLowerCase();
