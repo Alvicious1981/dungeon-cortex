@@ -103,11 +103,11 @@ function contextFor(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function post(action: string) {
+async function post(action: string, extra: Record<string, unknown> = {}) {
   const res = await POST(
     new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
       method: "POST",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...extra }),
     }),
     { params: Promise.resolve({ id: campaignId }) }
   );
@@ -524,6 +524,63 @@ describe("un conjuro sin nivel declarado se resuelve al nivel del propio conjuro
 
     expect(res.status).toBe(400);
     expect(streamNarrative).not.toHaveBeenCalled();
+  });
+});
+
+describe("un conjuro puede alcanzar a varias criaturas", () => {
+  /** Magic Missile as the SRD cache stores it: level 1, damage, no save. */
+  const MAGIC_MISSILE = {
+    id: "spell_magic_missile",
+    indexSlug: "magic-missile",
+    name: "Magic Missile",
+    level: 1,
+    concentration: false,
+    data: {
+      damage: {
+        damage_at_slot_level: { "1": "1d4+1", "2": "2d4+2" },
+        damage_type: { index: "force" },
+      },
+    },
+  };
+
+  it("resuelve contra los dos objetivos seleccionados, no solo el primero", async () => {
+    // Un ataque con arma nombra una criatura y se rechaza si no puede fijarla,
+    // pero un conjuro sí puede alcanzar a varias. Perder objetivos por el camino
+    // dejaría al narrador describiendo un impacto que el backend no resolvió.
+    const hostiles = [
+      { id: "t1", name: "Goblin One", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 } },
+      { id: "t2", name: "Goblin Two", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 } },
+    ];
+    const base = contextFor();
+    (buildCampaignContext as any).mockResolvedValue({
+      ...base,
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants: [
+          { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {} },
+          ...hostiles,
+        ],
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([MAGIC_MISSILE]);
+    (prisma.combatant.findMany as any).mockResolvedValue(hostiles);
+
+    const { res, frames } = await post("I cast Magic Missile", {
+      targetIds: ["t1", "t2"],
+    });
+
+    expect(res.status).toBe(200);
+
+    // Ambas criaturas reciben una escritura de estado, no solo la primera.
+    const updated = (prisma.combatant.update as any).mock.calls
+      .map((c: any[]) => c[0]?.where?.id)
+      .filter(Boolean);
+    expect(new Set(updated)).toEqual(new Set(["t1", "t2"]));
+
+    // Y la consecuencia que viaja al narrador nombra a las dos.
+    const consequence = frames.find((f) => f.e?.type === "COMBAT_CONSEQUENCE");
+    expect(consequence).toBeDefined();
+    expect(consequence.e.payload.targets).toHaveLength(2);
   });
 });
 

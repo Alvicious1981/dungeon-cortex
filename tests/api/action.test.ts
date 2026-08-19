@@ -156,6 +156,25 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(prisma.combatant.update).not.toHaveBeenCalled();
     });
 
+    it("hands the narrator the facts it resolved, not the raw player text", async () => {
+      // The other tests here prove an invalid attack is refused. This proves the
+      // valid one: the attack resolves, and what reaches streamNarrative is a
+      // narrative context carrying backend-resolved facts. Without that argument
+      // the narrator is describing an outcome it was never told, which is the
+      // failure this project exists to prevent — and nothing else asserted it.
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      expect(prisma.combatant.update).toHaveBeenCalled();
+
+      const call = (streamNarrative as any).mock.calls.at(-1);
+      expect(call?.[1]).toBe("I swing at it");
+      expect(call?.[2]?.facts.length).toBeGreaterThan(0);
+    });
+
     it("rejects a targetIds selection naming more than one creature", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, { ...hostile, id: "t3" }]));
 

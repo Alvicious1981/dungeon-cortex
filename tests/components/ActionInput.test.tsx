@@ -143,4 +143,40 @@ describe("ActionInput shared SSE transport", () => {
 
     window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
   });
+
+  it("attaches selected targets to an action the player typed", async () => {
+    // The test above covers the external-event path, where another component
+    // requests the action. This covers the other entry point: the player types
+    // the action and presses the button. handleSubmit builds its own request,
+    // so the selection reaching it is a separate guarantee — a spell aimed at
+    // two creatures must not lose one of them on the way out.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ t: "done" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+    const { getByRole, getByLabelText } = render(
+      <ActionInput
+        campaignId="campaign-1"
+        selectableTargets={[
+          { id: "enemy-1", name: "Goblin Alpha", hp: 10, maxHp: 10, isPlayer: false },
+          { id: "enemy-2", name: "Goblin Beta", hp: 10, maxHp: 10, isPlayer: false },
+        ]}
+      />
+    );
+
+    fireEvent.click(getByRole("checkbox", { name: "Goblin Alpha10/10" }));
+    fireEvent.click(getByRole("checkbox", { name: "Goblin Beta10/10" }));
+    fireEvent.change(getByLabelText("Tu acción"), {
+      target: { value: "Cast Magic Missile" },
+    });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toMatchObject({
+      action: "Cast Magic Missile",
+      targetIds: ["enemy-1", "enemy-2"],
+    });
+  });
 });
