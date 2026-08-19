@@ -183,6 +183,13 @@ distance — "you need to be adjacent" against "that is 40 ft away and the spell
 reaches 30". Two codes for one comparison would be duplication in the name with
 nothing behind it.
 
+**`AIM_AMBIGUOUS` narrows to area spells.** The previous increment fired it
+whenever a name matched several creatures. That is wrong for a spell with no area:
+naming two creatures there is a legitimate multi-target selection, not an
+ambiguous point of origin. Only an area spell needs one unambiguous square, so
+only an area spell refuses for it. This is a behaviour change to code merged in
+#94, deliberate and small.
+
 For a non-area spell with several targets where one is out of range, **the whole
 cast is refused** rather than dropping that target and resolving the rest.
 Dropping it silently would be the backend altering the player's selection without
@@ -224,15 +231,25 @@ resolves and leaves the raw value in the log.
 handled by the check. Adding a case to the union without a rule behind it fails
 there, as the area-shape guard does.
 
-### Cross-cutting fixture fallout, anticipated
+### Cross-cutting fixture fallout
 
-The area tests merged in #94 place the caster at (40,40) aiming at (1,0) — on
-purpose, to keep the caster out of the blast. That distance is **200 ft, and
-Fireball reaches 150**, so those fixtures will start returning `OUT_OF_RANGE` the
-moment the check exists. The caster needs to sit inside the range but outside the
-radius; (10,0) works — 45 ft to the aim, within 150 and clear of the 20 ft
-radius. Not a defect in the change; the change working. But it is half a dozen
-fixtures and better known in advance than discovered.
+An earlier draft of this spec claimed the area fixtures merged in #94 would start
+returning `OUT_OF_RANGE`, because they place the caster 200 ft from the aim while
+Fireball reaches 150. **That was wrong, and checking beat reasoning:** none of
+those fixtures declares a `range` in its spell `data` at all, so every one of them
+classifies as `unenforceable` and passes untouched.
+
+The real consequence is quieter and worse. Those fixtures would sail through
+without ever exercising the new code, and each would emit an "range not verified"
+log line for a spell whose range is perfectly well defined in the real SRD. So the
+work includes giving the existing spell fixtures a `range` that matches the spell
+they claim to be — `150 pies` for Fireball — and repositioning the caster inside
+it. (10,0) works for the area tests: 45 ft to the aim, within 150 and clear of the
+20 ft radius.
+
+A fixture that omits a field the production data always carries is the same
+hazard this repository keeps rediscovering: the test passes, and it passes for a
+reason unrelated to what it claims to prove.
 
 ### Verification
 
