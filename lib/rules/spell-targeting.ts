@@ -110,8 +110,13 @@ export interface SpellRangeInput {
   caster: GridCombatant;
   /** The aim point for an area spell, or null for a non-area spell. */
   aim: GridPoint | null;
-  /** The resolved targets for a non-area spell. Empty for an area spell. */
-  targets: readonly GridCombatant[];
+  /**
+   * The resolved targets for a non-area spell. Empty for an area spell.
+   *
+   * `name` is optional so a bare `GridCombatant` — which carries no name —
+   * still type-checks; the message falls back to the id when it is absent.
+   */
+  targets: readonly (GridCombatant & { name?: string })[];
 }
 
 /**
@@ -145,7 +150,7 @@ export function checkSpellRange(input: SpellRangeInput): SpellRangeVerdict {
   const measured: Array<{ label: string; distanceFt: number }> = aim
     ? [{ label: "that point", distanceFt: minFootprintDistanceFt(caster, aim) }]
     : targets.map((target) => ({
-        label: target.id,
+        label: target.name ?? target.id,
         distanceFt: minFootprintDistanceFt(caster, target),
       }));
 

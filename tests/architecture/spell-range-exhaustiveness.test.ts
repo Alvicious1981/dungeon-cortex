@@ -13,16 +13,29 @@ import type { GridCombatant, SpellRange } from "@/lib/rules/geometry";
 
 const caster: GridCombatant = { id: "p1", x: 0, y: 0, size: "Medium" };
 
-/** One representative of every kind in the union. */
-const ALL_KINDS: SpellRange[] = [
-  { kind: "distance", feetFromCaster: 30 },
-  { kind: "touch" },
-  { kind: "self" },
-  { kind: "unenforceable", raw: "Ilimitado" },
-];
+/**
+ * One representative of every kind in the union, keyed by the discriminant.
+ *
+ * A hand-written array (the previous shape of this fixture) still type-checks
+ * when a fifth kind is added to `SpellRange` — the array just stays four
+ * entries long, and the new kind is never exercised, which is exactly the
+ * failure this file exists to prevent. Keying by `SpellRange["kind"]` makes
+ * the object's own type require every kind as a property: omitting one is a
+ * compile error, not a silent gap.
+ */
+const ALL_KINDS: Record<SpellRange["kind"], SpellRange> = {
+  distance: { kind: "distance", feetFromCaster: 30 },
+  touch: { kind: "touch" },
+  self: { kind: "self" },
+  unenforceable: { kind: "unenforceable", raw: "Ilimitado" },
+};
 
 describe("cobertura de los tipos de alcance", () => {
-  it.each(ALL_KINDS)("$kind produce un veredicto utilizable", (range) => {
+  it.each(Object.values(ALL_KINDS))("$kind produce un veredicto correcto para un objetivo cercano", (range) => {
+    // The aim point is 5 ft away — within every enforceable kind's minimum
+    // range here, and irrelevant to self/unenforceable. A kind wired to a
+    // placeholder that always refuses, not only one that falls through to
+    // undefined, must fail this assertion.
     const verdict = checkSpellRange({
       range,
       caster,
@@ -30,11 +43,10 @@ describe("cobertura de los tipos de alcance", () => {
       targets: [],
     });
 
-    // Every kind must answer. A kind falling through to undefined, or returning
-    // a shape the gate cannot read, fails here.
-    expect(verdict).toBeDefined();
-    expect(typeof verdict.ok).toBe("boolean");
-    if (verdict.ok) expect(typeof verdict.enforced).toBe("boolean");
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) {
+      expect(verdict.enforced).toBe(range.kind !== "unenforceable");
+    }
   });
 
   it("los dos tipos comprobables rechazan algo fuera de alcance", () => {

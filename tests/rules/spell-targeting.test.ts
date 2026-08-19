@@ -202,6 +202,32 @@ describe("checkSpellRange", () => {
     ).toEqual({ ok: true, enforced: true });
   });
 
+  it("names the creature in the refusal message, not its database id", () => {
+    const verdict = checkSpellRange({
+      range: { kind: "distance", feetFromCaster: 30 },
+      caster,
+      aim: null,
+      targets: [{ id: "cmt_01h9xabcdefg", name: "Goblin Scout", x: 20, y: 0, size: "Medium" }],
+    });
+
+    expect(verdict).toMatchObject({ ok: false, code: "OUT_OF_RANGE" });
+    expect(verdict.ok === false && verdict.message).toContain("Goblin Scout");
+    expect(verdict.ok === false && verdict.message).not.toContain("cmt_01h9xabcdefg");
+  });
+
+  it("falls back to the id when a target carries no name", () => {
+    // Compatibility: a bare GridCombatant, with no `name`, must still produce
+    // a readable message rather than an undefined one.
+    const verdict = checkSpellRange({
+      range: { kind: "distance", feetFromCaster: 30 },
+      caster,
+      aim: null,
+      targets: [at("t1", 20, 0)],
+    });
+
+    expect(verdict.ok === false && verdict.message).toContain("t1");
+  });
+
   it("uses the caster's footprint, so a big caster reaches further", () => {
     // The discriminating case: anchor to anchor is 40 ft and would refuse; the
     // Large caster's near edge is 35 ft away and legally reaches.

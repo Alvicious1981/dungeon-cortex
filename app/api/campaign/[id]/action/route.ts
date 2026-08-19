@@ -611,57 +611,93 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         x: c.x,
         y: c.y,
         size: toSizeCategory(c.size),
+        name: c.name,
       });
 
-      // Aim: an explicit square wins; otherwise the named creature's square.
-      // The search covers every combatant, not only living hostiles — centring
-      // a blast on an ally or a fallen creature is a legal aim.
-      let aim: { x: number; y: number } | null = null;
-      if (Number.isInteger(body.targetX) && Number.isInteger(body.targetY)) {
-        aim = { x: body.targetX!, y: body.targetY! };
-      } else {
-        const named = intent.targetName
-          ? encounterCombatants.filter((c) =>
-              c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
-            )
-          : body.targetIds?.length
-            ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
-            : [];
+      const isSelfSpell = effect.range.kind === "self";
 
-        // Several candidates and no coordinates: where the caster meant to aim
-        // is unknowable, so refuse rather than pick one. Distinct from "no aim
-        // at all" because the fix differs — name one creature, or send a square.
-        if (effect.area && named.length > 1) {
-          return NextResponse.json(
-            {
-              error:
-                "That names more than one creature, so the point of origin is ambiguous. " +
-                "Name a single creature or pick a square.",
-              code: "AIM_AMBIGUOUS",
-            },
-            { status: 400 }
-          );
+      // The creature(s) the client selected, computed once and shared by aim
+      // derivation below and the non-area target set further down — the two
+      // used to run this same filter separately and disagree about which of
+      // targetIds/targetName took precedence when both were present. An
+      // explicit id list wins because the player chose those directly; the
+      // name path keeps every match here, since aim derivation still needs the
+      // count to detect an ambiguous point of origin.
+      const selectedByIds = body.targetIds?.length
+        ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
+        : null;
+      const selectedByName = !selectedByIds && intent.targetName
+        ? encounterCombatants.filter((c) =>
+            c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
+          )
+        : null;
+
+      // Aim: an explicit square wins; otherwise the selected creature's
+      // square. Skipped entirely for a caster-only spell — it has no point to
+      // choose, and the client's coordinates or selection must not redirect
+      // it; the aim is forced to the caster's own square below instead. The
+      // search covers every combatant, not only living hostiles — centring a
+      // blast on an ally or a fallen creature is a legal aim.
+      let aim: { x: number; y: number } | null = null;
+      if (!isSelfSpell) {
+        if (Number.isInteger(body.targetX) && Number.isInteger(body.targetY)) {
+          aim = { x: body.targetX!, y: body.targetY! };
+        } else {
+          const named = selectedByIds ?? selectedByName ?? [];
+
+          // Several candidates and no coordinates: where the caster meant to aim
+          // is unknowable, so refuse rather than pick one. Distinct from "no aim
+          // at all" because the fix differs — name one creature, or send a square.
+          if (effect.area && named.length > 1) {
+            return NextResponse.json(
+              {
+                error:
+                  "That names more than one creature, so the point of origin is ambiguous. " +
+                  "Name a single creature or pick a square.",
+                code: "AIM_AMBIGUOUS",
+              },
+              { status: 400 }
+            );
+          }
+          if (named.length === 1) aim = { x: named[0]!.x, y: named[0]!.y };
         }
-        if (named.length === 1) aim = { x: named[0]!.x, y: named[0]!.y };
       }
 
       const casterCombatant = encounterCombatants.find((c) => c.isPlayer);
 
+      // Both the range gate below and the area gate further down measure from
+      // the caster's own square. Without one to measure from, the area branch
+      // used to fall back to the map corner (0,0) and resolve with range
+      // enforcement silently absent. An encounter whose player row lacks
+      // `isPlayer` is a data problem, not license to skip enforcement: refuse
+      // the cast rather than resolve it from a square nobody occupies.
+      if (context.activeEncounter && !casterCombatant) {
+        return NextResponse.json(
+          { error: "Could not find your combatant in the active encounter." },
+          { status: 400 }
+        );
+      }
+
+      // A caster-only spell's origin is the caster, not whatever the client
+      // sent — this replaces the aim derived above (always null for a self
+      // spell at this point), it does not merely supplement it.
+      if (isSelfSpell && casterCombatant) {
+        aim = { x: casterCombatant.x, y: casterCombatant.y };
+      }
+
       let targets: ContextCombatant[] = [];
 
       // The selection a non-area spell would use, needed by the range check
-      // before the area branch decides anything.
-      const requestedTargets = body.targetIds?.length
-        ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
-        : intent.targetName
-          ? encounterCombatants.filter((c) =>
-              c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
-            )
-          : [];
+      // before the area branch decides anything. targetIds is honoured in
+      // full — an explicit multi-select is a legitimate choice the player
+      // made — but a name match is narrowed to a single creature: a name
+      // matching several must not fan the spell out across all of them.
+      const requestedTargets = selectedByIds ?? selectedByName?.slice(0, 1) ?? [];
 
       // ── Range, before anything is derived ───────────────────────────────────
       // Out of range is the more useful diagnostic and the cheaper one: deriving
       // a set first would report "the spell hit nobody" for a reach problem.
+      let unenforcedRangeLog: string | null = null;
       if (casterCombatant) {
         const rangeVerdict = checkSpellRange({
           range: effect.range,
@@ -679,24 +715,27 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
         if (!rangeVerdict.enforced) {
           // Declared rather than silent: a rule that did not apply and left no
-          // trace is how a gap survives unnoticed.
-          await prisma.gameLog.create({
-            data: {
-              campaignId,
-              role: "system",
-              content:
-                `⚠️ ${effect.name}: range not verified — the SRD records it as ` +
-                `"${rangeVerdict.raw ?? "missing"}", which carries no measurable distance.`,
-            },
-          });
+          // trace is how a gap survives unnoticed. The line itself is written
+          // only once the cast is confirmed to proceed — see below — so a
+          // refusal from the area branch that follows does not leave a log
+          // entry describing a spell that was never cast.
+          unenforcedRangeLog =
+            `⚠️ ${effect.name}: range not verified — the SRD records it as ` +
+            `"${rangeVerdict.raw ?? "missing"}", which carries no measurable distance.`;
         }
       }
 
-      if (effect.area && context.activeEncounter) {
+      if (isSelfSpell && !effect.area) {
+        // No area and no selection to compute: a caster-only spell reaches
+        // only the caster, whatever targetIds the client sent.
+        targets = casterCombatant ? [casterCombatant] : [];
+      } else if (effect.area && context.activeEncounter) {
         const outcome = resolveAreaTargets({
           area: effect.area,
           aim,
-          caster: { x: casterCombatant?.x ?? 0, y: casterCombatant?.y ?? 0 },
+          // casterCombatant is guaranteed here: an active encounter with no
+          // caster already returned 400 above.
+          caster: { x: casterCombatant!.x, y: casterCombatant!.y },
           combatants: encounterCombatants.map(asGrid),
         });
 
@@ -714,6 +753,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         // stores no target count, so there is no field to validate against.
         // Recorded as a remaining leak in the design doc.
         targets = requestedTargets;
+      }
+
+      // The cast is going ahead: now, and only now, declare an unenforceable
+      // range in the log.
+      if (unenforcedRangeLog) {
+        await prisma.gameLog.create({
+          data: { campaignId, role: "system", content: unenforcedRangeLog },
+        });
       }
 
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);

@@ -905,3 +905,234 @@ describe("el alcance del conjuro lo comprueba el backend", () => {
     ).toBe(true);
   });
 });
+
+describe("un conjuro lanzador-solo no se puede redirigir a otra criatura", () => {
+  const caster = {
+    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+  };
+
+  const hostile = (id: string, x: number, y: number) => ({
+    id, name: `Goblin ${id}`, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
+    x, y, size: "Medium",
+  });
+
+  function encounterWith(spell: unknown, combatants: Array<Record<string, unknown>>) {
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([spell]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+  }
+
+  function damaged(): string[] {
+    return (prisma.combatant.update as any).mock.calls
+      .map((c: any[]) => c[0]?.where?.id)
+      .filter(Boolean);
+  }
+
+  /** Espíritus Guardianes as the SRD stores it: caster-only, 15 ft radius. */
+  const ESPIRITUS_GUARDIANES = {
+    id: "spell_espiritus", indexSlug: "espiritus-guardianes", name: "Espiritus Guardianes",
+    level: 3, concentration: true,
+    data: {
+      damage: { damage_at_slot_level: { "3": "3d8" }, damage_type: { index: "radiant" } },
+      range: "Personal (radio de 15 pies)",
+    },
+  };
+
+  it("una esfera lanzador-solo se centra en el lanzador, ignorando un punto de mira lejano", async () => {
+    // Reproduced from the finding: an aim 200 ft away used to be applied
+    // verbatim, detonating a 15 ft caster-emanation across the map.
+    const near = hostile("t1", 2, 0);   // 10 ft — inside the 15 ft radius
+    const far = hostile("t2", 40, 0);   // 200 ft — where the client aimed
+    encounterWith(ESPIRITUS_GUARDIANES, [caster, near, far]);
+
+    const { res } = await post("I cast Espiritus Guardianes", {
+      targetX: 40, targetY: 0,
+    });
+
+    expect(res.status).toBe(200);
+    expect(damaged()).toContain("t1");
+    expect(damaged()).not.toContain("t2");
+  });
+
+  it("no exige punto de mira: un conjuro lanzador-solo no tiene casilla que elegir", async () => {
+    // The same spell cast with no coordinates at all used to refuse with
+    // AIM_REQUIRED, for a spell that has no square to choose.
+    encounterWith(ESPIRITUS_GUARDIANES, [caster, hostile("t1", 2, 0)]);
+
+    const { res } = await post("I cast Espiritus Guardianes");
+
+    expect(res.status).toBe(200);
+  });
+
+  /** A caster-only spell with no area at all — no sphere to hide behind. */
+  const RESPLANDOR_PERSONAL = {
+    id: "spell_resplandor", indexSlug: "resplandor-personal", name: "Resplandor Personal",
+    level: 1, concentration: false,
+    data: {
+      damage: { damage_at_slot_level: { "1": "1d6" }, damage_type: { index: "fire" } },
+      range: "Personal",
+    },
+  };
+
+  it("un conjuro lanzador-solo sin área no daña a un objetivo nombrado por el cliente", async () => {
+    const enemy = hostile("t1", 2, 0);
+    encounterWith(RESPLANDOR_PERSONAL, [caster, enemy]);
+
+    const { res } = await post("I cast Resplandor Personal", {
+      targetIds: ["t1"],
+    });
+
+    expect(res.status).toBe(200);
+    expect(damaged()).not.toContain("t1");
+  });
+});
+
+describe("un nombre que encaja con varias criaturas no las alcanza a todas", () => {
+  /** Magic Missile: no area, single-target by rule even though the SRD cache
+   *  stores no target count to validate against. */
+  const MAGIC_MISSILE = {
+    id: "spell_magic_missile", indexSlug: "magic-missile", name: "Magic Missile",
+    level: 1, concentration: false,
+    data: {
+      damage: { damage_at_slot_level: { "1": "1d4+1" }, damage_type: { index: "force" } },
+      range: "120 pies",
+    },
+  };
+
+  const caster = {
+    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+  };
+
+  const hostile = (id: string, x: number, y: number) => ({
+    id, name: "Goblin", isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
+    x, y, size: "Medium",
+  });
+
+  it("tres criaturas con el mismo nombre: solo una recibe la escritura de estado", async () => {
+    // Reproduced from the finding: three hostiles all named "Goblin" used to
+    // produce three combatant.update calls, one for each name match, where a
+    // single-target spell should hit exactly one.
+    const combatants = [
+      caster,
+      hostile("t1", 1, 0),
+      hostile("t2", 1, 1),
+      hostile("t3", 1, 2),
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([MAGIC_MISSILE]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const { res } = await post("I cast Magic Missile on the Goblin");
+
+    expect(res.status).toBe(200);
+    const updated = (prisma.combatant.update as any).mock.calls
+      .map((c: any[]) => c[0]?.where?.id)
+      .filter(Boolean);
+    expect(updated).toHaveLength(1);
+    expect(["t1", "t2", "t3"]).toContain(updated[0]);
+  });
+});
+
+describe("sin combatiente jugador identificable, el lanzamiento se rechaza", () => {
+  const FIREBALL_AREA = {
+    id: "spell_fireball_noplayer", indexSlug: "fireball", name: "Fireball",
+    level: 3, concentration: false,
+    data: {
+      damage: { damage_at_slot_level: { "3": "8d6" }, damage_type: { index: "fire" } },
+      dc: { dc_type: { index: "dex" }, dc_success: "half" },
+      area_of_effect: { type: "sphere", size: 20 },
+      range: "150 pies",
+    },
+  };
+
+  it("un encuentro sin ningun isPlayer=true rechaza el lanzamiento en vez de resolver desde (0,0)", async () => {
+    // Nothing in this encounter carries isPlayer, so there is no combatant to
+    // measure range or the area origin from. The old fallback resolved from
+    // the map corner (0,0) with the range gate silently skipped.
+    const combatants = [
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+        conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([FIREBALL_AREA]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const { res } = await post("I cast Fireball", { targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(400);
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("la linea de alcance no verificado no se escribe si el lanzamiento se rechaza despues", () => {
+  const caster = {
+    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+  };
+
+  /** An area spell with an unenforceable range, so checkSpellRange passes and
+   *  flags it for the log — but no aim point is supplied, so the area gate
+   *  that runs afterwards refuses the cast outright. */
+  const FIREBALL_UNLIMITED = {
+    id: "spell_fireball_unlimited", indexSlug: "fireball", name: "Fireball",
+    level: 3, concentration: false,
+    data: {
+      damage: { damage_at_slot_level: { "3": "8d6" }, damage_type: { index: "fire" } },
+      dc: { dc_type: { index: "dex" }, dc_success: "half" },
+      area_of_effect: { type: "sphere", size: 20 },
+      range: "Ilimitado",
+    },
+  };
+
+  it("un area sin punto de mira se rechaza sin dejar el aviso de alcance no verificado en el registro", async () => {
+    const combatants = [
+      caster,
+      { id: "t1", name: "Goblin", isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+        conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([FIREBALL_UNLIMITED]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const { res } = await post("I cast Fireball");
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "AIM_REQUIRED" });
+    // The range gate itself passed (unenforceable, not out of range) and would
+    // have logged that fact — but the cast never actually went ahead, so the
+    // log must stay silent about a spell that was never resolved.
+    expect(
+      systemLogs().some((line) => line.includes("range not verified"))
+    ).toBe(false);
+  });
+});
