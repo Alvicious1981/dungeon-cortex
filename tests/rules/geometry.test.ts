@@ -409,9 +409,10 @@ describe("getAoETargets", () => {
   })
 
   it("catches a Large creature by its footprint, not its anchor square", () => {
-    // A Large creature anchored outside the radius still occupies a square
-    // inside it. Testing only the anchor would miss the edge of every blast.
-    const large = at("ogre", 7, 5, "Large") // occupies (7,5),(8,5),(7,6),(8,6)
+    // Anchor (3,3) is 14.14 ft from the centre (5,5) — outside the 10 ft
+    // radius. But the footprint corner (4,4) is only 7.07 ft away — inside.
+    // Testing only the anchor would miss the edge of every blast.
+    const large = at("ogre", 3, 3, "Large") // occupies (3,3),(4,3),(3,4),(4,4)
     const hit = getAoETargets({
       shape: "sphere",
       origin: { x: 5, y: 5 },
