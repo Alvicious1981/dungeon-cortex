@@ -373,6 +373,31 @@ export interface SpellArea {
   sizeFt: number
 }
 
+/**
+ * How far a spell reaches, normalised from the SRD's free-text `range` field.
+ *
+ * Lives here rather than in the resolution service for the same reason
+ * `SpellArea` does: `spell-targeting.ts` needs the type and must not import a
+ * module that imports Prisma.
+ *
+ * `touch` is its own case although it is mechanically TOUCH_REACH_FT. The
+ * comparison is shared, so the duplication is in the name only; what it buys is
+ * a message the player can act on — "you have to be adjacent" rather than
+ * "out of range".
+ *
+ * `unenforceable` carries the raw value. Without it a result could say the range
+ * went unchecked but not why, and "Ilimitado" (the spell's actual rule) and null
+ * (a data gap) are different situations.
+ */
+export type SpellRange =
+  | { kind: "distance"; feetFromCaster: number }
+  | { kind: "touch" }
+  | { kind: "self" }
+  | { kind: "unenforceable"; raw: string | null }
+
+/** A touch spell reaches an adjacent square. */
+export const TOUCH_REACH_FT = 5
+
 export interface AoETargetsInput {
   shape: AreaShape
   /** Point-anchored shapes: the chosen point. Directional: the caster's square. */
