@@ -10,6 +10,7 @@ import {
   sizeToSquares,
   getCombatantOccupiedSquares,
   isOccupied,
+  getAoETargets,
   GridPoint,
   GridCombatant,
   SizeCategory,
@@ -385,5 +386,75 @@ describe("isInLine", () => {
 
   it("refuses a zero-length direction instead of matching everything", () => {
     expect(isInLine({ x: 1, y: 0 }, origin, { x: 0, y: 0 }, 20)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getAoETargets
+// ---------------------------------------------------------------------------
+
+describe("getAoETargets", () => {
+  const at = (id: string, x: number, y: number, size: SizeCategory = "Medium") =>
+    ({ id, x, y, size })
+
+  it("returns combatants inside a sphere and omits those outside", () => {
+    const combatants = [at("in", 5, 5), at("edge", 7, 5), at("out", 9, 5)]
+    const hit = getAoETargets({
+      shape: "sphere",
+      origin: { x: 5, y: 5 },
+      sizeFt: 10,
+      combatants,
+    })
+    expect(hit.map((c) => c.id)).toEqual(["in", "edge"])
+  })
+
+  it("catches a Large creature by its footprint, not its anchor square", () => {
+    // A Large creature anchored outside the radius still occupies a square
+    // inside it. Testing only the anchor would miss the edge of every blast.
+    const large = at("ogre", 7, 5, "Large") // occupies (7,5),(8,5),(7,6),(8,6)
+    const hit = getAoETargets({
+      shape: "sphere",
+      origin: { x: 5, y: 5 },
+      sizeFt: 10,
+      combatants: [large],
+    })
+    expect(hit.map((c) => c.id)).toEqual(["ogre"])
+  })
+
+  it("uses the direction for a cone and ignores creatures behind the caster", () => {
+    const combatants = [at("ahead", 3, 0), at("behind", -3, 0)]
+    const hit = getAoETargets({
+      shape: "cone",
+      origin: { x: 0, y: 0 },
+      sizeFt: 30,
+      direction: { x: 1, y: 0 },
+      combatants,
+    })
+    expect(hit.map((c) => c.id)).toEqual(["ahead"])
+  })
+
+  it("returns nothing for a directional shape with no direction", () => {
+    const hit = getAoETargets({
+      shape: "line",
+      origin: { x: 0, y: 0 },
+      sizeFt: 30,
+      combatants: [at("target", 2, 0)],
+    })
+    expect(hit).toEqual([])
+  })
+
+  it("resolves a mile-wide area without walking its squares", () => {
+    // The SRD cache holds areas up to 40,000 ft. On a 5 ft grid that is
+    // 8,000 x 8,000 = 64 million cells, so an implementation that enumerates
+    // the shape hangs here rather than returning. This test does not assert
+    // the algorithm directly; it makes the wrong one exhaust the timeout.
+    const combatants = [at("near", 1, 1), at("far", 200, 200)]
+    const hit = getAoETargets({
+      shape: "cube",
+      origin: { x: 0, y: 0 },
+      sizeFt: 40000,
+      combatants,
+    })
+    expect(hit.map((c) => c.id)).toEqual(["near", "far"])
   })
 })

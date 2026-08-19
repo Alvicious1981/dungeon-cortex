@@ -326,3 +326,66 @@ export function isOccupied(
     return squares.some((sq) => sq.x === point.x && sq.y === point.y)
   })
 }
+
+// ---------------------------------------------------------------------------
+// AoE: aggregation
+// ---------------------------------------------------------------------------
+
+/** The four area shapes the rules engine resolves. */
+export type AreaShape = "sphere" | "cube" | "cone" | "line"
+
+/** A spell's area, normalised from the SRD record. */
+export interface SpellArea {
+  shape: AreaShape
+  /** Radius for a sphere, edge for a cube, length for a cone or line. */
+  sizeFt: number
+}
+
+export interface AoETargetsInput {
+  shape: AreaShape
+  /** Point-anchored shapes: the chosen point. Directional: the caster's square. */
+  origin: GridPoint
+  /** Radius for a sphere, edge for a cube, length for a cone or line. */
+  sizeFt: number
+  /** Required by cone and line; ignored by sphere and cube. */
+  direction?: GridPoint
+  combatants: readonly GridCombatant[]
+}
+
+/**
+ * Returns every combatant the area touches.
+ *
+ * A combatant is caught when ANY square of its footprint falls inside the
+ * shape, so a Large creature clipping the edge of a blast is included even
+ * though its anchor square is outside.
+ *
+ * ─── Why this tests creatures, not squares ──────────────────────────────────
+ * Areas in the SRD cache reach 40,000 ft. Enumerating a shape that size on a
+ * 5 ft grid is 64 million cells; testing each combatant against the shape is
+ * bounded by the encounter's size instead. Never invert this loop.
+ *
+ * A directional shape called without a direction returns nothing rather than
+ * guessing a facing.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function getAoETargets(input: AoETargetsInput): GridCombatant[] {
+  const { shape, origin, sizeFt, direction, combatants } = input
+
+  const covers = (point: GridPoint): boolean => {
+    switch (shape) {
+      case "sphere":
+        return isInSphere(point, origin, sizeFt)
+      case "cube":
+        return isInCube(point, origin, sizeFt)
+      case "cone":
+        return direction ? isInCone(point, origin, direction, sizeFt) : false
+      case "line":
+        return direction ? isInLine(point, origin, direction, sizeFt) : false
+    }
+  }
+
+  return combatants.filter((combatant) =>
+    getCombatantOccupiedSquares(combatant).some(covers)
+  )
+}
