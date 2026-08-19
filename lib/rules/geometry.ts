@@ -327,6 +327,38 @@ export function isOccupied(
   })
 }
 
+/**
+ * The shortest distance in feet between a creature and a target, measured
+ * between the nearest squares of their footprints.
+ *
+ * Anchor-to-anchor is the wrong measure, not merely a rougher one: a Large
+ * creature's body extends a square beyond its anchor, so measuring anchors
+ * refuses spells the creature can legally reach. The bigger the creature, the
+ * bigger the error.
+ *
+ * The destination may be a bare `GridPoint` — an area spell's aim point is a
+ * square, not a creature.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function minFootprintDistanceFt(
+  from: GridCombatant,
+  to: GridCombatant | GridPoint
+): number {
+  const fromSquares = getCombatantOccupiedSquares(from)
+  const toSquares =
+    "size" in to ? getCombatantOccupiedSquares(to) : [to]
+
+  let shortest = Infinity
+  for (const a of fromSquares) {
+    for (const b of toSquares) {
+      const d = gridDistanceFt(a, b)
+      if (d < shortest) shortest = d
+    }
+  }
+  return shortest
+}
+
 // ---------------------------------------------------------------------------
 // AoE: aggregation
 // ---------------------------------------------------------------------------

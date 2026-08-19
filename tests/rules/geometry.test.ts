@@ -11,6 +11,7 @@ import {
   getCombatantOccupiedSquares,
   isOccupied,
   getAoETargets,
+  minFootprintDistanceFt,
   GridPoint,
   GridCombatant,
   SizeCategory,
@@ -457,5 +458,47 @@ describe("getAoETargets", () => {
       combatants,
     })
     expect(hit.map((c) => c.id)).toEqual(["near", "far"])
+  })
+})
+
+describe("minFootprintDistanceFt", () => {
+  const medium = (id: string, x: number, y: number): GridCombatant =>
+    ({ id, x, y, size: "Medium" })
+
+  it("measures between the nearest squares, not the anchors", () => {
+    // A Large caster anchored at (0,0) occupies (0,0),(1,0),(0,1),(1,1). Its
+    // nearest square to a target at (8,0) is (1,0) — 7 squares, 35 ft. Measuring
+    // anchor to anchor would report 8 squares, 40 ft, and wrongly refuse a
+    // 35 ft spell.
+    const largeCaster: GridCombatant = { id: "ogre", x: 0, y: 0, size: "Large" }
+    expect(minFootprintDistanceFt(largeCaster, medium("t", 8, 0))).toBe(35)
+  })
+
+  it("is zero when the footprints overlap", () => {
+    expect(minFootprintDistanceFt(medium("a", 3, 3), medium("b", 3, 3))).toBe(0)
+  })
+
+  it("counts a diagonal as 5 ft, per the grid rule", () => {
+    expect(minFootprintDistanceFt(medium("a", 0, 0), medium("b", 1, 1))).toBe(5)
+  })
+
+  it("accepts a bare point as the destination", () => {
+    // The aim point of an area spell is a square, not a creature.
+    expect(minFootprintDistanceFt(medium("a", 0, 0), { x: 4, y: 0 })).toBe(20)
+  })
+
+  it("shrinks as the source creature grows", () => {
+    // A Gargantuan creature reaches further from the same anchor, because more
+    // of its body is closer. This is the property that makes anchor-measuring
+    // wrong rather than merely imprecise.
+    const target = medium("t", 10, 0)
+    const asMedium = minFootprintDistanceFt(medium("c", 0, 0), target)
+    const asGargantuan = minFootprintDistanceFt(
+      { id: "c", x: 0, y: 0, size: "Gargantuan" },
+      target
+    )
+    expect(asGargantuan).toBeLessThan(asMedium)
+    expect(asMedium).toBe(50)
+    expect(asGargantuan).toBe(35)
   })
 })
