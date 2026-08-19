@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-19
 **Milestone:** V — The Cartographer & The Chronicler (`docs/MILESTONE_V_SPEC.md` §3–§4)
-**Status:** approved design, not yet implemented
+**Status:** implemented
 **Follows:** `docs/superpowers/specs/2026-08-19-aoe-target-authority-design.md`, which deferred this
 
 ## Problem
