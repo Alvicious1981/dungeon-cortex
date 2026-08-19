@@ -4,6 +4,8 @@ import {
   gridDistanceFt,
   isInSphere,
   isInCone,
+  isInCube,
+  isInLine,
   CONE_HALF_ANGLE_RAD,
   sizeToSquares,
   getCombatantOccupiedSquares,
@@ -322,5 +324,66 @@ describe("isOccupied", () => {
     // Square just outside the footprint
     expect(isOccupied({ x: 3, y: 0 }, [c])).toBe(false)
     expect(isOccupied({ x: 0, y: 3 }, [c])).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isInCube
+// ---------------------------------------------------------------------------
+
+describe("isInCube", () => {
+  const origin = { x: 5, y: 5 }
+
+  it("covers a 3x3 window for a 15 ft cube", () => {
+    // 15 ft / 5 = 3 squares per side, centred on the origin.
+    expect(isInCube({ x: 5, y: 5 }, origin, 15)).toBe(true)
+    expect(isInCube({ x: 4, y: 4 }, origin, 15)).toBe(true)
+    expect(isInCube({ x: 6, y: 6 }, origin, 15)).toBe(true)
+    expect(isInCube({ x: 3, y: 5 }, origin, 15)).toBe(false)
+    expect(isInCube({ x: 5, y: 7 }, origin, 15)).toBe(false)
+  })
+
+  it("gives the extra square to the positive side when the side is even", () => {
+    // A 10 ft cube is 2 squares wide and cannot centre on one square.
+    // The house ruling: the extra square goes +x / +y. Documented in the source.
+    expect(isInCube({ x: 5, y: 5 }, origin, 10)).toBe(true)
+    expect(isInCube({ x: 6, y: 6 }, origin, 10)).toBe(true)
+    expect(isInCube({ x: 4, y: 5 }, origin, 10)).toBe(false)
+  })
+
+  it("never collapses below a single square", () => {
+    expect(isInCube({ x: 5, y: 5 }, origin, 0)).toBe(true)
+    expect(isInCube({ x: 6, y: 5 }, origin, 0)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isInLine
+// ---------------------------------------------------------------------------
+
+describe("isInLine", () => {
+  const origin = { x: 0, y: 0 }
+  const east = { x: 1, y: 0 }
+
+  it("covers squares along the ray up to its length", () => {
+    expect(isInLine({ x: 1, y: 0 }, origin, east, 20)).toBe(true)
+    expect(isInLine({ x: 4, y: 0 }, origin, east, 20)).toBe(true)
+    expect(isInLine({ x: 5, y: 0 }, origin, east, 20)).toBe(false)
+  })
+
+  it("excludes the origin square", () => {
+    expect(isInLine({ x: 0, y: 0 }, origin, east, 20)).toBe(false)
+  })
+
+  it("excludes squares off the 5 ft width", () => {
+    expect(isInLine({ x: 2, y: 1 }, origin, east, 20)).toBe(false)
+  })
+
+  it("excludes squares behind the caster", () => {
+    expect(isInLine({ x: -2, y: 0 }, origin, east, 20)).toBe(false)
+  })
+
+  it("refuses a zero-length direction instead of matching everything", () => {
+    expect(isInLine({ x: 1, y: 0 }, origin, { x: 0, y: 0 }, 20)).toBe(false)
   })
 })

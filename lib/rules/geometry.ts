@@ -176,6 +176,84 @@ export function isInCone(
 }
 
 // ---------------------------------------------------------------------------
+// AoE: Cube
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if `point` lies within a cube of `sizeFt` per side centred on
+ * `origin`.
+ *
+ * ─── A house ruling, stated ─────────────────────────────────────────────────
+ * The SRD places a cube's point of origin anywhere on one *face* of the cube,
+ * which needs a facing the grid does not carry. Centring on the chosen point is
+ * the common table simplification and keeps the shape symmetric.
+ *
+ * An even-sided cube cannot centre on a single square, so the extra square goes
+ * to the +x / +y side. Arbitrary but fixed: an unstated tie-break would make the
+ * same cast resolve differently depending on rounding.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function isInCube(
+  point: GridPoint,
+  origin: GridPoint,
+  sizeFt: number
+): boolean {
+  const side = Math.max(1, Math.round(sizeFt / 5))
+  const half = Math.floor((side - 1) / 2)
+  const minX = origin.x - half
+  const minY = origin.y - half
+  return (
+    point.x >= minX &&
+    point.x <= minX + side - 1 &&
+    point.y >= minY &&
+    point.y <= minY + side - 1
+  )
+}
+
+// ---------------------------------------------------------------------------
+// AoE: Line
+// ---------------------------------------------------------------------------
+
+/** Half of a line's 5 ft width, in feet. */
+const LINE_HALF_WIDTH_FT = 2.5
+
+/**
+ * Returns true if `point` lies within a 5 ft wide line of `lengthFt`
+ * originating at `origin` and running along `direction`.
+ *
+ * SRD lines emanate from the caster, so the origin square itself is excluded
+ * and nothing behind the caster is ever caught.
+ *
+ * A zero-length `direction` returns false rather than matching everything: a
+ * line with no direction is not a line, and silently treating it as one would
+ * hit the whole map.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function isInLine(
+  point: GridPoint,
+  origin: GridPoint,
+  direction: GridPoint,
+  lengthFt: number
+): boolean {
+  const dirMag = Math.sqrt(direction.x * direction.x + direction.y * direction.y)
+  if (dirMag === 0) return false
+
+  const ux = direction.x / dirMag
+  const uy = direction.y / dirMag
+
+  const dx = point.x - origin.x
+  const dy = point.y - origin.y
+
+  // Feet travelled along the ray, and feet off it.
+  const alongFt = (dx * ux + dy * uy) * 5
+  const perpFt = Math.abs(dx * uy - dy * ux) * 5
+
+  return alongFt > 0 && alongFt <= lengthFt && perpFt <= LINE_HALF_WIDTH_FT
+}
+
+// ---------------------------------------------------------------------------
 // Collision: size-based footprint
 // ---------------------------------------------------------------------------
 
