@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveCachedSpell } from "@/lib/rules/spell-resolution-service";
+import { parseSpellArea, resolveCachedSpell } from "@/lib/rules/spell-resolution-service";
 
 interface SpellRow {
   id: string;
@@ -166,5 +166,44 @@ describe("resolveCachedSpell", () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+describe("parseSpellArea", () => {
+  it.each([
+    ["esfera", "sphere"],
+    ["sphere", "sphere"],
+    ["cilindro", "sphere"],
+    ["cylinder", "sphere"],
+    ["cubo", "cube"],
+    ["cube", "cube"],
+    ["cuadrado", "cube"],
+    ["cono", "cone"],
+    ["cone", "cone"],
+    ["line", "line"],
+  ])("maps the SRD type %s to %s", (rawType, shape) => {
+    // All ten strings observed in the live SrdSpell table. The column is
+    // bilingual with neither language dominant, so both must map.
+    const parsed = parseSpellArea({ type: rawType, size: 20 });
+    expect(parsed.area).toEqual({ shape, sizeFt: 20 });
+    expect(parsed.unsupportedType).toBeNull();
+  });
+
+  it("reports no area when the spell has none", () => {
+    expect(parseSpellArea(undefined)).toEqual({ area: null, unsupportedType: null });
+    expect(parseSpellArea(null)).toEqual({ area: null, unsupportedType: null });
+  });
+
+  it("fails closed on a type it does not know", () => {
+    // Treating an unknown shape as "no area" would hand target selection back
+    // to the client and reopen the hole this work exists to close.
+    const parsed = parseSpellArea({ type: "hipercubo", size: 20 });
+    expect(parsed.area).toBeNull();
+    expect(parsed.unsupportedType).toBe("hipercubo");
+  });
+
+  it("fails closed on a size that is not a usable number", () => {
+    expect(parseSpellArea({ type: "sphere", size: "veinte" }).area).toBeNull();
+    expect(parseSpellArea({ type: "sphere" }).area).toBeNull();
   });
 });
