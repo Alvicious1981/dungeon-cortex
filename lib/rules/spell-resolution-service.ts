@@ -28,7 +28,7 @@ interface SpellResolutionDb {
   };
 }
 
-import type { AreaShape, SpellArea } from "./geometry";
+import type { AreaShape, SpellArea, SpellRange } from "./geometry";
 
 export type { SpellArea };
 
@@ -92,6 +92,101 @@ export function parseSpellArea(raw: unknown): {
   return { area: { shape, sizeFt: size }, unsupportedType: null };
 }
 
+const FEET_PER_MILE = 5280;
+
+/** Every SRD spelling that means "the caster is the origin". */
+const SELF_KEYWORDS = ["lanzador", "personal", "self", "autolanzado"];
+
+/** Every SRD spelling that means "an adjacent creature". */
+const TOUCH_KEYWORDS = ["toque", "touch"];
+
+/**
+ * Reads a distance and its unit, in either language. Returns null when the text
+ * is not a plain distance.
+ */
+function parseDistanceFt(text: string): number | null {
+  const match = text.match(/(\d+(?:[.,]\d+)?)\s*(pies|pie|feet|foot|millas|milla|miles|mile)\b/);
+  if (!match) return null;
+
+  const amount = Number(match[1]!.replace(",", "."));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  const unit = match[2]!;
+  const inMiles = unit.startsWith("milla") || unit.startsWith("mile");
+  return inMiles ? amount * FEET_PER_MILE : amount;
+}
+
+/**
+ * Reads the area some SRD range strings carry in parentheses, e.g.
+ * "Personal (radio de 15 pies)".
+ *
+ * Only two wordings appear in the data — a radius and a straight line. Anything
+ * else extracts nothing, which leaves the spell arealess: the behaviour before
+ * this parser existed.
+ */
+function parseEmbeddedArea(text: string): SpellArea | null {
+  const inner = text.match(/\(([^)]*)\)/)?.[1];
+  if (!inner) return null;
+
+  const sizeFt = parseDistanceFt(inner);
+  if (sizeFt === null) return null;
+
+  // "radio" is a radius, which is exactly what `size` means for a sphere in
+  // area_of_effect, so the two agree without conversion.
+  if (inner.includes("radio") || inner.includes("radius")) {
+    return { shape: "sphere" as AreaShape, sizeFt };
+  }
+  if (inner.includes("línea") || inner.includes("linea") || inner.includes("line")) {
+    return { shape: "line" as AreaShape, sizeFt };
+  }
+  return null;
+}
+
+/**
+ * Normalises the SRD's free-text `range` into a rule the engine can enforce.
+ *
+ * ─── Order matters, and it is the trap in this field ─────────────────────────
+ * Three of the 26 observed values are caster-only WITH a number inside them:
+ * "Personal (radio de 15 pies)" and two siblings. Matching a distance first
+ * would classify Espíritus Guardianes as a 15 ft range, making a spell that
+ * emanates from the caster aimable 15 ft away. So self and touch are tested
+ * before any distance.
+ *
+ * ─── Why an unknown value is allowed rather than refused ─────────────────────
+ * The opposite of parseSpellArea, deliberately. Without an area shape the target
+ * set cannot be computed and proceeding would hand selection back to the client.
+ * Without a range only one constraint is missing, while the set is still entirely
+ * backend-derived. "Ilimitado" is also a real SRD rule, not a data gap, and
+ * refusing it would block a legal spell.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function parseSpellRange(raw: unknown): {
+  range: SpellRange;
+  embeddedArea: SpellArea | null;
+} {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { range: { kind: "unenforceable", raw: null }, embeddedArea: null };
+  }
+
+  const text = raw.trim().toLowerCase();
+  const embeddedArea = parseEmbeddedArea(text);
+
+  if (SELF_KEYWORDS.some((word) => text.startsWith(word))) {
+    return { range: { kind: "self" }, embeddedArea };
+  }
+  if (TOUCH_KEYWORDS.some((word) => text.startsWith(word))) {
+    return { range: { kind: "touch" }, embeddedArea };
+  }
+
+  const feet = parseDistanceFt(text);
+  if (feet !== null) {
+    return { range: { kind: "distance", feetFromCaster: feet }, embeddedArea };
+  }
+
+  return { range: { kind: "unenforceable", raw: raw.trim() }, embeddedArea };
+}
+
 export interface ResolvedSpellEffect extends SpellEffect {
   id: string;
   name: string;
@@ -116,6 +211,8 @@ export interface ResolvedSpellEffect extends SpellEffect {
    * its shape.
    */
   unsupportedAreaType: string | null;
+  /** How far this spell reaches, normalised from the SRD text. */
+  range: SpellRange;
 }
 
 export interface ResolveSpellInput {
@@ -193,9 +290,9 @@ export async function resolveCachedSpell(
     input.characterLevel
   );
   const sourceSlug = spell.indexSlug ?? spell.id;
-  const parsedArea = parseSpellArea(
-    (spell.data as Record<string, unknown> | null)?.area_of_effect
-  );
+  const spellData = (spell.data as Record<string, unknown> | null) ?? {};
+  const parsedArea = parseSpellArea(spellData.area_of_effect);
+  const parsedRange = parseSpellRange(spellData.range);
 
   return {
     ...effect,
@@ -205,7 +302,10 @@ export async function resolveCachedSpell(
     slotLevel,
     concentration: spell.concentration ?? false,
     sourceEndpoint: `https://www.dnd5eapi.co/api/2014/spells/${sourceSlug}`,
-    area: parsedArea.area,
+    // area_of_effect wins when both exist; the range's parenthetical is the only
+    // source for Controlar el clima and Espíritus Guardianes.
+    area: parsedArea.area ?? parsedRange.embeddedArea,
+    range: parsedRange.range,
     unsupportedAreaType: parsedArea.unsupportedType,
   };
 }
