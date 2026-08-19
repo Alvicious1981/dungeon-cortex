@@ -28,6 +28,70 @@ interface SpellResolutionDb {
   };
 }
 
+import type { AreaShape, SpellArea } from "./geometry";
+
+export type { SpellArea };
+
+/**
+ * The ten `area_of_effect.type` strings the live SrdSpell table holds, mapped
+ * onto the four shapes the rules engine resolves.
+ *
+ * The column is bilingual with neither language dominant — 51 Spanish rows
+ * against 34 English — so both spellings must be here.
+ *
+ * Two house rulings, stated rather than implied:
+ *   - cylinder/cilindro is a real SRD area whose footprint on a flat grid is a
+ *     circle, so it resolves as a sphere of the same radius; height is ignored.
+ *   - cuadrado is not an SRD area type and reads as a translation artifact of
+ *     "cube", so it maps to cube.
+ */
+const AREA_TYPE_TO_SHAPE: Record<string, AreaShape> = {
+  esfera: "sphere",
+  sphere: "sphere",
+  cilindro: "sphere",
+  cylinder: "sphere",
+  cubo: "cube",
+  cube: "cube",
+  cuadrado: "cube",
+  cono: "cone",
+  cone: "cone",
+  line: "line",
+};
+
+/**
+ * Reads `area_of_effect` from a cached SRD spell.
+ *
+ * Returns `unsupportedType` rather than silently reporting "no area" when the
+ * type is unrecognised: all ten observed strings are covered, so a new value
+ * means the data changed underneath us, and the caller must refuse the cast
+ * instead of letting the client choose targets again.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function parseSpellArea(raw: unknown): {
+  area: SpellArea | null;
+  unsupportedType: string | null;
+} {
+  if (!raw || typeof raw !== "object") return { area: null, unsupportedType: null };
+
+  const record = raw as Record<string, unknown>;
+  const rawType = typeof record.type === "string" ? record.type.trim().toLowerCase() : null;
+  const size = record.size;
+
+  if (!rawType) return { area: null, unsupportedType: null };
+
+  const shape = AREA_TYPE_TO_SHAPE[rawType];
+  if (!shape) return { area: null, unsupportedType: rawType };
+
+  // The column is untyped JSON, so a size that is not a finite number is not
+  // usable geometry. Fail closed for the same reason an unknown shape does.
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
+    return { area: null, unsupportedType: rawType };
+  }
+
+  return { area: { shape, sizeFt: size }, unsupportedType: null };
+}
+
 export interface ResolvedSpellEffect extends SpellEffect {
   id: string;
   name: string;
@@ -44,6 +108,14 @@ export interface ResolvedSpellEffect extends SpellEffect {
   slotLevel: number;
   concentration: boolean;
   sourceEndpoint: string;
+  /** The spell's area, when it has one the engine can resolve. */
+  area: SpellArea | null;
+  /**
+   * Set when the SRD record declares an area whose type is unrecognised. The
+   * caller must refuse the cast: the spell has an area, and we do not know
+   * its shape.
+   */
+  unsupportedAreaType: string | null;
 }
 
 export interface ResolveSpellInput {
@@ -121,6 +193,9 @@ export async function resolveCachedSpell(
     input.characterLevel
   );
   const sourceSlug = spell.indexSlug ?? spell.id;
+  const parsedArea = parseSpellArea(
+    (spell.data as Record<string, unknown> | null)?.area_of_effect
+  );
 
   return {
     ...effect,
@@ -130,5 +205,7 @@ export async function resolveCachedSpell(
     slotLevel,
     concentration: spell.concentration ?? false,
     sourceEndpoint: `https://www.dnd5eapi.co/api/2014/spells/${sourceSlug}`,
+    area: parsedArea.area,
+    unsupportedAreaType: parsedArea.unsupportedType,
   };
 }

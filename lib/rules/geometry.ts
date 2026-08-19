@@ -176,6 +176,84 @@ export function isInCone(
 }
 
 // ---------------------------------------------------------------------------
+// AoE: Cube
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if `point` lies within a cube of `sizeFt` per side centred on
+ * `origin`.
+ *
+ * ─── A house ruling, stated ─────────────────────────────────────────────────
+ * The SRD places a cube's point of origin anywhere on one *face* of the cube,
+ * which needs a facing the grid does not carry. Centring on the chosen point is
+ * the common table simplification and keeps the shape symmetric.
+ *
+ * An even-sided cube cannot centre on a single square, so the extra square goes
+ * to the +x / +y side. Arbitrary but fixed: an unstated tie-break would make the
+ * same cast resolve differently depending on rounding.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function isInCube(
+  point: GridPoint,
+  origin: GridPoint,
+  sizeFt: number
+): boolean {
+  const side = Math.max(1, Math.round(sizeFt / 5))
+  const half = Math.floor((side - 1) / 2)
+  const minX = origin.x - half
+  const minY = origin.y - half
+  return (
+    point.x >= minX &&
+    point.x <= minX + side - 1 &&
+    point.y >= minY &&
+    point.y <= minY + side - 1
+  )
+}
+
+// ---------------------------------------------------------------------------
+// AoE: Line
+// ---------------------------------------------------------------------------
+
+/** Half of a line's 5 ft width, in feet. */
+const LINE_HALF_WIDTH_FT = 2.5
+
+/**
+ * Returns true if `point` lies within a 5 ft wide line of `lengthFt`
+ * originating at `origin` and running along `direction`.
+ *
+ * SRD lines emanate from the caster, so the origin square itself is excluded
+ * and nothing behind the caster is ever caught.
+ *
+ * A zero-length `direction` returns false rather than matching everything: a
+ * line with no direction is not a line, and silently treating it as one would
+ * hit the whole map.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function isInLine(
+  point: GridPoint,
+  origin: GridPoint,
+  direction: GridPoint,
+  lengthFt: number
+): boolean {
+  const dirMag = Math.sqrt(direction.x * direction.x + direction.y * direction.y)
+  if (dirMag === 0) return false
+
+  const ux = direction.x / dirMag
+  const uy = direction.y / dirMag
+
+  const dx = point.x - origin.x
+  const dy = point.y - origin.y
+
+  // Feet travelled along the ray, and feet off it.
+  const alongFt = (dx * ux + dy * uy) * 5
+  const perpFt = Math.abs(dx * uy - dy * ux) * 5
+
+  return alongFt > 0 && alongFt <= lengthFt && perpFt <= LINE_HALF_WIDTH_FT
+}
+
+// ---------------------------------------------------------------------------
 // Collision: size-based footprint
 // ---------------------------------------------------------------------------
 
@@ -247,4 +325,67 @@ export function isOccupied(
     const squares = getCombatantOccupiedSquares(c)
     return squares.some((sq) => sq.x === point.x && sq.y === point.y)
   })
+}
+
+// ---------------------------------------------------------------------------
+// AoE: aggregation
+// ---------------------------------------------------------------------------
+
+/** The four area shapes the rules engine resolves. */
+export type AreaShape = "sphere" | "cube" | "cone" | "line"
+
+/** A spell's area, normalised from the SRD record. */
+export interface SpellArea {
+  shape: AreaShape
+  /** Radius for a sphere, edge for a cube, length for a cone or line. */
+  sizeFt: number
+}
+
+export interface AoETargetsInput {
+  shape: AreaShape
+  /** Point-anchored shapes: the chosen point. Directional: the caster's square. */
+  origin: GridPoint
+  /** Radius for a sphere, edge for a cube, length for a cone or line. */
+  sizeFt: number
+  /** Required by cone and line; ignored by sphere and cube. */
+  direction?: GridPoint
+  combatants: readonly GridCombatant[]
+}
+
+/**
+ * Returns every combatant the area touches.
+ *
+ * A combatant is caught when ANY square of its footprint falls inside the
+ * shape, so a Large creature clipping the edge of a blast is included even
+ * though its anchor square is outside.
+ *
+ * ─── Why this tests creatures, not squares ──────────────────────────────────
+ * Areas in the SRD cache reach 40,000 ft. Enumerating a shape that size on a
+ * 5 ft grid is 64 million cells; testing each combatant against the shape is
+ * bounded by the encounter's size instead. Never invert this loop.
+ *
+ * A directional shape called without a direction returns nothing rather than
+ * guessing a facing.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function getAoETargets(input: AoETargetsInput): GridCombatant[] {
+  const { shape, origin, sizeFt, direction, combatants } = input
+
+  const covers = (point: GridPoint): boolean => {
+    switch (shape) {
+      case "sphere":
+        return isInSphere(point, origin, sizeFt)
+      case "cube":
+        return isInCube(point, origin, sizeFt)
+      case "cone":
+        return direction ? isInCone(point, origin, direction, sizeFt) : false
+      case "line":
+        return direction ? isInLine(point, origin, direction, sizeFt) : false
+    }
+  }
+
+  return combatants.filter((combatant) =>
+    getCombatantOccupiedSquares(combatant).some(covers)
+  )
 }

@@ -139,6 +139,13 @@ beforeEach(() => {
   });
   (prisma.srdSpell.findUnique as any).mockResolvedValue(null);
   (prisma.srdSpell.findMany as any).mockResolvedValue([FIREBALL]);
+  // finalizeEncounterTurn claims the active -> resolved transition with an
+  // updateMany and reads the campaign's character to award XP. Real Prisma
+  // returns a count; an unstubbed vi.fn() returns undefined and the claim
+  // throws. Only tests that end an encounter reach this, which is why it went
+  // unnoticed until an area spell caught the last living combatant.
+  (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
+  (prisma.encounter.findUnique as any).mockResolvedValue({ campaign: { characterId } });
   (buildCampaignContext as any).mockResolvedValue(contextFor());
 });
 
@@ -540,16 +547,18 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
         damage_at_slot_level: { "1": "1d4+1", "2": "2d4+2" },
         damage_type: { index: "force" },
       },
+      area_of_effect: { type: "sphere", size: 20 },
     },
   };
 
-  it("resuelve contra los dos objetivos seleccionados, no solo el primero", async () => {
-    // Un ataque con arma nombra una criatura y se rechaza si no puede fijarla,
-    // pero un conjuro sí puede alcanzar a varias. Perder objetivos por el camino
-    // dejaría al narrador describiendo un impacto que el backend no resolvió.
+  it("alcanza a las dos criaturas que caen dentro del área", async () => {
+    // Antes este test pasaba targetIds sin posiciones y afirmaba que ambas
+    // recibían daño: documentaba el agujero, igual que aquel test que afirmaba
+    // que "search" llegaba a una puerta inexistente. Ahora ambas están dentro
+    // del radio y el daño lo decide la geometría, no la lista del cliente.
     const hostiles = [
-      { id: "t1", name: "Goblin One", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 } },
-      { id: "t2", name: "Goblin Two", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 } },
+      { id: "t1", name: "Goblin One", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
+      { id: "t2", name: "Goblin Two", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 1, size: "Medium" },
     ];
     const base = contextFor();
     (buildCampaignContext as any).mockResolvedValue({
@@ -557,7 +566,11 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
       activeEncounter: {
         id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
         combatants: [
-          { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {} },
+          // Deliberately far from the aim point: this test measures that both
+          // hostiles inside the radius are hit, and a caster caught in their own
+          // blast — correct, and covered separately — would be a second reason
+          // for it to fail.
+          { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 10, size: "Medium" },
           ...hostiles,
         ],
       },
@@ -567,6 +580,8 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
 
     const { res, frames } = await post("I cast Magic Missile", {
       targetIds: ["t1", "t2"],
+      targetX: 1,
+      targetY: 0,
     });
 
     expect(res.status).toBe(200);
@@ -598,5 +613,184 @@ describe("los botones de la interfaz llegan a una puerta real", () => {
 
     expect(res.status).toBe(200);
     expect(frames.some((f) => f.e?.type === eventType)).toBe(true);
+  });
+});
+
+describe("el área decide a quién alcanza un conjuro, no el cliente", () => {
+  /** Fireball as the SRD cache stores it: a 20 ft radius sphere. */
+  const FIREBALL_AREA = {
+    id: "spell_fireball_area",
+    indexSlug: "fireball",
+    name: "Fireball",
+    level: 3,
+    concentration: false,
+    data: {
+      damage: {
+        damage_at_slot_level: { "3": "8d6" },
+        damage_type: { index: "fire" },
+      },
+      dc: { dc_type: { index: "dex" }, dc_success: "half" },
+      area_of_effect: { type: "sphere", size: 20 },
+    },
+  };
+
+  const hostile = (id: string, name: string, x: number, y: number) => ({
+    id, name, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
+    x, y, size: "Medium",
+  });
+
+  /** The caster, placed far from every aim point these tests use. */
+  const caster = {
+    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    conditions: [], concentrationSpellId: null, stats: {},
+    x: 40, y: 40, size: "Medium",
+  };
+
+  function encounterWith(combatants: Array<Record<string, unknown>>) {
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([FIREBALL_AREA]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+  }
+
+  /** Every combatant the route wrote state for. */
+  function damaged(): string[] {
+    return (prisma.combatant.update as any).mock.calls
+      .map((c: any[]) => c[0]?.where?.id)
+      .filter(Boolean);
+  }
+
+  it("ignora un objetivo que el cliente nombró pero está fuera del radio", async () => {
+    const near = hostile("t1", "Goblin Cerca", 1, 0);
+    const far = hostile("t2", "Goblin Lejos", 40, 0);
+    encounterWith([caster, near, far]);
+
+    const { res } = await post("I cast Fireball", {
+      targetIds: ["t1", "t2"],
+      targetX: 1,
+      targetY: 0,
+    });
+
+    expect(res.status).toBe(200);
+    expect(damaged()).toContain("t1");
+    expect(damaged()).not.toContain("t2");
+  });
+
+  it("alcanza a quien está dentro del radio aunque el cliente no lo nombrara", async () => {
+    const named = hostile("t1", "Goblin Uno", 1, 0);
+    const unnamed = hostile("t2", "Goblin Dos", 1, 1);
+    encounterWith([caster, named, unnamed]);
+
+    const { res } = await post("I cast Fireball", {
+      targetIds: ["t1"],
+      targetX: 1,
+      targetY: 0,
+    });
+
+    expect(res.status).toBe(200);
+    expect(damaged()).toContain("t2");
+  });
+
+  it("rechaza cuando el nombre encaja con varias criaturas", async () => {
+    // Distinto de "sin punto de mira": aquí el jugador sí apuntó, pero a algo
+    // que no identifica una casilla. Elegir una por él sería adivinar.
+    encounterWith([caster, hostile("t1", "Goblin", 1, 0), hostile("t2", "Goblin", 5, 0)]);
+
+    const { res } = await post("I cast Fireball on the Goblin");
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "AIM_AMBIGUOUS" });
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("rechaza un conjuro de área sin punto al que apuntar", async () => {
+    encounterWith([caster, hostile("t1", "Goblin Uno", 1, 0)]);
+
+    const { res } = await post("I cast Fireball");
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "AIM_REQUIRED" });
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("rechaza un conjuro cuya forma de área el motor no conoce", async () => {
+    // Tratarla como "sin área" devolvería la elección al cliente, que es
+    // exactamente el agujero que esto viene a cerrar.
+    encounterWith([caster, hostile("t1", "Goblin Uno", 1, 0)]);
+    (prisma.srdSpell.findMany as any).mockResolvedValue([
+      { ...FIREBALL_AREA, data: { ...FIREBALL_AREA.data, area_of_effect: { type: "hipercubo", size: 20 } } },
+    ]);
+
+    const { res } = await post("I cast Fireball", { targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(400);
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+});
+
+describe("una explosión no distingue de quién es", () => {
+  // The design flagged both of these as unverified rather than assuming them.
+  const FIREBALL_AREA = {
+    id: "spell_fireball_self", indexSlug: "fireball", name: "Fireball",
+    level: 3, concentration: false,
+    data: {
+      damage: { damage_at_slot_level: { "3": "8d6" }, damage_type: { index: "fire" } },
+      dc: { dc_type: { index: "dex" }, dc_success: "half" },
+      area_of_effect: { type: "sphere", size: 20 },
+    },
+  };
+
+  function encounterWith(combatants: Array<Record<string, unknown>>) {
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([FIREBALL_AREA]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+  }
+
+  it("alcanza al propio lanzador si se sitúa dentro de su radio", async () => {
+    // Correct by the rules and until now unreachable: the client chose the set
+    // and never included itself.
+    const player = {
+      id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+    };
+    encounterWith([player]);
+
+    const { res } = await post("I cast Fireball", { targetX: 0, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    const updated = (prisma.combatant.update as any).mock.calls
+      .map((c: any[]) => c[0]?.where?.id)
+      .filter(Boolean);
+    expect(updated).toContain("p1");
+  });
+
+  it("alcanza a una criatura ya a 0 pv dentro del radio", async () => {
+    const downed = {
+      id: "t1", name: "Goblin Caído", isPlayer: false, hp: 0, maxHp: 10, ac: 12,
+      conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
+      x: 1, y: 0, size: "Medium",
+    };
+    encounterWith([
+      { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+        conditions: [], concentrationSpellId: null, stats: {}, x: 40, y: 40, size: "Medium" },
+      downed,
+    ]);
+
+    const { res } = await post("I cast Fireball", { targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(200);
   });
 });

@@ -4,10 +4,13 @@ import {
   gridDistanceFt,
   isInSphere,
   isInCone,
+  isInCube,
+  isInLine,
   CONE_HALF_ANGLE_RAD,
   sizeToSquares,
   getCombatantOccupiedSquares,
   isOccupied,
+  getAoETargets,
   GridPoint,
   GridCombatant,
   SizeCategory,
@@ -322,5 +325,137 @@ describe("isOccupied", () => {
     // Square just outside the footprint
     expect(isOccupied({ x: 3, y: 0 }, [c])).toBe(false)
     expect(isOccupied({ x: 0, y: 3 }, [c])).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isInCube
+// ---------------------------------------------------------------------------
+
+describe("isInCube", () => {
+  const origin = { x: 5, y: 5 }
+
+  it("covers a 3x3 window for a 15 ft cube", () => {
+    // 15 ft / 5 = 3 squares per side, centred on the origin.
+    expect(isInCube({ x: 5, y: 5 }, origin, 15)).toBe(true)
+    expect(isInCube({ x: 4, y: 4 }, origin, 15)).toBe(true)
+    expect(isInCube({ x: 6, y: 6 }, origin, 15)).toBe(true)
+    expect(isInCube({ x: 3, y: 5 }, origin, 15)).toBe(false)
+    expect(isInCube({ x: 5, y: 7 }, origin, 15)).toBe(false)
+  })
+
+  it("gives the extra square to the positive side when the side is even", () => {
+    // A 10 ft cube is 2 squares wide and cannot centre on one square.
+    // The house ruling: the extra square goes +x / +y. Documented in the source.
+    expect(isInCube({ x: 5, y: 5 }, origin, 10)).toBe(true)
+    expect(isInCube({ x: 6, y: 6 }, origin, 10)).toBe(true)
+    expect(isInCube({ x: 4, y: 5 }, origin, 10)).toBe(false)
+  })
+
+  it("never collapses below a single square", () => {
+    expect(isInCube({ x: 5, y: 5 }, origin, 0)).toBe(true)
+    expect(isInCube({ x: 6, y: 5 }, origin, 0)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isInLine
+// ---------------------------------------------------------------------------
+
+describe("isInLine", () => {
+  const origin = { x: 0, y: 0 }
+  const east = { x: 1, y: 0 }
+
+  it("covers squares along the ray up to its length", () => {
+    expect(isInLine({ x: 1, y: 0 }, origin, east, 20)).toBe(true)
+    expect(isInLine({ x: 4, y: 0 }, origin, east, 20)).toBe(true)
+    expect(isInLine({ x: 5, y: 0 }, origin, east, 20)).toBe(false)
+  })
+
+  it("excludes the origin square", () => {
+    expect(isInLine({ x: 0, y: 0 }, origin, east, 20)).toBe(false)
+  })
+
+  it("excludes squares off the 5 ft width", () => {
+    expect(isInLine({ x: 2, y: 1 }, origin, east, 20)).toBe(false)
+  })
+
+  it("excludes squares behind the caster", () => {
+    expect(isInLine({ x: -2, y: 0 }, origin, east, 20)).toBe(false)
+  })
+
+  it("refuses a zero-length direction instead of matching everything", () => {
+    expect(isInLine({ x: 1, y: 0 }, origin, { x: 0, y: 0 }, 20)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getAoETargets
+// ---------------------------------------------------------------------------
+
+describe("getAoETargets", () => {
+  const at = (id: string, x: number, y: number, size: SizeCategory = "Medium") =>
+    ({ id, x, y, size })
+
+  it("returns combatants inside a sphere and omits those outside", () => {
+    const combatants = [at("in", 5, 5), at("edge", 7, 5), at("out", 9, 5)]
+    const hit = getAoETargets({
+      shape: "sphere",
+      origin: { x: 5, y: 5 },
+      sizeFt: 10,
+      combatants,
+    })
+    expect(hit.map((c) => c.id)).toEqual(["in", "edge"])
+  })
+
+  it("catches a Large creature by its footprint, not its anchor square", () => {
+    // Anchor (3,3) is 14.14 ft from the centre (5,5) — outside the 10 ft
+    // radius. But the footprint corner (4,4) is only 7.07 ft away — inside.
+    // Testing only the anchor would miss the edge of every blast.
+    const large = at("ogre", 3, 3, "Large") // occupies (3,3),(4,3),(3,4),(4,4)
+    const hit = getAoETargets({
+      shape: "sphere",
+      origin: { x: 5, y: 5 },
+      sizeFt: 10,
+      combatants: [large],
+    })
+    expect(hit.map((c) => c.id)).toEqual(["ogre"])
+  })
+
+  it("uses the direction for a cone and ignores creatures behind the caster", () => {
+    const combatants = [at("ahead", 3, 0), at("behind", -3, 0)]
+    const hit = getAoETargets({
+      shape: "cone",
+      origin: { x: 0, y: 0 },
+      sizeFt: 30,
+      direction: { x: 1, y: 0 },
+      combatants,
+    })
+    expect(hit.map((c) => c.id)).toEqual(["ahead"])
+  })
+
+  it("returns nothing for a directional shape with no direction", () => {
+    const hit = getAoETargets({
+      shape: "line",
+      origin: { x: 0, y: 0 },
+      sizeFt: 30,
+      combatants: [at("target", 2, 0)],
+    })
+    expect(hit).toEqual([])
+  })
+
+  it("resolves a mile-wide area without walking its squares", () => {
+    // The SRD cache holds areas up to 40,000 ft. On a 5 ft grid that is
+    // 8,000 x 8,000 = 64 million cells, so an implementation that enumerates
+    // the shape hangs here rather than returning. This test does not assert
+    // the algorithm directly; it makes the wrong one exhaust the timeout.
+    const combatants = [at("near", 1, 1), at("far", 200, 200)]
+    const hit = getAoETargets({
+      shape: "cube",
+      origin: { x: 0, y: 0 },
+      sizeFt: 40000,
+      combatants,
+    })
+    expect(hit.map((c) => c.id)).toEqual(["near", "far"])
   })
 })

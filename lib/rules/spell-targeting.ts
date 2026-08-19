@@ -1,0 +1,98 @@
+/**
+ * lib/rules/spell-targeting.ts
+ *
+ * Which creatures a spell legally affects.
+ *
+ * The action route used to answer this by applying the spell to whatever
+ * combatant IDs the request carried. That let the caller decide a mechanical
+ * outcome — the project's non-negotiable rule violated from the client side
+ * rather than the narrator's.
+ *
+ * This module composes; it does not calculate. Choosing the predicate and the
+ * origin lives here, the grid mathematics lives in lib/rules/geometry.ts. If a
+ * cosine appears in this file, the boundary has slipped.
+ *
+ * @pure — no database, no I/O, no randomness.
+ */
+
+import {
+  getAoETargets,
+  type GridCombatant,
+  type GridPoint,
+  type SpellArea,
+} from "./geometry";
+
+export type SpellTargetingRefusal = "AIM_REQUIRED" | "DEGENERATE_DIRECTION";
+
+export type SpellTargetingResult =
+  | { ok: true; targets: GridCombatant[] }
+  | { ok: false; code: SpellTargetingRefusal; message: string };
+
+export interface AreaTargetingInput {
+  area: SpellArea;
+  /** The point the caster chose, when one was supplied or derivable. */
+  aim: GridPoint | null;
+  /** The caster's own square. Directional areas emanate from here. */
+  caster: GridPoint;
+  combatants: readonly GridCombatant[];
+}
+
+/** Shapes that emanate from the caster rather than being placed on a point. */
+const DIRECTIONAL_SHAPES = new Set<SpellArea["shape"]>(["cone", "line"]);
+
+/**
+ * Resolves the creatures an area spell affects.
+ *
+ * Point-anchored shapes (sphere, cube) centre on the aim point. Directional
+ * shapes (cone, line) originate at the caster and use the aim point only for
+ * facing, which is how the SRD describes them: "a line 100 feet long that
+ * originates from you".
+ *
+ * The returned set is everyone the geometry catches — the caster, their allies
+ * and creatures already at 0 hp included. Excluding the party would be the same
+ * silent mechanical decision this module exists to take away from the client,
+ * only made by the backend instead.
+ */
+export function resolveAreaTargets(input: AreaTargetingInput): SpellTargetingResult {
+  const { area, aim, caster, combatants } = input;
+
+  if (!aim) {
+    return {
+      ok: false,
+      code: "AIM_REQUIRED",
+      message: "This spell needs a point to aim at. Name one creature or pick a square.",
+    };
+  }
+
+  if (!DIRECTIONAL_SHAPES.has(area.shape)) {
+    return {
+      ok: true,
+      targets: getAoETargets({
+        shape: area.shape,
+        origin: aim,
+        sizeFt: area.sizeFt,
+        combatants,
+      }),
+    };
+  }
+
+  const direction = { x: aim.x - caster.x, y: aim.y - caster.y };
+  if (direction.x === 0 && direction.y === 0) {
+    return {
+      ok: false,
+      code: "DEGENERATE_DIRECTION",
+      message: "A cone or line needs a direction. Aim away from your own square.",
+    };
+  }
+
+  return {
+    ok: true,
+    targets: getAoETargets({
+      shape: area.shape,
+      origin: caster,
+      sizeFt: area.sizeFt,
+      direction,
+      combatants,
+    }),
+  };
+}
