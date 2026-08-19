@@ -72,6 +72,7 @@ const FIREBALL = {
       damage_type: { index: "fire" },
     },
     dc: { dc_type: { index: "dex" }, dc_success: "half" },
+    range: "150 pies",
   },
 };
 
@@ -548,6 +549,7 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
         damage_type: { index: "force" },
       },
       area_of_effect: { type: "sphere", size: 20 },
+      range: "120 pies",
     },
   };
 
@@ -631,6 +633,7 @@ describe("el área decide a quién alcanza un conjuro, no el cliente", () => {
       },
       dc: { dc_type: { index: "dex" }, dc_success: "half" },
       area_of_effect: { type: "sphere", size: 20 },
+      range: "150 pies",
     },
   };
 
@@ -644,7 +647,7 @@ describe("el área decide a quién alcanza un conjuro, no el cliente", () => {
   const caster = {
     id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
     conditions: [], concentrationSpellId: null, stats: {},
-    x: 40, y: 40, size: "Medium",
+    x: 10, y: 0, size: "Medium",
   };
 
   function encounterWith(combatants: Array<Record<string, unknown>>) {
@@ -744,6 +747,7 @@ describe("una explosión no distingue de quién es", () => {
       damage: { damage_at_slot_level: { "3": "8d6" }, damage_type: { index: "fire" } },
       dc: { dc_type: { index: "dex" }, dc_success: "half" },
       area_of_effect: { type: "sphere", size: 20 },
+      range: "150 pies",
     },
   };
 
@@ -785,12 +789,119 @@ describe("una explosión no distingue de quién es", () => {
     };
     encounterWith([
       { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
-        conditions: [], concentrationSpellId: null, stats: {}, x: 40, y: 40, size: "Medium" },
+        conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 0, size: "Medium" },
       downed,
     ]);
 
     const { res } = await post("I cast Fireball", { targetX: 1, targetY: 0 });
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe("el alcance del conjuro lo comprueba el backend", () => {
+  /** Fireball as the SRD stores it: 150 ft range, 20 ft radius sphere. */
+  const FIREBALL_RANGED = {
+    id: "spell_fireball_ranged",
+    indexSlug: "fireball",
+    name: "Fireball",
+    level: 3,
+    concentration: false,
+    data: {
+      damage: { damage_at_slot_level: { "3": "8d6" }, damage_type: { index: "fire" } },
+      dc: { dc_type: { index: "dex" }, dc_success: "half" },
+      area_of_effect: { type: "sphere", size: 20 },
+      range: "150 pies",
+    },
+  };
+
+  /** Cure Wounds: touch, no area. */
+  const CURE_WOUNDS = {
+    id: "spell_cure_wounds",
+    indexSlug: "cure-wounds",
+    name: "Cure Wounds",
+    level: 1,
+    concentration: false,
+    data: {
+      heal_at_slot_level: { "1": "1d8" },
+      range: "Toque",
+    },
+  };
+
+  const caster = {
+    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+  };
+
+  const hostile = (id: string, x: number, y: number) => ({
+    id, name: `Goblin ${id}`, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
+    x, y, size: "Medium",
+  });
+
+  function encounterWith(spell: unknown, combatants: Array<Record<string, unknown>>) {
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([spell]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+  }
+
+  it("rechaza un punto de mira más allá del alcance", async () => {
+    // (0,0) to (40,0) is 200 ft; Fireball reaches 150.
+    encounterWith(FIREBALL_RANGED, [caster, hostile("t1", 40, 0)]);
+
+    const { res } = await post("I cast Fireball", { targetX: 40, targetY: 0 });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "OUT_OF_RANGE" });
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("permite un punto de mira al límite, y el radio alcanza más allá", async () => {
+    // The aim is exactly 150 ft away; the 20 ft radius legitimately catches a
+    // creature 170 ft out. An implementation gating targets instead of the
+    // origin refuses this.
+    const atLimit = hostile("t1", 30, 0);   // 150 ft — the aim square
+    const beyond = hostile("t2", 33, 0);    // 165 ft, inside the 20 ft radius
+    encounterWith(FIREBALL_RANGED, [caster, atLimit, beyond]);
+
+    const { res } = await post("I cast Fireball", { targetX: 30, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    const updated = (prisma.combatant.update as any).mock.calls
+      .map((c: any[]) => c[0]?.where?.id)
+      .filter(Boolean);
+    expect(updated).toContain("t2");
+  });
+
+  it("un conjuro de toque exige un objetivo adyacente", async () => {
+    encounterWith(CURE_WOUNDS, [caster, hostile("t1", 4, 0)]);
+
+    const { res } = await post("I cast Cure Wounds on Goblin t1", {
+      targetIds: ["t1"],
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "OUT_OF_RANGE" });
+  });
+
+  it("deja constancia cuando el alcance no se pudo comprobar", async () => {
+    encounterWith(
+      { ...FIREBALL_RANGED, data: { ...FIREBALL_RANGED.data, range: "Ilimitado" } },
+      [caster, hostile("t1", 40, 0)]
+    );
+
+    const { res } = await post("I cast Fireball", { targetX: 40, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    expect(
+      systemLogs().some((line) => line.includes("Ilimitado"))
+    ).toBe(true);
   });
 });

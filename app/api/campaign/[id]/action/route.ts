@@ -34,7 +34,7 @@ import { moveToNode } from "@/lib/rules/navigation";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
-import { resolveAreaTargets } from "@/lib/rules/spell-targeting";
+import { checkSpellRange, resolveAreaTargets } from "@/lib/rules/spell-targeting";
 import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
@@ -606,52 +606,98 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       }
 
       const encounterCombatants = context.activeEncounter?.combatants ?? [];
+      const asGrid = (c: ContextCombatant) => ({
+        id: c.id,
+        x: c.x,
+        y: c.y,
+        size: toSizeCategory(c.size),
+      });
+
+      // Aim: an explicit square wins; otherwise the named creature's square.
+      // The search covers every combatant, not only living hostiles — centring
+      // a blast on an ally or a fallen creature is a legal aim.
+      let aim: { x: number; y: number } | null = null;
+      if (Number.isInteger(body.targetX) && Number.isInteger(body.targetY)) {
+        aim = { x: body.targetX!, y: body.targetY! };
+      } else {
+        const named = intent.targetName
+          ? encounterCombatants.filter((c) =>
+              c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
+            )
+          : body.targetIds?.length
+            ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
+            : [];
+
+        // Several candidates and no coordinates: where the caster meant to aim
+        // is unknowable, so refuse rather than pick one. Distinct from "no aim
+        // at all" because the fix differs — name one creature, or send a square.
+        if (effect.area && named.length > 1) {
+          return NextResponse.json(
+            {
+              error:
+                "That names more than one creature, so the point of origin is ambiguous. " +
+                "Name a single creature or pick a square.",
+              code: "AIM_AMBIGUOUS",
+            },
+            { status: 400 }
+          );
+        }
+        if (named.length === 1) aim = { x: named[0]!.x, y: named[0]!.y };
+      }
+
+      const casterCombatant = encounterCombatants.find((c) => c.isPlayer);
+
       let targets: ContextCombatant[] = [];
 
-      if (effect.area && context.activeEncounter) {
-        // Aim: an explicit square wins; otherwise the named creature's square.
-        // The search covers every combatant, not only living hostiles — centring
-        // a blast on an ally or a fallen creature is a legal aim.
-        let aim: { x: number; y: number } | null = null;
-        if (Number.isInteger(body.targetX) && Number.isInteger(body.targetY)) {
-          aim = { x: body.targetX!, y: body.targetY! };
-        } else {
-          const named = intent.targetName
-            ? encounterCombatants.filter((c) =>
-                c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
-              )
-            : body.targetIds?.length
-              ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
-              : [];
+      // The selection a non-area spell would use, needed by the range check
+      // before the area branch decides anything.
+      const requestedTargets = body.targetIds?.length
+        ? encounterCombatants.filter((c) => body.targetIds!.includes(c.id))
+        : intent.targetName
+          ? encounterCombatants.filter((c) =>
+              c.name.toLowerCase().includes(intent.targetName!.toLowerCase())
+            )
+          : [];
 
-          // Several candidates and no coordinates: where the caster meant to aim
-          // is unknowable, so refuse rather than pick one. Distinct from "no aim
-          // at all" because the fix differs — name one creature, or send a square.
-          if (named.length > 1) {
-            return NextResponse.json(
-              {
-                error:
-                  "That names more than one creature, so the point of origin is ambiguous. " +
-                  "Name a single creature or pick a square.",
-                code: "AIM_AMBIGUOUS",
-              },
-              { status: 400 }
-            );
-          }
-          if (named.length === 1) aim = { x: named[0]!.x, y: named[0]!.y };
+      // ── Range, before anything is derived ───────────────────────────────────
+      // Out of range is the more useful diagnostic and the cheaper one: deriving
+      // a set first would report "the spell hit nobody" for a reach problem.
+      if (casterCombatant) {
+        const rangeVerdict = checkSpellRange({
+          range: effect.range,
+          caster: asGrid(casterCombatant),
+          aim: effect.area ? aim : null,
+          targets: effect.area ? [] : requestedTargets.map(asGrid),
+        });
+
+        if (!rangeVerdict.ok) {
+          return NextResponse.json(
+            { error: rangeVerdict.message, code: rangeVerdict.code },
+            { status: 400 }
+          );
         }
 
-        const casterCombatant = encounterCombatants.find((c) => c.isPlayer);
+        if (!rangeVerdict.enforced) {
+          // Declared rather than silent: a rule that did not apply and left no
+          // trace is how a gap survives unnoticed.
+          await prisma.gameLog.create({
+            data: {
+              campaignId,
+              role: "system",
+              content:
+                `⚠️ ${effect.name}: range not verified — the SRD records it as ` +
+                `"${rangeVerdict.raw ?? "missing"}", which carries no measurable distance.`,
+            },
+          });
+        }
+      }
+
+      if (effect.area && context.activeEncounter) {
         const outcome = resolveAreaTargets({
           area: effect.area,
           aim,
           caster: { x: casterCombatant?.x ?? 0, y: casterCombatant?.y ?? 0 },
-          combatants: encounterCombatants.map((c) => ({
-            id: c.id,
-            x: c.x,
-            y: c.y,
-            size: toSizeCategory(c.size),
-          })),
+          combatants: encounterCombatants.map(asGrid),
         });
 
         if (!outcome.ok) {
@@ -663,15 +709,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
         const hitIds = new Set(outcome.targets.map((t) => t.id));
         targets = encounterCombatants.filter((c) => hitIds.has(c.id));
-      } else if (body.targetIds && body.targetIds.length > 0 && context.activeEncounter) {
+      } else {
         // Spells with no area still take the caller's selection: the SRD cache
         // stores no target count, so there is no field to validate against.
         // Recorded as a remaining leak in the design doc.
-        targets = context.activeEncounter.combatants.filter(c => body.targetIds!.includes(c.id));
-      } else if (intent.targetName && context.activeEncounter) {
-        const normalizedTarget = intent.targetName.toLowerCase();
-        const found = context.activeEncounter.combatants.find(c => c.name.toLowerCase().includes(normalizedTarget));
-        if (found) targets = [found];
+        targets = requestedTargets;
       }
 
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
