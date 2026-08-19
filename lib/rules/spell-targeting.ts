@@ -17,9 +17,12 @@
 
 import {
   getAoETargets,
+  minFootprintDistanceFt,
+  TOUCH_REACH_FT,
   type GridCombatant,
   type GridPoint,
   type SpellArea,
+  type SpellRange,
 } from "./geometry";
 
 export type SpellTargetingRefusal = "AIM_REQUIRED" | "DEGENERATE_DIRECTION";
@@ -94,5 +97,74 @@ export function resolveAreaTargets(input: AreaTargetingInput): SpellTargetingRes
       direction,
       combatants,
     }),
+  };
+}
+
+export type SpellRangeVerdict =
+  | { ok: true; enforced: true }
+  | { ok: true; enforced: false; raw: string | null }
+  | { ok: false; code: "OUT_OF_RANGE"; message: string };
+
+export interface SpellRangeInput {
+  range: SpellRange;
+  caster: GridCombatant;
+  /** The aim point for an area spell, or null for a non-area spell. */
+  aim: GridPoint | null;
+  /**
+   * The resolved targets for a non-area spell. Empty for an area spell.
+   *
+   * `name` is optional so a bare `GridCombatant` — which carries no name —
+   * still type-checks; the message falls back to the id when it is absent.
+   */
+  targets: readonly (GridCombatant & { name?: string })[];
+}
+
+/**
+ * Decides whether the caster can reach where they are aiming.
+ *
+ * ─── The origin, not the targets ────────────────────────────────────────────
+ * For an area spell only the aim point is measured. A Fireball cast at 120 ft
+ * has a 20 ft radius and legitimately catches something 140 ft away; measuring
+ * the targets would refuse it.
+ *
+ * For a spell with no area there is no origin to measure, so every resolved
+ * target is checked instead. That constrains non-area spells for the first time.
+ *
+ * One target out of range refuses the whole cast rather than quietly dropping
+ * it: dropping would alter the player's selection without telling them, which is
+ * the kind of silent mechanical decision this module exists to prevent.
+ *
+ * A caster-only spell always passes and its aim is ignored — it has no point to
+ * choose. An unenforceable range passes reporting `enforced: false`, so the
+ * caller can say the rule went unapplied instead of implying it held.
+ */
+export function checkSpellRange(input: SpellRangeInput): SpellRangeVerdict {
+  const { range, caster, aim, targets } = input;
+
+  if (range.kind === "self") return { ok: true, enforced: true };
+  if (range.kind === "unenforceable") {
+    return { ok: true, enforced: false, raw: range.raw };
+  }
+
+  const limitFt = range.kind === "touch" ? TOUCH_REACH_FT : range.feetFromCaster;
+  const measured: Array<{ label: string; distanceFt: number }> = aim
+    ? [{ label: "that point", distanceFt: minFootprintDistanceFt(caster, aim) }]
+    : targets.map((target) => ({
+        label: target.name ?? target.id,
+        distanceFt: minFootprintDistanceFt(caster, target),
+      }));
+
+  const tooFar = measured.find((entry) => entry.distanceFt > limitFt);
+  if (!tooFar) return { ok: true, enforced: true };
+
+  return {
+    ok: false,
+    code: "OUT_OF_RANGE",
+    message:
+      range.kind === "touch"
+        ? `A touch spell needs an adjacent target, and ${tooFar.label} is ` +
+          `${tooFar.distanceFt} ft away.`
+        : `${tooFar.label} is ${tooFar.distanceFt} ft away and this spell ` +
+          `reaches ${limitFt} ft.`,
   };
 }

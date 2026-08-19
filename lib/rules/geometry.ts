@@ -327,6 +327,38 @@ export function isOccupied(
   })
 }
 
+/**
+ * The shortest distance in feet between a creature and a target, measured
+ * between the nearest squares of their footprints.
+ *
+ * Anchor-to-anchor is the wrong measure, not merely a rougher one: a Large
+ * creature's body extends a square beyond its anchor, so measuring anchors
+ * refuses spells the creature can legally reach. The bigger the creature, the
+ * bigger the error.
+ *
+ * The destination may be a bare `GridPoint` — an area spell's aim point is a
+ * square, not a creature.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function minFootprintDistanceFt(
+  from: GridCombatant,
+  to: GridCombatant | GridPoint
+): number {
+  const fromSquares = getCombatantOccupiedSquares(from)
+  const toSquares =
+    "size" in to ? getCombatantOccupiedSquares(to) : [to]
+
+  let shortest = Infinity
+  for (const a of fromSquares) {
+    for (const b of toSquares) {
+      const d = gridDistanceFt(a, b)
+      if (d < shortest) shortest = d
+    }
+  }
+  return shortest
+}
+
 // ---------------------------------------------------------------------------
 // AoE: aggregation
 // ---------------------------------------------------------------------------
@@ -340,6 +372,31 @@ export interface SpellArea {
   /** Radius for a sphere, edge for a cube, length for a cone or line. */
   sizeFt: number
 }
+
+/**
+ * How far a spell reaches, normalised from the SRD's free-text `range` field.
+ *
+ * Lives here rather than in the resolution service for the same reason
+ * `SpellArea` does: `spell-targeting.ts` needs the type and must not import a
+ * module that imports Prisma.
+ *
+ * `touch` is its own case although it is mechanically TOUCH_REACH_FT. The
+ * comparison is shared, so the duplication is in the name only; what it buys is
+ * a message the player can act on — "you have to be adjacent" rather than
+ * "out of range".
+ *
+ * `unenforceable` carries the raw value. Without it a result could say the range
+ * went unchecked but not why, and "Ilimitado" (the spell's actual rule) and null
+ * (a data gap) are different situations.
+ */
+export type SpellRange =
+  | { kind: "distance"; feetFromCaster: number }
+  | { kind: "touch" }
+  | { kind: "self" }
+  | { kind: "unenforceable"; raw: string | null }
+
+/** A touch spell reaches an adjacent square. */
+export const TOUCH_REACH_FT = 5
 
 export interface AoETargetsInput {
   shape: AreaShape
