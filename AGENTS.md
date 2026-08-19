@@ -98,6 +98,15 @@ Three that reached `master` and were only found later:
 - `Combatant.stats` existed with a `{}` default and was never written. Every rule reading a creature's ability score silently saw 10.
 - The encounter route read ability scores from `data.ability_scores`, a key the stored SRD JSON does not have. The flat `wisdom` and `dexterity` fields were right there, and the adjacent line already used them.
 
+The same failure repeats one level up, in the checking itself. A cheap sample gets mistaken for the check it stands in for. Twice in one session, in opposite directions:
+
+- A worktree's uncommitted changes were declared superseded after confirming that four distinctive symbols from them appeared in `master`. A line-by-line comparison then found 92 added lines `master` did not have, including five named tests. The sample was accurate; the conclusion drawn from it was not, and acting on it would have destroyed the tests.
+- Those five tests were then declared missing coverage because their names appear nowhere in `master`. Reading what each one asserts showed two were already covered under different names — one of them asserting behaviour `master` had deliberately replaced, so porting it would have reinstated the worse rule.
+
+**A sample can prove presence. It can never prove absence.** Finding a symbol in `master` proves that symbol is there; it proves nothing about the other ninety lines. A name missing from `master` proves the name is missing; it proves nothing about the behaviour.
+
+Names, symbols and signatures are identifiers, not behaviour. Before deleting anything, porting anything, or calling anything redundant, compare what the code *does*: line by line for a diff, assertion by assertion for a test. Run the cheap check first if it helps you find work — never to rule work out.
+
 So, when inspecting:
 
 - For every value produced, confirm something consumes it. For every value consumed, confirm something produces it. A field that only one side touches is the shape of this defect.
@@ -105,6 +114,7 @@ So, when inspecting:
 - Distrust a test that mocks the thing it appears to be testing. Mocking `@/lib/ai/intent` in a route test verifies the gates against hand-written intents and never exercises the classifier that feeds them.
 - `vi.mock` of a module does not intercept calls that module makes to itself. Mocking `resolveAttackRoll` does not affect `lib/rules/combat.ts` calling it internally, so an assertion on the mock silently proves nothing.
 - Before trusting a field, check the data. A read-only query against the real table settles in seconds what a type annotation only claims.
+- Re-run the verification immediately before a destructive step, not once at the start of the investigation. The check that matters is the one whose result is still true when the files are deleted.
 
 ## Work style
 
