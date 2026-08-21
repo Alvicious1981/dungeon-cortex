@@ -21,14 +21,35 @@ showed the other half, which is worse and more useful:
 
 | Table | Rows | Read by | Written by |
 | --- | --- | --- | --- |
-| `SrdEquipment` | **0** | `lib/rules/srd-equipment-lookup.ts`, `lib/ai/tools/srd-lookup.ts` | nothing |
-| `SrdItem` | 237 | `lib/ai/tools/srd-lookup.ts` (item lookup only) | `prisma/seed-srd.ts:305` |
+| `SrdEquipment` | **0** | `lib/rules/srd-equipment-lookup.ts`, `lib/ai/tools/srd-lookup.ts` | `scripts/ingest-srd.ts:639` — unreachable, see below |
+| `SrdItem` | 237 | `lib/ai/tools/srd-lookup.ts` (item lookup only) | `prisma/seed-srd.ts:305` — wired as `pnpm seed` |
 
 The seeder loads `data/srd-es/equipment.json` into `srdItem`. Both equipment
 lookups query `srdEquipment`. So `getEquipmentInfo` returns `null` for every
 weapon and every piece of armour in the game, `addItem` always throws
 `Item not found in SRD.` — and `addItem` has no callers anyway. One of the two
 lookup copies is exposed to the narrator as a tool (`lib/ai/tool-policy.ts:31`).
+
+**Correction made while planning.** An earlier draft of this spec said
+`SrdEquipment` was written by nothing. That was a grep of `prisma/seed-srd.ts`
+treated as proof of absence — the error `AGENTS.md` documents, committed inside
+the spec about that error. `scripts/ingest-srd.ts:639` does upsert the table. It
+reads the same `data/srd-es/equipment.json`, is absent from `package.json`,
+and has plainly never run against this database, which is why the table is
+empty. Two ingestion paths for one file, one of them unreachable.
+
+This changes the work rather than the decision. Repointing at `SrdItem` still
+beats running the unreachable script — which would produce the second cache of
+one SRD truth this spec rejects, and which imports `dotenv/config`. But the
+field mapping does not need inventing: `ingest-srd.ts:610-640` already maps
+`two_handed_damage`, `armor_class`, `desc` and `properties` correctly. **PR 1
+extracts that mapping rather than writing a rival one**, and adds the type
+discipline it lacks — it is `any`-typed throughout.
+
+After PR 1, `SrdEquipment` has no reader and no writer: PR 1 also removes that
+script's equipment section, so the table is unambiguously dead and awaiting its
+own decision, rather than half-wired. Dropping the model stays out of scope; a
+destructive migration is its own call.
 
 The data that was missing is present and clean:
 
@@ -96,8 +117,9 @@ but a condition of correctness for everything above it.
 The two halves carry very different risk and are reviewed separately.
 
 **PR 1 — repair the SRD pipeline.** Repoint `srd-equipment-lookup.ts` at
-`SrdItem`, add the projector, delete the duplicate lookup in
-`lib/ai/tools/srd-lookup.ts`. **No rule changes; no roll changes.** It is not a
+`SrdItem`, extract the projector, delete the duplicate lookup in
+`lib/ai/tools/srd-lookup.ts`, and remove the unreachable equipment ingestion in
+`scripts/ingest-srd.ts`. **No rule changes; no roll changes.** It is not a
 change without a consumer: the narrator's equipment tool already calls
 `getEquipmentInfo` and receives `null` for every weapon and every armour, so the
 observable result of PR 1 is that tool starting to answer.
@@ -162,9 +184,20 @@ the number is what lets the log say *why* the bonus is what it is, the same way
 
 ### `lib/rules/srd-equipment-lookup.ts` — repointed *(PR 1)*
 
-Reads `SrdItem`. Exports `projectSrdItem(raw: unknown): EquipmentInfo | null`,
-tested independently of any query. `getEquipmentInfo` resolves by id, then by
-**exact** case-insensitive name — never `contains`.
+Reads `SrdItem`. `getEquipmentInfo` resolves by id, then by **exact**
+case-insensitive name — never `contains`.
+
+The projection itself lives in a separate pure module,
+`lib/rules/srd-equipment-projection.ts`, which owns `EquipmentInfo` and
+`projectSrdItem(name: string, data: unknown): EquipmentInfo`. Keeping it apart
+from the query is what lets it be tested with **no mocking at all** — the point,
+given that mocks are how this defect stayed hidden. The lookup re-exports both,
+so existing importers are unaffected.
+
+The signature takes the row's `name` column and returns a value rather than
+`EquipmentInfo | null`: the row's existence is the caller's question, and the
+fields are individually nullable. It never throws on an unexpected shape — a
+malformed row degrades to nulls instead of breaking the narrator's tool.
 
 The duplicate `getEquipmentInfo` in `lib/ai/tools/srd-lookup.ts` is deleted and
 imported from here. Fixing one copy and leaving the other would reinstate the
@@ -254,11 +287,13 @@ wrong shape" would enter, so it is isolated and tested against real shapes.
 
 | `EquipmentInfo` field | Source | Note |
 | --- | --- | --- |
-| `weaponCategory` | `weapon_category` | lowercased to match `WeaponCategory` |
+| `weaponCategory` | `weapon_category` | SRD casing kept — `Simple` \| `Martial` |
 | `weaponRange` | `weapon_range` | `Melee` \| `Ranged` |
+| `equipmentCategory` | `equipment_category.name` | always an **object**, 237/237 |
+| `desc` | `desc` joined | always an **array**, 109/109 |
 | `damageDice` | `damage.damage_dice` | **nullable** |
 | `damageType` | `damage.damage_type.name` | nullable |
-| `properties` | `properties[].name` | lowercased |
+| `properties` | `properties[].name` | SRD casing kept |
 | `rangeNormal` / `rangeLong` | `range.normal` / `range.long` | long is 9/37 |
 | `armorClassBase` | `armor_class.base` | 13/13 |
 
@@ -266,6 +301,12 @@ The projector maps armour fields even though armour *proficiency* is out of
 scope. `getEquipmentInfo` also backs the narrator's equipment tool; a projector
 that handled only weapons would answer every armour query with a half-filled
 object — trading one silent gap for another.
+
+**Casing is preserved, not normalised.** `EquipmentInfo` is what the narrator's
+equipment tool returns, so lowercasing here would change AI-facing output in a PR
+whose whole claim is that no behaviour changes. Normalisation — `"Martial"` to
+`"martial"`, `"Finesse"` to `"finesse"` — belongs to the rule layer in PR 2,
+where a lowercase `WeaponCategory` is actually required.
 
 **`Net` has no `damage` object** — 36 of 37 weapons have one. A projector that
 assumes `damage.damage_dice` either throws or invents a die on that one weapon.
