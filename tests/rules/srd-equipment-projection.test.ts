@@ -5,9 +5,10 @@ import { projectSrdItem } from "@/lib/rules/srd-equipment-projection";
 
 /**
  * The projector is tested against the real file the seeder reads, not against
- * hand-written objects. Five test files mock `srdEquipment` and hand back
+ * hand-written objects. Four test files mocked `srdEquipment` and handed back
  * fabricated rows; that is how an empty table stayed invisible to 2995 tests.
- * A fixture written by hand would repeat the mistake in a new place.
+ * This branch removed those mocks. A fixture written by hand would repeat the
+ * mistake in a new place.
  */
 const RAW = JSON.parse(
   readFileSync(join(process.cwd(), "data", "srd-es", "equipment.json"), "utf8"),

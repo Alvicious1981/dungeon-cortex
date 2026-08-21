@@ -20,19 +20,19 @@ import {
   type EquipmentInfo,
 } from "@/lib/rules/srd-equipment-projection";
 
-export { projectSrdItem };
 export type { EquipmentInfo };
 
 export async function getEquipmentInfo(query: string): Promise<EquipmentInfo | null> {
-  const byId = await prisma.srdItem.findUnique({ where: { id: query } });
-  if (byId) return projectSrdItem(byId.name, byId.data);
-
   const wanted = query.trim().toLowerCase();
   if (wanted.length === 0) return null;
 
+  const byId = await prisma.srdItem.findUnique({ where: { id: query } });
+  if (byId) return projectSrdItem(byId.name, byId.data);
+
   // findMany rather than findFirst: several existing test suites mock the Prisma
   // client with findUnique and findMany only, and this module has no reason to
-  // break them. take: 2 is enough to answer "is there exactly one?".
+  // break them. take: 2 caps a query that should return at most one row; it is
+  // not read as a count and does not reject a second match.
   const candidates = await prisma.srdItem.findMany({
     where: { name: { equals: wanted, mode: "insensitive" } },
     orderBy: { name: "asc" },

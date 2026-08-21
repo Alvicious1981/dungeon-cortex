@@ -70,7 +70,7 @@ here is not classification. It is that nobody wired the two ends together.
 ### Why 2995 tests did not catch it
 
 Every test touching `srdEquipment` mocks the Prisma client:
-`srdEquipment: { findUnique: vi.fn(), findMany: vi.fn() }`, in five files. They
+`srdEquipment: { findUnique: vi.fn(), findMany: vi.fn() }`, in four files. They
 hand back fabricated rows. An empty table is invisible to the entire suite.
 This is the hazard `AGENTS.md` names directly — *distrust a test that mocks the
 thing it appears to be testing* — and it is why the testing section below binds
@@ -111,6 +111,12 @@ but a condition of correctness for everything above it.
   SRD truth, and seeding the live database is out of bounds for this work.
 - **Retiring the `SrdEquipment` model.** A destructive migration deserves its own
   decision. This increment leaves the table unread rather than dropped.
+- **Unifying `getItemInfo` and `getEquipmentInfo`'s matching policy.** Both now
+  read `SrdItem`, but `getItemInfo` (`lib/ai/tools/srd-lookup.ts`) still does a
+  `contains` search and returns the first candidate — `getItemInfo("Sword")`
+  hands the narrator a Longsword — while `getEquipmentInfo("Sword")` returns
+  `null` by design. Two matching policies over one table is a real divergence;
+  reconciling it is not this PR's scope.
 
 ## Delivered as two pull requests
 
@@ -191,8 +197,11 @@ The projection itself lives in a separate pure module,
 `lib/rules/srd-equipment-projection.ts`, which owns `EquipmentInfo` and
 `projectSrdItem(name: string, data: unknown): EquipmentInfo`. Keeping it apart
 from the query is what lets it be tested with **no mocking at all** — the point,
-given that mocks are how this defect stayed hidden. The lookup re-exports both,
-so existing importers are unaffected.
+given that mocks are how this defect stayed hidden. The lookup re-exports the
+`EquipmentInfo` type, genuinely consumed by `lib/ai/tools/srd-lookup.ts`; it does
+not re-export `projectSrdItem` — nothing imports it through the lookup module,
+since `projectSrdItem` is new on this branch and every consumer already imports
+it directly from `srd-equipment-projection.ts`.
 
 The signature takes the row's `name` column and returns a value rather than
 `EquipmentInfo | null`: the row's existence is the caller's question, and the

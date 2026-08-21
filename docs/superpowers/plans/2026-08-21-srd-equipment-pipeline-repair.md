@@ -83,7 +83,7 @@ import { projectSrdItem } from "@/lib/rules/srd-equipment-projection";
 
 /**
  * The projector is tested against the real file the seeder reads, not against
- * hand-written objects. Five test files mock `srdEquipment` and hand back
+ * hand-written objects. Four test files mock `srdEquipment` and hand back
  * fabricated rows; that is how an empty table stayed invisible to 2995 tests.
  * A fixture written by hand would repeat the mistake in a new place.
  */
@@ -830,8 +830,13 @@ where the real data disagreed with this plan.
   `getEquipmentInfo` finding an item by substring will now get `null`. Nothing
   does today, because it found nothing at all; but it is where to look first if
   the narrator starts answering "I don't know" about a real item.
-- **`addItem` in `lib/rules/inventory.ts` is untouched and still broken** in a
-  second way: it branches on `info.weaponCategory` to decide an item is a
-  weapon, which now works, but it has no callers. PR 2 addresses it.
+- **`addItem` in `lib/rules/inventory.ts` is untouched, but its behavior flipped.**
+  Before this branch it threw `Item ${itemSlug} not found in SRD.` on every
+  call, because `getEquipmentInfo` always returned `null`. It now succeeds and
+  builds mechanical weapon/armor properties from the projected row. It has no
+  callers anywhere in the codebase, so this flip changes no roll — that is the
+  only reason the "no rule changes" claim survives. `tests/rules/inventory-add-item.test.ts`
+  now pins both the success shape and the not-found throw. PR 2 addresses giving
+  it callers.
 - **`SrdEquipment` still exists as a Prisma model** with no reader and no
   writer. Dropping it is a destructive migration and deliberately not in scope.
