@@ -32,7 +32,6 @@ vi.mock("@/lib/db/prisma", () => ({
     srdSpell: { findUnique: vi.fn(), findMany: vi.fn() },
     srdMonster: { findUnique: vi.fn(), findMany: vi.fn() },
     srdItem: { findUnique: vi.fn(), findMany: vi.fn() },
-    srdEquipment: { findUnique: vi.fn(), findMany: vi.fn() },
   },
 }));
 

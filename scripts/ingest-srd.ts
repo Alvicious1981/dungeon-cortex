@@ -575,84 +575,6 @@ async function ingestSpells(): Promise<number> {
   return inserted;
 }
 
-async function ingestEquipment(): Promise<number> {
-  const equipFile = path.join(__dirname, '../data/srd-es/equipment.json');
-  if (!fs.existsSync(equipFile)) {
-    console.warn('  Equipment JSON not found, skipping.');
-    return 0;
-  }
-
-  const content = fs.readFileSync(equipFile, 'utf-8');
-  let equipmentList: any[];
-  try {
-    equipmentList = JSON.parse(content);
-  } catch (err) {
-    console.error('  [ERROR] Failed to parse equipment.json:', err);
-    return 0;
-  }
-
-  let inserted = 0;
-  let errors = 0;
-
-  for (const item of equipmentList) {
-    if (!item.index || !item.name) continue;
-    const id = `srd-equipment-${item.index}`;
-
-    // Flatten properties array to string array
-    const properties = Array.isArray(item.properties)
-      ? item.properties.map((p: any) => p.name || p.index || String(p))
-      : [];
-
-    let desc = null;
-    if (item.desc) {
-      desc = Array.isArray(item.desc) ? item.desc.join('\n') : String(item.desc);
-    }
-
-    try {
-      const payload = {
-        name: item.name,
-        indexSlug: item.index,
-        equipmentCategory: item.equipment_category?.name || item.equipment_category?.index || null,
-        weaponCategory: item.weapon_category || null,
-        weaponRange: item.weapon_range || null,
-        categoryRange: item.category_range || null,
-        costQuantity: item.cost?.quantity ?? null,
-        costUnit: item.cost?.unit ?? null,
-        weight: item.weight ?? null,
-        damageDice: item.damage?.damage_dice || null,
-        damageType: item.damage?.damage_type?.name || item.damage?.damage_type?.index || null,
-        twoHandedDamageDice: item.two_handed_damage?.damage_dice || null,
-        twoHandedDamageType: item.two_handed_damage?.damage_type?.name || item.two_handed_damage?.damage_type?.index || null,
-        rangeNormal: item.range?.normal ?? null,
-        rangeLong: item.range?.long ?? null,
-        armorCategory: item.armor_category || null,
-        armorClassBase: item.armor_class?.base ?? null,
-        armorClassDexBonus: item.armor_class?.dex_bonus ?? null,
-        armorClassMaxBonus: item.armor_class?.max_bonus ?? null,
-        strMinimum: item.str_minimum ?? null,
-        stealthDisadvantage: item.stealth_disadvantage ?? null,
-        desc,
-        properties,
-        data: item,
-      };
-
-      await prisma.srdEquipment.upsert({
-        where: { id },
-        update: payload,
-        create: { id, ...payload },
-      });
-      console.log(`  [OK]      ${item.name} (${payload.equipmentCategory ?? '?'})`);
-      inserted++;
-    } catch (err) {
-      console.error(`  [ERROR]   ${item.index}: ${(err as Error).message}`);
-      errors++;
-    }
-  }
-
-  console.log(`\n  Equipment: ${inserted} upserted, ${errors} errors.`);
-  return inserted;
-}
-
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -667,9 +589,6 @@ async function main() {
 
     console.log('\n► Ingesting Spells...');
     const spellCount = await ingestSpells();
-
-    console.log('\n► Ingesting Equipment...');
-    const equipCount = await ingestEquipment();
 
     console.log('\n╔══════════════════════════════════════════════════════════════╗');
     console.log('║                    INGESTION COMPLETE                       ║');

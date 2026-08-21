@@ -123,7 +123,6 @@ vi.mock("@/lib/db/prisma", () => ({
     srdSpell: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
     srdMonster: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
     srdItem: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
-    srdEquipment: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
   },
 }));
 

@@ -26,7 +26,6 @@ const prisma = vi.hoisted(() => ({
   srdSpell: { findUnique: vi.fn(), findMany: vi.fn() },
   srdMonster: { findUnique: vi.fn(), findMany: vi.fn() },
   srdItem: { findUnique: vi.fn(), findMany: vi.fn() },
-  srdEquipment: { findUnique: vi.fn(), findMany: vi.fn() },
 }));
 
 vi.mock("@/lib/db/prisma", () => ({ prisma }));
@@ -95,7 +94,6 @@ describe("streamNarrative contained tool surface", () => {
     await expect(result.textPromise).resolves.toBe("Narration without a lookup.");
     expect(prisma.srdSpell.findUnique).not.toHaveBeenCalled();
     expect(prisma.srdItem.findUnique).not.toHaveBeenCalled();
-    expect(prisma.srdEquipment.findUnique).not.toHaveBeenCalled();
     expect(prisma.srdMonster.findUnique).not.toHaveBeenCalled();
   });
   it("executes an allowed spell lookup", async () => {
