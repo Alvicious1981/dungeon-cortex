@@ -72,7 +72,9 @@ reads `weaponProperties`.
 
 **In:** the weapon's own properties decide the attack bonus — category and
 proficiency, finesse, and melee/ranged ability — sourced from the SRD cache that
-actually holds data.
+actually holds data, **and the damage bonus uses the same ability the attack
+used**. See "One ability, both rolls" below; this is not an extension of scope
+but a condition of correctness for everything above it.
 
 **Out, with reasons:**
 
@@ -89,12 +91,36 @@ actually holds data.
 - **Retiring the `SrdEquipment` model.** A destructive migration deserves its own
   decision. This increment leaves the table unread rather than dropped.
 
+## Delivered as two pull requests
+
+The two halves carry very different risk and are reviewed separately.
+
+**PR 1 — repair the SRD pipeline.** Repoint `srd-equipment-lookup.ts` at
+`SrdItem`, add the projector, delete the duplicate lookup in
+`lib/ai/tools/srd-lookup.ts`. **No rule changes; no roll changes.** It is not a
+change without a consumer: the narrator's equipment tool already calls
+`getEquipmentInfo` and receives `null` for every weapon and every armour, so the
+observable result of PR 1 is that tool starting to answer.
+
+**PR 2 — the attack rule.** `weapon-profile.ts`, `weapon-profile-service.ts`,
+removal of `weaponAttackModifier`, the ability and proficiency rules, the damage
+consistency above, creation-time hydration, the shared call site, and the guards.
+**Every attack roll in the game changes here.**
+
+The reason for splitting is the previous increment's own evidence: a whole-branch
+review found two critical defects that seven per-task reviews had missed. A
+branch that simultaneously repairs a dead pipeline and alters every attack is
+harder to review than the two apart, and if something misbehaves later, the two
+histories say which one did it.
+
+The sections below describe the finished state. Each names the PR it lands in.
+
 ## Architecture
 
 The split mirrors the previous increment: `spell-targeting.ts` decides,
 `geometry.ts` calculates, `spell-resolution-service.ts` touches the database.
 
-### `lib/rules/weapon-profile.ts` — new, pure
+### `lib/rules/weapon-profile.ts` — new, pure *(PR 2)*
 
 ```ts
 export interface WeaponProfile {
@@ -130,11 +156,11 @@ Returning `abilityUsed`, `proficiencyApplied` and `categoryResolved` alongside
 the number is what lets the log say *why* the bonus is what it is, the same way
 `checkSpellRange` returns `enforced`.
 
-### `lib/rules/weapon-profile-service.ts` — new, I/O
+### `lib/rules/weapon-profile-service.ts` — new, I/O *(PR 2)*
 
 `resolveWeaponProfile(item)`: pure fast path, database only as fallback.
 
-### `lib/rules/srd-equipment-lookup.ts` — repointed
+### `lib/rules/srd-equipment-lookup.ts` — repointed *(PR 1)*
 
 Reads `SrdItem`. Exports `projectSrdItem(raw: unknown): EquipmentInfo | null`,
 tested independently of any query. `getEquipmentInfo` resolves by id, then by
@@ -144,13 +170,13 @@ The duplicate `getEquipmentInfo` in `lib/ai/tools/srd-lookup.ts` is deleted and
 imported from here. Fixing one copy and leaving the other would reinstate the
 defect in the layer that feeds the narrator.
 
-### `lib/rules/combat.ts` — `weaponAttackModifier` removed
+### `lib/rules/combat.ts` — `weaponAttackModifier` removed *(PR 2)*
 
 Replaced, not supplemented. A second way to compute the same bonus is what
 produced the drift with the view-model. Its four assertions are rewritten
 against `weaponAttackBonus`.
 
-### A field deliberately not written
+### A field deliberately not written *(PR 2)*
 
 Character creation will hydrate the weapon from the SRD but will **not** write
 `InventoryItem.indexSlug`. Nothing would read it: the resolution chain never
@@ -158,7 +184,7 @@ reaches a slug lookup, because a hydrated row already carries its category. A
 field written and never read is the exact defect this increment closes. It gets
 written the day `addItem` has callers again.
 
-## Resolution chain
+## Resolution chain *(PR 2)*
 
 `resolveWeaponProfile(item)` — two steps and a floor:
 
@@ -172,7 +198,7 @@ written the day `addItem` has callers again.
 SRD. The SRD is the fallback, not an arbiter that overwrites what was persisted.
 Magic or modified weapons will need exactly that behaviour.
 
-## The ability rule, and its check order
+## The ability rule, and its check order *(PR 2)*
 
 Order is the trap here, as it was with `Lanzador (radio de 5 pies)` in the
 previous increment:
@@ -199,7 +225,29 @@ Proficiency, applied after the ability:
 Both failures are closed. Neither ever inflates a roll, matching the convention
 the recent migrations state explicitly.
 
-## The projector
+## One ability, both rolls *(PR 2)*
+
+Both attack sites compute damage as `flatDamageBonus: strMod + weaponBonus`
+(`route.ts:273`, `route.ts:979`). Changing only the attack to use DEX — through
+finesse or through a ranged weapon — would ship a rule that contradicts itself
+inside a single attack. SRD 2014 is explicit about Finesse: *"You must use the
+same modifier for both."*
+
+**The damage bonus consumes `abilityUsed`.** This is why `weaponAttackBonus`
+returns it rather than a bare number. Returning the ability and then leaving the
+damage line on `strMod` would be a value produced and never consumed, in the
+increment whose entire subject is that defect.
+
+Concretely: `flatDamageBonus` becomes the modifier of `stats[abilityUsed]` plus
+the weapon's own `damageBonus`, at both sites. A longbow that now attacks with
+DEX also deals damage with DEX; a dart resolved under finesse uses one chosen
+ability for both rolls, never one for each.
+
+This is the only place in the increment where an existing damage number changes
+for a weapon that already resolves today — and only for weapons that are ranged
+or finesse. The live save's longsword is neither, so its damage is untouched.
+
+## The projector *(PR 1)*
 
 `SrdItem.data` is raw dnd5eapi JSON. This is where "correct data read with the
 wrong shape" would enter, so it is isolated and tested against real shapes.
@@ -223,7 +271,7 @@ object — trading one silent gap for another.
 assumes `damage.damage_dice` either throws or invents a die on that one weapon.
 `damageDice` is nullable and `Net` is its test.
 
-## Wiring
+## Wiring *(PR 2)*
 
 **Character creation** (`app/api/character/route.ts:90`) hydrates the longsword
 from SRD id `longsword`. The hand-written literal already matches the SRD row
@@ -256,21 +304,32 @@ increment declares an unenforceable range instead of implying it held.
 The suite hid this defect for its whole life. The tests are designed against
 that failure, not only against the rule.
 
+**PR 1:**
+
 - **The projector is tested against `data/srd-es/equipment.json`** — the real
   file the seeder reads — not against hand-written objects. If the SRD shape
   changes, a test fails instead of a game. `Net` is a named case.
 - **No fuzzy matching:** `"Sword"` must **not** resolve to `"Longsword"`. An
   absence proved by construction, not by sampling.
+- **One lookup, not two:** a guard asserting that `lib/ai/tools/srd-lookup.ts`
+  does not define its own equipment query. The duplicate is what let the defect
+  exist in two places; a test is what stops it coming back as three.
+
+**PR 2:**
+
 - **A guard binding both ends:** for one character and one weapon, the bonus the
   view-model displays must equal the bonus the backend resolves. Divergence
   becomes a CI failure rather than a discovery three months later.
+- **One ability, both rolls:** for a ranged or finesse weapon, the ability behind
+  the damage bonus must be the ability behind the attack bonus. This binds the
+  two ends of the rule that the current code splits.
 - **Exhaustiveness guard** keyed as `Record<WeaponCategory, …>`, so adding a
   category is a compile error — the I1 correction from #95, which replaced a
   hand-written array that still type-checked with a member missing.
 - **Discriminating cases:** `Dart` (ranged and finesse — must offer the choice),
-  `Net` (no damage object), a non-proficient class with a martial weapon
-  (bonus must drop), an unknown class string (no proficiency), a legacy row with
-  no category (resolves by name), and level scaling across the 1–20 table.
+  a non-proficient class with a martial weapon (bonus must drop), an unknown
+  class string (no proficiency), a legacy row with no category (resolves by
+  name), and level scaling across the 1–20 table.
 
 ## Related
 
