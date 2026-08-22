@@ -1,5 +1,6 @@
 import type { CharacterSheetProps, CharacterSpellSlot } from "@/components/character/CharacterSheetVTT";
 import type { ItemType } from "@/lib/rules/inventory";
+import { readWeaponProfile, weaponAttackBonus } from "@/lib/rules/weapon-profile";
 
 interface CharacterSheetSource {
   character: {
@@ -73,10 +74,6 @@ function getObject(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-function getStringArray(raw: unknown): string[] {
-  return Array.isArray(raw) ? raw.filter((value): value is string => typeof value === "string") : [];
-}
-
 export function buildSheetViewModel({ character, inventory }: CharacterSheetSource): CharacterSheetProps {
   const stats = getStats(character.stats);
   const proficiencyBonus = 2 + Math.floor((character.level - 1) / 4);
@@ -139,21 +136,31 @@ export function buildSheetViewModel({ character, inventory }: CharacterSheetSour
       { label: "Persuasion", value: formatModifier(getModifier(stats.CHA)) },
     ],
     attacks: inventory.filter((item) => item.type === "weapon").map((weapon) => {
+      // The bonus comes from the same pure rule the action route resolves with.
+      // The sheet used to compute its own, honouring Finesse while the route did
+      // not and applying proficiency where the route now does not; two
+      // implementations of one SRD rule is exactly the drift this closes.
       const properties = getObject(weapon.properties);
-      const traits = getStringArray(properties.properties);
-      const finesse = traits.some((trait) => trait.toLowerCase() === "finesse");
-      const attackModifier = finesse
-        ? Math.max(getModifier(stats.STR), getModifier(stats.DEX))
-        : getModifier(stats.STR);
-      const damageBonus = attackModifier + (typeof properties.damageBonus === "number" ? properties.damageBonus : 0);
-      const damageDice = typeof properties.damageDice === "string" ? properties.damageDice : "N/D";
-      const damageType = typeof properties.damageType === "string" ? properties.damageType : "";
+      const profile = readWeaponProfile(properties);
+      const attack = weaponAttackBonus({
+        profile,
+        stats,
+        characterClass: character.class,
+        level: character.level,
+      });
+
+      const abilityMod = getModifier(stats[attack.abilityUsed]);
+      const damageBonus =
+        abilityMod + (typeof properties.damageBonus === "number" ? properties.damageBonus : 0);
+      const damageDice = profile.damageDice ?? "N/D";
+      const damageType = profile.damageType ?? "";
+
       return {
         id: weapon.id,
         name: weapon.name,
-        bonus: attackModifier + proficiencyBonus,
+        bonus: attack.bonus,
         damage: `${damageDice}${damageBonus === 0 ? "" : formatModifier(damageBonus)} ${damageType}`.trim(),
-        traits,
+        traits: [...profile.traits],
       };
     }),
     spellSlots: buildSpellSlots(character.spellSlots),

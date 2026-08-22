@@ -12,7 +12,7 @@ describe("server character sheet projection", () => {
       },
       inventory: [
         { id: "armor", name: "Scale Mail", type: "armor", quantity: 1, equippedSlot: "ARMOR", properties: { baseAC: 14, addDexModifier: true, maxDexBonus: 2 } },
-        { id: "sword", name: "Rapier", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: { damageDice: "1d8", damageType: "piercing", properties: ["finesse"] } },
+        { id: "sword", name: "Rapier", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: { damageDice: "1d8", damageType: "piercing", weaponCategory: "Martial", weaponProperties: ["Finesse"] } },
       ],
     });
     expect(view.core).toMatchObject({ armorClass: 16, initiative: 2, speedFeet: null, proficiencyBonus: 3, passivePerception: 11 });
