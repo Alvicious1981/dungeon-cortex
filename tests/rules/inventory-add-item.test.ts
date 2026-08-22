@@ -80,7 +80,12 @@ describe("addItem", () => {
     expect(item.properties).toEqual({
       damageDice: "1d8",
       damageBonus: 0,
-      damageType: "Slashing",
+      // The SRD row above carries "Slashing"; the rule layer lowercases it,
+      // because DamageType is a lowercase union and normalizeDamageType turns
+      // anything it does not recognise into force damage. Asserting the
+      // lowercase value is what makes this test prove the conversion rather
+      // than pin the raw SRD casing.
+      damageType: "slashing",
       rangeNormal: null,
       rangeLong: null,
       // The keys every attack now reads. `addItem` had both values in scope and

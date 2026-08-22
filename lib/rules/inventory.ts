@@ -282,7 +282,11 @@ export async function addItem(
     properties = {
       damageDice: info.damageDice || "1d4",
       damageBonus: 0,
-      damageType: info.damageType || "bludgeoning",
+      // Lowercased for the same reason starting-inventory.ts does it: the SRD
+      // stores "Slashing", while DamageType is a lowercase union and
+      // normalizeDamageType silently converts anything it does not recognise
+      // into force damage.
+      damageType: (info.damageType || "bludgeoning").toLowerCase(),
       rangeNormal: info.rangeNormal,
       rangeLong: info.rangeLong,
       // Written here because they are read on every attack. Omitting them —
