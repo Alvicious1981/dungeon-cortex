@@ -6,7 +6,6 @@ import {
   checkDeath,
   resolveEncounterEnd,
   acFromMonsterData,
-  acFromInventory,
   resolveAttackRoll,
   // Milestone J — Slice 1
   rollDamage,
@@ -178,29 +177,6 @@ describe("combat rules", () => {
       expect(acFromMonsterData({})).toBe(10);
       expect(acFromMonsterData({ armor_class: [] })).toBe(10);
       expect(acFromMonsterData({ armor_class: [{ type: "natural" }] })).toBe(10);
-    });
-  });
-
-  describe("acFromInventory", () => {
-    it("calculates unarmored correctly", () => {
-      expect(acFromInventory([], 3)).toBe(13); // 10 + 3
-    });
-
-    it("calculates with full dex bonus (light armor)", () => {
-      const inventory = [{ type: "armor", properties: { baseAC: 12 } }];
-      expect(acFromInventory(inventory, 4)).toBe(16); // 12 + 4
-    });
-
-    it("calculates with capped dex bonus (medium armor)", () => {
-      const inventory = [{ type: "armor", properties: { baseAC: 14, maxDexBonus: 2 } }];
-      expect(acFromInventory(inventory, 4)).toBe(16); // 14 + 2
-      expect(acFromInventory(inventory, 1)).toBe(15); // 14 + 1
-    });
-
-    it("calculates with no dex bonus (heavy armor)", () => {
-      const inventory = [{ type: "armor", properties: { baseAC: 18, addDexModifier: false } }];
-      expect(acFromInventory(inventory, 4)).toBe(18); // 18 + 0
-      expect(acFromInventory(inventory, -1)).toBe(18); // even negative usually doesn't apply per 5e RAW, though our implementation treats addDex=false as exactly 0 dex bonus.
     });
   });
 

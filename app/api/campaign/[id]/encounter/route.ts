@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
-import { rollInitiative, acFromMonsterData, acFromInventory } from "@/lib/rules/combat";
+import { rollInitiative, acFromMonsterData } from "@/lib/rules/combat";
+import { armorClassFor } from "@/lib/rules/armor-class";
 import { abilityModifier } from "@/lib/rules/dice";
 import {
   monsterAbilityScores,
@@ -137,7 +138,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const stats = campaign.character.stats as Record<string, number>;
   const playerDexMod = abilityModifier(stats.DEX ?? 10);
-  const playerAC = acFromInventory(campaign.character.inventory, playerDexMod);
+  const playerAC = armorClassFor({
+    inventory: campaign.character.inventory,
+    dexModifier: playerDexMod,
+  }).armorClass;
 
   const combatantInputs = [
     {

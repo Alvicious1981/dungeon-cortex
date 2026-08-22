@@ -4,6 +4,7 @@ import {
   readArmorProfile,
   type ArmorInventoryRow,
 } from "@/lib/rules/armor-class";
+import type { EncounterInventoryItemRecord } from "@/lib/rules/encounter-service";
 
 function equipped(properties: Record<string, unknown>): ArmorInventoryRow {
   return { type: "armor", equippedSlot: "ARMOR", properties };
@@ -158,5 +159,52 @@ describe("armorClassFor — what does not count", () => {
       equipped({ baseAC: 16, armorClass: "heavy" }),
     ];
     expect(armorClassFor({ inventory, dexModifier: 3 }).armorClass).toBe(16);
+  });
+});
+
+describe("armorClassFor — cases migrated from acFromInventory", () => {
+  // These arrived from tests/rules/combat.test.ts. Each fixture gains an
+  // equippedSlot and a category: the originals had neither, because the
+  // implementation they covered read neither.
+  it("calculates unarmored correctly", () => {
+    expect(armorClassFor({ inventory: [], dexModifier: 3 }).armorClass).toBe(13);
+  });
+
+  it("calculates with full dex bonus (light armor)", () => {
+    const inventory = [equipped({ baseAC: 12, armorClass: "light" })];
+    expect(armorClassFor({ inventory, dexModifier: 4 }).armorClass).toBe(16);
+  });
+
+  it("calculates with capped dex bonus (medium armor)", () => {
+    const inventory = [
+      equipped({ baseAC: 14, armorClass: "medium", maxDexBonus: 2, addDexModifier: true }),
+    ];
+    expect(armorClassFor({ inventory, dexModifier: 4 }).armorClass).toBe(16);
+    expect(armorClassFor({ inventory, dexModifier: 1 }).armorClass).toBe(15);
+  });
+
+  it("calculates with no dex bonus (heavy armor)", () => {
+    const inventory = [equipped({ baseAC: 18, armorClass: "heavy", addDexModifier: false })];
+    expect(armorClassFor({ inventory, dexModifier: 4 }).armorClass).toBe(18);
+    // A negative modifier is not subtracted either: addDexModifier false means
+    // exactly zero Dexterity, not "apply it anyway".
+    expect(armorClassFor({ inventory, dexModifier: -1 }).armorClass).toBe(18);
+  });
+});
+
+describe("the encounter service's inventory record reaches the rule intact", () => {
+  it("carries equippedSlot through to the rule", () => {
+    // EncounterInventoryItemRecord declared only { type, properties }. Because
+    // ArmorInventoryRow makes equippedSlot optional, passing that record would
+    // type-check and silently compute every player as unarmoured. This test
+    // builds the row through the service's OWN record type, so it stops
+    // compiling if the field is ever dropped again — a runtime assertion alone
+    // could not catch it.
+    const row: EncounterInventoryItemRecord = {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 16, armorClass: "heavy" },
+    };
+    expect(armorClassFor({ inventory: [row], dexModifier: 3 }).armorClass).toBe(16);
   });
 });

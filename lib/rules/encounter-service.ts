@@ -7,18 +7,24 @@ import {
   type SpawnEncounterInput,
 } from "@/lib/rules/encounters";
 import {
-  acFromInventory,
   acFromMonsterData,
   rollInitiative,
 } from "@/lib/rules/combat";
+import { armorClassFor } from "@/lib/rules/armor-class";
 import {
   buildMonsterRawData,
   queryMonsters as defaultQueryMonsters,
 } from "@/lib/rules/srd-monster-lookup";
 import type { Monster } from "@/lib/rules/srd";
 
-interface EncounterInventoryItemRecord {
+export interface EncounterInventoryItemRecord {
   type: string;
+  /**
+   * Required by the armour rule. Declared here because `ArmorInventoryRow`
+   * makes it optional: omitting it compiles and computes every player as
+   * unarmoured.
+   */
+  equippedSlot?: string | null;
   properties: unknown;
 }
 
@@ -231,7 +237,10 @@ export async function spawnCombatEncounter(
 
   const stats = characterStats(campaign.character);
   const playerDexMod = abilityModifier(stats.DEX ?? 10);
-  const playerAC = acFromInventory(campaign.character.inventory, playerDexMod);
+  const playerAC = armorClassFor({
+    inventory: campaign.character.inventory,
+    dexModifier: playerDexMod,
+  }).armorClass;
 
   const initiativeInputs = [
     {

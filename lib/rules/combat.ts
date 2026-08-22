@@ -818,37 +818,6 @@ export function acFromMonsterData(data: Record<string, unknown>): number {
   return typeof first.value === "number" ? first.value : 10;
 }
 
-/**
- * Derives a player character's AC from their inventory.
- *
- * Rules (5e 2014 SRD):
- *   - Unarmored: 10 + DEX modifier.
- *   - Light armor: base AC + DEX modifier (no cap).
- *   - Medium armor: base AC + DEX modifier (max +2).
- *   - Heavy armor: base AC, no DEX modifier.
- *   - Shield: +2 AC (stacks with any armor — not yet implemented here).
- *
- * The first item with type "armor" in the inventory is used.
- * If no armor is found the character is treated as unarmored.
- *
- * @pure — no side effects.
- */
-export function acFromInventory(
-  inventory: Array<{ type: string; properties: unknown }>,
-  dexModifier: number
-): number {
-  const armorItem = inventory.find((i) => i.type === "armor");
-  if (!armorItem) return 10 + dexModifier;
-
-  const props = armorItem.properties as Record<string, unknown>;
-  const base = typeof props.baseAC === "number" ? props.baseAC : 10;
-  const addDex = props.addDexModifier !== false;
-  const rawMax = props.maxDexBonus;
-  const maxDex = typeof rawMax === "number" ? rawMax : Infinity;
-  const dexBonus = addDex ? Math.min(dexModifier, maxDex) : 0;
-  return base + dexBonus;
-}
-
 // ---------------------------------------------------------------------------
 // Attack roll resolution
 // ---------------------------------------------------------------------------

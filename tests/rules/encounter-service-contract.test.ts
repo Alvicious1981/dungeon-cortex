@@ -54,6 +54,7 @@ function createDb(options?: {
             inventory: [
               {
                 type: "armor",
+                equippedSlot: "ARMOR",
                 properties: { baseAC: 11, addDexModifier: true },
               },
             ],
