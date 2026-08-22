@@ -18,9 +18,9 @@ import {
 } from "@/lib/rules/spell-resolution-service";
 import {
   extractConditions,
-  weaponAttackModifier,
   type DamageType,
 } from "@/lib/rules/combat";
+import { resolveWeaponAttack, unresolvedCategoryLog } from "@/lib/rules/weapon-attack";
 import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
@@ -238,18 +238,30 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
 
       const charStats = context.character.stats as Record<string, number>;
-      const strMod = abilityModifier(charStats.STR ?? 10);
-      
-      const weaponDice = foundWeapon 
-        ? (foundWeapon.properties as Record<string, unknown>).damageDice as string ?? "1d4"
-        : "1d4";
-      const weaponBonus = foundWeapon 
-        ? (foundWeapon.properties as Record<string, unknown>).damageBonus as number ?? 0 
-        : 0;
-
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = weaponAttackModifier(strMod, context.character.level);
+
+      const attack = await resolveWeaponAttack({
+        weapon: foundWeapon
+          ? { name: foundWeapon.name, properties: foundWeapon.properties }
+          : null,
+        stats: charStats,
+        characterClass: context.character.class,
+        level: context.character.level,
+        fallbackDamageType: "bludgeoning",
+      });
+
+      // Declared before the transaction opens: at this point the attack is
+      // confirmed to proceed, so the line never describes an attack that was
+      // rejected. Same discipline as the unenforceable-range log above.
+      const categoryLog = foundWeapon
+        ? unresolvedCategoryLog({ weaponName: foundWeapon.name, attack })
+        : null;
+      if (categoryLog) {
+        await prisma.gameLog.create({
+          data: { campaignId, role: "system", content: categoryLog },
+        });
+      }
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({
@@ -267,10 +279,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorConditions: playerConditions,
           targetCombatants: targets,
           weaponName: foundWeapon?.name || "Unarmed",
-          weaponDice,
-          damageType: ((foundWeapon?.properties as Record<string, unknown>)?.damageType || "bludgeoning") as DamageType,
-          attackModifier,
-          flatDamageBonus: strMod + weaponBonus,
+          weaponDice: attack.weaponDice,
+          damageType: attack.damageType as DamageType,
+          attackModifier: attack.attackModifier,
+          flatDamageBonus: attack.flatDamageBonus,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
 
@@ -950,12 +962,27 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         return NextResponse.json({ error: "No weapon found." }, { status: 400 });
       }
 
-      const weaponProps = getItemProperties({...foundWeapon, characterId: context.character.id}, "weapon");
       const charStats = context.character.stats as Record<string, number>;
-      const strMod = abilityModifier(charStats.STR ?? 10);
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
-      const attackModifier = weaponAttackModifier(strMod, context.character.level);
+
+      const attack = await resolveWeaponAttack({
+        weapon: { name: foundWeapon.name, properties: foundWeapon.properties },
+        stats: charStats,
+        characterClass: context.character.class,
+        level: context.character.level,
+        fallbackDamageType: "slashing",
+      });
+
+      const categoryLog = unresolvedCategoryLog({
+        weaponName: foundWeapon.name,
+        attack,
+      });
+      if (categoryLog) {
+        await prisma.gameLog.create({
+          data: { campaignId, role: "system", content: categoryLog },
+        });
+      }
 
       await prisma.$transaction(async (tx) => {
         const attackOutcome = await executeCombatAction({
@@ -973,10 +1000,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorConditions: playerConditions,
           targetCombatants: targets,
           weaponName: foundWeapon.name,
-          weaponDice: weaponProps?.damageDice || "1d4",
-          damageType: (weaponProps?.damageType as DamageType) || "slashing",
-          attackModifier,
-          flatDamageBonus: strMod + (weaponProps?.damageBonus || 0),
+          weaponDice: attack.weaponDice,
+          damageType: attack.damageType as DamageType,
+          attackModifier: attack.attackModifier,
+          flatDamageBonus: attack.flatDamageBonus,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
 

@@ -88,6 +88,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       character: {
         id: "char-1",
         name: "Hero",
+        class: "fighter",
         level: 1,
         stats: { STR: 14 },
         inventory: [
@@ -264,7 +265,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     const target2 = { id: "t2", name: "Goblin 2", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
     
     const mockContext = {
-      character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
+      character: { name: "Hero", class: "fighter", stats: { STR: 10 }, inventory: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],
@@ -364,7 +365,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   it("falls back to auto-targeting if targetIds is missing", async () => {
     const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
     const mockContext = {
-      character: { name: "Hero", stats: { STR: 10 }, inventory: [] },
+      character: { name: "Hero", class: "fighter", stats: { STR: 10 }, inventory: [] },
       relevantMemories: [],
       recentLogs: [],
       quests: [],

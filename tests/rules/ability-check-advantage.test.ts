@@ -4,7 +4,7 @@ import {
   CONDITION_REGISTRY,
   evaluateAbilityCheckAdvantage,
 } from "@/lib/rules/conditions";
-import { weaponAttackModifier } from "@/lib/rules/combat";
+import { weaponAttackBonus } from "@/lib/rules/weapon-profile";
 
 /**
  * El agotamiento y varias condiciones dan desventaja en TODA prueba de
@@ -70,7 +70,16 @@ describe("evaluateAbilityCheckAdvantage", () => {
   });
 });
 
-describe("weaponAttackModifier", () => {
+describe("weaponAttackBonus replaces weaponAttackModifier", () => {
+  const PROFILE = {
+    category: "martial" as const,
+    isRanged: false,
+    traits: [] as readonly string[],
+    damageDice: "1d8",
+    damageType: "Slashing",
+  };
+  const NO_MOD = { STR: 10, DEX: 10 }; // ability modifier 0
+
   it.each([
     [1, 2],
     [4, 2],
@@ -81,12 +90,25 @@ describe("weaponAttackModifier", () => {
   ])("a nivel %i el bono de competencia es +%i", (level, expected) => {
     // Estaba fijo a +2 en las dos rutas de ataque, así que desde nivel 5 toda
     // tirada salía corta. Con modificador 0, lo devuelto es la competencia.
-    expect(weaponAttackModifier(0, level)).toBe(expected);
+    expect(
+      weaponAttackBonus({
+        profile: PROFILE,
+        stats: NO_MOD,
+        characterClass: "fighter",
+        level,
+      }).bonus,
+    ).toBe(expected);
   });
 
   it("suma el modificador de característica a la competencia", () => {
-    expect(weaponAttackModifier(3, 5)).toBe(6);
-    expect(weaponAttackModifier(-1, 1)).toBe(1);
+    expect(
+      weaponAttackBonus({
+        profile: PROFILE,
+        stats: { STR: 16, DEX: 10 },
+        characterClass: "fighter",
+        level: 5,
+      }).bonus,
+    ).toBe(6); // +3 STR, +3 competencia
   });
 
   it.each([0, 21, NaN, undefined as unknown as number])(
@@ -94,7 +116,14 @@ describe("weaponAttackModifier", () => {
     (level) => {
       // Degradar conservador: nunca infla el ataque, y no propaga NaN a la
       // tirada como haría una fórmula aplicada a un nivel ausente.
-      expect(weaponAttackModifier(0, level)).toBe(2);
-    }
+      expect(
+        weaponAttackBonus({
+          profile: PROFILE,
+          stats: NO_MOD,
+          characterClass: "fighter",
+          level,
+        }).bonus,
+      ).toBe(2);
+    },
   );
 });
