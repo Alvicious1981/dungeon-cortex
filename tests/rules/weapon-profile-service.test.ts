@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/rules/srd-equipment-lookup");
+const getEquipmentInfo = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/rules/srd-equipment-lookup", () => ({ getEquipmentInfo }));
 
 import { resolveWeaponProfile } from "@/lib/rules/weapon-profile-service";
-import { getEquipmentInfo } from "@/lib/rules/srd-equipment-lookup";
 
 /** The shape PR 1's projector returns, with SRD casing preserved. */
 const SRD_LONGSWORD = {
