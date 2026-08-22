@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { CLASS_HIT_DICE, ABILITY_SCORES, type AbilityScore } from "@/lib/dnd-api/constants";
 import { defaultSkillProficiencies } from "@/lib/rules/class-skills";
+import { buildStartingInventory } from "@/lib/rules/starting-inventory";
 
 interface CreateCharacterBody {
   name: string;
@@ -85,20 +86,7 @@ export async function POST(req: NextRequest) {
       spellSlots,
       skillProficiencies: defaultSkillProficiencies(characterClass),
       inventory: {
-        create: [
-          {
-            name: "Longsword",
-            type: "weapon",
-            quantity: 1,
-            properties: { damageDice: "1d8", damageBonus: 0, damageType: "slashing" },
-          },
-          {
-            name: "Health Potion",
-            type: "consumable",
-            quantity: 2,
-            properties: { healingDice: "2d4", healingBonus: 2 },
-          },
-        ],
+        create: await buildStartingInventory(),
       },
     },
   });
