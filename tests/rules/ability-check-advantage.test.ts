@@ -100,6 +100,19 @@ describe("weaponAttackBonus replaces weaponAttackModifier", () => {
     ).toBe(expected);
   });
 
+  it("un modificador de característica negativo resta, no se ignora", () => {
+    // Migrado de `weaponAttackModifier(-1, 1) === 1`: la aserción del caso
+    // negativo se perdió al reescribir el bloque. STR 8 (-1) + competencia +2.
+    expect(
+      weaponAttackBonus({
+        profile: PROFILE,
+        stats: { STR: 8, DEX: 8 },
+        characterClass: "fighter",
+        level: 1,
+      }).bonus,
+    ).toBe(1);
+  });
+
   it("suma el modificador de característica a la competencia", () => {
     expect(
       weaponAttackBonus({

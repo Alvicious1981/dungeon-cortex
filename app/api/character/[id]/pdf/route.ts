@@ -5,6 +5,7 @@ import { characterSheetErrorResponse } from "@/lib/character-sheet/http";
 import { CharacterSheetServiceError } from "@/lib/character-sheet/service";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 import { exportCharacterPdf } from "@/lib/character-sheet/pdf";
+import { resolveInventoryWeaponProfiles } from "@/lib/rules/weapon-profile-service";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -23,7 +24,14 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
     if (!character) {
       throw new CharacterSheetServiceError("CHARACTER_NOT_FOUND", "Personaje no encontrado.");
     }
-    const sheet = buildSheetViewModel({ character, inventory: character.inventory });
+    // Same resolution the campaign page and the attack sites perform: the
+    // exported sheet must not print a bonus the die will not roll.
+    const weaponProfiles = await resolveInventoryWeaponProfiles(character.inventory);
+    const sheet = buildSheetViewModel({
+      character,
+      inventory: character.inventory,
+      weaponProfiles,
+    });
     const bytes = await exportCharacterPdf(sheet, {
       id: character.id,
       name: character.name,

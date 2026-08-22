@@ -108,6 +108,25 @@ const ARMOR_PROF: Record<CharacterClass, ReadonlySet<ArmorCategory>> = {
   wizard:    new Set(),
 };
 
+/**
+ * Reads a proficiency table by an **own** key only.
+ *
+ * `Character.class` is free text, and creation validates only that it is
+ * non-empty. `TABLE[characterClass]?.has(...)` resolves `"constructor"`,
+ * `"toString"`, `"valueOf"` and `"__proto__"` to an inherited
+ * `Object.prototype` member — not undefined — so `?.` does not guard, and
+ * `.has` is missing on it: a `TypeError`, i.e. a 500 on every attack and on
+ * the character sheet. This module documents itself as never throwing.
+ */
+function own<K extends string, V>(
+  table: Record<K, V>,
+  key: K,
+): V | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key)
+    ? table[key]
+    : undefined;
+}
+
 // ─── Public query functions ───────────────────────────────────────────────────
 
 /**
@@ -118,7 +137,8 @@ export function isWeaponProficient(
   characterClass: CharacterClass,
   weaponCategory: WeaponCategory,
 ): boolean {
-  return WEAPON_PROF[characterClass]?.has(weaponCategory) ?? false;
+  const table = own(WEAPON_PROF, characterClass);
+  return table?.has(weaponCategory) ?? false;
 }
 
 /**
@@ -129,5 +149,6 @@ export function isArmorProficient(
   characterClass: CharacterClass,
   armorCategory: ArmorCategory,
 ): boolean {
-  return ARMOR_PROF[characterClass]?.has(armorCategory) ?? false;
+  const table = own(ARMOR_PROF, characterClass);
+  return table?.has(armorCategory) ?? false;
 }

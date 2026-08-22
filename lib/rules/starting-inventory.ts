@@ -16,7 +16,17 @@
 import { getEquipmentInfo } from "@/lib/rules/srd-equipment-lookup";
 
 export async function buildStartingInventory() {
-  const srd = await getEquipmentInfo("Longsword").catch(() => null);
+  const srd = await getEquipmentInfo("Longsword").catch((error: unknown) => {
+    // Declared, not silent. This path decides whether the character has
+    // proficiency with its starting weapon for the rest of its life; a failure
+    // that leaves no trace is how that gap survives unnoticed.
+    console.warn(
+      "[starting-inventory] SRD lookup for Longsword failed; falling back to the " +
+        "literal, so the starting weapon carries no category:",
+      error,
+    );
+    return null;
+  });
 
   // A fresh development database has no SrdItem rows. Creating a character must
   // not depend on the cache being seeded, so an absent lookup keeps the literal.
@@ -24,7 +34,13 @@ export async function buildStartingInventory() {
     ? {
         damageDice: srd.damageDice ?? "1d8",
         damageBonus: 0,
-        damageType: srd.damageType ?? "slashing",
+        // Lowercased at the rule boundary, the way category, range and traits
+        // already are (`weapon-profile.ts:70-80, 94`). `DamageType` is a
+        // lowercase-only union, and `normalizeDamageType`
+        // (`combat-pipeline.ts:63-67`) silently turns an unrecognised type into
+        // force damage — so the SRD's "Slashing" would quietly change what a
+        // longsword deals, and would reach the narrator in that casing too.
+        damageType: (srd.damageType ?? "slashing").toLowerCase(),
         weaponCategory: srd.weaponCategory,
         weaponRange: srd.weaponRange,
         weaponProperties: srd.properties,

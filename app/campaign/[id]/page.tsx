@@ -29,6 +29,7 @@ import BattleGrid from "@/components/combat/BattleGrid";
 import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
+import { resolveInventoryWeaponProfiles } from "@/lib/rules/weapon-profile-service";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -278,7 +279,15 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   const { character, logs } = campaign;
   const activeEncounter = campaign.encounters[0] ?? null;
-  const sheetViewModel = buildSheetViewModel({ character, inventory: character.inventory });
+  // Resolved here rather than inside the view-model: the sheet must show the
+  // same profile the attack sites resolve, and a legacy weapon row carries no
+  // category, so that answer only exists after the SRD fallback runs.
+  const weaponProfiles = await resolveInventoryWeaponProfiles(character.inventory);
+  const sheetViewModel = buildSheetViewModel({
+    character,
+    inventory: character.inventory,
+    weaponProfiles,
+  });
   const characterProfile = {
     id: character.id,
     name: character.name,

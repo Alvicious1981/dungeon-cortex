@@ -30,7 +30,9 @@ describe("buildStartingInventory", () => {
     expect(weapon.properties).toEqual({
       damageDice: "1d8",
       damageBonus: 0,
-      damageType: "Slashing",
+      // Lowercased at the rule boundary: `DamageType` is a lowercase-only
+      // union, and an unrecognised type is silently normalised to force damage.
+      damageType: "slashing",
       weaponCategory: "Martial",
       weaponRange: "Melee",
       weaponProperties: ["Versatile"],
@@ -59,7 +61,10 @@ describe("buildStartingInventory", () => {
     });
   });
 
-  it("falls back to the literal when the lookup throws", async () => {
+  it("falls back to the literal when the lookup throws, and says so", async () => {
+    // The fallback must leave a trace. This path decides whether the character
+    // has proficiency with its starting weapon for the rest of its life.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     getEquipmentInfo.mockRejectedValue(new Error("connection lost"));
 
     const [weapon] = await buildStartingInventory();
@@ -69,6 +74,8 @@ describe("buildStartingInventory", () => {
       damageBonus: 0,
       damageType: "slashing",
     });
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
   it("leaves the health potion alone — it is not in the SRD cache", async () => {

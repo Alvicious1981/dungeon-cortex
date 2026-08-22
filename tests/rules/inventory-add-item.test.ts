@@ -61,6 +61,7 @@ describe("addItem", () => {
       equipmentInfo({
         name: "Longsword",
         weaponCategory: "Martial",
+        weaponRange: "Melee",
         damageDice: "1d8",
         damageType: "Slashing",
         properties: ["Versatile"],
@@ -82,6 +83,11 @@ describe("addItem", () => {
       damageType: "Slashing",
       rangeNormal: null,
       rangeLong: null,
+      // The keys every attack now reads. `addItem` had both values in scope and
+      // wrote neither, so a weapon added this way was born needing the SRD
+      // fallback that exists only for rows written before the keys did.
+      weaponCategory: "Martial",
+      weaponRange: "Melee",
       weaponProperties: ["Versatile"],
     });
   });

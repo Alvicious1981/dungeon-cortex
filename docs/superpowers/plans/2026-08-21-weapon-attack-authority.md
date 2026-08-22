@@ -86,7 +86,7 @@ corrupt persisted level turns an attack into a 500.
 | `tests/rules/weapon-profile.test.ts` | **Create.** The ability rule, proficiency, unarmed, level clamp, exhaustiveness. |
 | `lib/rules/weapon-profile-service.ts` | **Create.** `resolveWeaponProfile` — pure fast path, SRD lookup only as fallback. |
 | `tests/rules/weapon-profile-service.test.ts` | **Create.** The resolution chain and its precedence rule. |
-| `app/api/character/route.ts` | **Modify.** Hydrate the starting longsword from the SRD; fall back to the literal when the cache is empty. |
+| ~~`app/api/character/route.ts`~~ `lib/rules/starting-inventory.ts` | **CORRECTED — Create.** Hydrate the starting longsword from the SRD; fall back to the literal when the cache is empty. The plan placed `buildStartingInventory` in the route and had the test import it from there; Next.js App Router permits only route handlers as exports from a `route.ts`, so it shipped as its own rule module, with `tests/rules/starting-inventory.test.ts` as its test. |
 | `tests/api/character-create-hydration.test.ts` | **Create.** Hydrated shape, and the empty-cache fallback. |
 | `lib/rules/weapon-attack.ts` | **Create.** The one helper both attack sites call. |
 | `lib/rules/combat.ts` | **Modify.** Remove `weaponAttackModifier`. |
@@ -1859,7 +1859,10 @@ describe("the sheet's attack bonus equals the backend's", () => {
   it("reads the canonical weaponProperties key", () => {
     // The old key was `properties.properties`. A weapon whose traits live under
     // the canonical name must have its finesse honoured.
-    expect(sheetBonus("rogue", 1, { STR: 8, DEX: 18 }, FINESSE)).toBe(6); // +4 DEX, +2 prof
+    // CORRECTED: this shipped as 4, not 6. A rogue has only the `simple`
+    // category in this model (`lib/rules/proficiency.ts:82`), so no proficiency
+    // bonus applies to a martial finesse weapon: +4 DEX and nothing else.
+    expect(sheetBonus("rogue", 1, { STR: 8, DEX: 18 }, FINESSE)).toBe(4); // +4 DEX, no prof
   });
 });
 ```
@@ -2066,3 +2069,44 @@ where the real code disagreed with this plan.
 - **Armour proficiency remains unconsumed.** `isArmorProficient` has the same
   shape of defect as `isWeaponProficient` had. AC is resolved on a different path
   and the spec puts it out of scope; it is the obvious next increment.
+
+
+---
+
+## Corrections
+
+Recorded after implementation and review, the way the spec records its own
+"Correction made while planning". The plan is left otherwise intact; these are
+the places where what shipped differs from what was written, and why.
+
+1. **`buildStartingInventory` does not live in `app/api/character/route.ts`.**
+   Next.js App Router allows only route handlers to be exported from a
+   `route.ts`, so importing the builder from there is not possible. It shipped
+   as `lib/rules/starting-inventory.ts`, tested by
+   `tests/rules/starting-inventory.test.ts` rather than
+   `tests/api/character-create-hydration.test.ts`.
+
+2. **The rogue guard case is `4`, not `6`.** The plan annotated it
+   `// +4 DEX, +2 prof`. A rogue holds only the `simple` category in
+   `lib/rules/proficiency.ts:82` — the SRD's individual rapier/shortsword grants
+   are deliberately outside that table — so a martial finesse weapon earns no
+   proficiency bonus. +4 DEX and nothing else.
+
+3. **The view-model's calculation was unified after all.** The spec listed this
+   as deliberately out of scope. It could not stay out: every character created
+   before this branch carries damage and no weapon category, so the attack sites
+   fill the category from `SrdItem` while a sheet resolving with
+   `readWeaponProfile` alone cannot — the live save's level-1 barbarian rolled
+   +4 with a legacy Longsword and displayed +2. `buildSheetViewModel` now takes
+   an optional pre-resolved `weaponProfiles` map keyed by inventory item id and
+   stays pure; its two server-side callers
+   (`app/campaign/[id]/page.tsx`, `app/api/character/[id]/pdf/route.ts`) build
+   it with `resolveInventoryWeaponProfiles`. With no map supplied the behaviour
+   is unchanged, so every existing test holds. `MILESTONE_V_SPEC` §5 is
+   respected: no rendering, no JSX, nothing under `components/` changed.
+
+4. **`damageType` is lowercased at the rule boundary.** The hydrated starting
+   longsword wrote the SRD's `"Slashing"` into a field typed as a lowercase-only
+   `DamageType` union; `normalizeDamageType` (`lib/rules/combat-pipeline.ts:63`)
+   silently converts an unrecognised type to force damage, so the plan's claim
+   that hydration changes no character's damage type held only by luck.

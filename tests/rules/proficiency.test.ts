@@ -189,3 +189,32 @@ describe("isArmorProficient", () => {
     expect(isArmorProficient("sorcerer", "heavy")).toBe(false);
   });
 });
+
+// ─── Prototype keys ──────────────────────────────────────────────────────────
+
+describe("a class name that is an Object.prototype key", () => {
+  // `Character.class` is free text; creation validates only non-emptiness, and
+  // `weapon-profile.ts` casts the persisted value straight into these lookups.
+  // `TABLE[key]?.has(...)` resolved these to an inherited prototype member —
+  // not undefined — so `?.` did not guard and `.has` was missing: a TypeError,
+  // i.e. a 500 on every attack and on the character sheet.
+  const PROTOTYPE_KEYS = [
+    "constructor",
+    "toString",
+    "valueOf",
+    "hasOwnProperty",
+    "__proto__",
+  ] as const;
+
+  it.each(PROTOTYPE_KEYS)("%s is not proficient with any weapon, and does not throw", (key) => {
+    expect(() => isWeaponProficient(key as never, "simple")).not.toThrow();
+    expect(isWeaponProficient(key as never, "simple")).toBe(false);
+    expect(isWeaponProficient(key as never, "martial")).toBe(false);
+  });
+
+  it.each(PROTOTYPE_KEYS)("%s is not proficient with any armor, and does not throw", (key) => {
+    expect(() => isArmorProficient(key as never, "light")).not.toThrow();
+    expect(isArmorProficient(key as never, "light")).toBe(false);
+    expect(isArmorProficient(key as never, "shield")).toBe(false);
+  });
+});

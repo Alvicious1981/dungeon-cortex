@@ -11,7 +11,6 @@
  * Server-only — never import from a client component.
  */
 
-import { abilityModifier } from "@/lib/rules/dice";
 import { weaponAttackBonus } from "@/lib/rules/weapon-profile";
 import { resolveWeaponProfile } from "@/lib/rules/weapon-profile-service";
 
@@ -57,14 +56,12 @@ export async function resolveWeaponAttack(input: {
   const weaponDamageBonus =
     typeof properties.damageBonus === "number" ? properties.damageBonus : 0;
 
-  const abilityScore = stats?.[bonus.abilityUsed];
-  const abilityMod = abilityModifier(
-    typeof abilityScore === "number" && Number.isFinite(abilityScore) ? abilityScore : 10,
-  );
-
   return {
     attackModifier: bonus.bonus,
-    flatDamageBonus: abilityMod + weaponDamageBonus,
+    // The same modifier the attack roll used, taken from the rule that decided
+    // it rather than re-derived here. SRD 2014 on Finesse: "You must use the
+    // same modifier for both" — one source makes that structural, not a habit.
+    flatDamageBonus: bonus.abilityMod + weaponDamageBonus,
     weaponDice: profile?.damageDice ?? UNARMED_DICE,
     damageType: profile?.damageType ?? fallbackDamageType,
     abilityUsed: bonus.abilityUsed,

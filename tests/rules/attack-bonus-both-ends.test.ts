@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
-import { readWeaponProfile, weaponAttackBonus } from "@/lib/rules/weapon-profile";
+import {
+  readWeaponProfile,
+  weaponAttackBonus,
+  type WeaponProfile,
+} from "@/lib/rules/weapon-profile";
+import { resolveWeaponProfile } from "@/lib/rules/weapon-profile-service";
+
+const getEquipmentInfo = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/rules/srd-equipment-lookup", () => ({ getEquipmentInfo }));
 
 /**
  * The sheet and the die must show the same number.
@@ -29,6 +38,7 @@ function sheetBonus(
   level: number,
   stats: Record<string, number>,
   properties: Record<string, unknown>,
+  resolved?: WeaponProfile,
 ): number {
   const sheet = buildSheetViewModel({
     character: {
@@ -52,6 +62,7 @@ function sheetBonus(
         properties,
       },
     ],
+    weaponProfiles: resolved ? new Map([["w1", resolved]]) : undefined,
   });
 
   return sheet.attacks[0].bonus;
@@ -104,5 +115,58 @@ describe("the sheet's attack bonus equals the backend's", () => {
     // (lib/rules/proficiency.ts:82), and the rapier/shortsword grants the SRD
     // gives rogues individually are deliberately handled outside that table.
     expect(sheetBonus("rogue", 1, { STR: 8, DEX: 18 }, FINESSE)).toBe(4);
+  });
+});
+
+/**
+ * The path every character that exists today actually takes.
+ *
+ * Every row above is hydrated — category, range and traits all present — which
+ * is precisely why the legacy shape went untested on both ends. A character
+ * created before this branch carries damage and nothing else, so the backend
+ * fills the category from `SrdItem` and the sheet, resolving with
+ * `readWeaponProfile` alone, saw no category at all: +4 rolled against +2
+ * displayed for a level-1 barbarian with a Longsword.
+ */
+const LEGACY = { damageDice: "1d8", damageBonus: 0, damageType: "slashing" };
+
+const SRD_LONGSWORD = {
+  name: "Longsword",
+  weaponCategory: "Martial",
+  weaponRange: "Melee",
+  damageDice: "1d8",
+  damageType: "Slashing",
+  properties: ["Versatile"],
+};
+
+describe("a legacy weapon row, with no persisted category", () => {
+  it("shows the sheet the same number the backend rolls", async () => {
+    getEquipmentInfo.mockResolvedValue(SRD_LONGSWORD);
+
+    // Exactly what the attack sites do, and now what the sheet's callers do.
+    const resolved = await resolveWeaponProfile({ name: "Longsword", properties: LEGACY });
+    expect(resolved.category).toBe("martial");
+
+    const backend = weaponAttackBonus({
+      profile: resolved,
+      stats: { STR: 14, DEX: 10 },
+      characterClass: "barbarian",
+      level: 1,
+    });
+
+    // +2 STR, +2 proficiency — a barbarian has the martial category.
+    expect(backend.proficiencyApplied).toBe(true);
+    expect(backend.bonus).toBe(4);
+    expect(sheetBonus("barbarian", 1, { STR: 14, DEX: 10 }, LEGACY, resolved)).toBe(
+      backend.bonus,
+    );
+  });
+
+  it("is what the sheet would get wrong without the resolved profile", async () => {
+    // Pins the direction: unresolved, the row has no category, so no
+    // proficiency — +2 against the +4 the die rolls. This is the divergence,
+    // and it is why the map is passed rather than the view-model left pure and
+    // uninformed.
+    expect(sheetBonus("barbarian", 1, { STR: 14, DEX: 10 }, LEGACY)).toBe(2);
   });
 });

@@ -1,6 +1,11 @@
 import type { CharacterSheetProps, CharacterSpellSlot } from "@/components/character/CharacterSheetVTT";
+import { abilityModifier } from "@/lib/rules/dice";
 import type { ItemType } from "@/lib/rules/inventory";
-import { readWeaponProfile, weaponAttackBonus } from "@/lib/rules/weapon-profile";
+import {
+  readWeaponProfile,
+  weaponAttackBonus,
+  type WeaponProfile,
+} from "@/lib/rules/weapon-profile";
 
 interface CharacterSheetSource {
   character: {
@@ -24,10 +29,18 @@ interface CharacterSheetSource {
     equippedSlot?: string | null;
     properties: unknown;
   }>;
-}
-
-function getModifier(score: number): number {
-  return Math.floor((score - 10) / 2);
+  /**
+   * Weapon profiles already resolved against the SRD, keyed by inventory item
+   * id. Optional, and the view-model stays pure: a caller with database access
+   * resolves them, a caller without one falls back to the row's own properties.
+   *
+   * It exists because every character created before weapon categories were
+   * persisted carries damage and nothing else. The attack sites fill that gap
+   * from `SrdItem`; without the same answer here, the sheet showed a legacy
+   * Longsword at +2 while the die rolled +4 — the exact divergence this
+   * increment exists to close.
+   */
+  weaponProfiles?: ReadonlyMap<string, WeaponProfile>;
 }
 
 function formatModifier(modifier: number): string {
@@ -74,11 +87,15 @@ function getObject(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-export function buildSheetViewModel({ character, inventory }: CharacterSheetSource): CharacterSheetProps {
+export function buildSheetViewModel({
+  character,
+  inventory,
+  weaponProfiles,
+}: CharacterSheetSource): CharacterSheetProps {
   const stats = getStats(character.stats);
   const proficiencyBonus = 2 + Math.floor((character.level - 1) / 4);
-  const dexMod = getModifier(stats.DEX);
-  const wisMod = getModifier(stats.WIS);
+  const dexMod = abilityModifier(stats.DEX);
+  const wisMod = abilityModifier(stats.WIS);
   let armorClass = 10 + dexMod;
   const equippedArmor = inventory.find(
     (item) => item.type === "armor" && item.equippedSlot === "ARMOR"
@@ -112,36 +129,41 @@ export function buildSheetViewModel({ character, inventory }: CharacterSheetSour
       passivePerception: 10 + wisMod,
     },
     abilities: {
-      str: { score: stats.STR, modifier: getModifier(stats.STR) },
+      str: { score: stats.STR, modifier: abilityModifier(stats.STR) },
       dex: { score: stats.DEX, modifier: dexMod },
-      con: { score: stats.CON, modifier: getModifier(stats.CON) },
-      int: { score: stats.INT, modifier: getModifier(stats.INT) },
+      con: { score: stats.CON, modifier: abilityModifier(stats.CON) },
+      int: { score: stats.INT, modifier: abilityModifier(stats.INT) },
       wis: { score: stats.WIS, modifier: wisMod },
-      cha: { score: stats.CHA, modifier: getModifier(stats.CHA) },
+      cha: { score: stats.CHA, modifier: abilityModifier(stats.CHA) },
     },
     savingThrows: [
-      { label: "Strength", value: formatModifier(getModifier(stats.STR)) },
+      { label: "Strength", value: formatModifier(abilityModifier(stats.STR)) },
       { label: "Dexterity", value: formatModifier(dexMod) },
-      { label: "Constitution", value: formatModifier(getModifier(stats.CON)) },
-      { label: "Intelligence", value: formatModifier(getModifier(stats.INT)) },
+      { label: "Constitution", value: formatModifier(abilityModifier(stats.CON)) },
+      { label: "Intelligence", value: formatModifier(abilityModifier(stats.INT)) },
       { label: "Wisdom", value: formatModifier(wisMod) },
-      { label: "Charisma", value: formatModifier(getModifier(stats.CHA)) },
+      { label: "Charisma", value: formatModifier(abilityModifier(stats.CHA)) },
     ],
     skills: [
-      { label: "Athletics", value: formatModifier(getModifier(stats.STR)) },
+      { label: "Athletics", value: formatModifier(abilityModifier(stats.STR)) },
       { label: "Acrobatics", value: formatModifier(dexMod) },
       { label: "Stealth", value: formatModifier(dexMod) },
       { label: "Perception", value: formatModifier(wisMod) },
       { label: "Insight", value: formatModifier(wisMod) },
-      { label: "Persuasion", value: formatModifier(getModifier(stats.CHA)) },
+      { label: "Persuasion", value: formatModifier(abilityModifier(stats.CHA)) },
     ],
     attacks: inventory.filter((item) => item.type === "weapon").map((weapon) => {
       // The bonus comes from the same pure rule the action route resolves with.
       // The sheet used to compute its own, honouring Finesse while the route did
       // not and applying proficiency where the route now does not; two
       // implementations of one SRD rule is exactly the drift this closes.
+      //
+      // A pre-resolved profile wins when the caller supplied one: it is the
+      // same `resolveWeaponProfile` answer the attack sites use, which is what
+      // keeps a legacy row — damage only, no category — showing the number the
+      // die will actually roll. With no map the behaviour is unchanged.
       const properties = getObject(weapon.properties);
-      const profile = readWeaponProfile(properties);
+      const profile = weaponProfiles?.get(weapon.id) ?? readWeaponProfile(properties);
       const attack = weaponAttackBonus({
         profile,
         stats,
@@ -149,7 +171,7 @@ export function buildSheetViewModel({ character, inventory }: CharacterSheetSour
         level: character.level,
       });
 
-      const abilityMod = getModifier(stats[attack.abilityUsed]);
+      const abilityMod = abilityModifier(stats[attack.abilityUsed]);
       const damageBonus =
         abilityMod + (typeof properties.damageBonus === "number" ? properties.damageBonus : 0);
       const damageDice = profile.damageDice ?? "N/D";

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/session";
 import { NextRequest } from "next/server";
 import { buildCampaignContext } from "@/lib/memory/context";
+import { computeConsequences } from "@/lib/rules/combat";
 import { parseIntent } from "@/lib/ai/intent";
 import { streamNarrative } from "@/lib/ai/narrator";
 
@@ -25,6 +26,12 @@ vi.mock("@/lib/db/prisma", () => ({
     combatant: { findMany: vi.fn(), update: vi.fn() },
     inventoryItem: { delete: vi.fn(), update: vi.fn() },
     character: { findUnique: vi.fn(), update: vi.fn() },
+    // The route resolves a weapon's category through `getEquipmentInfo`, which
+    // reads `srdItem`. Without this delegate the call threw a TypeError that
+    // `resolveWeaponProfile`'s `.catch` swallowed, so every attack in this file
+    // silently resolved to no category and no proficiency — a crashed lookup
+    // masquerading as a resolution.
+    srdItem: { findUnique: vi.fn(), findMany: vi.fn() },
     $transaction: vi.fn(async (cb) => cb(prisma)),
   },
 }));
@@ -48,6 +55,9 @@ vi.mock("@/lib/rules/combat", async (importActual) => {
   const actual = await importActual<any>();
   return {
     ...actual,
+    // Delegates to the real implementation: this is a probe on the arguments
+    // the route resolved, not a replacement for the rule.
+    computeConsequences: vi.fn((input: any) => actual.computeConsequences(input)),
     resolveAttackRoll: vi.fn(() => ({ hit: true, critical: false, roll: 10, total: 12 })),
     extractConditions: vi.fn((c) => (Array.isArray(c) ? c : JSON.parse(c || "[]"))),
     applyCondition: vi.fn((list, c) => [...new Set([...list, c])]),
@@ -77,6 +87,21 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     vi.clearAllMocks();
     (getAuthUser as any).mockResolvedValue(mockUser);
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    // The seeded SRD row these fixtures' Longsword resolves against. The
+    // lookup tries findUnique by id first, then an exact-name findMany.
+    (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+    (prisma.srdItem.findMany as any).mockResolvedValue([
+      {
+        id: "longsword",
+        name: "Longsword",
+        data: {
+          weapon_category: "Martial",
+          weapon_range: "Melee",
+          damage: { damage_dice: "1d8", damage_type: { name: "Slashing" } },
+          properties: [{ index: "versatile", name: "Versatile", url: "" }],
+        },
+      },
+    ]);
   });
 
   describe("free-text attack targeting", () => {
@@ -174,6 +199,22 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       const call = (streamNarrative as any).mock.calls.at(-1);
       expect(call?.[1]).toBe("I swing at it");
       expect(call?.[2]?.facts.length).toBeGreaterThan(0);
+    });
+
+    it("rolls the attack at the proficient modifier the weapon earns", async () => {
+      // The fixture's Longsword row carries damage and no category — the legacy
+      // shape every existing character has. The route must fill it from the SRD
+      // and apply proficiency: fighter level 1, STR 14 (+2), martial (+2) = +4.
+      // Nothing here asserted a modifier before, which is why a lookup that
+      // threw on every call looked exactly like one that resolved.
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      const consequences = (computeConsequences as any).mock.calls.at(-1);
+      expect(consequences?.[0]?.attackModifier).toBe(4);
     });
 
     it("rejects a targetIds selection naming more than one creature", async () => {

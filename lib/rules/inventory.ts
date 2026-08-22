@@ -48,6 +48,18 @@ export interface WeaponProperties {
   rangeLong?: number;
   /** D&D 5e weapon properties, e.g. ["finesse", "light", "thrown"] */
   weaponProperties?: string[];
+  /**
+   * SRD weapon category — "Simple" or "Martial". Optional because every row
+   * written before this key existed has none, and the SRD fallback in
+   * `weapon-profile-service.ts` fills that gap at read time.
+   *
+   * Declared here because it now decides whether a proficiency bonus applies
+   * to every attack. It was written by `buildStartingInventory` and read by
+   * `readWeaponProfile` while appearing in no type at all.
+   */
+  weaponCategory?: string;
+  /** SRD weapon range — "Melee" or "Ranged". Decides STR versus DEX. */
+  weaponRange?: string;
 }
 
 /** Properties for type === "armor" */
@@ -273,6 +285,11 @@ export async function addItem(
       damageType: info.damageType || "bludgeoning",
       rangeNormal: info.rangeNormal,
       rangeLong: info.rangeLong,
+      // Written here because they are read on every attack. Omitting them —
+      // with both values already in scope on the line above — is what made a
+      // weapon added this way born needing the SRD fallback.
+      weaponCategory: info.weaponCategory,
+      weaponRange: info.weaponRange,
       weaponProperties: info.properties
     };
   } else if (info.armorCategory) {

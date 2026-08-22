@@ -51,3 +51,22 @@ export async function resolveWeaponProfile(row: WeaponRow): Promise<WeaponProfil
     traits: fromSrd.traits,
   };
 }
+
+/**
+ * Resolves every weapon row in an inventory, keyed by item id.
+ *
+ * `buildSheetViewModel` is pure and cannot reach the database, but it must show
+ * the number the attack sites will roll — and for a legacy row that number
+ * exists only after the SRD fallback. Its two server-side callers build this
+ * map and hand it in.
+ */
+export async function resolveInventoryWeaponProfiles(
+  inventory: ReadonlyArray<{ id: string; name: string; type: string; properties: unknown }>,
+): Promise<ReadonlyMap<string, WeaponProfile>> {
+  const weapons = inventory.filter((item) => item.type === "weapon");
+  const profiles = await Promise.all(
+    weapons.map((item) => resolveWeaponProfile({ name: item.name, properties: item.properties })),
+  );
+
+  return new Map(weapons.map((item, index) => [item.id, profiles[index]]));
+}

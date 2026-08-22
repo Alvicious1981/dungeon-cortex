@@ -99,9 +99,19 @@ but a condition of correctness for everything above it.
 
 **Out, with reasons:**
 
-- **Unifying the view-model's calculation.** Deliberately declined; the sheet
+- **Unifying the view-model's calculation.** ~~Deliberately declined; the sheet
   keeps computing its own bonus. A guard binds the two ends instead, so they
-  cannot diverge silently. `MILESTONE_V_SPEC` §5 stays respected.
+  cannot diverge silently.~~ **Corrected after implementation:** the opposite
+  shipped. The sheet calls the same pure rule (`weaponAttackBonus`), and its two
+  server-side callers hand it the profile `resolveWeaponProfile` produced. The
+  decline could not stand: every character created before this branch carries
+  damage and no category, so the backend fills the category from `SrdItem` while
+  a sheet computing its own bonus cannot — a level-1 barbarian's legacy
+  Longsword rolled +4 and displayed +2. The guard this spec itself demands
+  cannot pass on the only data shape that exists in production unless both ends
+  resolve identically. `MILESTONE_V_SPEC` §5 stays respected: the view-model is
+  still pure and imports no service, and the two callers changed only in how
+  they resolve data — no rendering, no JSX, nothing under `components/`.
 - **Armour proficiency.** `isArmorProficient` is unconsumed for the same reason,
   but AC is resolved on a different path and would double this increment.
 - **Versatile damage, two-handed, reach, thrown range.** Traits become available

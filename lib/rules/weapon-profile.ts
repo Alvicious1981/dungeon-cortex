@@ -36,6 +36,12 @@ export interface WeaponProfile {
 export interface WeaponAttackBonus {
   bonus: number;
   abilityUsed: "STR" | "DEX";
+  /**
+   * The modifier of the ability the attack used, already checked against a
+   * missing or non-finite score. Returned so the damage bonus can reuse it
+   * rather than re-deriving it from `stats` with a second finite-check.
+   */
+  abilityMod: number;
   proficiencyApplied: boolean;
   categoryResolved: boolean;
 }
@@ -169,6 +175,7 @@ export function weaponAttackBonus(input: {
   return {
     bonus,
     abilityUsed,
+    abilityMod,
     proficiencyApplied,
     categoryResolved: category !== null,
   };
