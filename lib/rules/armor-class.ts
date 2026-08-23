@@ -121,6 +121,36 @@ const UNARMORED = (dexModifier: number): ArmorClassResult => ({
 });
 
 /**
+ * Which row, if any, is the character's body armour.
+ *
+ * Split out of `armorClassFor` because two rules now ask about the same armour
+ * for different reasons: one wants the number it grants, the other wants the
+ * category to judge proficiency against. Asking twice through two selectors
+ * would be how they come to disagree.
+ *
+ * A shield is excluded — the SRD stores it as an additive base of 2 — and so is
+ * any row whose base is below the unarmoured 10, because armour that leaves you
+ * worse than naked is a bonus row wearing armour's type.
+ */
+export function selectBodyArmor(
+  inventory: readonly ArmorInventoryRow[],
+): ArmorProfile | null {
+  for (const row of inventory) {
+    if (row.type !== "armor" || row.equippedSlot !== "ARMOR") continue;
+
+    const profile = readArmorProfile(row.properties);
+    if (profile.category === "shield") continue;
+    if (profile.baseAC === null) continue;
+    if (profile.baseAC < UNARMORED_BASE) continue;
+    if (profile.declaredAddsDex === null && profile.category === null) continue;
+
+    return profile;
+  }
+
+  return null;
+}
+
+/**
  * The character's armour class.
  *
  * Only equipped body armour counts. A shield is excluded outright: the SRD
@@ -140,48 +170,22 @@ export function armorClassFor(input: {
 }): ArmorClassResult {
   const { inventory, dexModifier } = input;
 
-  for (const row of inventory) {
-    if (row.type !== "armor" || row.equippedSlot !== "ARMOR") continue;
+  const profile = selectBodyArmor(inventory);
+  if (profile === null || profile.baseAC === null) return UNARMORED(dexModifier);
 
-    const profile = readArmorProfile(row.properties);
-    if (profile.category === "shield") continue;
-    if (profile.baseAC === null) continue;
-    // Body armour that leaves you worse off than naked is not a total; it is an
-    // accessory bonus stored in a row typed "armor". `data/loot-tables.json`
-    // ships exactly such rows — the Voidclasp Gauntlet declares
-    // `baseAC: 1, addDexModifier: false`, which without this floor resolves to
-    // an armour class of 1. All 13 SRD body armours have a base of 11 or more,
-    // so the floor excludes no real armour. It does not subsume the shield skip
-    // above (a shield's base is 2, but a category-less accessory has no
-    // category to skip on), and the shield skip does not subsume it.
-    if (profile.baseAC < UNARMORED_BASE) continue;
-
-    if (profile.declaredAddsDex !== null) {
-      const bonus = profile.declaredAddsDex
-        ? profile.declaredMaxDexBonus === null
-          ? dexModifier
-          : // A junk negative cap would otherwise subtract Dexterity. Clamp it
-            // at zero: a cap can withhold the modifier, never reverse it.
-            Math.min(dexModifier, Math.max(profile.declaredMaxDexBonus, 0))
-        : 0;
-      return {
-        armorClass: profile.baseAC + bonus,
-        category: profile.category,
-        armored: true,
-      };
-    }
-
-    if (profile.category === null) continue;
-
-    const bonus = dexBonusFromCategory(profile.category, dexModifier);
-    if (bonus === null) continue;
-
-    return {
-      armorClass: profile.baseAC + bonus,
-      category: profile.category,
-      armored: true,
-    };
+  if (profile.declaredAddsDex !== null) {
+    const bonus = profile.declaredAddsDex
+      ? profile.declaredMaxDexBonus === null
+        ? dexModifier
+        : Math.min(dexModifier, Math.max(profile.declaredMaxDexBonus, 0))
+      : 0;
+    return { armorClass: profile.baseAC + bonus, category: profile.category, armored: true };
   }
 
-  return UNARMORED(dexModifier);
+  if (profile.category === null) return UNARMORED(dexModifier);
+
+  const bonus = dexBonusFromCategory(profile.category, dexModifier);
+  if (bonus === null) return UNARMORED(dexModifier);
+
+  return { armorClass: profile.baseAC + bonus, category: profile.category, armored: true };
 }

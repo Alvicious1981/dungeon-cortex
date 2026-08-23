@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   armorClassFor,
   readArmorProfile,
+  selectBodyArmor,
   type ArmorInventoryRow,
 } from "@/lib/rules/armor-class";
 import type { EncounterInventoryItemRecord } from "@/lib/rules/encounter-service";
@@ -284,5 +285,53 @@ describe("the encounter service's inventory record reaches the rule intact", () 
       properties: { baseAC: 16, armorClass: "heavy" },
     };
     expect(armorClassFor({ inventory: [row], dexModifier: 3 }).armorClass).toBe(16);
+  });
+});
+
+describe("selectBodyArmor", () => {
+  // armorClassFor already proves the selection rule through the AC it returns.
+  // These pin the selector directly, because Task 2 asks it a different
+  // question — "what is being worn" rather than "what is it worth".
+  it("returns the equipped body armour's profile", () => {
+    const profile = selectBodyArmor([
+      equipped({ baseAC: 16, armorClass: "heavy", addDexModifier: false }),
+    ]);
+    expect(profile?.category).toBe("heavy");
+    expect(profile?.baseAC).toBe(16);
+  });
+
+  it("returns null when nothing is equipped", () => {
+    expect(selectBodyArmor([])).toBeNull();
+  });
+
+  it("returns null for armour that is carried but not equipped", () => {
+    expect(
+      selectBodyArmor([
+        { type: "armor", properties: { baseAC: 16, armorClass: "heavy" } },
+      ]),
+    ).toBeNull();
+  });
+
+  it("never returns a shield", () => {
+    expect(selectBodyArmor([equipped({ baseAC: 2, armorClass: "shield" })])).toBeNull();
+  });
+
+  it("never returns a bonus row below the unarmoured base", () => {
+    // The Voidclasp Gauntlet shape: baseAC 1, a declared dex flag, no category.
+    expect(
+      selectBodyArmor([equipped({ baseAC: 1, addDexModifier: false })]),
+    ).toBeNull();
+  });
+
+  it("agrees with armorClassFor about what is worn", () => {
+    // The two must never disagree about the selection, because the AC and the
+    // proficiency penalty would then be judged against different armour.
+    const inventory = [
+      equipped({ baseAC: 2, armorClass: "shield" }),
+      equipped({ baseAC: 15, armorClass: "medium" }),
+    ];
+    expect(selectBodyArmor(inventory)?.category).toBe(
+      armorClassFor({ inventory, dexModifier: 3 }).category,
+    );
   });
 });
