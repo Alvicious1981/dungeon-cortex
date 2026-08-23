@@ -15,6 +15,13 @@
  * Both ignored `ArmorProperties.armorClass` — the SRD category, declared in the
  * types since the beginning and read by nothing. It is what makes an absent
  * `addDexModifier` answerable instead of a guess.
+ *
+ * Note on where the answer is used: `lib/rules/encounter-service.ts` persists the
+ * player's armour class into the combatant row at spawn, while the character
+ * sheet recomputes it live on every read. Equipping armour mid-encounter
+ * therefore leaves the two showing different numbers until the next spawn. That
+ * is the existing design, not a defect of this module; it is recorded here so it
+ * is not rediscovered as a bug.
  */
 
 import type { ArmorCategory } from "@/lib/rules/proficiency";
@@ -69,6 +76,12 @@ function toCategory(value: unknown): ArmorCategory | null {
  * Absent is reported as null rather than defaulted. "The row does not say" and
  * "the row says no" are different answers, and the two implementations this
  * module replaces disagreed about precisely that.
+ *
+ * Naming, because the persisted shape makes it confusing: the stored
+ * `properties.armorClass` is the SRD **category string** ("light", "heavy", …),
+ * which is why it is read into `category`. The number called `armorClass` is the
+ * one this module computes, on `ArmorClassResult`. Both names are forced by
+ * shapes already in the database; neither is free to be renamed here.
  */
 export function readArmorProfile(properties: unknown): ArmorProfile {
   const root = asRecord(properties);
@@ -114,6 +127,9 @@ const UNARMORED = (dexModifier: number): ArmorClassResult => ({
  * stores it as base 2, an additive bonus, so treating it as armour would set a
  * character's AC to 2 + DEX.
  *
+ * A row whose base is below the unarmoured 10 is excluded too: it is a bonus,
+ * not a total, whatever its category says.
+ *
  * A row that declares neither a category nor a dex flag cannot say how it
  * behaves, so it is ignored rather than trusted for its base alone — the only
  * direction that never inflates.
@@ -130,12 +146,23 @@ export function armorClassFor(input: {
     const profile = readArmorProfile(row.properties);
     if (profile.category === "shield") continue;
     if (profile.baseAC === null) continue;
+    // Body armour that leaves you worse off than naked is not a total; it is an
+    // accessory bonus stored in a row typed "armor". `data/loot-tables.json`
+    // ships exactly such rows — the Voidclasp Gauntlet declares
+    // `baseAC: 1, addDexModifier: false`, which without this floor resolves to
+    // an armour class of 1. All 13 SRD body armours have a base of 11 or more,
+    // so the floor excludes no real armour. It does not subsume the shield skip
+    // above (a shield's base is 2, but a category-less accessory has no
+    // category to skip on), and the shield skip does not subsume it.
+    if (profile.baseAC < UNARMORED_BASE) continue;
 
     if (profile.declaredAddsDex !== null) {
       const bonus = profile.declaredAddsDex
         ? profile.declaredMaxDexBonus === null
           ? dexModifier
-          : Math.min(dexModifier, profile.declaredMaxDexBonus)
+          : // A junk negative cap would otherwise subtract Dexterity. Clamp it
+            // at zero: a cap can withhold the modifier, never reverse it.
+            Math.min(dexModifier, Math.max(profile.declaredMaxDexBonus, 0))
         : 0;
       return {
         armorClass: profile.baseAC + bonus,

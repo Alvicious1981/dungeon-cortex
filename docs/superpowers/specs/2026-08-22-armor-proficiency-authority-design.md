@@ -46,7 +46,11 @@ shield in the game steps on it.
 
 ### The data is clean and one field of it is inert
 
-All 13 armours in `data/srd-es/equipment.json`, verified across the whole file:
+Two files produce `type: "armor"` rows, and only one of them is clean. This
+section originally surveyed the SRD file alone; the loot file is added here
+because the rule has to survive both.
+
+**`data/srd-es/equipment.json` — all 13 armours, verified across the whole file:**
 
 | Category | Count | `armor_class` shape |
 | --- | --- | --- |
@@ -54,6 +58,19 @@ All 13 armours in `data/srd-es/equipment.json`, verified across the whole file:
 | `Medium` | 5 | `base`, `dex_bonus: true`, `max_bonus: 2` — all five |
 | `Heavy` | 4 | `base`, `dex_bonus: false` |
 | `Shield` | 1 | `base: 2`, `dex_bonus: false` |
+
+**`data/loot-tables.json` — 10 rows typed `"armor"`, 0 declaring a category.**
+They are gauntlets, boots, cloaks, helms and a buckler fragment: accessories, not
+body armour. Nine carry no `baseAC` at all (their bonus, where they have one, sits
+in an unread `ac_bonus`). One, the Voidclasp Gauntlet, carries
+`baseAC: 1, addDexModifier: false` — a bonus stored in the field that means a
+total.
+
+So the category fallback below applies to **SRD-sourced armour only**. Loot rows
+carry no category, and the ones with a base carry a base below 10; they are
+excluded by the `baseAC` floor in `armorClassFor`, which refuses any row whose
+base would leave the wearer worse off than unarmoured. The floor and the
+shield-category skip catch different shapes and neither subsumes the other.
 
 `ArmorProperties.armorClass` (`lib/rules/inventory.ts:70`) already declares
 exactly this closed set — `"light" | "medium" | "heavy" | "shield"` — and
@@ -150,6 +167,27 @@ export interface ArmorClassResult {
 }
 ```
 
+**The block above is the design sketch, not the shipped signature.** PR 1 shipped
+a narrower one and `docs/superpowers/plans/2026-08-22-armor-class-unification.md`,
+section "Corrections this plan makes to the spec", records why. What exists in
+`lib/rules/armor-class.ts` today is:
+
+```ts
+export interface ArmorProfile {
+  category: ArmorCategory | null;
+  baseAC: number | null;
+  declaredAddsDex: boolean | null;
+  declaredMaxDexBonus: number | null;
+}
+
+export function readArmorProfile(properties: unknown): ArmorProfile; // never null
+export interface ArmorInventoryRow { type: string; equippedSlot?: string | null; properties: unknown }
+```
+
+`readArmorProfile` always returns a profile; every field is individually
+nullable, and `declared*` names say the value came from the row rather than from
+a default. Code against this, not against the sketch.
+
 `readArmorProfile` validates rather than casts, the way `readWeaponProfile` does.
 Returning `category` and `armored` alongside the number is what lets PR 2 ask
 "proficient with what?" without recomputing anything, and what lets the log say
@@ -182,7 +220,8 @@ The category is not a guess. Falling back to it:
 | `heavy` | none |
 | `shield` | not applicable — never selected as body armour |
 
-This matches the stored data exactly across all 13 rows, so the fallback and the
+This matches the stored SRD data exactly across all 13 rows (the loot corpus
+declares no category and never reaches the fallback), so the fallback and the
 per-item values agree wherever both exist. A row with **no category and no
 `addDexModifier`** falls to `10 + DEX` unarmoured rather than inventing a base:
 the conservative direction, and it never inflates.

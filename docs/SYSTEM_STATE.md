@@ -40,7 +40,7 @@ The following legacy items are considered archived and must NOT be used for grou
 ### Correcciones aplicadas
 - `rollDamage()` usa `rollDie()` — testeable y auditable
 - `resolveConcentrationCheck()` eliminada de `combat.ts` (canónica: `resolveConcentrationSave` en `magic.ts`)
-- Escudo (+2 AC) en `acFromInventory()`
+- ~~Escudo (+2 AC) en `acFromInventory()`~~ — nunca fue cierto: el comentario de la función decía "not yet implemented here". `acFromInventory()` fue eliminada; la CA la calcula `lib/rules/armor-class.ts`, que garantiza que un escudo no se confunda con armadura de cuerpo, pero **el +2 del escudo sigue sin implementarse**.
 - Turn guard en action route: 400 si el combatant activo no es el jugador
 - MacroDeck deshabilitada + banner visual durante turno enemigo (`isPlayerTurn` prop)
 - Condiciones normalizadas (parseo JSON seguro en `CombatHUD`)

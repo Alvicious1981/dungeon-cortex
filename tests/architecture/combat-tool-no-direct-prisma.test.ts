@@ -91,6 +91,10 @@ describe("spawnEncounter architecture: AI tool must delegate encounter spawning"
     expect(spawnEncounterBody).not.toMatch(/\bbuildEncounter\s*\(/);
     expect(spawnEncounterBody).not.toMatch(/\brollInitiative\s*\(/);
     expect(spawnEncounterBody).not.toMatch(/\bacFromInventory\s*\(/);
+    // acFromInventory no longer exists, so the line above is vacuous on its
+    // own. The mechanic it forbade — the AI tool computing a player's armour
+    // class itself — moved to armorClassFor, which is what must stay out.
+    expect(spawnEncounterBody).not.toMatch(/\barmorClassFor\s*\(/);
     expect(spawnEncounterBody).not.toMatch(/\bacFromMonsterData\s*\(/);
     expect(spawnEncounterBody).not.toMatch(/\bbuildMonsterRawData\s*\(/);
     expect(spawnEncounterBody).not.toMatch(/\bxpForCR\s*\(/);

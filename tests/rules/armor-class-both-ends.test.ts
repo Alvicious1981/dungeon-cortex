@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 import { armorClassFor, type ArmorInventoryRow } from "@/lib/rules/armor-class";
+import type { EncounterInventoryItemRecord } from "@/lib/rules/encounter-service";
 
 /**
  * The armour class the sheet shows must equal the one combat resolves.
@@ -8,6 +9,17 @@ import { armorClassFor, type ArmorInventoryRow } from "@/lib/rules/armor-class";
  * They were computed in two places that disagreed twice over: which armour
  * counted, and what an absent addDexModifier meant. One decided what the player
  * was attacked against and the other decided what the player was shown.
+ *
+ * What this file is and is not. Since the unification, buildSheetViewModel does
+ * nothing but call armorClassFor, so the equality rows below compare that
+ * function to itself and cannot fail for any input. That is deliberate, not
+ * coverage: the rows exist to fail the day someone re-inlines an armour-class
+ * calculation into the view-model, which is exactly how the divergence arose the
+ * first time. They prove no number is correct.
+ *
+ * The numbers are carried by the pinned-direction tests at the bottom of this
+ * file and by tests/rules/armor-class.test.ts. Do not read a green run here as
+ * evidence that the arithmetic is right.
  */
 
 function sheetAC(stats: Record<string, number>, properties: Record<string, unknown>): number {
@@ -66,5 +78,21 @@ describe("the sheet's armour class equals the backend's", () => {
   it("pins the direction for a shield", () => {
     // 10 + 4 unarmoured, never 2 + 4.
     expect(sheetAC(DEXTEROUS, { baseAC: 2, armorClass: "shield" })).toBe(14);
+  });
+
+  it("pins the direction on the service end for a category-only row", () => {
+    // The other end needs a number of its own, and the category fallback is the
+    // path only the flag-declaring fixture covered. This builds the row through
+    // the encounter service's own record type and calls armorClassFor exactly as
+    // spawnEncounter does: medium armour, no declared flag, DEX +4 → 15 + 2.
+    const row: EncounterInventoryItemRecord = {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 15, armorClass: "medium" },
+    };
+    const result = armorClassFor({ inventory: [row], dexModifier: 4 });
+    expect(result.armorClass).toBe(17);
+    expect(result.category).toBe("medium");
+    expect(result.armored).toBe(true);
   });
 });

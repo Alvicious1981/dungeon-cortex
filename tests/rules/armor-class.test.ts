@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   armorClassFor,
@@ -153,6 +154,22 @@ describe("armorClassFor — what does not count", () => {
     expect(armorClassFor({ inventory, dexModifier: 3 }).armorClass).toBe(13);
   });
 
+  it("refuses a row whose base is worse than wearing nothing", () => {
+    // An accessory stored as `type: "armor"` with a bonus in `baseAC`. The
+    // shield skip cannot catch it, because it declares no category at all.
+    const inventory = [equipped({ baseAC: 1, addDexModifier: false })];
+    const result = armorClassFor({ inventory, dexModifier: 3 });
+    expect(result.armorClass).toBe(13);
+    expect(result.armored).toBe(false);
+  });
+
+  it("never lets a junk negative dex cap subtract from the base", () => {
+    const inventory = [
+      equipped({ baseAC: 14, armorClass: "medium", addDexModifier: true, maxDexBonus: -1 }),
+    ];
+    expect(armorClassFor({ inventory, dexModifier: 4 }).armorClass).toBe(14);
+  });
+
   it("skips a shield to find the body armour behind it", () => {
     const inventory = [
       equipped({ baseAC: 2, armorClass: "shield" }),
@@ -189,6 +206,67 @@ describe("armorClassFor — cases migrated from acFromInventory", () => {
     // A negative modifier is not subtracted either: addDexModifier false means
     // exactly zero Dexterity, not "apply it anyway".
     expect(armorClassFor({ inventory, dexModifier: -1 }).armorClass).toBe(18);
+  });
+});
+
+describe("the shipped loot corpus cannot lower anyone's armour class", () => {
+  // Bound to the real file, not a fixture. `data/loot-tables.json` is the other
+  // producer of `type: "armor"` rows — the spec surveyed `data/srd-es/equipment.json`
+  // and never looked here. Ten rows are typed "armor" and not one declares a
+  // category, so they are gauntlets, boots, cloaks and helms wearing armour's
+  // type. A hand-written fixture would repeat the omission somewhere new.
+  const lootTables = JSON.parse(readFileSync("data/loot-tables.json", "utf8")) as Record<
+    string,
+    unknown
+  >;
+
+  const armorRows = Object.entries(lootTables).flatMap(([table, rows]) =>
+    Array.isArray(rows)
+      ? rows
+          .filter(
+            (row): row is { name: string; type: string; properties?: unknown } =>
+              typeof row === "object" && row !== null && (row as { type?: unknown }).type === "armor",
+          )
+          .map((row) => ({ table, row }))
+      : [],
+  );
+
+  it("finds the armour rows it means to check", () => {
+    // If the file is ever restructured and this sweep silently matches nothing,
+    // the assertion below would pass vacuously.
+    expect(armorRows.length).toBeGreaterThan(0);
+  });
+
+  it.each([1, 3, -1])(
+    "keeps every row at or above the unarmoured value at DEX %i",
+    (dexModifier) => {
+      const unarmored = 10 + dexModifier;
+      for (const { table, row } of armorRows) {
+        const inventory: ArmorInventoryRow[] = [
+          { type: "armor", equippedSlot: "ARMOR", properties: row.properties ?? {} },
+        ];
+        const result = armorClassFor({ inventory, dexModifier });
+        expect(
+          result.armorClass,
+          `${table} / ${row.name} produced ${result.armorClass}, below the unarmoured ${unarmored}`,
+        ).toBeGreaterThanOrEqual(unarmored);
+      }
+    },
+  );
+
+  it("gives the Voidclasp Gauntlet no armour class of its own", () => {
+    // baseAC 1 with addDexModifier false: it reached the declared-flag branch
+    // ahead of every other guard and resolved to an armour class of 1.
+    const voidclasp = armorRows.find(({ row }) => row.name === "Voidclasp Gauntlet");
+    expect(voidclasp).toBeDefined();
+
+    const inventory: ArmorInventoryRow[] = [
+      { type: "armor", equippedSlot: "ARMOR", properties: voidclasp!.row.properties },
+    ];
+    const result = armorClassFor({ inventory, dexModifier: 3 });
+    expect(result.armorClass).toBe(13);
+    expect(result.armored).toBe(false);
+    expect(result.category).toBeNull();
   });
 });
 
