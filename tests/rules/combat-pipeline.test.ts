@@ -312,6 +312,70 @@ describe("executeCombatAction", () => {
 
       expect(tx.encounter.update).not.toHaveBeenCalled();
     });
+
+    // ── actorArmorPenalty wiring (Hop B: CombatActionPayload → computeConsequences) ──
+    //
+    // executeCombatAction does not surface `disadvantage` directly, so these
+    // tests observe its effect on which physical d20 the pipeline reports as
+    // `naturalRoll`. The random queue supplies a high value then a low value:
+    // under disadvantage two d20s are rolled and the lower is kept (the
+    // second, queued value); without it, only the first (high) roll is ever
+    // consumed. A wiring break between actorArmorPenalty and computeConsequences
+    // would make the penalised case report the high roll instead.
+
+    it("actorArmorPenalty: true forces the attack roll onto disadvantage", async () => {
+      const enemy = buildEnemy();
+      const tx = buildMockTx();
+      // d20 (Dis): 0.9 → 19, 0.05 → 2; lower (2) is kept, so the attack misses AC 10.
+      mockRandom([0.9, 0.05]);
+
+      const payload: CombatActionPayload = {
+        actionType: "attack",
+        encounter: buildEncounter([buildPlayer(), enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        actorArmorPenalty: true,
+        targetCombatants: [enemy],
+        weaponName: "Dagger",
+        weaponDice: "1d4",
+        damageType: "piercing",
+        attackModifier: 0,
+        flatDamageBonus: 0,
+        collectEvents: true,
+      };
+
+      const outcome = await executeCombatAction(payload, tx);
+
+      expect(outcome.consequences[0]?.naturalRoll).toBe(2);
+    });
+
+    it("without actorArmorPenalty, the attack roll is a single unpenalised d20", async () => {
+      const enemy = buildEnemy();
+      const tx = buildMockTx();
+      // Same queue as above, but with no disadvantage only the first roll (19) is consumed.
+      mockRandom([0.9, 0.05]);
+
+      const payload: CombatActionPayload = {
+        actionType: "attack",
+        encounter: buildEncounter([buildPlayer(), enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        // actorArmorPenalty intentionally absent — no armour penalty applies.
+        targetCombatants: [enemy],
+        weaponName: "Dagger",
+        weaponDice: "1d4",
+        damageType: "piercing",
+        attackModifier: 0,
+        flatDamageBonus: 0,
+        collectEvents: true,
+      };
+
+      const outcome = await executeCombatAction(payload, tx);
+
+      expect(outcome.consequences[0]?.naturalRoll).toBe(19);
+    });
   });
 
   // ── Resource drain — spell slots ─────────────────────────────────────────────

@@ -842,6 +842,74 @@ describe("computeConsequences", () => {
     expect(result.combat_facts.defender).toBe("NPC:Orc");
   });
 
+  // ─── attackerArmorPenalty wiring (Hop A: ConsequenceInput → resolveAttackRoll) ──
+  //
+  // computeConsequences does not surface `disadvantage` on its return value,
+  // so these tests observe the effect the flag has on which physical d20 is
+  // kept. Math.random is queued with a high value then a low value: with
+  // disadvantage in play, resolveAttackRoll rolls twice and keeps the lower
+  // (the second, low value); without it, only the first (high) roll is ever
+  // consumed. A wiring break — the field silently failing to reach
+  // resolveAttackRoll — would make the penalised case report the high roll.
+
+  it("attackerArmorPenalty: true forces the attack roll onto disadvantage", () => {
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0.9)  // first d20 → 19
+      .mockReturnValueOnce(0.05); // second d20 → 2
+    const result = computeConsequences({
+      attacker:          "PC:Kara",
+      defender:          "NPC:Orc",
+      weapon:            "Axe",
+      weaponDice:        "1d6",
+      attackModifier:    3,
+      damageType:        "slashing",
+      targetAC:          14,
+      targetHp:          20,
+      targetMaxHp:       20,
+      targetIsPlayer:    false,
+      targetIsBoss:      false,
+      statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      attackerArmorPenalty: true,
+      isMelee:           true,
+      encounterSnapshot: makeSnapshot(),
+      usedSenses:        [],
+      zones:             [],
+    });
+    // Disadvantage keeps the lower of the two queued rolls.
+    expect(result.combat_facts.attack_roll).toBe(2);
+  });
+
+  it("without attackerArmorPenalty, the attack roll is a single unpenalised d20", () => {
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0.9)  // first d20 → 19
+      .mockReturnValueOnce(0.05); // would-be second d20 → 2 (never consumed)
+    const result = computeConsequences({
+      attacker:          "PC:Kara",
+      defender:          "NPC:Orc",
+      weapon:            "Axe",
+      weaponDice:        "1d6",
+      attackModifier:    3,
+      damageType:        "slashing",
+      targetAC:          14,
+      targetHp:          20,
+      targetMaxHp:       20,
+      targetIsPlayer:    false,
+      targetIsBoss:      false,
+      statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      // attackerArmorPenalty intentionally absent — no armour penalty applies.
+      isMelee:           true,
+      encounterSnapshot: makeSnapshot(),
+      usedSenses:        [],
+      zones:             [],
+    });
+    // No disadvantage: only a single d20 is rolled and kept.
+    expect(result.combat_facts.attack_roll).toBe(19);
+  });
+
   it("on a miss, damage is 0 and hp is unchanged", () => {
     // Math.random → 0 means d20 = 1 (fumble — always miss)
     vi.spyOn(Math, "random").mockReturnValue(0);
