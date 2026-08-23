@@ -130,3 +130,68 @@ describe("penalisedByArmor", () => {
     expect(penalisedByArmor("Stealth")).toBe(true);
   });
 });
+
+describe("the penalty as the ability-check gate applies it", () => {
+  // The route ORs the penalty into the disadvantage the condition evaluator
+  // already produced. These pin the composition rule the route implements,
+  // without standing up the route.
+  function gateDisadvantage(input: {
+    conditionDisadvantage: boolean;
+    skill: Skill;
+    characterClass: string;
+    inventory: ArmorInventoryRow[];
+  }): boolean {
+    const penalty = armorPenaltyFor({
+      inventory: input.inventory,
+      characterClass: input.characterClass,
+    });
+    return (
+      input.conditionDisadvantage || (penalty.applies && penalisedByArmor(input.skill))
+    );
+  }
+
+  it("adds disadvantage to a Stealth check in unproficient armour", () => {
+    expect(
+      gateDisadvantage({
+        conditionDisadvantage: false,
+        skill: "Stealth",
+        characterClass: "wizard",
+        inventory: wearing("heavy"),
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves a Perception check alone in the same armour", () => {
+    expect(
+      gateDisadvantage({
+        conditionDisadvantage: false,
+        skill: "Perception",
+        characterClass: "wizard",
+        inventory: wearing("heavy"),
+      }),
+    ).toBe(false);
+  });
+
+  it("leaves a Stealth check alone when the wearer is proficient", () => {
+    expect(
+      gateDisadvantage({
+        conditionDisadvantage: false,
+        skill: "Stealth",
+        characterClass: "fighter",
+        inventory: wearing("heavy"),
+      }),
+    ).toBe(false);
+  });
+
+  it("does not stack with disadvantage that was already there", () => {
+    // One source is the same as three. The boolean is the point.
+    expect(
+      gateDisadvantage({
+        conditionDisadvantage: true,
+        skill: "Stealth",
+        characterClass: "wizard",
+        inventory: wearing("heavy"),
+      }),
+    ).toBe(true);
+  });
+});

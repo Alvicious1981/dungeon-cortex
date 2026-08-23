@@ -21,6 +21,7 @@ import {
   type DamageType,
 } from "@/lib/rules/combat";
 import { resolveWeaponAttack, unresolvedCategoryLog } from "@/lib/rules/weapon-attack";
+import { armorPenaltyFor, penalisedByArmor } from "@/lib/rules/armor-proficiency";
 import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
@@ -434,6 +435,18 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         charData.exhaustionLevel
       );
 
+      // SRD: armour you lack proficiency with gives disadvantage on any check
+      // that involves Strength or Dexterity — four of the eighteen skills. It is
+      // passed as a value rather than modelled as a condition: an unproficient
+      // wearer is not an SRD condition, and a CONDITION_REGISTRY entry would
+      // leak into everywhere conditions are listed and narrated.
+      const armorPenalty = armorPenaltyFor({
+        inventory: charData.inventory,
+        characterClass: charData.class,
+      });
+      const armorDisadvantage =
+        armorPenalty.applies && penalisedByArmor(intent.skill);
+
       // Who, if anyone, is resisting. The rules table is consulted again rather
       // than carried on the intent: which creature opposes a shove is a rules
       // question, and the AI layer's schema should not be the place it lives.
@@ -480,7 +493,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           skill: intent.skill,
           band: intent.band,
           advantage,
-          disadvantage,
+          disadvantage: disadvantage || armorDisadvantage,
           ...(opposedBy && opponents.length > 0
             ? { opposition: { opponents, skills: opposedBy.skills } }
             : {}),
