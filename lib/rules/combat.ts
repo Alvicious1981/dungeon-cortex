@@ -306,6 +306,8 @@ export interface ComputeConsequencesInput {
   statusApplied: string[];
   attackerConditions: string[];
   defenderConditions: string[];
+  /** SRD armour-proficiency penalty on the attacker. Defaults to no penalty. */
+  attackerArmorPenalty?: boolean;
   isMelee: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
@@ -652,6 +654,7 @@ export function computeConsequences(
     usedSenses, zones,
     attackerConditions,
     defenderConditions,
+    attackerArmorPenalty,
     isMelee,
   } = input;
 
@@ -661,7 +664,9 @@ export function computeConsequences(
     targetAC,
     attackerConditions,
     defenderConditions,
-    isMelee
+    isMelee,
+    undefined,
+    attackerArmorPenalty ?? false
   );
 
   // 2. Roll damage and hit location only on a hit.
@@ -856,7 +861,19 @@ export function resolveAttackRoll(
   defenderConditions: string[] = [],
   /** @deprecated — Use spatialContext instead. */
   isMelee: boolean = true,
-  spatialContext?: AttackSpatialContext
+  spatialContext?: AttackSpatialContext,
+  /**
+   * SRD: armour the attacker lacks proficiency with gives disadvantage on any
+   * attack involving Strength or Dexterity — which every weapon attack is.
+   *
+   * Passed as a value rather than modelled as a condition, because an
+   * unproficient wearer is not an SRD condition and a CONDITION_REGISTRY entry
+   * would leak into everywhere conditions are listed and narrated.
+   *
+   * It lands seventh because the sixth parameter, `spatialContext`, is supplied
+   * by no call site anywhere and is left undisturbed rather than removed.
+   */
+  armorPenalty: boolean = false
 ): AttackRollResult {
   if (spatialContext) {
     const distance = calculateDistance(
@@ -878,11 +895,16 @@ export function resolveAttackRoll(
     }
   }
 
-  const { advantage, disadvantage } = evaluateAdvantage(
+  const evaluated = evaluateAdvantage(
     attackerConditions,
     defenderConditions,
     isMelee
   );
+  const advantage = evaluated.advantage;
+  // Disadvantage does not stack in 5e — one source is the same as three — and
+  // it still cancels against advantage, so the penalty joins the pool rather
+  // than overriding it.
+  const disadvantage = evaluated.disadvantage || armorPenalty;
 
   const rollResult: RollResult = advantage
     ? rollWithAdvantage(20, attackModifier)

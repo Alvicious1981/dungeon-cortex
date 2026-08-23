@@ -72,6 +72,8 @@ export interface CombatActionPayload {
   actorId: string;
   actorName: string;
   actorConditions: string[];
+  /** SRD armour-proficiency penalty on the actor. Defaults to no penalty. */
+  actorArmorPenalty?: boolean;
   targetCombatants: PipelineCombatant[];
   
   // Weapon/Attack data
@@ -325,6 +327,7 @@ export async function executeCombatAction(
         statusApplied: [],
         attackerConditions: actorConditions,
         defenderConditions: extractConditions(target.conditions),
+        attackerArmorPenalty: payload.actorArmorPenalty ?? false,
         isMelee: true,
         encounterSnapshot: snapshot,
         usedSenses: [],

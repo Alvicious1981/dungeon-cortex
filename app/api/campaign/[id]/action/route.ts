@@ -278,6 +278,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorId: playerCombatant?.id ?? context.character.id,
           actorName: context.character.name,
           actorConditions: playerConditions,
+          actorArmorPenalty: armorPenaltyFor({
+            inventory: context.character.inventory,
+            characterClass: context.character.class,
+          }).applies,
           targetCombatants: targets,
           weaponName: foundWeapon?.name || "Unarmed",
           weaponDice: attack.weaponDice,
@@ -1011,6 +1015,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorId: playerCombatant?.id ?? context.character.id,
           actorName: context.character.name,
           actorConditions: playerConditions,
+          actorArmorPenalty: armorPenaltyFor({
+            inventory: context.character.inventory,
+            characterClass: context.character.class,
+          }).applies,
           targetCombatants: targets,
           weaponName: foundWeapon.name,
           weaponDice: attack.weaponDice,
