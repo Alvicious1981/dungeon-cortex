@@ -450,6 +450,45 @@ describe("el estado del personaje modula la tirada", () => {
   });
 });
 
+describe("una armadura sin competencia penaliza la prueba, no la habilidad entera", () => {
+  // Mira es maga: sin competencia en ninguna armadura. El inventario del
+  // fixture está vacío por defecto, así que aquí se equipa una armadura
+  // pesada a mano para forzar la penalización.
+  const HEAVY_ARMOR_UNPROFICIENT = [
+    {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    },
+  ];
+
+  it("una prueba de Destreza (Sigilo) sale con desventaja", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: HEAVY_ARMOR_UNPROFICIENT })
+    );
+
+    const { frames } = await post("I hide behind the crates");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.rollMode).toBe("disadvantage");
+  });
+
+  it("la misma armadura no toca una prueba que no es de Fuerza ni Destreza", async () => {
+    // Misma maga, misma armadura pesada sin competencia, pero Investigación es
+    // una prueba de Inteligencia: la SRD no la penaliza. Esta es la prueba que
+    // le da sentido a la anterior — junto demuestran que la puerta lee la
+    // habilidad de la prueba, no que aplique la penalización a todo.
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: HEAVY_ARMOR_UNPROFICIENT })
+    );
+
+    const { frames } = await post("I search the room");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.rollMode).toBe("normal");
+  });
+});
+
 describe("un conjuro sin nivel declarado se resuelve al nivel del propio conjuro", () => {
   it("gasta el espacio de nivel 3 al lanzar Fireball sin decir nivel", async () => {
     const { res, frames } = await post("I cast Fireball");
