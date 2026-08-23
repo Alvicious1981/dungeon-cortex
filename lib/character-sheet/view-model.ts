@@ -1,5 +1,6 @@
 import type { CharacterSheetProps, CharacterSpellSlot } from "@/components/character/CharacterSheetVTT";
 import { abilityModifier } from "@/lib/rules/dice";
+import { armorClassFor } from "@/lib/rules/armor-class";
 import type { ItemType } from "@/lib/rules/inventory";
 import {
   readWeaponProfile,
@@ -96,22 +97,10 @@ export function buildSheetViewModel({
   const proficiencyBonus = 2 + Math.floor((character.level - 1) / 4);
   const dexMod = abilityModifier(stats.DEX);
   const wisMod = abilityModifier(stats.WIS);
-  let armorClass = 10 + dexMod;
-  const equippedArmor = inventory.find(
-    (item) => item.type === "armor" && item.equippedSlot === "ARMOR"
-  );
-  if (equippedArmor) {
-    const armor = getObject(equippedArmor.properties);
-    if (typeof armor.baseAC === "number") {
-      armorClass = armor.baseAC;
-      if (armor.addDexModifier === true) {
-        const dexBonus = typeof armor.maxDexBonus === "number"
-          ? Math.min(dexMod, armor.maxDexBonus)
-          : dexMod;
-        armorClass += dexBonus;
-      }
-    }
-  }
+  // The same pure rule the encounter service resolves with. The sheet used to
+  // compute its own, agreeing with the backend on which armour counted but not
+  // on what an absent addDexModifier meant.
+  const armorClass = armorClassFor({ inventory, dexModifier: dexMod }).armorClass;
 
   return {
     identity: {
