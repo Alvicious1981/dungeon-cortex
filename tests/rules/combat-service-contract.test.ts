@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveCombatAttack } from "@/lib/rules/combat-service";
+import type { ArmorInventoryRow } from "@/lib/rules/armor-class";
 
 type CombatantFixture = {
   id: string;
@@ -51,6 +52,8 @@ function buildEnemy(overrides: Partial<CombatantFixture> = {}): CombatantFixture
 function createTx(options?: {
   campaignId?: string;
   characterId?: string | null;
+  /** The campaign character as the armour-penalty select reads it. */
+  character?: { class: string; inventory: ArmorInventoryRow[] } | null;
   encounter?: null | {
     id: string;
     campaignId: string;
@@ -105,7 +108,12 @@ function createTx(options?: {
     },
     campaign: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
-        where.id === campaignId ? { characterId: options?.characterId ?? "character-1" } : null
+        where.id === campaignId
+          ? {
+              characterId: options?.characterId ?? "character-1",
+              character: options?.character ?? null,
+            }
+          : null
       ),
     },
     combatant: {
@@ -202,7 +210,12 @@ describe("resolveCombatAttack combat service contract", () => {
     expect(tx.encounter.update).not.toHaveBeenCalled();
   });
 
-  it("loads campaign.characterId for player-scoped pipeline effects", async () => {
+  it("loads campaign.characterId and the wearer's armour on one read", async () => {
+    // The select grew: `actorArmorPenalty` needs the player's class and
+    // inventory, and this is the read that already fetches the campaign's
+    // character, so the penalty costs no extra query. The original assertion —
+    // that characterId is loaded — is unchanged; the two new keys are added to
+    // it rather than replacing it.
     const { tx } = createTx({ characterId: "character-1" });
     mockRandom([0.5, 0.5, 0.3]);
 
@@ -210,7 +223,10 @@ describe("resolveCombatAttack combat service contract", () => {
 
     expect(tx.campaign.findUnique).toHaveBeenCalledWith({
       where: { id: "campaign-1" },
-      select: { characterId: true },
+      select: {
+        characterId: true,
+        character: { select: { class: true, inventory: true } },
+      },
     });
   });
 
@@ -238,4 +254,61 @@ describe("resolveCombatAttack combat service contract", () => {
     });
   });
 
+});
+
+/**
+ * `buildAttackPayload` is the second producer of `CombatActionPayload`, and
+ * `actorArmorPenalty` is optional with a `false` default at
+ * `combat-pipeline.ts:330`. Omitting it here would type-check, keep every other
+ * test green, and let every attack routed through `resolveCombatAttack` escape
+ * the penalty. These are the tests that would fail if it were dropped again.
+ */
+describe("resolveCombatAttack carries the armour penalty to the die", () => {
+  const HEAVY_ARMOR: ArmorInventoryRow[] = [
+    {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    },
+  ];
+
+  /** First d20 near-max, second near-min: normal crits, disadvantage fumbles. */
+  const HIGH_THEN_LOW = [0.99, 0, 0.5, 0.5, 0.5, 0.5];
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("rolls with disadvantage for a wizard in heavy armour", async () => {
+    const { tx } = createTx({
+      character: { class: "wizard", inventory: HEAVY_ARMOR },
+    });
+    mockRandom(HIGH_THEN_LOW);
+
+    const result = await resolveAttack(tx);
+
+    // The second, lower die is the one that counted.
+    expect(result.combat_facts.is_crit).toBe(false);
+    expect(result.combat_facts.is_fumble).toBe(true);
+  });
+
+  it("rolls normally for a fighter in the same armour", async () => {
+    const { tx } = createTx({
+      character: { class: "fighter", inventory: HEAVY_ARMOR },
+    });
+    mockRandom(HIGH_THEN_LOW);
+
+    const result = await resolveAttack(tx);
+
+    // Only one die was rolled, and it was the high one.
+    expect(result.combat_facts.is_crit).toBe(true);
+    expect(result.combat_facts.is_fumble).toBe(false);
+  });
+
+  it("rolls normally when the campaign has no character to read", async () => {
+    const { tx } = createTx();
+    mockRandom(HIGH_THEN_LOW);
+
+    const result = await resolveAttack(tx);
+
+    expect(result.combat_facts.is_crit).toBe(true);
+  });
 });

@@ -901,9 +901,18 @@ export function resolveAttackRoll(
     isMelee
   );
   const advantage = evaluated.advantage;
-  // Disadvantage does not stack in 5e — one source is the same as three — and
-  // it still cancels against advantage, so the penalty joins the pool rather
-  // than overriding it.
+  // Disadvantage does not stack in 5e — one source is the same as three — so
+  // the armour penalty joins the pool with an `||` rather than overriding it.
+  //
+  // What it does NOT do here: cancel against advantage. The selection below
+  // picks advantage outright whenever both are present, so an advantaged
+  // attacker in armour they cannot use still rolls with advantage. That
+  // diverges from `resolveAbilityCheck` (lib/rules/ability-check.ts:269),
+  // which does cancel the two into a normal roll. The divergence is pre-existing and deliberately out of
+  // scope for this increment — see the plan's "A rule this codebase does not
+  // implement" note — and it is pinned by
+  // `tests/rules/armor-penalty-wiring.test.ts` so a later change to it is
+  // deliberate rather than accidental.
   const disadvantage = evaluated.disadvantage || armorPenalty;
 
   const rollResult: RollResult = advantage

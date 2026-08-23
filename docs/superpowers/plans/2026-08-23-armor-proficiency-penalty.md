@@ -44,6 +44,8 @@ The three paths take disadvantage in three different shapes. This is not an inco
 | Attack rolls | `resolveAttackRoll` calls `evaluateAdvantage(attackerConditions, defenderConditions, isMelee)` internally (`combat.ts:852-882`) | Thread an explicit flag through the payload chain |
 | Spellcasting | no gate exists | Refuse before any resolution work, and log it |
 
+**One equip action switches the whole rule off, and that is out of scope too.** The equip gate (`app/api/campaign/[id]/action/route.ts:939-941`) sends every `type: "armor"` row to the single `ARMOR` slot, evicting whatever was there. `data/loot-tables.json` ships several `type: "armor"` rows with no `baseAC` — "Ashwalker Boots", "Shadowstep Slippers", "Cloak of Diminished Silhouette", "Ironwood Shield Fragment" — and equipping any of them evicts the body armour: `selectBodyArmor` then returns null, the penalty vanishes and casting is restored, while the fiction still has the character in chain mail. A real shield does the same, because `lib/rules/inventory.ts` gives the SRD "Shield" `type: "armor"` with `armorClass: "shield"`, so it equips into `ARMOR` and is then skipped by `selectBodyArmor`. The root cause is one `ARMOR` slot for every armour-typed row, which is pre-existing and not this PR's to fix — the fix is a slot model (body / shield / accessory), and it would ripple through equip, the sheet and AC. Recorded here so PR 3 inherits it as a known item.
+
 **Saving throws are out of scope, with a reason.** The spec's SRD quote covers them, but this codebase resolves saves inside `resolveSavingThrow` on paths driven by spell effects rather than by the character's own equipment, and no call site currently has the wearer's inventory in hand. Wiring it would be a fourth thread of the same kind for a case no test or live flow exercises. Recorded here so PR 3 has it, rather than left for a reviewer to discover as a gap.
 
 ## The attack chain, and the awkwardness it forces
@@ -1162,7 +1164,7 @@ Report files created and modified, commands run with their results, the test cou
 
 ## Notes for the reviewer
 
-- **Every Strength and Dexterity roll of an unproficient wearer changes here.** That is the point. Nothing changes today for the live save: the character owns no armour at all, so `selectBodyArmor` returns null and the penalty never applies.
+- **Every Strength and Dexterity ability check and attack roll of an unproficient wearer changes here** — not every STR/DEX roll: saving throws are not wired, see below. Nothing changes today for the live save either way: the character owns no armour at all, so `selectBodyArmor` returns null and the penalty never applies.
 - **The barbarian case is the one a real save can reach.** Barbarians have light, medium and shield — not heavy. The live character is a barbarian, so heavy armour is one loot drop away from being live.
 - **Saving throws are deliberately out of scope**, with the reason stated in the plan's own "Where the penalty attaches" section: no save call site currently has the wearer's inventory in hand, and no flow exercises it. It is PR 3's first item.
 - **`resolveAttackRoll` now takes seven positional parameters**, the sixth of which (`spatialContext`) is still supplied by nobody. That is recorded as ugly rather than fixed, because removing it would delete real logic and ripple to six test call sites. Its cleanup is its own increment.

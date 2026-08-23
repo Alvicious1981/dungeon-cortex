@@ -7,6 +7,8 @@ import {
   type EncounterSnapshot,
   type ResolveAttackInput,
 } from "@/lib/rules/combat";
+import { armorPenaltyFor } from "@/lib/rules/armor-proficiency";
+import type { ArmorInventoryRow } from "@/lib/rules/armor-class";
 import {
   executeCombatAction,
   type CombatActionPayload,
@@ -42,6 +44,15 @@ interface CombatEncounterRecord {
 
 interface CombatCampaignRecord {
   characterId?: string | null;
+  /**
+   * The campaign's player character, read for the armour-proficiency penalty.
+   * Optional because the same select is served by test doubles that predate it;
+   * an absent character yields no penalty rather than a thrown read.
+   */
+  character?: {
+    class: string;
+    inventory: ArmorInventoryRow[];
+  } | null;
 }
 
 interface CombatDb {
@@ -54,7 +65,7 @@ interface CombatDb {
   campaign: {
     findUnique(args: {
       where: { id: string };
-      select: { characterId: boolean };
+      select: Record<string, unknown>;
     }): Promise<CombatCampaignRecord | null>;
   };
 }
@@ -120,8 +131,10 @@ function buildAttackPayload(input: {
   defender: PipelineCombatant;
   status: PipelineEncounterState["status"];
   playerCharacterId?: string;
+  campaign: CombatCampaignRecord | null;
 }): CombatActionPayload {
-  const { request, encounter, attacker, defender, status, playerCharacterId } = input;
+  const { request, encounter, attacker, defender, status, playerCharacterId, campaign } =
+    input;
 
   return {
     actionType: "attack",
@@ -136,6 +149,17 @@ function buildAttackPayload(input: {
     attackModifier: request.attackModifier,
     flatDamageBonus: 0,
     playerCharacterId,
+    // The second producer of this payload. `actorArmorPenalty` is optional and
+    // defaults to false downstream, so omitting it here would have let every
+    // attack routed through `resolveCombatAttack` escape the penalty silently
+    // — types checking, tests green. It is only ever the player's own armour:
+    // enemy combatants carry no inventory to read.
+    actorArmorPenalty: attacker.isPlayer
+      ? armorPenaltyFor({
+          inventory: campaign?.character?.inventory ?? [],
+          characterClass: campaign?.character?.class ?? "",
+        }).applies
+      : false,
     collectEvents: false,
   };
 }
@@ -171,7 +195,12 @@ export async function resolveCombatAttack(
 
   const campaign = await db.campaign.findUnique({
     where: { id: input.campaignId },
-    select: { characterId: true },
+    select: {
+      characterId: true,
+      // Inventory and class come along on the read that was already happening,
+      // so the armour penalty costs no extra query.
+      character: { select: { class: true, inventory: true } },
+    },
   });
 
   const status = toEncounterStatus(encounter.status);
@@ -184,6 +213,7 @@ export async function resolveCombatAttack(
       defender,
       status,
       playerCharacterId: campaign?.characterId ?? undefined,
+      campaign,
     }),
     db as unknown as Prisma.TransactionClient
   );

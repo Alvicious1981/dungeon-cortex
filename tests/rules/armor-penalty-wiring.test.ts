@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 import { resolveAttackRoll } from "@/lib/rules/combat";
 
 /**
- * The penalty has to survive four layers to reach the die. Each layer is a
- * place it can be dropped silently — the value would simply be `undefined`, the
- * types would still check, and every existing test would still pass.
+ * The last of the four layers the penalty crosses to reach the die.
+ *
+ * Every test here calls `resolveAttackRoll` directly, so this file covers only
+ * that final hop: the flag arrives as a parameter and has to change the roll
+ * mode. The earlier hops — payload into `computeConsequences`, and
+ * `computeConsequences` into `resolveAttackRoll` — are covered in
+ * `tests/rules/combat.test.ts` and `tests/rules/combat-pipeline.test.ts`.
+ * Each hop is a place the value can be dropped silently: it would simply be
+ * `undefined`, the types would still check, and every existing test would still
+ * pass. That is why all three files exist rather than one.
  *
  * These assert on `AttackRollResult`'s own reported roll mode rather than on a
  * spy. `resolveAttackRoll` returns `advantage` and `disadvantage` as part of its

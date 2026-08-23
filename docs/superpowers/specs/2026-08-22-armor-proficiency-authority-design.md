@@ -129,9 +129,16 @@ consume it; a guard binds the sheet to the die. **No proficiency logic, and no
 roll changes beyond correcting the two divergences named above.**
 
 **PR 2 — the proficiency penalty.** `isArmorProficient` gains its consumer, and
-an unproficient wearer takes disadvantage on STR/DEX attack rolls, ability checks
-and saving throws, and cannot cast spells. **Every STR/DEX roll of an unproficient
-character changes here.**
+an unproficient wearer takes disadvantage on STR/DEX attack rolls and ability
+checks, and cannot cast spells.
+
+**Saving throws are deferred out of PR 2.** As delivered, `resolveSavingThrow` is
+untouched: no save call site has the wearer's inventory in hand, and no flow in
+the application exercises a STR or DEX save for a player character, so the
+penalty has nowhere to arrive. Wiring it means giving the save path the wearer's
+inventory first, which is its own change. It is a PR 3 item — this paragraph
+amends the sentence above rather than leaving the spec claiming a scope the
+branch does not deliver.
 
 ## Architecture
 

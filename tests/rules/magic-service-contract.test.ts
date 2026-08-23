@@ -11,6 +11,9 @@ type CharacterFixture = {
   id: string;
   campaignId: string;
   spellSlots: SpellSlotsFixture | null;
+  /** Read by the armour-proficiency refusal; absent on the base fixtures. */
+  class?: string;
+  inventory?: unknown[];
   inventoryVersion: number;
   combatVersion: number;
   questVersion: number;
@@ -646,5 +649,88 @@ describe("castSpell magic service contract", () => {
     expect(JSON.stringify(result)).not.toMatch(
       /AD&D|OSR|THAC0|descending AC|AC descendente|saving throw vs|save vs death|save vs wands|gold for XP|XP por oro/i
     );
+  });
+});
+
+/**
+ * SRD 2014: armour you lack proficiency with does not penalise casting, it
+ * forbids it. The refusal lives in the service rather than in
+ * `app/api/campaign/[id]/magic/cast/route.ts` so that every caller of
+ * `castSpell` inherits it; the route-level proof is in
+ * `tests/api/magic-cast-route.test.ts`.
+ */
+describe("castSpell refuses to cast in armour the caster cannot use", () => {
+  const HEAVY_ARMOR = [
+    {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    },
+  ];
+
+  const LIGHT_ARMOR = [
+    {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 11, armorClass: "light", addDexModifier: true },
+    },
+  ];
+
+  function characterWearing(armor: unknown[], characterClass: string): CharacterFixture[] {
+    return [{ ...baseCharacters[0], class: characterClass, inventory: armor }];
+  }
+
+  it("refuses a levelled spell and spends no slot", async () => {
+    const { tx, characters } = createTx({
+      characters: characterWearing(HEAVY_ARMOR, "wizard"),
+    });
+
+    await expect(
+      cast({
+        campaignId: "campaign-1",
+        characterId: "character-1",
+        spellId: "magic-missile",
+        spellLevel: 1,
+        slotLevel: 1,
+        tx,
+      })
+    ).rejects.toMatchObject({ code: "ARMOR_PROFICIENCY_REQUIRED" });
+
+    expect(tx.character.update).not.toHaveBeenCalled();
+    expect(characters[0].spellSlots?.["1"].current).toBe(2);
+    expectNoCrossDomainWrites(tx);
+  });
+
+  it("refuses a cantrip too — the rule says spells, not levelled spells", async () => {
+    // The level-0 path returns early without touching a slot, so the refusal
+    // has to come before it. This is the case that proves it does.
+    const { tx } = createTx({ characters: characterWearing(HEAVY_ARMOR, "wizard") });
+
+    await expect(
+      cast({
+        campaignId: "campaign-1",
+        characterId: "character-1",
+        spellId: "fire-bolt",
+        spellLevel: 0,
+        tx,
+      })
+    ).rejects.toMatchObject({ code: "ARMOR_PROFICIENCY_REQUIRED" });
+  });
+
+  it("lets a proficient wearer cast — the gate reads the class, not the armour alone", async () => {
+    const { tx, characters } = createTx({
+      characters: characterWearing(LIGHT_ARMOR, "cleric"),
+    });
+
+    await cast({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      spellId: "magic-missile",
+      spellLevel: 1,
+      slotLevel: 1,
+      tx,
+    });
+
+    expect(characters[0].spellSlots?.["1"].current).toBe(1);
   });
 });

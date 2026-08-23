@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { armorPenaltyFor } from "@/lib/rules/armor-proficiency";
+import type { ArmorInventoryRow } from "@/lib/rules/armor-class";
 import {
   consumeSlot,
   hasAvailableSlot,
@@ -16,7 +18,8 @@ export type MagicServiceErrorCode =
   | "INVALID_SLOT_LEVEL"
   | "SLOT_LEVEL_TOO_LOW"
   | "NO_SPELL_SLOT_AVAILABLE"
-  | "INVALID_SPELL_SLOTS";
+  | "INVALID_SPELL_SLOTS"
+  | "ARMOR_PROFICIENCY_REQUIRED";
 
 export class MagicServiceError extends Error {
   constructor(
@@ -37,6 +40,12 @@ interface MagicCharacterRecord {
   id: string;
   campaignId?: string;
   spellSlots: unknown;
+  /**
+   * Read for the armour-proficiency refusal. Optional because test doubles
+   * predate the select; absent data yields no armour and so no refusal.
+   */
+  class?: string | null;
+  inventory?: ArmorInventoryRow[] | null;
 }
 
 interface MagicSpellRecord {
@@ -184,7 +193,14 @@ async function resolveCharacter(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
-    select: { id: true, campaignId: true, spellSlots: true },
+    select: {
+      id: true,
+      campaignId: true,
+      spellSlots: true,
+      // On the read that was already happening: no extra query buys the gate.
+      class: true,
+      inventory: true,
+    },
   });
 
   if (!character) {
@@ -205,6 +221,32 @@ async function resolveCharacter(
   }
 
   return character;
+}
+
+/**
+ * SRD 2014: armour you lack proficiency with means you cannot cast at all.
+ *
+ * This is a refusal, not a penalty, and it lives here rather than in the route
+ * because `app/api/campaign/[id]/magic/cast/route.ts` is not the only caller
+ * that could ever reach `castSpell`. It runs before any slot is read or spent,
+ * so a refused cast costs the character nothing. Cantrips are refused too: the
+ * rule says spells, not levelled spells.
+ *
+ * The action route enforces the same rule at its own `cast_spell` gate, which
+ * refuses before it reaches this service at all.
+ */
+function assertArmorPermitsCasting(character: MagicCharacterRecord): void {
+  const penalty = armorPenaltyFor({
+    inventory: character.inventory ?? [],
+    characterClass: character.class ?? "",
+  });
+
+  if (penalty.applies) {
+    throw new MagicServiceError(
+      "ARMOR_PROFICIENCY_REQUIRED",
+      `Cannot cast while wearing ${penalty.category} armour without proficiency.`
+    );
+  }
 }
 
 async function assertSpellIfProvided(
@@ -264,6 +306,7 @@ async function castSpellInTransaction(
 
   const campaign = await resolveCampaign(db, input);
   const character = await resolveCharacter(db, input, campaign);
+  assertArmorPermitsCasting(character);
   await assertSpellIfProvided(db, input);
 
   if (input.spellLevel === 0) {

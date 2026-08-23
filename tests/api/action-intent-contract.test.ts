@@ -527,6 +527,28 @@ describe("una armadura sin competencia impide lanzar, no solo penaliza", () => {
 
     expect(res.status).not.toBe(400);
   });
+
+  it("un clérigo con armadura ligera —que sí sabe usar— lanza igual", async () => {
+    // Sin este caso, una puerta escrita como "lleva armadura ⇒ rechazo" pasaría
+    // los dos tests anteriores: uno lleva armadura, el otro no lleva ninguna.
+    // Este es el único que obliga a la puerta a leer la clase.
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({
+        class: "cleric",
+        inventory: [
+          {
+            type: "armor",
+            equippedSlot: "ARMOR",
+            properties: { baseAC: 11, armorClass: "light", addDexModifier: true },
+          },
+        ],
+      })
+    );
+
+    const { res } = await post("I cast Fireball");
+
+    expect(res.status).not.toBe(400);
+  });
 });
 
 describe("un conjuro sin nivel declarado se resuelve al nivel del propio conjuro", () => {
