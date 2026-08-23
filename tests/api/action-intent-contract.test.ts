@@ -489,6 +489,46 @@ describe("una armadura sin competencia penaliza la prueba, no la habilidad enter
   });
 });
 
+describe("una armadura sin competencia impide lanzar, no solo penaliza", () => {
+  // SRD: no es desventaja, es que no se puede lanzar en absoluto. El rechazo
+  // llega antes de cualquier resolución, así que no se gasta espacio ni se
+  // tira nada.
+  const HEAVY_ARMOR_UNPROFICIENT = [
+    {
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    },
+  ];
+
+  it("rechaza el conjuro de una maga con armadura que no sabe usar", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: HEAVY_ARMOR_UNPROFICIENT })
+    );
+
+    const { res } = await post("I cast Fireball");
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/armour|armor/i);
+
+    // Rechazo declarado, no silencioso.
+    expect(systemLogs().some((line) => /armou?r/i.test(line))).toBe(true);
+
+    // Nada se gastó ni se tiró: el rechazo llegó antes de cualquier resolución.
+    expect(prisma.character.update).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("la misma maga lanza en cuanto se quita la armadura", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextFor({ inventory: [] }));
+
+    const { res } = await post("I cast Fireball");
+
+    expect(res.status).not.toBe(400);
+  });
+});
+
 describe("un conjuro sin nivel declarado se resuelve al nivel del propio conjuro", () => {
   it("gasta el espacio de nivel 3 al lanzar Fireball sin decir nivel", async () => {
     const { res, frames } = await post("I cast Fireball");

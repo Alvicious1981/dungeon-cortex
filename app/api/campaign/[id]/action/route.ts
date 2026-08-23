@@ -559,6 +559,36 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
+      // SRD: armour you lack proficiency with stops you casting altogether — a
+      // refusal, not a penalty. It comes before any resolution so that a refused
+      // cast spends no slot, rolls nothing, and never reaches the narrator.
+      const castArmorPenalty = armorPenaltyFor({
+        inventory: context.character.inventory,
+        characterClass: context.character.class,
+      });
+      if (castArmorPenalty.applies) {
+        // Declared rather than silent, the way an unenforceable spell range and
+        // an unresolved weapon category already are.
+        await prisma.gameLog.create({
+          data: {
+            campaignId,
+            role: "system",
+            content:
+              `⚠️ Casting refused: ${context.character.name} is wearing ` +
+              `${castArmorPenalty.category} armour without proficiency, and the ` +
+              `SRD forbids casting in armour you cannot use.`,
+          },
+        });
+        return NextResponse.json(
+          {
+            error:
+              `You cannot cast while wearing ${castArmorPenalty.category} armour ` +
+              `you are not proficient with.`,
+          },
+          { status: 400 }
+        );
+      }
+
       // Resolution comes first, because the SRD record is what decides the cost.
       // A player who names no level — "I cast Fireball", the ordinary case — is
       // casting at the spell's own level, not casting for free. This gate used
