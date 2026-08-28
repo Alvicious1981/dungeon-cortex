@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   armorPenaltyFor,
+  describeArmorPenalty,
   penalisedByArmor,
 } from "@/lib/rules/armor-proficiency";
 import { SKILL_ABILITY, type Skill } from "@/lib/rules/ability-check";
@@ -229,5 +230,93 @@ describe("armour proficiency never changes armour class", () => {
 
     expect(wizard.armorClass).toBe(fighter.armorClass);
     expect(wizard.armorClass).toBe(16);
+  });
+});
+
+// ─── the shield ──────────────────────────────────────────────────────────────
+
+const SHIELD_ROW: ArmorInventoryRow = {
+  type: "armor",
+  equippedSlot: "OFF_HAND",
+  properties: { baseAC: 2, armorClass: "shield", addDexModifier: false, maxDexBonus: null },
+};
+
+describe("armorPenaltyFor — the shield", () => {
+  it("penalises a wizard holding a shield", () => {
+    // Wizards have no shield proficiency (ARMOR_PROF). Before the additive
+    // term the shield granted nothing, so asking cost nothing either; now it
+    // grants +2 and the SRD charges for it.
+    expect(armorPenaltyFor({ inventory: [SHIELD_ROW], characterClass: "wizard" })).toEqual({
+      applies: true,
+      category: "shield",
+    });
+  });
+
+  it("does not penalise a fighter holding the same shield", () => {
+    expect(armorPenaltyFor({ inventory: [SHIELD_ROW], characterClass: "fighter" })).toEqual({
+      applies: false,
+      category: "shield",
+    });
+  });
+
+  it("ignores a shield that is only carried", () => {
+    expect(
+      armorPenaltyFor({
+        inventory: [{ ...SHIELD_ROW, equippedSlot: null }],
+        characterClass: "wizard",
+      }),
+    ).toEqual({ applies: false, category: null });
+  });
+
+  it("penalises for the body armour when both are worn and both are unknown", () => {
+    // Two offences, one penalty. The body armour is reported because it is the
+    // more specific answer: it is what the character is wearing, and it is what
+    // the caster-rejection message names.
+    expect(
+      armorPenaltyFor({
+        inventory: [...wearing("heavy"), SHIELD_ROW],
+        characterClass: "wizard",
+      }),
+    ).toEqual({ applies: true, category: "heavy" });
+  });
+
+  it("penalises for the shield when the armour is proficient but the shield is not", () => {
+    // A bard has light armour but no shield. The armour alone would pass.
+    expect(
+      armorPenaltyFor({
+        inventory: [...wearing("light", 11), SHIELD_ROW],
+        characterClass: "bard",
+      }),
+    ).toEqual({ applies: true, category: "shield" });
+  });
+
+  it("does not penalise a cleric wearing medium armour and a shield", () => {
+    expect(
+      armorPenaltyFor({
+        inventory: [...wearing("medium", 14), SHIELD_ROW],
+        characterClass: "cleric",
+      }),
+    ).toEqual({ applies: false, category: "medium" });
+  });
+});
+
+describe("describeArmorPenalty", () => {
+  it("names body armour by its category", () => {
+    for (const category of ["light", "medium", "heavy"] as const) {
+      expect(describeArmorPenalty({ applies: true, category })).toBe(`${category} armour`);
+    }
+  });
+
+  it("names a shield as a shield, because a shield is not worn", () => {
+    // Three refusal messages across two files interpolated the category into
+    // "wearing ${category} armour". With the shield now able to be the
+    // offender, every one of them would have said "wearing shield armour".
+    expect(describeArmorPenalty({ applies: true, category: "shield" })).toBe("a shield");
+  });
+
+  it("has something to say even when nothing offends", () => {
+    // Callers only reach this behind `applies`, but a phrase builder that can
+    // emit "null armour" is one refactor away from doing it in production.
+    expect(describeArmorPenalty({ applies: false, category: null })).toBe("armour");
   });
 });

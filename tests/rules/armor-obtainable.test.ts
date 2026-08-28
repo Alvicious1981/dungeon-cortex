@@ -61,12 +61,28 @@ describe("body armour is obtainable from the loot tables", () => {
   it("grants the SRD breastplate's armour class", () => {
     // Breastplate: base 14, medium, DEX capped at +2. A DEX modifier of +3 is
     // capped, which is what distinguishes medium from light: 14 + 2, not 14 + 3.
+    //
+    // Plus the row's own `ac_bonus: 2` — the runes of warding it has always
+    // declared and nothing read. This assertion said 16 while that field was
+    // inert; it says 18 now because the additive term consumes it, which makes
+    // the Cuirass what its rarity always implied: a +2 breastplate.
     expect(
       armorClassFor({
         inventory: [asInventoryRow("Tomb Warden's Cuirass", "ARMOR")],
         dexModifier: 3,
       }).armorClass,
-    ).toBe(16);
+    ).toBe(18);
+  });
+
+  it("grants the buckler its shield base and its enchantment together", () => {
+    // Ironwood Shield Fragment: SRD shield base 2, plus its own ac_bonus 1.
+    // Nothing wore off — an unarmoured character holding it is 10 + DEX + 3.
+    expect(
+      armorClassFor({
+        inventory: [asInventoryRow("Ironwood Shield Fragment", "OFF_HAND")],
+        dexModifier: 2,
+      }).armorClass,
+    ).toBe(15);
   });
 
   it("fires the proficiency penalty for a class without medium armour", () => {

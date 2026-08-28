@@ -1326,3 +1326,48 @@ describe("la puerta de equipar enruta por categoría, no por tipo", () => {
     );
   });
 });
+
+describe("el escudo cuesta competencia igual que la armadura", () => {
+  // Mira es maga: ARMOR_PROF no le da escudo. El escudo pasó a sumar +2 de CA
+  // en este incremento, así que la SRD lo cobra. Sin esta puerta, el término
+  // aditivo le habría regalado +2 a toda clase sin coste alguno.
+  const SHIELD_UNPROFICIENT = [
+    {
+      type: "armor",
+      equippedSlot: "OFF_HAND",
+      properties: { baseAC: 2, armorClass: "shield", addDexModifier: false, maxDexBonus: null },
+    },
+  ];
+
+  it("rechaza el conjuro de una maga que empuña un escudo", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: SHIELD_UNPROFICIENT })
+    );
+
+    const { res } = await post("I cast Fireball");
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+
+    // Nombrado como escudo, no como "shield armour": tres mensajes
+    // interpolaban la categoría dentro de "wearing ${category} armour".
+    expect(body.error).toMatch(/a shield/i);
+    expect(body.error).not.toMatch(/shield armour|shield armor/i);
+
+    expect(systemLogs().some((line) => /a shield/i.test(line))).toBe(true);
+
+    expect(prisma.character.update).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("una prueba de Sigilo de la misma maga sale con desventaja", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: SHIELD_UNPROFICIENT })
+    );
+
+    const { frames } = await post("I hide behind the crates");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.rollMode).toBe("disadvantage");
+  });
+});

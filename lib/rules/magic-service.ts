@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { armorPenaltyFor } from "@/lib/rules/armor-proficiency";
+import { armorPenaltyFor, describeArmorPenalty } from "@/lib/rules/armor-proficiency";
 import type { ArmorInventoryRow } from "@/lib/rules/armor-class";
 import {
   consumeSlot,
@@ -244,7 +244,7 @@ function assertArmorPermitsCasting(character: MagicCharacterRecord): void {
   if (penalty.applies) {
     throw new MagicServiceError(
       "ARMOR_PROFICIENCY_REQUIRED",
-      `Cannot cast while wearing ${penalty.category} armour without proficiency.`
+      `Cannot cast while using ${describeArmorPenalty(penalty)} without proficiency.`
     );
   }
 }

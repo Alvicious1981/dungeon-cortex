@@ -4,9 +4,11 @@ import {
   armorClassFor,
   readArmorProfile,
   selectBodyArmor,
+  selectShield,
   type ArmorInventoryRow,
 } from "@/lib/rules/armor-class";
 import type { EncounterInventoryItemRecord } from "@/lib/rules/encounter-service";
+import { slotFor } from "@/lib/rules/equipment-slot";
 
 function equipped(properties: Record<string, unknown>): ArmorInventoryRow {
   return { type: "armor", equippedSlot: "ARMOR", properties };
@@ -26,6 +28,7 @@ describe("readArmorProfile", () => {
       baseAC: 15,
       declaredAddsDex: true,
       declaredMaxDexBonus: 2,
+      bonusAC: null,
     });
   });
 
@@ -38,6 +41,7 @@ describe("readArmorProfile", () => {
       baseAC: 11,
       declaredAddsDex: null,
       declaredMaxDexBonus: null,
+      bonusAC: null,
     });
   });
 
@@ -333,5 +337,216 @@ describe("selectBodyArmor", () => {
     expect(selectBodyArmor(inventory)?.category).toBe(
       armorClassFor({ inventory, dexModifier: 3 }).category,
     );
+  });
+});
+
+// ─── additive terms: the shield's base and ac_bonus ──────────────────────────
+
+function inSlot(
+  slot: string,
+  properties: Record<string, unknown>,
+): ArmorInventoryRow {
+  return { type: "armor", equippedSlot: slot, properties };
+}
+
+const CUIRASS = { baseAC: 14, armorClass: "medium", addDexModifier: true, maxDexBonus: 2 };
+const SHIELD = { baseAC: 2, armorClass: "shield", addDexModifier: false, maxDexBonus: null };
+
+describe("readArmorProfile — ac_bonus", () => {
+  it("reads the bonus a row declares", () => {
+    expect(readArmorProfile({ ac_bonus: 2 }).bonusAC).toBe(2);
+  });
+
+  it("reports an absent bonus as null, not zero", () => {
+    // "The row does not say" and "the row says nothing is added" are the same
+    // arithmetic here, but not the same claim; the rest of this module has held
+    // that line since it was written and this field does not get to break it.
+    expect(readArmorProfile({}).bonusAC).toBeNull();
+    expect(readArmorProfile(null).bonusAC).toBeNull();
+  });
+
+  it("refuses a bonus that is not a finite number", () => {
+    for (const value of ["2", true, null, [], {}, NaN, Infinity]) {
+      expect(readArmorProfile({ ac_bonus: value }).bonusAC).toBeNull();
+    }
+  });
+});
+
+describe("selectShield", () => {
+  it("finds a shield equipped in the off hand", () => {
+    expect(selectShield([inSlot("OFF_HAND", SHIELD)])?.baseAC).toBe(2);
+  });
+
+  it("ignores a shield that is only carried", () => {
+    expect(selectShield([{ type: "armor", equippedSlot: null, properties: SHIELD }])).toBeNull();
+  });
+
+  it("ignores a shield equipped anywhere but the off hand", () => {
+    // Rows persisted before the slot rule shipped can still hold a shield in
+    // ARMOR. Those must not start granting the bonus retroactively.
+    expect(selectShield([inSlot("ARMOR", SHIELD)])).toBeNull();
+  });
+
+  it("never returns body armour", () => {
+    expect(selectShield([inSlot("OFF_HAND", CUIRASS)])).toBeNull();
+  });
+});
+
+describe("armorClassFor — additive terms", () => {
+  it("adds an equipped shield's base to the body armour", () => {
+    // Breastplate 14, DEX +3 capped at +2, shield 2.
+    expect(
+      armorClassFor({
+        inventory: [inSlot("ARMOR", CUIRASS), inSlot("OFF_HAND", SHIELD)],
+        dexModifier: 3,
+      }).armorClass,
+    ).toBe(18);
+  });
+
+  it("adds a shield to an unarmoured character", () => {
+    expect(
+      armorClassFor({ inventory: [inSlot("OFF_HAND", SHIELD)], dexModifier: 1 }).armorClass,
+    ).toBe(13);
+  });
+
+  it("sums ac_bonus across every equipped slot", () => {
+    // The real loot shapes: a +2 breastplate, a +1 buckler, a +1 helm.
+    expect(
+      armorClassFor({
+        inventory: [
+          inSlot("ARMOR", { ...CUIRASS, ac_bonus: 2 }),
+          inSlot("OFF_HAND", { ...SHIELD, ac_bonus: 1 }),
+          inSlot("ACCESSORY", { ac_bonus: 1 }),
+        ],
+        dexModifier: 3,
+      }).armorClass,
+    ).toBe(22);
+  });
+
+  it("ignores ac_bonus on a row that is not equipped", () => {
+    expect(
+      armorClassFor({
+        inventory: [
+          inSlot("ARMOR", CUIRASS),
+          { type: "armor", equippedSlot: null, properties: { ac_bonus: 5 } },
+        ],
+        dexModifier: 0,
+      }).armorClass,
+    ).toBe(14);
+  });
+
+  it("counts an accessory bonus for an otherwise unarmoured character", () => {
+    expect(
+      armorClassFor({ inventory: [inSlot("ACCESSORY", { ac_bonus: 1 })], dexModifier: 2 })
+        .armorClass,
+    ).toBe(13);
+  });
+
+  it("still reports armored false when only a bonus applies", () => {
+    // The flag means "body armour decided this number", and a helm did not.
+    const result = armorClassFor({
+      inventory: [inSlot("ACCESSORY", { ac_bonus: 1 })],
+      dexModifier: 0,
+    });
+    expect(result.armored).toBe(false);
+    expect(result.category).toBeNull();
+  });
+
+  it("is unchanged for a character wearing armour and nothing else", () => {
+    expect(
+      armorClassFor({ inventory: [inSlot("ARMOR", CUIRASS)], dexModifier: 3 }).armorClass,
+    ).toBe(16);
+  });
+});
+
+describe("a bonus is paid only where the slot rule would have put the row", () => {
+  it("pays nothing for a shield persisted into the armour slot", () => {
+    // The exact legacy shape: the pre-slot-rule route sent every armour-typed
+    // row to ARMOR, so an Ironwood Shield Fragment can be sitting there right
+    // now. Both selectors skip it — one for its category, one for its slot —
+    // and `armorPenaltyFor` therefore never charges proficiency for it. If the
+    // bonus term paid out anyway, the row would raise armour class while being
+    // invisible to the rule that is supposed to make it cost something.
+    expect(
+      armorClassFor({
+        inventory: [inSlot("ARMOR", { ...SHIELD, ac_bonus: 1 })],
+        dexModifier: 1,
+      }).armorClass,
+    ).toBe(11);
+  });
+
+  it("pays nothing for body armour hung in the off hand", () => {
+    expect(
+      armorClassFor({
+        inventory: [inSlot("OFF_HAND", { ...CUIRASS, ac_bonus: 2 })],
+        dexModifier: 1,
+      }).armorClass,
+    ).toBe(11);
+  });
+
+  it("pays nothing for a row in a slot the game does not have", () => {
+    // `equippedSlot` is an unconstrained String? in the schema.
+    for (const slot of ["BACKPACK", "armor", "main_hand", " "]) {
+      expect(
+        armorClassFor({ inventory: [inSlot(slot, { ac_bonus: 3 })], dexModifier: 0 })
+          .armorClass,
+      ).toBe(10);
+    }
+  });
+
+  it("pays nothing for a row that is not armour at all", () => {
+    expect(
+      armorClassFor({
+        inventory: [
+          { type: "misc", equippedSlot: "ACCESSORY", properties: { ac_bonus: 3 } },
+          { type: "weapon", equippedSlot: "MAIN_HAND", properties: { ac_bonus: 3 } },
+        ],
+        dexModifier: 0,
+      }).armorClass,
+    ).toBe(10);
+  });
+
+  it("refuses a fractional bonus, which no armour class can be", () => {
+    expect(
+      armorClassFor({ inventory: [inSlot("ACCESSORY", { ac_bonus: 1.5 })], dexModifier: 0 })
+        .armorClass,
+    ).toBe(10);
+  });
+
+  it("honours a negative bonus, because a cursed item is a real thing", () => {
+    expect(
+      armorClassFor({ inventory: [inSlot("ACCESSORY", { ac_bonus: -1 })], dexModifier: 0 })
+        .armorClass,
+    ).toBe(9);
+  });
+
+  it("agrees with slotFor about where every shape belongs", () => {
+    // `bonusACFrom` mirrors `slotFor`'s armour branch rather than calling it:
+    // `equipment-slot.ts` imports `readArmorProfile` from this module, so the
+    // call would close a runtime import cycle. A mirror that nothing pins is a
+    // mirror that drifts, so this pins it. The test file can import both.
+    const shapes: Array<Record<string, unknown>> = [
+      { ...CUIRASS, ac_bonus: 2 },
+      { ...SHIELD, ac_bonus: 1 },
+      { ac_bonus: 1 },
+      { baseAC: 11, armorClass: "light", ac_bonus: 1 },
+      { armorClass: "heavy", ac_bonus: 1 },
+      { ac_bonus: 1, armorClass: "nonsense" },
+    ];
+
+    for (const properties of shapes) {
+      const belongs = slotFor({ type: "armor", properties }).slot;
+
+      for (const slot of ["ARMOR", "OFF_HAND", "ACCESSORY", "MAIN_HAND"]) {
+        const paid =
+          armorClassFor({ inventory: [inSlot(slot, properties)], dexModifier: 0 })
+            .armorClass -
+          armorClassFor({ inventory: [inSlot(slot, { ...properties, ac_bonus: 0 })], dexModifier: 0 })
+            .armorClass;
+
+        // The bonus is paid in exactly the slot the rule would have chosen.
+        expect(paid === 0).toBe(slot !== belongs);
+      }
+    }
   });
 });

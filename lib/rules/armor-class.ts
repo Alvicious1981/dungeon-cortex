@@ -44,6 +44,13 @@ export interface ArmorProfile {
   declaredAddsDex: boolean | null;
   /** The row's own cap, or null when the row does not say. */
   declaredMaxDexBonus: number | null;
+  /**
+   * An additive bonus the row grants while equipped, or null when it declares
+   * none. Read from `ac_bonus` — snake_case, unlike its four neighbours,
+   * because that is the key the loot data has always used and renaming it
+   * would orphan every persisted row that carries one.
+   */
+  bonusAC: number | null;
 }
 
 export interface ArmorClassResult {
@@ -92,7 +99,80 @@ export function readArmorProfile(properties: unknown): ArmorProfile {
     declaredAddsDex:
       typeof root?.addDexModifier === "boolean" ? root.addDexModifier : null,
     declaredMaxDexBonus: num(root?.maxDexBonus),
+    bonusAC: num(root?.ac_bonus),
   };
+}
+
+/**
+ * The shield the character is holding, if any.
+ *
+ * Deliberately a second selector rather than a flag on `selectBodyArmor`: the
+ * two answer different questions about different slots, and a shield is not
+ * armour that happens to be excluded — under the SRD it is an additive 2, which
+ * is why `selectBodyArmor` skips the category outright and why a row with a
+ * base below the unarmoured 10 is rejected there but expected here.
+ *
+ * The off-hand requirement is what makes this safe on old data. Rows persisted
+ * before the slot rule shipped can still hold a shield in ARMOR; those must not
+ * start granting a bonus retroactively, and they do not.
+ */
+export function selectShield(
+  inventory: readonly ArmorInventoryRow[],
+): ArmorProfile | null {
+  for (const row of inventory) {
+    if (row.type !== "armor" || row.equippedSlot !== "OFF_HAND") continue;
+
+    const profile = readArmorProfile(row.properties);
+    if (profile.category !== "shield") continue;
+    if (profile.baseAC === null) continue;
+
+    return profile;
+  }
+
+  return null;
+}
+
+/**
+ * Every additive bonus the character's equipped rows grant, summed.
+ *
+ * A row pays only from the slot the slot rule would have chosen for it. Being
+ * equipped is not enough, and an earlier draft of this function believed it
+ * was: `equippedSlot` is an unconstrained string, and the route that predates
+ * `lib/rules/equipment-slot.ts` sent every armour-typed row to ARMOR. So a
+ * shield can be sitting in ARMOR right now, where `selectBodyArmor` skips it
+ * for its category and `selectShield` skips it for its slot — which means
+ * `armorPenaltyFor` never charges proficiency for it. Paying its bonus anyway
+ * would have raised armour class from a row invisible to the rule that is
+ * supposed to make it cost something.
+ *
+ * The placement test mirrors `slotFor` rather than calling it, because
+ * `equipment-slot.ts` imports `readArmorProfile` from this module and the call
+ * would close a runtime import cycle. A mirror nothing pins is a mirror that
+ * drifts, so `tests/rules/armor-class.test.ts` asserts the two agree across
+ * every shape — that test is the only thing keeping this honest.
+ */
+function bonusACFrom(inventory: readonly ArmorInventoryRow[]): number {
+  let total = 0;
+
+  for (const row of inventory) {
+    if (row.type !== "armor") continue;
+
+    const { category, bonusAC } = readArmorProfile(row.properties);
+    if (bonusAC === null || !Number.isInteger(bonusAC)) continue;
+
+    const belongs =
+      category === null
+        ? "ACCESSORY"
+        : category === "shield"
+          ? "OFF_HAND"
+          : "ARMOR";
+
+    if (row.equippedSlot !== belongs) continue;
+
+    total += bonusAC;
+  }
+
+  return total;
 }
 
 /** How much Dexterity a category contributes when the row itself is silent. */
@@ -170,6 +250,22 @@ export function armorClassFor(input: {
 }): ArmorClassResult {
   const { inventory, dexModifier } = input;
 
+  const base = bodyArmorClass(inventory, dexModifier);
+  const additive = (selectShield(inventory)?.baseAC ?? 0) + bonusACFrom(inventory);
+
+  if (additive === 0) return base;
+
+  // `category` and `armored` keep describing the body armour, not the total.
+  // They answer "what is this character wearing", which is the question the
+  // proficiency rule puts to them; a helm granting +1 has not dressed anyone.
+  return { ...base, armorClass: base.armorClass + additive };
+}
+
+/** The half of the answer that only body armour and Dexterity decide. */
+function bodyArmorClass(
+  inventory: readonly ArmorInventoryRow[],
+  dexModifier: number,
+): ArmorClassResult {
   const profile = selectBodyArmor(inventory);
   if (profile === null || profile.baseAC === null) return UNARMORED(dexModifier);
 

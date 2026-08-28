@@ -19,7 +19,11 @@
  */
 
 import { SKILL_ABILITY, type Skill } from "@/lib/rules/ability-check";
-import { selectBodyArmor, type ArmorInventoryRow } from "@/lib/rules/armor-class";
+import {
+  selectBodyArmor,
+  selectShield,
+  type ArmorInventoryRow,
+} from "@/lib/rules/armor-class";
 import {
   isArmorProficient,
   type ArmorCategory,
@@ -49,17 +53,39 @@ export function armorPenaltyFor(input: {
   inventory: readonly ArmorInventoryRow[];
   characterClass: string;
 }): ArmorPenalty {
-  const profile = selectBodyArmor(input.inventory);
-  const category = profile?.category ?? null;
+  const worn = selectBodyArmor(input.inventory)?.category ?? null;
+  const held = selectShield(input.inventory)?.category ?? null;
 
-  if (category === null) return { applies: false, category: null };
+  if (worn === null && held === null) return { applies: false, category: null };
 
   const normalisedClass = input.characterClass.trim().toLowerCase() as CharacterClass;
 
-  return {
-    applies: !isArmorProficient(normalisedClass, category),
-    category,
-  };
+  const wornUnknown = worn !== null && !isArmorProficient(normalisedClass, worn);
+  const heldUnknown = held !== null && !isArmorProficient(normalisedClass, held);
+
+  // Two offences produce one penalty — the SRD does not stack it — so the
+  // category reported is whichever one is answering for it. The body armour
+  // wins when it is the offender because it is the more specific answer: it is
+  // what the character is wearing, and it is what the rejection message names.
+  // When only the shield offends, the shield must be reported, or a bard in
+  // leather would be told their leather is the problem.
+  const category = wornUnknown ? worn : heldUnknown ? held : (worn ?? held);
+
+  return { applies: wornUnknown || heldUnknown, category };
+}
+
+/**
+ * How to name the offending gear in a refusal the player will read.
+ *
+ * Here rather than at the call sites because three messages across two files
+ * interpolated the category straight into "wearing ${category} armour". That
+ * was true while only body armour could offend. Now that a shield can, every
+ * one of them would have said "wearing shield armour" — a sentence that is
+ * wrong about the English and about the fiction, since a shield is held.
+ */
+export function describeArmorPenalty(penalty: ArmorPenalty): string {
+  if (penalty.category === "shield") return "a shield";
+  return penalty.category === null ? "armour" : `${penalty.category} armour`;
 }
 
 /**

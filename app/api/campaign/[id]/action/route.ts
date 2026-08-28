@@ -21,7 +21,11 @@ import {
   type DamageType,
 } from "@/lib/rules/combat";
 import { resolveWeaponAttack, unresolvedCategoryLog } from "@/lib/rules/weapon-attack";
-import { armorPenaltyFor, penalisedByArmor } from "@/lib/rules/armor-proficiency";
+import {
+  armorPenaltyFor,
+  describeArmorPenalty,
+  penalisedByArmor,
+} from "@/lib/rules/armor-proficiency";
 import { slotFor } from "@/lib/rules/equipment-slot";
 import {
   evaluateAbilityCheckAdvantage,
@@ -575,15 +579,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             campaignId,
             role: "system",
             content:
-              `⚠️ Casting refused: ${context.character.name} is wearing ` +
-              `${castArmorPenalty.category} armour without proficiency, and the ` +
-              `SRD forbids casting in armour you cannot use.`,
+              `⚠️ Casting refused: ${context.character.name} is using ` +
+              `${describeArmorPenalty(castArmorPenalty)} without proficiency, and the ` +
+              `SRD forbids casting with gear you cannot use.`,
           },
         });
         return NextResponse.json(
           {
             error:
-              `You cannot cast while wearing ${castArmorPenalty.category} armour ` +
+              `You cannot cast while using ${describeArmorPenalty(castArmorPenalty)} ` +
               `you are not proficient with.`,
           },
           { status: 400 }
