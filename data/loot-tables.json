@@ -268,6 +268,10 @@
       "description": "A small round buckler carved from a single ironwood knot. It turns aside blades without a mark.",
       "type": "armor",
       "properties": {
+        "baseAC": 2,
+        "armorClass": "shield",
+        "addDexModifier": false,
+        "maxDexBonus": null,
         "ac_bonus": 1
       },
       "valueGP": 150,
@@ -548,6 +552,11 @@
       "description": "A breastplate carved with runes of warding. The wearer cannot be flanked or attacked by opportunity.",
       "type": "armor",
       "properties": {
+        "baseAC": 14,
+        "armorClass": "medium",
+        "addDexModifier": true,
+        "maxDexBonus": 2,
+        "stealthDisadvantage": true,
         "ac_bonus": 2,
         "effect": "no_opportunity_attacks_vs_wearer"
       },

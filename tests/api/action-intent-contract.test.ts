@@ -1237,3 +1237,92 @@ describe("la linea de alcance no verificado no se escribe si el lanzamiento se r
     ).toBe(false);
   });
 });
+
+describe("la puerta de equipar enruta por categoría, no por tipo", () => {
+  // Las Ashwalker Boots son `type: "armor"` en data/loot-tables.json y no
+  // llevan categoría de armadura. Antes de la regla de slots iban a ARMOR, lo
+  // que desequipaba la armadura de cuerpo y apagaba en silencio la penalización
+  // por competencia sobre ataques, pruebas de FUE/DES y lanzamiento.
+  const CON_BOTAS = [
+    {
+      id: "mail",
+      name: "Chain Mail",
+      type: "armor",
+      quantity: 1,
+      properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+      equippedSlot: "ARMOR",
+    },
+    {
+      id: "boots",
+      name: "Ashwalker Boots",
+      type: "armor",
+      quantity: 1,
+      properties: { effect: "ignore_difficult_terrain_ash" },
+      equippedSlot: null,
+    },
+  ];
+
+  it("no desaloja la armadura de cuerpo al equipar unas botas", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: CON_BOTAS })
+    );
+
+    // "don" es uno de los verbos que el clasificador reconoce para `equip`;
+    // "put on" no lo es, así que el texto se elige para llegar de verdad a la
+    // puerta en vez de fallar en la clasificación.
+    await post("I don the Ashwalker Boots");
+
+    // Confirma primero que la puerta se alcanzó, para no confundir un fallo de
+    // clasificación con el defecto que este test busca.
+    expect(prisma.inventoryItem.update).toHaveBeenCalled();
+
+    // La colocación va al slot de accesorio.
+    expect(prisma.inventoryItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "boots" },
+        data: { equippedSlot: "ACCESSORY" },
+      })
+    );
+
+    // Y el desalojo apunta a ACCESSORY, así que la cota de malla sigue puesta.
+    // Esta es la aserción que falla si se revierte todo el incremento.
+    expect(prisma.inventoryItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ equippedSlot: "ACCESSORY" }),
+      })
+    );
+    expect(prisma.inventoryItem.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ equippedSlot: "ARMOR" }),
+      })
+    );
+  });
+
+  it("manda el escudo a la mano libre, no al slot de armadura", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({
+        inventory: [
+          {
+            id: "shield",
+            name: "Shield",
+            type: "armor",
+            quantity: 1,
+            properties: { baseAC: 2, armorClass: "shield" },
+            equippedSlot: null,
+          },
+        ],
+      })
+    );
+
+    await post("I equip the Shield");
+
+    expect(prisma.inventoryItem.update).toHaveBeenCalled();
+
+    expect(prisma.inventoryItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "shield" },
+        data: { equippedSlot: "OFF_HAND" },
+      })
+    );
+  });
+});

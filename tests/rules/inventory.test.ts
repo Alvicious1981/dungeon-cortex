@@ -99,6 +99,60 @@ describe("equipItem", () => {
   });
 });
 
+describe("equipItem slot legality", () => {
+  const sword = {
+    id: "sword",
+    characterId: "c1",
+    name: "Longsword",
+    type: "weapon",
+    quantity: 1,
+    properties: { damageDice: "1d8" },
+    equippedSlot: null,
+  };
+  const mail = {
+    id: "mail",
+    characterId: "c1",
+    name: "Chain Mail",
+    type: "armor",
+    quantity: 1,
+    properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    equippedSlot: null,
+  };
+
+  it("refuses a weapon placed in the armour slot", () => {
+    expect(() => equipItem("sword", "ARMOR", [sword, mail])).toThrow(RangeError);
+    expect(() => equipItem("sword", "ARMOR", [sword, mail])).toThrow(
+      /cannot occupy "ARMOR"/,
+    );
+  });
+
+  it("refuses body armour placed in the off hand", () => {
+    expect(() => equipItem("mail", "OFF_HAND", [sword, mail])).toThrow(RangeError);
+  });
+
+  it("refuses a slot that is not a slot", () => {
+    expect(() => equipItem("sword", "HEAD", [sword, mail])).toThrow(RangeError);
+  });
+
+  it("still equips a legal placement, and still evicts the prior occupant", () => {
+    const occupied = [{ ...sword, equippedSlot: null }, { ...mail, equippedSlot: "ARMOR" }];
+    const other = {
+      ...mail,
+      id: "plate",
+      name: "Plate",
+      properties: { baseAC: 18, armorClass: "heavy", addDexModifier: false },
+      equippedSlot: null,
+    };
+    const result = equipItem("plate", "ARMOR", [...occupied, other]);
+    expect(result.find((i) => i.id === "plate")?.equippedSlot).toBe("ARMOR");
+    expect(result.find((i) => i.id === "mail")?.equippedSlot).toBeNull();
+  });
+
+  it("still reports an unknown item, and reports it as not found rather than illegal", () => {
+    expect(() => equipItem("ghost", "MAIN_HAND", [sword])).toThrow(/not found/);
+  });
+});
+
 // ─── useConsumable ────────────────────────────────────────────────────────────
 
 describe("useConsumable", () => {

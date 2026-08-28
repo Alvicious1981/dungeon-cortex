@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getEquipmentInfo } from "@/lib/rules/srd-equipment-lookup";
+import { slotAccepts, slotFor } from "@/lib/rules/equipment-slot";
 /**
  * lib/rules/inventory.ts
  *
@@ -142,12 +143,15 @@ type ItemProperties = {
  * Returns a new inventory array with `itemId` equipped into `targetSlot`.
  *
  * Rules enforced:
+ * - The placement must be the one `slotFor` would choose for the item. A
+ *   longsword may not occupy ARMOR, and an arbitrary string is not a slot.
  * - Each slot may hold at most one item — the previous occupant is unequipped.
  * - An item moving to a new slot is removed from its old slot automatically.
  * - Operation is idempotent if the item already occupies the target slot.
  * - Original array and items are never mutated.
  *
- * @throws {RangeError} if `itemId` is not found in `inventory`.
+ * @throws {RangeError} if `itemId` is not found in `inventory`, or if the item
+ *   cannot occupy `targetSlot`.
  */
 export function equipItem(
   itemId: string,
@@ -157,6 +161,13 @@ export function equipItem(
   const target = inventory.find((i) => i.id === itemId);
   if (!target) {
     throw new RangeError(`Item "${itemId}" not found in inventory.`);
+  }
+
+  if (!slotAccepts(target, targetSlot)) {
+    throw new RangeError(
+      `Item "${target.name}" cannot occupy "${targetSlot}"; it belongs in ` +
+        `"${slotFor(target).slot}".`
+    );
   }
 
   return inventory.map((item) => {

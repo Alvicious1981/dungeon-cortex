@@ -45,7 +45,7 @@ const baseItems: InventoryItemFixture[] = [
     type: "weapon",
     quantity: 1,
     properties: {},
-    equippedSlot: "mainHand",
+    equippedSlot: "MAIN_HAND",
   },
   {
     id: "staff-other",
@@ -55,7 +55,7 @@ const baseItems: InventoryItemFixture[] = [
     type: "weapon",
     quantity: 1,
     properties: {},
-    equippedSlot: "mainHand",
+    equippedSlot: "MAIN_HAND",
   },
   {
     id: "axe-other-campaign",
@@ -65,7 +65,7 @@ const baseItems: InventoryItemFixture[] = [
     type: "weapon",
     quantity: 1,
     properties: {},
-    equippedSlot: "mainHand",
+    equippedSlot: "MAIN_HAND",
   },
 ];
 
@@ -111,7 +111,7 @@ describe("equipCharacterItem service contract", () => {
         campaignId: "campaign-1",
         characterId: "character-1",
         itemId: "missing-item",
-        targetSlot: "mainHand",
+        targetSlot: "MAIN_HAND",
         tx,
       })
     ).rejects.toMatchObject({
@@ -127,7 +127,7 @@ describe("equipCharacterItem service contract", () => {
         campaignId: "campaign-1",
         characterId: "character-1",
         itemId: "staff-other",
-        targetSlot: "mainHand",
+        targetSlot: "MAIN_HAND",
         tx,
       })
     ).rejects.toMatchObject({
@@ -142,11 +142,11 @@ describe("equipCharacterItem service contract", () => {
       campaignId: "campaign-1",
       characterId: "character-1",
       itemId: "sword-1",
-      targetSlot: "mainHand",
+      targetSlot: "MAIN_HAND",
       tx,
     });
 
-    expect(state.find((item) => item.id === "sword-1")?.equippedSlot).toBe("mainHand");
+    expect(state.find((item) => item.id === "sword-1")?.equippedSlot).toBe("MAIN_HAND");
     expect(result).toMatchObject({
       ok: true,
       facts: {
@@ -154,7 +154,7 @@ describe("equipCharacterItem service contract", () => {
         characterId: "character-1",
         itemId: "sword-1",
         itemName: "Longsword",
-        targetSlot: "mainHand",
+        targetSlot: "MAIN_HAND",
       },
     });
   });
@@ -166,12 +166,12 @@ describe("equipCharacterItem service contract", () => {
       campaignId: "campaign-1",
       characterId: "character-1",
       itemId: "sword-1",
-      targetSlot: "mainHand",
+      targetSlot: "MAIN_HAND",
       tx,
     });
 
     expect(state.find((item) => item.id === "dagger-1")?.equippedSlot).toBeNull();
-    expect(state.find((item) => item.id === "sword-1")?.equippedSlot).toBe("mainHand");
+    expect(state.find((item) => item.id === "sword-1")?.equippedSlot).toBe("MAIN_HAND");
   });
 
   it("does not touch items owned by other characters", async () => {
@@ -181,12 +181,12 @@ describe("equipCharacterItem service contract", () => {
       campaignId: "campaign-1",
       characterId: "character-1",
       itemId: "sword-1",
-      targetSlot: "mainHand",
+      targetSlot: "MAIN_HAND",
       tx,
     });
 
-    expect(state.find((item) => item.id === "staff-other")?.equippedSlot).toBe("mainHand");
-    expect(state.find((item) => item.id === "axe-other-campaign")?.equippedSlot).toBe("mainHand");
+    expect(state.find((item) => item.id === "staff-other")?.equippedSlot).toBe("MAIN_HAND");
+    expect(state.find((item) => item.id === "axe-other-campaign")?.equippedSlot).toBe("MAIN_HAND");
   });
 
   it("returns structured facts for narration without deciding prose", async () => {
@@ -196,7 +196,7 @@ describe("equipCharacterItem service contract", () => {
       campaignId: "campaign-1",
       characterId: "character-1",
       itemId: "sword-1",
-      targetSlot: "mainHand",
+      targetSlot: "MAIN_HAND",
       tx,
     });
 
@@ -205,11 +205,30 @@ describe("equipCharacterItem service contract", () => {
       facts: {
         type: "equipment_changed",
         itemName: "Longsword",
-        targetSlot: "mainHand",
+        targetSlot: "MAIN_HAND",
       },
     });
     expect(result).not.toHaveProperty("narration");
     expect(result).not.toHaveProperty("prose");
     expect(result).not.toHaveProperty("message");
+  });
+
+  it("maps an illegal placement to ILLEGAL_SLOT_FOR_ITEM and writes nothing", async () => {
+    const { tx } = createTx(baseItems);
+
+    await expect(
+      equipCharacterItem({
+        campaignId: "campaign-1",
+        characterId: "character-1",
+        itemId: "sword-1",
+        targetSlot: "ARMOR",
+        tx,
+      })
+    ).rejects.toMatchObject({
+      name: "EquipmentServiceError",
+      code: "ILLEGAL_SLOT_FOR_ITEM",
+    });
+
+    expect(tx.inventoryItem.update).not.toHaveBeenCalled();
   });
 });

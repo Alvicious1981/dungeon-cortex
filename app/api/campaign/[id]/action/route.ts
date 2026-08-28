@@ -22,6 +22,7 @@ import {
 } from "@/lib/rules/combat";
 import { resolveWeaponAttack, unresolvedCategoryLog } from "@/lib/rules/weapon-attack";
 import { armorPenaltyFor, penalisedByArmor } from "@/lib/rules/armor-proficiency";
+import { slotFor } from "@/lib/rules/equipment-slot";
 import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
@@ -936,9 +937,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      let targetSlot = "ACCESSORY";
-      if (foundItem.type === "weapon") targetSlot = "MAIN_HAND";
-      else if (foundItem.type === "armor") targetSlot = "ARMOR";
+      const { slot: targetSlot } = slotFor(foundItem);
 
       await prisma.$transaction(async (tx) => {
         await tx.inventoryItem.updateMany({

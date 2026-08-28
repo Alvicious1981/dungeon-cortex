@@ -4,7 +4,8 @@ import { equipItem, type InventoryItem } from "@/lib/rules/inventory";
 export type EquipmentServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
   | "ITEM_NOT_FOUND"
-  | "ITEM_OWNERSHIP_MISMATCH";
+  | "ITEM_OWNERSHIP_MISMATCH"
+  | "ILLEGAL_SLOT_FOR_ITEM";
 
 export class EquipmentServiceError extends Error {
   constructor(
@@ -160,7 +161,21 @@ export async function equipCharacterItem(
 
   assertItemOwnership(campaignItems, characterItems, input);
 
-  const updated = equipItem(input.itemId, input.targetSlot, characterItems);
+  let updated: EquipmentInventoryItem[];
+  try {
+    updated = equipItem(
+      input.itemId,
+      input.targetSlot,
+      characterItems
+    ) as EquipmentInventoryItem[];
+  } catch (error) {
+    // `assertItemOwnership` has already proved the item exists, so the only
+    // RangeError reachable here is an illegal placement.
+    if (error instanceof RangeError) {
+      throw new EquipmentServiceError("ILLEGAL_SLOT_FOR_ITEM", error.message);
+    }
+    throw error;
+  }
   const changed = updated.filter(
     (item, index) => item.equippedSlot !== characterItems[index]?.equippedSlot
   );
