@@ -1371,3 +1371,75 @@ describe("el escudo cuesta competencia igual que la armadura", () => {
     expect(payload.rollMode).toBe("disadvantage");
   });
 });
+
+describe("un objeto equipado puede dar ventaja en una prueba", () => {
+  // Los Thornweave Gloves son la primera de las cuarenta cadenas `effect` del
+  // archivo de botín que llega a mover una tirada. `evaluateAbilityCheckAdvantage`
+  // devolvía `advantage` como false fijo y su propio comentario decía que una
+  // futura fuente de ventaja entraría por ahí; esta es esa fuente.
+  const GUANTES = [
+    {
+      id: "gloves",
+      name: "Thornweave Gloves",
+      type: "armor",
+      quantity: 1,
+      properties: { effect: "advantage_climb_checks" },
+      equippedSlot: "ACCESSORY",
+    },
+  ];
+
+  const ARMADURA_SIN_COMPETENCIA = {
+    id: "mail",
+    name: "Chain Mail",
+    type: "armor",
+    quantity: 1,
+    properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    equippedSlot: "ARMOR",
+  };
+
+  it("trepar con los guantes puestos sale con ventaja", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextFor({ inventory: GUANTES }));
+
+    const { frames } = await post("I climb the wall");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.skill).toBe("Athletics");
+    expect(payload.rollMode).toBe("advantage");
+  });
+
+  it("los mismos guantes no tocan una prueba que no es de Atletismo", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextFor({ inventory: GUANTES }));
+
+    const { frames } = await post("I hide behind the crates");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.skill).toBe("Stealth");
+    expect(payload.rollMode).toBe("normal");
+  });
+
+  it("la ventaja del objeto y la desventaja de la armadura se anulan", async () => {
+    // Atletismo es una prueba de Fuerza, así que la armadura sin competencia la
+    // penaliza. La SRD las cancela y `resolveAbilityCheck` ya lo hacía: esto
+    // comprueba que la fuente nueva entra por el mismo sitio y hereda esa regla
+    // en vez de saltársela.
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: [...GUANTES, ARMADURA_SIN_COMPETENCIA] })
+    );
+
+    const { frames } = await post("I climb the wall");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.rollMode).toBe("normal");
+  });
+
+  it("los guantes guardados en la mochila no dan nada", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextFor({ inventory: [{ ...GUANTES[0], equippedSlot: null }] })
+    );
+
+    const { frames } = await post("I climb the wall");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.rollMode).toBe("normal");
+  });
+});

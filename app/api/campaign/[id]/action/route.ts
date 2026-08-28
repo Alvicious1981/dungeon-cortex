@@ -27,6 +27,7 @@ import {
   penalisedByArmor,
 } from "@/lib/rules/armor-proficiency";
 import { slotFor } from "@/lib/rules/equipment-slot";
+import { abilityCheckAdvantageFrom } from "@/lib/rules/item-effects";
 import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
@@ -456,6 +457,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const armorDisadvantage =
         armorPenalty.applies && penalisedByArmor(intent.skill);
 
+      // A worn item can grant advantage. Passed beside the condition result
+      // rather than folded into it for the same reason the armour penalty is:
+      // an equipped item is not an SRD condition, and a CONDITION_REGISTRY
+      // entry would leak into everywhere conditions are listed and narrated.
+      // The two cancel inside resolveAbilityCheck, per the SRD.
+      const itemAdvantage = abilityCheckAdvantageFrom({
+        inventory: charData.inventory,
+        skill: intent.skill,
+      });
+
       // Who, if anyone, is resisting. The rules table is consulted again rather
       // than carried on the intent: which creature opposes a shove is a rules
       // question, and the AI layer's schema should not be the place it lives.
@@ -501,7 +512,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         {
           skill: intent.skill,
           band: intent.band,
-          advantage,
+          advantage: advantage || itemAdvantage,
           disadvantage: disadvantage || armorDisadvantage,
           ...(opposedBy && opponents.length > 0
             ? { opposition: { opponents, skills: opposedBy.skills } }
