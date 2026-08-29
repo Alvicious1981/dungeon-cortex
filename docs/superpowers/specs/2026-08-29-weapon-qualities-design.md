@@ -1,7 +1,7 @@
 # Weapon qualities: magical, silvered and adamantine
 
 **Date:** 2026-08-29
-**Status:** designed
+**Status:** implemented
 **Follows:** `docs/superpowers/specs/2026-08-28-damage-modifiers-design.md`, which built the rule that resolves a creature's damage modifiers and deliberately left every conditional clause unresolved
 
 ## Problem

@@ -185,6 +185,26 @@ whatever literal the first batch happened to use.
 Anchors verified 2026-08-29. Each is the same shape as the defects above — a
 value produced with no consumer, or a consumer with no producer.
 
+Closed 2026-08-29: weapons now have qualities, so the SRD's conditional damage
+clauses resolve. `lib/rules/weapon-quality.ts` reads `magical`, `silvered` and
+`adamantine` off the row — a declaration is authoritative, and absent one a
+`damageBonus > 0` derives `magical`, because in the SRD a weapon with a bonus is
+a magic weapon. `lib/rules/damage-clauses.ts` holds four entries, the exact
+strings covering 69 of the data's 72 conditional entries, recognised verbatim
+rather than parsed: a grammar over the wording would be deriving mechanics from
+prose. `applyDamageModifiers` takes an optional attack descriptor and **absent
+still means unresolved**, which is what let every untouched caller keep its
+behaviour. Two loot rows — a silvered sword and an adamantine warpick, neither
+with a `damageBonus` — exist so the silvered and adamantine branches are
+reachable rather than born dormant.
+
+Three wordings stay unrecognised on purpose, one occurrence each: `damage from
+spells`, the `(from stoneskin)` note, and `piercing from magic weapons wielded by
+good creatures`. Each needs a concept the model does not carry, and
+`tests/rules/damage-clauses.test.ts` asserts that the unrecognised remainder is
+exactly those three — a new SRD wording fails that test rather than passing
+unnoticed.
+
 Closed 2026-08-29: the AI tool module's dead surface is gone.
 `lib/ai/tools/srd-lookup.ts` held seven exports no source imported — a
 `queryMonsters`, `MonsterQueryOptions` and `buildMonsterRawData` duplicating
@@ -230,11 +250,6 @@ mismatch survives a green suite.
   source or an explicit, recorded decision about that boundary. An earlier note
   here called it the highest-value item; that was written without checking the
   spell data, and it was wrong.
-- **Magical, silvered and adamantine weapons** — no notion of them exists, so
-  six shapes of SRD damage clause (`"… from nonmagical weapons that aren't
-  silvered"`, `"damage from spells"`, and others) are reported unresolved
-  rather than applied. `lib/rules/damage-modifiers.ts` reports them; nothing
-  guesses at them.
 - **The whole wilderness subsystem** — not a dormant value: a subsystem the
   project switched off on purpose. `stealthAdvantage` at
   `lib/rules/wilderness.ts:275` is one field of it, and the note that stood here
