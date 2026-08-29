@@ -11,6 +11,7 @@ import {
   rollInitiative,
 } from "@/lib/rules/combat";
 import { armorClassFor } from "@/lib/rules/armor-class";
+import { conditionImmunityIndexes } from "@/lib/rules/condition-immunity";
 import {
   buildMonsterRawData,
   queryMonsters as defaultQueryMonsters,
@@ -276,6 +277,7 @@ export async function spawnCombatEncounter(
         damageImmunities: [],
         damageResistances: [],
         damageVulnerabilities: [],
+        conditionImmunities: [],
         // The player is never a source of the combat XP award (§7 of the decision only
         // sums isPlayer === false combatants), so it never carries an authorized value.
         xpValue: null,
@@ -298,6 +300,7 @@ export async function spawnCombatEncounter(
       damageImmunities: monster.damage_immunities ?? [],
       damageResistances: monster.damage_resistances ?? [],
       damageVulnerabilities: monster.damage_vulnerabilities ?? [],
+      conditionImmunities: conditionImmunityIndexes(monster.condition_immunities),
       // Backend-authorized SRD figure already resolved in memory by queryMonsters;
       // never xpForCR/adjustedXP/encounterMultiplier.
       xpValue: monster.xp ?? null,

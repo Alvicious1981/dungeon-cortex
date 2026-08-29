@@ -257,6 +257,11 @@ model Combatant {
   damageImmunities      String[] @default([])
   damageResistances     String[] @default([])
   damageVulnerabilities String[] @default([])
+  /// SRD condition immunities, snapshotted alongside the damage modifiers.
+  /// Bare condition ids ("poisoned", "grappled") — the seeder reduces the SRD's
+  /// {index, name, url} objects to their index, and every id it produces is a
+  /// key of CONDITION_REGISTRY.
+  conditionImmunities   String[] @default([])
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
   size                 String  @default("Medium")

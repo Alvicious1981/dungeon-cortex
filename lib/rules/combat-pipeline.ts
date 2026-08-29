@@ -30,6 +30,7 @@ import {
   unresolvedModifierLog,
   type ModifiedDamage,
 } from "@/lib/rules/damage-modifiers";
+import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
 
 export interface PipelineCombatant {
   id: string;
@@ -43,6 +44,7 @@ export interface PipelineCombatant {
   damageImmunities?: string[];
   damageResistances?: string[];
   damageVulnerabilities?: string[];
+  conditionImmunities?: string[];
   concentrationSpellId: string | null;
 }
 
@@ -308,7 +310,8 @@ export async function executeCombatAction(
     let isCrit = false;
     let newHp = target.hp;
     let naturalRoll = 0;
-    let conditionsToApply: string[] = [];
+    let conditionsToApply: readonly string[] = [];
+    let conditionsBlocked: readonly string[] = [];
     let damageUnresolved: readonly string[] = [];
     let damageApplied: ModifiedDamage["applied"] = "none";
 
@@ -404,6 +407,20 @@ export async function executeCombatAction(
       damageUnresolved = modified.unresolved;
       damageApplied = modified.applied;
 
+      // Resolved before the facts are assembled, not after, so that
+      // `status_applied` and the conditions actually written to the row come
+      // from one list. Computing them separately is how the two come to
+      // disagree — and the facts reach the narrator, so a disagreement would
+      // have it describing a condition the engine had refused.
+      if (!saved && effect.condition) {
+        const grant = grantConditions({
+          conditions: [effect.condition],
+          immunities: target.conditionImmunities ?? [],
+        });
+        conditionsToApply = grant.granted;
+        conditionsBlocked = grant.blocked;
+      }
+
       if (damage > 0) {
         hitLoc = rollHitLocation();
         const facts: CombatFacts = {
@@ -418,17 +435,16 @@ export async function executeCombatAction(
           is_crit: false,
           is_fumble: false,
           hit_location: hitLoc,
-          status_applied: !saved && effect.condition ? [effect.condition] : [],
+          // What actually took hold, not what was attempted. This said
+          // `!saved && effect.condition` regardless of whether the condition
+          // survived, so an immune target's facts would have claimed it landed.
+          status_applied: [...conditionsToApply],
           overkill: computeOverkill(damage, target.hp),
         };
         tags = deriveNarrativeTags(facts);
       }
 
       newHp = Math.max(0, target.hp - damage);
-
-      if (!saved && effect.condition) {
-        conditionsToApply = [effect.condition];
-      }
     }
 
     const modifierLog = unresolvedModifierLog({
@@ -436,6 +452,12 @@ export async function executeCombatAction(
       result: { damage, applied: damageApplied, unresolved: damageUnresolved },
     });
     if (modifierLog) systemLogs.push(modifierLog);
+
+    const immunityLog = immuneConditionLog({
+      defenderName: target.name,
+      blocked: conditionsBlocked,
+    });
+    if (immunityLog) systemLogs.push(immunityLog);
 
     totalDamageDealt += damage;
 
@@ -462,7 +484,7 @@ export async function executeCombatAction(
       hpAfter: newHp,
       targetMaxHp: target.maxHp,
       isKill: newHp <= 0,
-      conditionsApplied: conditionsToApply,
+      conditionsApplied: [...conditionsToApply],
       narrativeTags: tags,
     };
     consequences.push(singleConsequence);

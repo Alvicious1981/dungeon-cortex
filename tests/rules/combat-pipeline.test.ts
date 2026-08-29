@@ -1366,3 +1366,95 @@ describe("executeCombatAction — spell damage resolves against modifiers", () =
     expect(systemLogLines(result).some((line) => line.includes("not applied"))).toBe(true);
   });
 });
+
+describe("condition immunity", () => {
+  // SrdMonster.conditionImmunities was written by both seeders and read by no
+  // rule. The chain this covers: the column reaches PipelineCombatant, the
+  // spell branch filters the attempted condition against it, and the facts,
+  // the persisted row and the system log all come from the same split.
+  function poisonPayload(target: PipelineCombatant): CombatActionPayload {
+    return {
+      actionType: "cast_spell",
+      encounter: buildEncounter([buildPlayer(), target]),
+      actorId: "player-1",
+      actorName: "Mira",
+      actorConditions: [],
+      targetCombatants: [target],
+      spellName: "Ray of Sickness",
+      spellLevel: 1,
+      spellEffect: {
+        type: "damage",
+        dice: "1d6",
+        hasSavingThrow: false,
+        condition: "poisoned",
+      },
+      playerCharacterId: "char-1",
+      collectEvents: true,
+    };
+  }
+
+  it("applies the condition to a target with no immunities", async () => {
+    const tx = buildMockTx();
+    const target = buildEnemy({ conditionImmunities: [] });
+
+    const outcome = await executeCombatAction(poisonPayload(target), tx as never);
+
+    expect(tx.combatant.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ conditions: ["poisoned"] }),
+      })
+    );
+    expect(outcome.consequences[0]?.conditionsApplied).toEqual(["poisoned"]);
+    expect(outcome.systemLogs).toEqual([]);
+  });
+
+  it("does not write the condition onto an immune target", async () => {
+    const tx = buildMockTx();
+    const target = buildEnemy({ conditionImmunities: ["poisoned"] });
+
+    await executeCombatAction(poisonPayload(target), tx as never);
+
+    expect(tx.combatant.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ conditions: [] }),
+      })
+    );
+  });
+
+  it("tells the facts the truth about what took hold", async () => {
+    // `combat_facts.status_applied` is set from the filtered `granted` list on
+    // this path too, which is correct — but nothing downstream reads it for a
+    // cast_spell action: consequenceDetails.push only happens in the attack
+    // branch, and this spell branch's facts are consumed solely by
+    // deriveNarrativeTags, which never looks at status_applied. The real,
+    // narrator-facing assertion is the one below.
+    const tx = buildMockTx();
+    const target = buildEnemy({ conditionImmunities: ["poisoned"] });
+
+    const outcome = await executeCombatAction(poisonPayload(target), tx as never);
+
+    expect(outcome.consequences[0]?.conditionsApplied).toEqual([]);
+  });
+
+  it("declares the immunity in the system log", async () => {
+    const tx = buildMockTx();
+    const target = buildEnemy({ conditionImmunities: ["poisoned"] });
+
+    const outcome = await executeCombatAction(poisonPayload(target), tx as never);
+
+    expect(outcome.systemLogs.some((line) => /immune/i.test(line))).toBe(true);
+    expect(outcome.systemLogs.some((line) => line.includes("poisoned"))).toBe(true);
+  });
+
+  it("still applies damage to an immune target", async () => {
+    // Immunity to a condition is not immunity to the spell.
+    const tx = buildMockTx();
+    const target = buildEnemy({ hp: 20, conditionImmunities: ["poisoned"] });
+
+    await executeCombatAction(poisonPayload(target), tx as never);
+
+    const call = (tx.combatant.update as unknown as { mock: { calls: unknown[][] } })
+      .mock.calls.at(-1)?.[0] as { data: { hp: number } };
+    expect(call.data.hp).toBeLessThan(20);
+  });
+});

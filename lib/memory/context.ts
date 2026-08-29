@@ -95,6 +95,8 @@ export interface ContextCombatant {
   damageImmunities: string[];
   damageResistances: string[];
   damageVulnerabilities: string[];
+  /** SRD condition immunities, snapshotted at spawn. Empty for the player. */
+  conditionImmunities: string[];
   /** ID of the currently concentrated-on spell, or null. */
   concentrationSpellId: string | null;
   /** Grid column (0-based). Used by tactical movement validation. */
@@ -337,6 +339,7 @@ export async function buildCampaignContext(
             damageImmunities: true,
             damageResistances: true,
             damageVulnerabilities: true,
+            conditionImmunities: true,
             concentrationSpellId: true,
             x: true,
             y: true,

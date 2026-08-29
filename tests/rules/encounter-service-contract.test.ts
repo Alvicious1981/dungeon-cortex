@@ -146,6 +146,7 @@ describe("spawnCombatEncounter service contract", () => {
               ac: 13,
               initiativeTotal: 21,
               stats: { DEX: 14 },
+              conditionImmunities: [],
               damageImmunities: [],
               damageResistances: [],
               damageVulnerabilities: [],
@@ -159,6 +160,7 @@ describe("spawnCombatEncounter service contract", () => {
               ac: 13,
               initiativeTotal: 6,
               stats: { STR: 10, DEX: 12, CON: 10, INT: 10, WIS: 10, CHA: 10 },
+              conditionImmunities: [],
               damageImmunities: [],
               damageResistances: [],
               damageVulnerabilities: [],
@@ -364,5 +366,45 @@ describe("damage modifiers reach the combatant", () => {
     expect(player.damageImmunities).toEqual([]);
     expect(player.damageResistances).toEqual([]);
     expect(player.damageVulnerabilities).toEqual([]);
+  });
+});
+
+describe("condition immunities reach the combatant", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("copies the monster's condition immunities onto the spawned combatant", async () => {
+    // The monster the fixture spawns must actually carry condition immunities
+    // for this to mean anything; assert that first so a fixture change cannot
+    // make this vacuous. A wraith is genuinely immune to poisoned in the SRD.
+    const wraith: Monster = {
+      index: "wraith",
+      name: "Wraith",
+      hit_points: 67,
+      armor_class: [{ type: "natural", value: 13 }],
+      type: "undead",
+      challenge_rating: 5,
+      dexterity: 16,
+      condition_immunities: ["exhaustion", "poisoned"],
+    };
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [wraith]);
+    mockRandom([0.9, 0.2]);
+
+    await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 5,
+      theme: "undead",
+      db,
+      queryMonsters,
+    });
+
+    const call = (db.encounter.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const combatants = call.data.combatants.create as Array<{
+      isPlayer: boolean;
+      conditionImmunities: string[];
+    }>;
+    const enemy = combatants.find((c) => !c.isPlayer)!;
+
+    expect(enemy.conditionImmunities).toEqual(["exhaustion", "poisoned"]);
   });
 });

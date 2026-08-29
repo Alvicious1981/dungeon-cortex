@@ -65,6 +65,7 @@ const resolvedEncounter: CampaignContext["activeEncounter"] = {
       damageImmunities: [],
       damageResistances: [],
       damageVulnerabilities: [],
+      conditionImmunities: [],
       concentrationSpellId: null,
       x: 0,
       y: 0,
