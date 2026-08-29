@@ -14,7 +14,6 @@
  */
 
 import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
-import type { Monster } from "@/lib/rules/srd";
 import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, getLevelFromXP, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
@@ -177,29 +176,25 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
     const conditionText = conditions.length > 0 ? ` [${conditions.join(", ")}]` : "";
     const tag = combatant.isPlayer ? "(Player)" : "(Enemy)";
 
-    let mechanicalSummary = "";
-    if (!combatant.isPlayer && combatant.stats) {
-      const m = combatant.stats as unknown as Monster;
-      const ac = m.armor_class?.[0]?.value ?? combatant.ac;
-      const constraints: string[] = [];
-      if (m.damage_immunities?.length) constraints.push(`Immune: ${m.damage_immunities.join(", ")}`);
-      if (m.damage_resistances?.length) constraints.push(`Resist: ${m.damage_resistances.join(", ")}`);
-      if (m.condition_immunities?.length) {
-        constraints.push(
-          `Cond Immune: ${m.condition_immunities
-            .map((condition: unknown) =>
-              typeof condition === "string"
-                ? condition
-                : (condition as { name: string }).name
-            )
-            .join(", ")}`
-        );
-      }
-      const constraintStr = constraints.length > 0 ? ` | ${constraints.join(" | ")}` : "";
-      mechanicalSummary = `AC: ${ac}${constraintStr}, `;
-    } else {
-      mechanicalSummary = `AC: ${combatant.ac}, `;
+    // The damage and condition modifiers the combat pipeline resolves against
+    // live in their own snapshot columns; `stats` holds only ability scores.
+    // Reading them here is what keeps the narrator from describing damage the
+    // engine already reduced, or a condition it already refused.
+    const constraints: string[] = [];
+    if (combatant.damageImmunities.length) {
+      constraints.push(`Immune: ${combatant.damageImmunities.join(", ")}`);
     }
+    if (combatant.damageResistances.length) {
+      constraints.push(`Resist: ${combatant.damageResistances.join(", ")}`);
+    }
+    if (combatant.damageVulnerabilities.length) {
+      constraints.push(`Vulnerable: ${combatant.damageVulnerabilities.join(", ")}`);
+    }
+    if (combatant.conditionImmunities.length) {
+      constraints.push(`Cond Immune: ${combatant.conditionImmunities.join(", ")}`);
+    }
+    const constraintStr = constraints.length > 0 ? ` | ${constraints.join(" | ")}` : "";
+    const mechanicalSummary = `AC: ${combatant.ac}${constraintStr}, `;
 
     lines.push(
       `${index + 1}. **${combatant.name}** ${tag} — ${mechanicalSummary}HP: ${combatant.hp}/${combatant.maxHp}, Initiative: ${combatant.initiativeTotal}${conditionText}${turnMarker}`

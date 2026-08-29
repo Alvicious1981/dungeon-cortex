@@ -78,6 +78,18 @@ vi.mock("@/lib/ai/narrator", () => ({
   })),
 }));
 
+/**
+ * The four snapshot columns `Combatant` always carries: Prisma declares them
+ * `String[] @default([])`, so a real row never omits them. Fixtures spread
+ * this so their shape matches the row the route actually reads.
+ */
+const NO_MODIFIERS = {
+  damageImmunities: [] as string[],
+  damageResistances: [] as string[],
+  damageVulnerabilities: [] as string[],
+  conditionImmunities: [] as string[],
+};
+
 describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   const campaignId = "camp_123";
   const mockUser = { id: "user_123" };
@@ -105,9 +117,9 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   });
 
   describe("free-text attack targeting", () => {
-    const hostile = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
-    const downed = { id: "t2", name: "Goblin", hp: 0, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
-    const hero = { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
+    const hostile = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
+    const downed = { id: "t2", name: "Goblin", hp: 0, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
+    const hero = { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
 
     const contextWith = (combatants: unknown[]) => ({
       character: {
@@ -374,8 +386,8 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   });
 
   it("handles multi-target Attack via targetIds", async () => {
-    const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
-    const target2 = { id: "t2", name: "Goblin 2", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
+    const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
+    const target2 = { id: "t2", name: "Goblin 2", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
     
     const mockContext = {
       character: { name: "Hero", class: "fighter", stats: { STR: 10 }, inventory: [] },
@@ -388,7 +400,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
         currentTurnIndex: 0,
         round: 1,
         combatants: [
-           { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" },
+           { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" },
            target1,
            target2
         ]
@@ -418,8 +430,8 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
   it("advances the turn when an item is used during combat", async () => {
     const combatants = [
-      { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: [], concentrationSpellId: null },
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 10, maxHp: 10, conditions: [], concentrationSpellId: null },
+      { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: [], concentrationSpellId: null },
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10, conditions: [], concentrationSpellId: null },
     ];
     (buildCampaignContext as any).mockResolvedValue({
       character: {
@@ -476,7 +488,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   });
 
   it("falls back to auto-targeting if targetIds is missing", async () => {
-    const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", isPlayer: false };
+    const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
     const mockContext = {
       character: { name: "Hero", class: "fighter", stats: { STR: 10 }, inventory: [] },
       relevantMemories: [],
@@ -488,7 +500,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
         currentTurnIndex: 0,
         round: 1,
         combatants: [
-           { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" },
+           { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" },
            target1
         ]
       }
@@ -761,8 +773,8 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
         round: 1,
         totalDamageDealt: 0,
         combatants: [
-          { id: "p1", name: "Hero", isPlayer: true, hp: 20, maxHp: 20, conditions: [], concentrationSpellId: null },
-          { id: "t1", name: "Goblin", isPlayer: false, hp: 1, maxHp: 7, conditions: [], concentrationSpellId: null },
+          { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: [], concentrationSpellId: null },
+          { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 1, maxHp: 7, conditions: [], concentrationSpellId: null },
         ],
       },
     };
@@ -774,8 +786,8 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
     // "all_enemies_dead". The enemy already carries its backend-authorized
     // xpValue snapshot (docs/DECISION_XP_AWARD_AUTHORITY.md §5-§6).
     (prisma.combatant.findMany as any).mockResolvedValue([
-      { id: "p1", isPlayer: true, hp: 20 },
-      { id: "t1", isPlayer: false, hp: 0, xpValue: 50 },
+      { id: "p1", ...NO_MODIFIERS, isPlayer: true, hp: 20 },
+      { id: "t1", ...NO_MODIFIERS, isPlayer: false, hp: 0, xpValue: 50 },
     ]);
     (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
     // Recipient derived exclusively from persisted state: Encounter → Campaign

@@ -55,6 +55,18 @@ vi.mock("@/lib/ai/narrator", () => ({
   })),
 }));
 
+/**
+ * The four snapshot columns `Combatant` always carries: Prisma declares them
+ * `String[] @default([])`, so a real row never omits them. Fixtures spread
+ * this so their shape matches the row the route actually reads.
+ */
+const NO_MODIFIERS = {
+  damageImmunities: [] as string[],
+  damageResistances: [] as string[],
+  damageVulnerabilities: [] as string[],
+  conditionImmunities: [] as string[],
+};
+
 const campaignId = "camp_1";
 const characterId = "char_1";
 const mockUser = { id: "user_1" };
@@ -226,7 +238,7 @@ describe("la dificultad depende de la acción, no es una constante", () => {
 
 describe("una contienda deriva la CD del que se resiste", () => {
   const player = {
-    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20,
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20,
     conditions: [], concentrationSpellId: null, stats: {},
   };
 
@@ -252,10 +264,10 @@ describe("una contienda deriva la CD del que se resiste", () => {
   it("esconderse de un centinela despierto es más difícil que de uno obtuso", async () => {
     // Lo que las puntuaciones persistidas en Combatant hacen posible: hasta
     // ahora stats era {} para todos y ambos casos habrían dado el mismo número.
-    withHostiles([{ id: "t1", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
+    withHostiles([{ id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
     const alert = await checkPayload("I hide behind the crates");
 
-    withHostiles([{ id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } }]);
+    withHostiles([{ id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } }]);
     const oblivious = await checkPayload("I hide behind the crates");
 
     expect(alert.dcSource).toBe("contest");
@@ -265,8 +277,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   it("ante varios observadores manda el más despierto", async () => {
     withHostiles([
-      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
     ]);
 
     expect((await checkPayload("I hide behind the crates")).dc).toBe(14);
@@ -274,8 +286,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   it("ignora a los caídos: un centinela inconsciente no vigila", async () => {
     withHostiles([
-      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", isPlayer: false, hp: 0, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 0, maxHp: 8, conditions: [], stats: { WIS: 18 } },
     ]);
 
     expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
@@ -286,7 +298,7 @@ describe("una contienda deriva la CD del que se resiste", () => {
     // encuentro se guardaban con stats vacío, y tratarlos como criatura promedio
     // daba CD 10 — más fácil que esconderse sin nadie delante (CD 15).
     withHostiles([
-      { id: "t1", name: "Unknown", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: {} },
+      { id: "t1", name: "Unknown", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: {} },
     ]);
     const watched = await checkPayload("I hide behind the crates");
 
@@ -309,8 +321,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
     // hp > 0 no basta: un centinela dormido por un conjuro conserva sus puntos
     // de golpe y no se entera de nada. Antes fijaba la CD completa.
     withHostiles([
-      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: ["unconscious"], stats: { WIS: 18 } },
+      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["unconscious"], stats: { WIS: 18 } },
     ]);
 
     expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
@@ -318,7 +330,7 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   it("un observador aturdido sí vigila: no puede actuar, pero mira", async () => {
     withHostiles([
-      { id: "t1", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: ["stunned"], stats: { WIS: 18 } },
+      { id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["stunned"], stats: { WIS: 18 } },
     ]);
 
     expect((await checkPayload("I hide behind the crates")).dc).toBe(14);
@@ -328,8 +340,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
     // El SRD enfrenta el hurto a la Percepción del propio incauto. Antes la CD
     // salía del guardia de al lado, que ni siquiera era el objetivo.
     withHostiles([
-      { id: "t1", name: "Merchant", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 8 } },
-      { id: "t2", name: "Guard", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
+      { id: "t1", name: "Merchant", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 8 } },
+      { id: "t2", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
     ]);
 
     const payload = await checkPayload("I pickpocket the Merchant");
@@ -339,8 +351,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   it("mentir lo resiste quien escucha, no un hostil ajeno", async () => {
     withHostiles([
-      { id: "t1", name: "Innkeeper", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 10 } },
-      { id: "t2", name: "Inquisitor", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
+      { id: "t1", name: "Innkeeper", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 10 } },
+      { id: "t2", name: "Inquisitor", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
     ]);
 
     expect((await checkPayload("I lie to the Innkeeper")).dc).toBe(10);
@@ -350,8 +362,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
     // Contraste deliberado con los dos anteriores. Decir de quién te escondes no
     // impide que el segundo centinela te vea.
     withHostiles([
-      { id: "t1", name: "Drunk", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
+      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
     ]);
 
     expect((await checkPayload("I hide from the Drunk")).dc).toBe(14);
@@ -359,7 +371,7 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   it("un objetivo nombrado que no existe cae a la banda, no adivina", async () => {
     withHostiles([
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
     ]);
 
     expect((await checkPayload("I pickpocket the Merchant")).dcSource).toBe("band");
@@ -370,8 +382,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
     // contienda. El nombre resuelve la ambigüedad: se empuja al goblin, y la CD
     // sale de la Fuerza del goblin, no de la del orco.
     withHostiles([
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18, DEX: 8 } },
-      { id: "t2", name: "Orc", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4, DEX: 4 } },
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18, DEX: 8 } },
+      { id: "t2", name: "Orc", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4, DEX: 4 } },
     ]);
 
     const payload = await checkPayload("I shove the Goblin");
@@ -383,8 +395,8 @@ describe("una contienda deriva la CD del que se resiste", () => {
     // El nombre ya no basta para distinguirlas, así que no se contiende contra
     // una suposición — la regla que ya aplica la puerta de ataque.
     withHostiles([
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
-      { id: "t2", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4 } },
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+      { id: "t2", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4 } },
     ]);
 
     expect((await checkPayload("I shove the Goblin")).dcSource).toBe("band");
@@ -392,7 +404,7 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   it("sin nombrar objetivo, un único candidato es inequívoco", async () => {
     withHostiles([
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
     ]);
 
     const payload = await checkPayload("I shove");
@@ -401,7 +413,7 @@ describe("una contienda deriva la CD del que se resiste", () => {
   });
 
   it("la línea del registro distingue una contienda de una banda", async () => {
-    withHostiles([{ id: "t1", name: "Sentry", isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
+    withHostiles([{ id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
     await post("I hide behind the crates");
 
     expect(systemLogs().some((line) => line.includes("(contested)"))).toBe(true);
@@ -438,7 +450,7 @@ describe("el estado del personaje modula la tirada", () => {
         currentTurnIndex: 0,
         totalDamageDealt: 0,
         combatants: [
-          { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, conditions: ["poisoned"] },
+          { id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: ["poisoned"] },
         ],
       },
     });
@@ -660,8 +672,8 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
     // que "search" llegaba a una puerta inexistente. Ahora ambas están dentro
     // del radio y el daño lo decide la geometría, no la lista del cliente.
     const hostiles = [
-      { id: "t1", name: "Goblin One", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
-      { id: "t2", name: "Goblin Two", isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 1, size: "Medium" },
+      { id: "t1", name: "Goblin One", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
+      { id: "t2", name: "Goblin Two", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 1, size: "Medium" },
     ];
     const base = contextFor();
     (buildCampaignContext as any).mockResolvedValue({
@@ -673,7 +685,7 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
           // hostiles inside the radius are hit, and a caster caught in their own
           // blast — correct, and covered separately — would be a second reason
           // for it to fail.
-          { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 10, size: "Medium" },
+          { id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 10, size: "Medium" },
           ...hostiles,
         ],
       },
@@ -739,14 +751,14 @@ describe("el área decide a quién alcanza un conjuro, no el cliente", () => {
   };
 
   const hostile = (id: string, name: string, x: number, y: number) => ({
-    id, name, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    id, name, ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
     conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
     x, y, size: "Medium",
   });
 
   /** The caster, placed far from every aim point these tests use. */
   const caster = {
-    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
     conditions: [], concentrationSpellId: null, stats: {},
     x: 10, y: 0, size: "Medium",
   };
@@ -868,7 +880,7 @@ describe("una explosión no distingue de quién es", () => {
     // Correct by the rules and until now unreachable: the client chose the set
     // and never included itself.
     const player = {
-      id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
       conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
     };
     encounterWith([player]);
@@ -884,12 +896,12 @@ describe("una explosión no distingue de quién es", () => {
 
   it("alcanza a una criatura ya a 0 pv dentro del radio", async () => {
     const downed = {
-      id: "t1", name: "Goblin Caído", isPlayer: false, hp: 0, maxHp: 10, ac: 12,
+      id: "t1", name: "Goblin Caído", ...NO_MODIFIERS, isPlayer: false, hp: 0, maxHp: 10, ac: 12,
       conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
       x: 1, y: 0, size: "Medium",
     };
     encounterWith([
-      { id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      { id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
         conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 0, size: "Medium" },
       downed,
     ]);
@@ -930,12 +942,12 @@ describe("el alcance del conjuro lo comprueba el backend", () => {
   };
 
   const caster = {
-    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
     conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
   };
 
   const hostile = (id: string, x: number, y: number) => ({
-    id, name: `Goblin ${id}`, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    id, name: `Goblin ${id}`, ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
     conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
     x, y, size: "Medium",
   });
@@ -1009,12 +1021,12 @@ describe("el alcance del conjuro lo comprueba el backend", () => {
 
 describe("un conjuro lanzador-solo no se puede redirigir a otra criatura", () => {
   const caster = {
-    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
     conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
   };
 
   const hostile = (id: string, x: number, y: number) => ({
-    id, name: `Goblin ${id}`, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    id, name: `Goblin ${id}`, ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
     conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
     x, y, size: "Medium",
   });
@@ -1109,12 +1121,12 @@ describe("un nombre que encaja con varias criaturas no las alcanza a todas", () 
   };
 
   const caster = {
-    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
     conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
   };
 
   const hostile = (id: string, x: number, y: number) => ({
-    id, name: "Goblin", isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    id, name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
     conditions: [], concentrationSpellId: null, stats: { DEX: 10 },
     x, y, size: "Medium",
   });
@@ -1167,7 +1179,7 @@ describe("sin combatiente jugador identificable, el lanzamiento se rechaza", () 
     // measure range or the area origin from. The old fallback resolved from
     // the map corner (0,0) with the range gate silently skipped.
     const combatants = [
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
         conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
     ];
     (buildCampaignContext as any).mockResolvedValue({
@@ -1191,7 +1203,7 @@ describe("sin combatiente jugador identificable, el lanzamiento se rechaza", () 
 
 describe("la linea de alcance no verificado no se escribe si el lanzamiento se rechaza despues", () => {
   const caster = {
-    id: "p1", name: "Mira", isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
     conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
   };
 
@@ -1212,7 +1224,7 @@ describe("la linea de alcance no verificado no se escribe si el lanzamiento se r
   it("un area sin punto de mira se rechaza sin dejar el aviso de alcance no verificado en el registro", async () => {
     const combatants = [
       caster,
-      { id: "t1", name: "Goblin", isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
         conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
     ];
     (buildCampaignContext as any).mockResolvedValue({

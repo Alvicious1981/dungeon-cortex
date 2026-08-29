@@ -327,3 +327,82 @@ describe("formatSurvivalHUD", () => {
     expect(below).not.toContain("since the last rest");
   });
 });
+
+describe("formatSystemPrompt — enemy damage and condition constraints", () => {
+  /**
+   * The snapshot the encounter service writes at spawn lives in its own
+   * columns; `stats` only ever holds the six ability scores. These tests
+   * pin the narrator's constraint line to the columns the combat pipeline
+   * actually resolves against, so the prompt cannot contradict the engine.
+   */
+  const enemyCombatant: CampaignContext["activeEncounter"] = {
+    id: "enc-active-01",
+    round: 2,
+    currentTurnIndex: 0,
+    totalDamageDealt: 7,
+    combatants: [
+      {
+        id: "cbt-zombie",
+        name: "Zombie",
+        isPlayer: false,
+        hp: 16,
+        maxHp: 22,
+        ac: 8,
+        initiativeTotal: 5,
+        conditions: [],
+        stats: { STR: 13, DEX: 6, CON: 16, INT: 3, WIS: 6, CHA: 5 },
+        damageImmunities: ["poison"],
+        damageResistances: ["cold", "necrotic"],
+        damageVulnerabilities: ["radiant"],
+        conditionImmunities: ["poisoned", "charmed"],
+        concentrationSpellId: null,
+        x: 1,
+        y: 1,
+        size: "Medium",
+      },
+    ],
+  };
+
+  it("states the enemy's damage immunities, resistances and vulnerabilities", () => {
+    const prompt = formatSystemPrompt({
+      ...baseContext,
+      activeEncounter: enemyCombatant,
+    });
+
+    expect(prompt).toContain("Immune: poison");
+    expect(prompt).toContain("Resist: cold, necrotic");
+    expect(prompt).toContain("Vulnerable: radiant");
+  });
+
+  it("states the enemy's condition immunities", () => {
+    const prompt = formatSystemPrompt({
+      ...baseContext,
+      activeEncounter: enemyCombatant,
+    });
+
+    expect(prompt).toContain("Cond Immune: poisoned, charmed");
+  });
+
+  it("omits the constraint line for a combatant with no modifiers", () => {
+    const prompt = formatSystemPrompt({
+      ...baseContext,
+      activeEncounter: {
+        ...enemyCombatant,
+        combatants: [
+          {
+            ...enemyCombatant.combatants[0],
+            damageImmunities: [],
+            damageResistances: [],
+            damageVulnerabilities: [],
+            conditionImmunities: [],
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain("**Zombie** (Enemy) — AC: 8, HP: 16/22");
+    expect(prompt).not.toContain("Immune:");
+    expect(prompt).not.toContain("Resist:");
+    expect(prompt).not.toContain("Vulnerable:");
+  });
+});

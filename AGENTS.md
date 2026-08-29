@@ -185,6 +185,15 @@ whatever literal the first batch happened to use.
 Anchors verified 2026-08-29. Each is the same shape as the defects above — a
 value produced with no consumer, or a consumer with no producer.
 
+Closed 2026-08-29: `lib/memory/formatter.ts` no longer casts `combatant.stats`
+to `Monster`. It reads the four snapshot columns `ContextCombatant` carries, so
+the narrator's constraint line now names immunities, resistances,
+vulnerabilities and condition immunities — the same values the combat pipeline
+resolved against. Fifty-six combatant fixtures in `tests/api/action.test.ts` and
+`tests/api/action-intent-contract.test.ts` had never carried those columns; they
+do now, because a fixture thinner than the row it stands for is how a shape
+mismatch survives a green suite.
+
 - **`lib/rules/magic.ts:396`** — `resolveSpellEffect` returns `condition: null`
   on all three exit paths, with its own TODO: *"To be extracted from SRD
   description or specialized fields."* Because of it, **no spell in the game
@@ -200,22 +209,6 @@ value produced with no consumer, or a consumer with no producer.
   source or an explicit, recorded decision about that boundary. An earlier note
   here called it the highest-value item; that was written without checking the
   spell data, and it was wrong.
-- **`lib/memory/formatter.ts:182` — the recommended next increment.**
-  `combatant.stats as unknown as Monster`, then reads `damage_immunities`,
-  `damage_resistances` and `condition_immunities` off it. `stats` holds only
-  ability scores, so those reads have always been `undefined` and the
-  narrator's constraint line has never been emitted. `m.armor_class?.[0]?.value`
-  is the same bug, masked by its `?? combatant.ac` fallback.
-  This is now a live contradiction rather than a dormant one: the engine halves
-  fire damage against a fire-resistant monster, and the narrator is not told, so
-  it can describe the blow landing devastatingly — narration contradicting a
-  resolved mechanic, which is the one thing this project forbids. It needs no
-  migration and no new producer: `ContextCombatant` already carries all four
-  columns in camelCase at the top level, so the fix is to stop reading a broken
-  cast and read them. Small enough to also add vulnerabilities, which the
-  constraint list omits. The damage-modifier spec deferred it deliberately —
-  "it changes what the AI is told, and merging a narration change into a rules
-  increment blurs both" — and that reason no longer applies.
 - **`lib/ai/tools/srd-lookup.ts:272`** — a second `queryMonsters` whose `select`
   pulls all four modifier columns and whose projection drops every one. Inert
   today: no production importer. The correctly-projecting one lives in
