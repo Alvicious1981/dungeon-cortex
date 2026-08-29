@@ -235,11 +235,21 @@ mismatch survives a green suite.
   silvered"`, `"damage from spells"`, and others) are reported unresolved
   rather than applied. `lib/rules/damage-modifiers.ts` reports them; nothing
   guesses at them.
-- **`stealthAdvantage` for the slow travel pace** (`lib/rules/wilderness.ts:275`)
-  — produced and read by nothing. It is the mirror term of the armour's Stealth
-  disadvantage, on the same roll, but it is not the same size of job: travel
-  pace is not persisted anywhere. There is no `pace` column and no field on
-  `CampaignContext`, so consuming it needs a migration and a producer first.
+- **The whole wilderness subsystem** — not a dormant value: a subsystem the
+  project switched off on purpose. `stealthAdvantage` at
+  `lib/rules/wilderness.ts:275` is one field of it, and the note that stood here
+  called it a missing `pace` column. That was wrong, and wrong in a way worth
+  recording: the pace is already read and written as `travelState.partyPace` in
+  `lib/rules/wilderness-service.ts:447`. What does not exist is the table.
+  `schema.prisma` has no `TravelState` and no `WildernessMap`; migration
+  `20260805090000` says so in its second line — "excluded pending a separate
+  5e/SRD 2014 decision" — and `resolveDb` throws `LEGACY_SUBSYSTEM_DISABLED`
+  when nothing injects a database. `buildWildernessTool` is not in
+  `buildNarratorTools` either; its only importers are two tests.
+  **Blocked by a recorded decision, not by effort.** Consuming any of it means
+  reviving two models and taking the rules decision that migration parked, which
+  is a project call and not an increment. Do not propose it as a next step
+  without that decision being made first.
 
 ## Work style
 
