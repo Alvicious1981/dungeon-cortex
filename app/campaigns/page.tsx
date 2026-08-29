@@ -11,6 +11,10 @@ export const metadata = {
   title: "Tus campañas",
 };
 
+// This page is backed by mutable per-user data. It must be rendered for each
+// request rather than frozen to whatever campaigns existed during `next build`.
+export const dynamic = "force-dynamic";
+
 // Solo los campos con contrato de listado estable. Oro, misión activa,
 // localización y tiempo jugado quedan deliberadamente fuera.
 interface CampaignSummary {
