@@ -5,7 +5,7 @@ export interface E2ECreatedRecords {
   characterId?: string;
 }
 
-function assertSafeE2EDatabase(): void {
+export function assertSafeE2EDatabase(): void {
   if (process.env.E2E_TEST_MODE !== "true") {
     throw new Error(
       "Refusing E2E database access without E2E_TEST_MODE=true."

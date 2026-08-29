@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Response } from "@playwright/test";
 
 import {
+  assertSafeE2EDatabase,
   cleanupE2ERecords,
   type E2ECreatedRecords,
 } from "./support/database";
@@ -17,6 +18,7 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
   page,
 }) => {
   test.setTimeout(90_000);
+  assertSafeE2EDatabase();
 
   const created: E2ECreatedRecords = {};
   const pageErrors: Error[] = [];
@@ -80,11 +82,15 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
     await expect(
       page.getByRole("heading", { name: "Tus campañas" })
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: campaignTitle })
-    ).toBeVisible();
 
-    const resumeLink = page.getByRole("link", { name: "Continuar campaña" });
+    const campaignCard = page.getByRole("article").filter({
+      has: page.getByRole("heading", { name: campaignTitle }),
+    });
+    await expect(campaignCard).toBeVisible();
+
+    const resumeLink = campaignCard.getByRole("link", {
+      name: "Continuar campaña",
+    });
     await expect(resumeLink).toHaveAttribute(
       "href",
       `/campaign/${created.campaignId}`
