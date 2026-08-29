@@ -211,3 +211,36 @@ describe("unresolvedCategoryLog", () => {
     ).toBeNull();
   });
 });
+
+describe("resolveWeaponAttack — qualities", () => {
+  const CHARACTER = {
+    stats: STATS,
+    characterClass: "fighter",
+    level: 3,
+    fallbackDamageType: "bludgeoning",
+  };
+
+  it("carries the quality declared on the weapon row", async () => {
+    const attack = await resolveWeaponAttack({
+      weapon: { name: "Silvered Longsword", properties: { qualities: ["silvered"] } },
+      ...CHARACTER,
+    });
+
+    expect(attack.qualities).toEqual(["silvered"]);
+  });
+
+  it("derives magical from the weapon's damage bonus", async () => {
+    const attack = await resolveWeaponAttack({
+      weapon: { name: "Blade of Bitter Resolve", properties: { damageBonus: 1 } },
+      ...CHARACTER,
+    });
+
+    expect(attack.qualities).toEqual(["magical"]);
+  });
+
+  it("gives an unarmed strike no qualities", async () => {
+    const attack = await resolveWeaponAttack({ weapon: null, ...CHARACTER });
+
+    expect(attack.qualities).toEqual([]);
+  });
+});

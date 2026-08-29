@@ -13,6 +13,7 @@
 
 import { weaponAttackBonus } from "@/lib/rules/weapon-profile";
 import { resolveWeaponProfile } from "@/lib/rules/weapon-profile-service";
+import { weaponQualitiesFor, type WeaponQuality } from "@/lib/rules/weapon-quality";
 
 const UNARMED_DICE = "1d4";
 
@@ -24,6 +25,13 @@ export interface ResolvedWeaponAttack {
   abilityUsed: "STR" | "DEX";
   proficiencyApplied: boolean;
   categoryResolved: boolean;
+  /**
+   * What the weapon is, for the damage clauses that ask: magical, silvered,
+   * adamantine, or none of them. Read here because this is already the one
+   * place that opens the weapon's `properties`, and a second reader is how two
+   * rules come to disagree about the same sword.
+   */
+  qualities: readonly WeaponQuality[];
 }
 
 /**
@@ -67,6 +75,7 @@ export async function resolveWeaponAttack(input: {
     abilityUsed: bonus.abilityUsed,
     proficiencyApplied: bonus.proficiencyApplied,
     categoryResolved: bonus.categoryResolved,
+    qualities: weapon === null ? [] : weaponQualitiesFor(properties),
   };
 }
 
