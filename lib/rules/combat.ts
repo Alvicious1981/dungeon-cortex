@@ -15,6 +15,7 @@ import { calculateDistance, type GridZone } from "./spatial";
 import {
   applyDamageModifiers,
   DAMAGE_TYPES,
+  type DamageAttack,
   type DamageModifiers,
   type DamageType,
   type ModifiedDamage,
@@ -323,6 +324,13 @@ export interface ComputeConsequencesInput {
    * combatant spawned before this shipped genuinely has.
    */
   targetModifiers?: DamageModifiers;
+  /**
+   * What struck, for the clauses that ask about it. Optional for the same
+   * reason `targetModifiers` is: every existing caller and fixture keeps
+   * compiling, and absent means a clause goes unevaluated rather than being
+   * resolved on a guess.
+   */
+  attack?: DamageAttack;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +676,7 @@ export function computeConsequences(
     attackerArmorPenalty,
     isMelee,
     targetModifiers,
+    attack,
   } = input;
 
   // 1. Resolve the attack roll.
@@ -710,6 +719,7 @@ export function computeConsequences(
       resistances: [],
       vulnerabilities: [],
     },
+    attack,
   });
 
   const hpBefore = targetHp;

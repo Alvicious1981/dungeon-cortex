@@ -1357,8 +1357,22 @@ describe("executeCombatAction — spell damage resolves against modifiers", () =
     expect(result.combatants.find((c) => c.id === target.id)!.hp).toBe(45);
   });
 
-  it("logs a clause it cannot evaluate instead of applying it", async () => {
+  it("resolves a weapon clause as inapplicable to spell damage, silently", async () => {
+    // This case used to write "not applied": the clause was unreadable, so the
+    // engine declared the gap. It is readable now, and a spell is not a weapon,
+    // so the answer is "does not apply" — a resolution, not a refusal. Declaring
+    // a refusal that no longer happened would be its own kind of lie.
     const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
+    const target = { ...enemyFixture(), hp: 50, damageResistances: [clause] };
+    const result = await castFireballAt(target, { rolledDamage: 10 });
+
+    expect(result.combatants.find((c) => c.id === target.id)!.hp).toBe(40);
+    expect(systemLogLines(result).some((line) => line.includes("not applied"))).toBe(false);
+  });
+
+  it("still logs a wording the engine cannot read", async () => {
+    // The declared-refusal guarantee survives for everything outside the table.
+    const clause = "piercing from magic weapons wielded by good creatures";
     const target = { ...enemyFixture(), hp: 50, damageResistances: [clause] };
     const result = await castFireballAt(target, { rolledDamage: 10 });
 

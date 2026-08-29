@@ -229,23 +229,33 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(consequences?.[0]?.attackModifier).toBe(4);
     });
 
-    it("declares an unresolvable damage-resistance clause instead of applying it silently", async () => {
-      // The chain this covers: computeConsequences produces damageUnresolved →
-      // executeCombatAction collects it into CombatOutcome.systemLogs →
-      // the route's writeSystemLogs persists it as a system gameLog row. An
-      // assertion on outcome.systemLogs alone would stop one layer short of
-      // proving the player is actually told anything.
+    /**
+     * How much damage the target actually took, read off the hp the route
+     * wrote. Asserting the write rather than an intermediate value is what
+     * makes this cover the whole chain: resolveWeaponAttack reads the weapon's
+     * qualities, the route puts them on the payload, the pipeline forwards them
+     * and the damage rule decides with them.
+     */
+    const damageWrittenFor = (targetId: string, startingHp: number): number => {
+      const call = (prisma.combatant.update as any).mock.calls.find(
+        ([args]: [{ where: { id: string }; data: { hp?: number } }]) =>
+          args.where.id === targetId && typeof args.data.hp === "number",
+      );
+      if (!call) throw new Error(`No hp write for ${targetId}`);
+      return startingHp - call[0].data.hp;
+    };
+
+    it("halves the damage of a mundane weapon against the clause, and says nothing", async () => {
+      // The clause used to be unreadable, so the route declared the gap and paid
+      // full damage. It is readable now and the Longsword fixture is mundane, so
+      // the resistance applies — and a refusal that no longer happens must not
+      // be logged as though it did.
       //
-      // `unresolvedModifierLog` only fires when damage > 0 (lib/rules/damage-
-      // modifiers.ts), so this assertion depends on the attack actually
-      // landing. `resolveAttackRoll` is re-exported by `@/lib/rules/combat`
-      // but called internally by `computeConsequences` as a local reference,
-      // so mocking the export does not reach it — the real d20 roll comes
-      // from `Math.random()` and is otherwise left to chance. Pin it to a
-      // natural 10 (neither a fumble nor a crit) so the attack reliably
-      // beats this target's AC 10.
+      // `resolveAttackRoll` is called internally by `computeConsequences` as a
+      // local reference, so mocking the export does not reach it. Pin the d20 to
+      // a natural 10 — neither fumble nor crit — so the attack beats AC 10.
       const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
-      const resistant = { ...hostile, damageResistances: [clause] };
+      const resistant = { ...hostile, hp: 100, maxHp: 100, damageResistances: [clause] };
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resistant]));
       (prisma.combatant.findMany as any).mockResolvedValue([hero, resistant]);
       const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.45);
@@ -254,7 +264,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
         const res = await attackWith({}, { targetIds: ["t1"] });
 
         expect(res.status).toBe(200);
-        expect(prisma.gameLog.create).toHaveBeenCalledWith(
+        expect(prisma.gameLog.create).not.toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               role: "system",
@@ -262,6 +272,71 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
             }),
           })
         );
+        expect(damageWrittenFor("t1", 100)).toBeGreaterThan(0);
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
+    it("pays a magic weapon in full against the same clause", async () => {
+      // The pair that proves the quality crossed every layer. Both weapons roll
+      // the same die and carry no damage bonus — the magic one *declares*
+      // itself magical rather than deriving it from a `+1`, because a bonus
+      // would raise the damage on its own and the comparison would pass with
+      // the quality never leaving the route. Same clause, same pinned roll,
+      // same target: the only difference left is whether the resistance applied.
+      const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
+
+      const damageWith = async (properties: Record<string, unknown>): Promise<number> => {
+        vi.clearAllMocks();
+        (getAuthUser as any).mockResolvedValue(mockUser);
+        (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+        (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+        (prisma.srdItem.findMany as any).mockResolvedValue([
+          {
+            id: "longsword",
+            name: "Longsword",
+            data: {
+              weapon_category: "Martial",
+              weapon_range: "Melee",
+              damage: { damage_dice: "1d8", damage_type: { name: "Slashing" } },
+              properties: [{ index: "versatile", name: "Versatile", url: "" }],
+            },
+          },
+        ]);
+
+        const resistant = { ...hostile, hp: 100, maxHp: 100, damageResistances: [clause] };
+        const base = contextWith([hero, resistant]);
+        (buildCampaignContext as any).mockResolvedValue({
+          ...base,
+          character: {
+            ...base.character,
+            inventory: [
+              {
+                id: "w1",
+                name: "Longsword",
+                type: "weapon",
+                equippedSlot: "MAIN_HAND",
+                properties,
+              },
+            ],
+          },
+        });
+        (prisma.combatant.findMany as any).mockResolvedValue([hero, resistant]);
+
+        const res = await attackWith({}, { targetIds: ["t1"] });
+        expect(res.status).toBe(200);
+        return damageWrittenFor("t1", 100);
+      };
+
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+      try {
+        const mundane = await damageWith({});
+        const magical = await damageWith({ qualities: ["magical"] });
+
+        expect(mundane).toBeGreaterThan(0);
+        expect(magical).toBe(mundane * 2);
       } finally {
         randomSpy.mockRestore();
       }

@@ -4,6 +4,7 @@ import { computeConsequences, type EncounterSnapshot } from "@/lib/rules/combat"
 import { executeCombatAction } from "@/lib/rules/combat-pipeline";
 import type { CombatActionPayload, PipelineCombatant } from "@/lib/rules/combat-pipeline";
 import type { DamageModifiers, DamageType } from "@/lib/rules/damage-modifiers";
+import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { buildEnemy, buildEncounter, buildMockTx, buildPlayer } from "./combat-pipeline-fixtures";
 
 /**
@@ -167,4 +168,56 @@ describe("both damage paths resolve modifiers identically", () => {
       expect(weaponPath).toBe(spellPath);
     });
   }
+});
+
+describe("a weapon's quality reaches the damage the pipeline writes", () => {
+  const WEREWOLF_CLAUSE =
+    "bludgeoning, piercing, and slashing from nonmagical weapons that aren't silvered";
+
+  afterEach(() => vi.restoreAllMocks());
+
+  async function damageAfterAttack(qualities: readonly WeaponQuality[]): Promise<number> {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    const target = buildEnemy({
+      id: "wolf",
+      name: "Werewolf",
+      hp: 999,
+      maxHp: 999,
+      ac: 1,
+      damageImmunities: [WEREWOLF_CLAUSE],
+    });
+
+    const outcome = await executeCombatAction(
+      {
+        actionType: "attack",
+        encounter: buildEncounter([buildPlayer({ id: "pc1" }), target]),
+        actorId: "pc1",
+        actorName: "Kara",
+        actorConditions: [],
+        targetCombatants: [target],
+        weaponName: "Longsword",
+        weaponDice: "0d1",
+        damageType: "slashing",
+        attackModifier: 100,
+        flatDamageBonus: 12,
+        weaponQualities: qualities,
+      },
+      buildMockTx(),
+    );
+
+    return outcome.totalDamageDealt;
+  }
+
+  it("pays nothing through a werewolf's hide with a mundane blade", async () => {
+    expect(await damageAfterAttack([])).toBe(0);
+  });
+
+  it("cuts through with a silvered one", async () => {
+    expect(await damageAfterAttack(["silvered"])).toBe(12);
+  });
+
+  it("cuts through with a magic one", async () => {
+    expect(await damageAfterAttack(["magical"])).toBe(12);
+  });
 });

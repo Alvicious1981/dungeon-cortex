@@ -31,6 +31,7 @@ import {
   type ModifiedDamage,
 } from "@/lib/rules/damage-modifiers";
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
+import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 
 export interface PipelineCombatant {
   id: string;
@@ -92,6 +93,8 @@ export interface CombatActionPayload {
   damageType?: DamageType;
   attackModifier?: number;
   flatDamageBonus?: number;
+  /** The striking weapon's SRD qualities. Absent for an unarmed or unknown weapon. */
+  weaponQualities?: readonly WeaponQuality[];
 
   // Spell data
   spellName?: string;
@@ -358,6 +361,9 @@ export async function executeCombatAction(
           resistances: target.damageResistances ?? [],
           vulnerabilities: target.damageVulnerabilities ?? [],
         },
+        attack: payload.weaponQualities
+          ? { kind: "weapon", qualities: payload.weaponQualities }
+          : undefined,
       });
 
       damage = consequencesPayload.combat_facts.damage;
@@ -401,6 +407,11 @@ export async function executeCombatAction(
           resistances: target.damageResistances ?? [],
           vulnerabilities: target.damageVulnerabilities ?? [],
         },
+        // A clause about "nonmagical weapons" does not reach spell damage, and
+        // saying so here is what resolves it instead of reporting it unread.
+        // It does not resolve the separate "damage from spells" clause, which
+        // the table deliberately does not know.
+        attack: { kind: "spell", qualities: [] },
       });
 
       damage = modified.damage;

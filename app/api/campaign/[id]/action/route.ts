@@ -314,6 +314,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           damageType: attack.damageType as DamageType,
           attackModifier: attack.attackModifier,
           flatDamageBonus: attack.flatDamageBonus,
+          weaponQualities: attack.qualities,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
 
@@ -1104,6 +1105,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           damageType: attack.damageType as DamageType,
           attackModifier: attack.attackModifier,
           flatDamageBonus: attack.flatDamageBonus,
+          weaponQualities: attack.qualities,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
 

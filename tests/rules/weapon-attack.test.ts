@@ -179,6 +179,7 @@ describe("unresolvedCategoryLog", () => {
     abilityUsed: "STR" as const,
     proficiencyApplied: true,
     categoryResolved: true,
+    qualities: [],
   };
 
   it("says nothing when the category resolved", () => {
