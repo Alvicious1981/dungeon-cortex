@@ -28,6 +28,7 @@ import {
 } from "@/lib/rules/armor-proficiency";
 import { slotFor } from "@/lib/rules/equipment-slot";
 import { abilityCheckAdvantageFrom } from "@/lib/rules/item-effects";
+import { stealthDisadvantageFor } from "@/lib/rules/armor-stealth";
 import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
@@ -478,6 +479,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const armorDisadvantage =
         armorPenalty.applies && penalisedByArmor(intent.skill);
 
+      // SRD: armour marked "Stealth: Disadvantage" costs its wearer the Stealth
+      // check, whether or not they are proficient with it — a different rule
+      // from the one above, which is why it is a second term and not a widening
+      // of the first. A proficient fighter in chain mail takes this one alone.
+      const stealthDisadvantage = stealthDisadvantageFor({
+        inventory: charData.inventory,
+        skill: intent.skill,
+      });
+
       // A worn item can grant advantage. Passed beside the condition result
       // rather than folded into it for the same reason the armour penalty is:
       // an equipped item is not an SRD condition, and a CONDITION_REGISTRY
@@ -534,7 +544,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           skill: intent.skill,
           band: intent.band,
           advantage: advantage || itemAdvantage,
-          disadvantage: disadvantage || armorDisadvantage,
+          disadvantage: disadvantage || armorDisadvantage || stealthDisadvantage,
           ...(opposedBy && opponents.length > 0
             ? { opposition: { opponents, skills: opposedBy.skills } }
             : {}),

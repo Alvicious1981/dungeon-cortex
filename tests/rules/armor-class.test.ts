@@ -29,6 +29,7 @@ describe("readArmorProfile", () => {
       declaredAddsDex: true,
       declaredMaxDexBonus: 2,
       bonusAC: null,
+      stealthDisadvantage: null,
     });
   });
 
@@ -42,6 +43,7 @@ describe("readArmorProfile", () => {
       declaredAddsDex: null,
       declaredMaxDexBonus: null,
       bonusAC: null,
+      stealthDisadvantage: null,
     });
   });
 

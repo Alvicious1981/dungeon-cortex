@@ -1455,3 +1455,61 @@ describe("un objeto equipado puede dar ventaja en una prueba", () => {
     expect(payload.rollMode).toBe("normal");
   });
 });
+
+describe("la armadura pesada cuesta la tirada de Sigilo", () => {
+  // `stealthDisadvantage` lo escribían dos productores — la proyección SRD y
+  // `addItemToInventory` — y no lo leía ninguna regla, así que la placa más
+  // pesada del juego se escondía igual que un pícaro desnudo.
+  //
+  // La portadora es guerrera, competente con la pesada, para que la desventaja
+  // que se prueba aquí sea la del flag y no la de competencia: una maga con la
+  // misma cota ya sale con desventaja por otro motivo, y el test no distinguiría.
+  const COTA_SIGILOSA = [
+    {
+      id: "mail",
+      name: "Chain Mail",
+      type: "armor",
+      quantity: 1,
+      properties: {
+        baseAC: 16,
+        armorClass: "heavy",
+        addDexModifier: false,
+        strengthRequirement: 13,
+        stealthDisadvantage: true,
+      },
+      equippedSlot: "ARMOR",
+    },
+  ];
+
+  const guerreraCon = (inventory: unknown[]) =>
+    contextFor({ class: "fighter", inventory });
+
+  it("esconderse con la cota puesta sale con desventaja", async () => {
+    (buildCampaignContext as any).mockResolvedValue(guerreraCon(COTA_SIGILOSA));
+
+    const { frames } = await post("I hide behind the crates");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.skill).toBe("Stealth");
+    expect(payload.rollMode).toBe("disadvantage");
+  });
+
+  it("la misma cota no toca una prueba que no es de Sigilo", async () => {
+    (buildCampaignContext as any).mockResolvedValue(guerreraCon(COTA_SIGILOSA));
+
+    const { frames } = await post("I search the room");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.skill).toBe("Investigation");
+    expect(payload.rollMode).toBe("normal");
+  });
+
+  it("la misma guerrera sin la cota se esconde con normalidad", async () => {
+    (buildCampaignContext as any).mockResolvedValue(guerreraCon([]));
+
+    const { frames } = await post("I hide behind the crates");
+    const payload = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED").e.payload;
+
+    expect(payload.rollMode).toBe("normal");
+  });
+});

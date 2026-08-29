@@ -51,6 +51,13 @@ export interface ArmorProfile {
    * would orphan every persisted row that carries one.
    */
   bonusAC: number | null;
+  /**
+   * Whether wearing the row imposes disadvantage on Stealth, or null when the
+   * row does not say. Null rather than false for the reason the whole profile
+   * reports absence: seven SRD armours declare it, and a row written before the
+   * key existed is silent, not innocent.
+   */
+  stealthDisadvantage: boolean | null;
 }
 
 export interface ArmorClassResult {
@@ -100,6 +107,8 @@ export function readArmorProfile(properties: unknown): ArmorProfile {
       typeof root?.addDexModifier === "boolean" ? root.addDexModifier : null,
     declaredMaxDexBonus: num(root?.maxDexBonus),
     bonusAC: num(root?.ac_bonus),
+    stealthDisadvantage:
+      typeof root?.stealthDisadvantage === "boolean" ? root.stealthDisadvantage : null,
   };
 }
 

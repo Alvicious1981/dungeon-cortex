@@ -185,6 +185,15 @@ whatever literal the first batch happened to use.
 Anchors verified 2026-08-29. Each is the same shape as the defects above — a
 value produced with no consumer, or a consumer with no producer.
 
+Closed 2026-08-29: armour marked "Stealth: Disadvantage" now costs the wearer
+the roll. `stealthDisadvantage` had two producers — `projectSrdItem` and
+`addItemToInventory` — and no mechanical reader, so the heaviest plate in the
+game rolled Stealth like a rogue in nothing. `lib/rules/armor-stealth.ts` reads
+it through `selectBodyArmor`, the selector the proficiency rule already asks, and
+enters the roll as a third term beside the armour penalty. The `ac_bonus` bullet
+that stood here was stale in the other direction: `lib/rules/armor-class.ts:102`
+has consumed it since `39365f8`, and the note outlived the fix.
+
 Closed 2026-08-29: `lib/memory/formatter.ts` no longer casts `combatant.stats`
 to `Monster`. It reads the four snapshot columns `ContextCombatant` carries, so
 the narrator's constraint line now names immunities, resistances,
@@ -218,8 +227,11 @@ mismatch survives a green suite.
   silvered"`, `"damage from spells"`, and others) are reported unresolved
   rather than applied. `lib/rules/damage-modifiers.ts` reports them; nothing
   guesses at them.
-- **`ac_bonus` on three loot rows** and **`stealthDisadvantage`** — read by no
-  mechanical rule. The latter has a narration-only reader.
+- **`stealthAdvantage` for the slow travel pace** (`lib/rules/wilderness.ts:275`)
+  — produced and read by nothing. It is the mirror term of the armour's Stealth
+  disadvantage, on the same roll, but it is not the same size of job: travel
+  pace is not persisted anywhere. There is no `pace` column and no field on
+  `CampaignContext`, so consuming it needs a migration and a producer first.
 
 ## Work style
 
