@@ -57,7 +57,7 @@ Before running a script, confirm it exists in `package.json`.
 Use the smallest relevant check:
 
 - `pnpm typecheck` — TypeScript and contract changes.
-- `pnpm test` — rules, backend, utilities, and regression checks.
+- `pnpm exec vitest run --maxWorkers=2` — rules, backend, utilities, and regression checks. **Use this, not `pnpm test`.** On this machine plain `pnpm test` produces vitest worker-startup timeouts that read as test failures; capping the workers removes them. A test that *times out* is usually machine contention — re-run that file alone before concluding anything. A test that fails an *assertion* is not contention.
 - `pnpm build` — broad app, route, or framework changes.
 - `pnpm lint` — lint checks when relevant.
 - `pnpm test:e2e` — UI flow or end-to-end behavior.
@@ -69,7 +69,7 @@ Use the smallest relevant check:
 | --- | --- |
 | Documentation only | Manual review; `pnpm check-retro` if rules terminology changed. |
 | TypeScript types or shared contracts | `pnpm typecheck` |
-| Rules/backend utilities | `pnpm test` |
+| Rules/backend utilities | `pnpm exec vitest run --maxWorkers=2` |
 | API routes or app-wide changes | `pnpm typecheck` and `pnpm build` |
 | UI flow changes | `pnpm test:e2e` when feasible |
 | D&D canon/rules terminology | `pnpm check-retro` |
@@ -87,6 +87,35 @@ Ask before running commands that:
 - change deployment configuration,
 - push to GitHub,
 - deploy the app.
+
+### Migrations: write them, never run them
+
+The database holds a real save — one user, one character, one campaign. Write
+the migration file by hand and leave it unapplied; the maintainer applies it.
+`prisma generate` is the exception and is required: it regenerates the client
+types from `schema.prisma` without touching the database, which is what lets a
+branch compile and its tests pass while the save stays untouched.
+
+Follow the shape of `prisma/migrations/20260814120000_add_combatant_xp_value_snapshot/`:
+an atomic `DO $tag$` block, `ADD COLUMN IF NOT EXISTS`, and commentary
+explaining the choices. On whether to give a new column a `DEFAULT`, the
+question is whether the default is a *claim*: `xpValue` was left nullable
+because `0` is a legitimate authorised award and a default would have made
+legacy rows indistinguishable from it, while the damage-modifier columns took
+`DEFAULT '{}'` because an empty array and "has no modifiers" are the same fact.
+
+**State the deploy ordering in the handover, every time.** A new column that
+`lib/memory/context.ts` selects is selected unconditionally, and
+`buildCampaignContext` runs on every campaign action — so merging before the
+migration is applied does not degrade the game, it stops it. The suite cannot
+catch this, because every test fabricates its rows.
+
+### Merging convention
+
+Squash. Every PR since #52 lands as a single commit with a `(#NN)` suffix;
+the 49 merge commits with two parents in the history all predate that. When
+merging locally without a PR: squash-merge into `master`, **run the suite on
+the merged result rather than only on the branch**, then push.
 
 ## Dormant defects
 
@@ -115,6 +144,71 @@ So, when inspecting:
 - `vi.mock` of a module does not intercept calls that module makes to itself. Mocking `resolveAttackRoll` does not affect `lib/rules/combat.ts` calling it internally, so an assertion on the mock silently proves nothing.
 - Before trusting a field, check the data. A read-only query against the real table settles in seconds what a type annotation only claims.
 - Re-run the verification immediately before a destructive step, not once at the start of the investigation. The check that matters is the one whose result is still true when the files are deleted.
+
+### A test that cannot fail is worse than no test
+
+Two shapes of this reached `master` before review caught them, both written
+while fixing dormant defects:
+
+- `expect(outcome.consequenceDetails?.[0]?.combat_facts.status_applied ?? []).toEqual([])`
+  — for a `cast_spell` action that array is always empty, so `[0]` is
+  `undefined` and `?? []` makes the assertion unconditionally true. It passed
+  identically on `master` with the bug still in place.
+- Four assertions each checking `[]` against four different columns. Every one
+  passed with every column's projection line deleted.
+
+**Falsify the test, don't just watch it go green.** Break the line it guards,
+confirm red, restore. Where a test guards several things, break each one
+separately — a test that only fails when all of them are gone is guarding one
+thing, not several.
+
+### Forcing an attack to land
+
+`hit: critical || (!fumble && total >= targetAC)` in `lib/rules/combat.ts` —
+**a natural 1 misses regardless of the attack modifier.** Setting
+`attackModifier: 100` against `targetAC: 1` does not force a hit; it forces one
+nineteen times in twenty, and the twentieth fumbles. Eight tests shipped with
+that assumption and failed roughly a third of full-suite runs between them.
+
+Pin the die instead: `vi.spyOn(Math, "random").mockReturnValue(0.45)` gives a
+natural 10 — neither a fumble nor a critical, which would double the damage
+dice. Restore with `vi.restoreAllMocks()` or a `finally`; `vi.clearAllMocks()`
+clears call history without restoring a spy's implementation, so a leaked
+`Math.random` spy silently affects every later test in the file.
+
+The scoping lesson cost a second round: find these by asking "does this
+assertion depend on the attack landing or missing?", not by grepping for
+whatever literal the first batch happened to use.
+
+### Known dormant values, still open
+
+Anchors verified 2026-08-29. Each is the same shape as the defects above — a
+value produced with no consumer, or a consumer with no producer.
+
+- **`lib/rules/magic.ts:396`** — `resolveSpellEffect` returns `condition: null`
+  on all three exit paths, with its own TODO: *"To be extracted from SRD
+  description or specialized fields."* Because of it, **no spell in the game
+  applies any condition.** `CONDITION_REGISTRY`, `applyCondition`,
+  `lib/rules/condition-immunity.ts` and `Combatant.conditionImmunities` are all
+  built, wired and unreachable, waiting on this one field. This is the highest-
+  value item on the list: it turns correct, tested, inert code into play.
+- **`lib/memory/formatter.ts:182`** — `combatant.stats as unknown as Monster`,
+  then reads `damage_immunities`, `damage_resistances` and
+  `condition_immunities` off it. `stats` holds only ability scores, so those
+  reads have always been `undefined` and the narrator's constraint line has
+  never been emitted. The data now exists on the combatant row under camelCase
+  names; this reads snake_case off a bad cast.
+- **`lib/ai/tools/srd-lookup.ts:272`** — a second `queryMonsters` whose `select`
+  pulls all four modifier columns and whose projection drops every one. Inert
+  today: no production importer. The correctly-projecting one lives in
+  `lib/rules/srd-monster-lookup.ts`.
+- **Magical, silvered and adamantine weapons** — no notion of them exists, so
+  six shapes of SRD damage clause (`"… from nonmagical weapons that aren't
+  silvered"`, `"damage from spells"`, and others) are reported unresolved
+  rather than applied. `lib/rules/damage-modifiers.ts` reports them; nothing
+  guesses at them.
+- **`ac_bonus` on three loot rows** and **`stealthDisadvantage`** — read by no
+  mechanical rule. The latter has a narration-only reader.
 
 ## Work style
 
