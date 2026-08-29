@@ -190,14 +190,32 @@ value produced with no consumer, or a consumer with no producer.
   description or specialized fields."* Because of it, **no spell in the game
   applies any condition.** `CONDITION_REGISTRY`, `applyCondition`,
   `lib/rules/condition-immunity.ts` and `Combatant.conditionImmunities` are all
-  built, wired and unreachable, waiting on this one field. This is the highest-
-  value item on the list: it turns correct, tested, inert code into play.
-- **`lib/memory/formatter.ts:182`** — `combatant.stats as unknown as Monster`,
-  then reads `damage_immunities`, `damage_resistances` and
-  `condition_immunities` off it. `stats` holds only ability scores, so those
-  reads have always been `undefined` and the narrator's constraint line has
-  never been emitted. The data now exists on the combatant row under camelCase
-  names; this reads snake_case off a bad cast.
+  built, wired and unreachable, waiting on this one field.
+  **Blocked by the data, not by effort — do not pick this up expecting a small
+  increment.** `data/srd-es/spells.json` has no structured condition anywhere:
+  zero `/api/conditions` references, zero `condition*` keys, and the word
+  "charmed" appears exactly once in the whole file, inside a `desc`. Extracting
+  a condition from a spell therefore means deriving a mechanical outcome from
+  prose, which this project does not do. It needs either a new structured
+  source or an explicit, recorded decision about that boundary. An earlier note
+  here called it the highest-value item; that was written without checking the
+  spell data, and it was wrong.
+- **`lib/memory/formatter.ts:182` — the recommended next increment.**
+  `combatant.stats as unknown as Monster`, then reads `damage_immunities`,
+  `damage_resistances` and `condition_immunities` off it. `stats` holds only
+  ability scores, so those reads have always been `undefined` and the
+  narrator's constraint line has never been emitted. `m.armor_class?.[0]?.value`
+  is the same bug, masked by its `?? combatant.ac` fallback.
+  This is now a live contradiction rather than a dormant one: the engine halves
+  fire damage against a fire-resistant monster, and the narrator is not told, so
+  it can describe the blow landing devastatingly — narration contradicting a
+  resolved mechanic, which is the one thing this project forbids. It needs no
+  migration and no new producer: `ContextCombatant` already carries all four
+  columns in camelCase at the top level, so the fix is to stop reading a broken
+  cast and read them. Small enough to also add vulnerabilities, which the
+  constraint list omits. The damage-modifier spec deferred it deliberately —
+  "it changes what the AI is told, and merging a narration change into a rules
+  increment blurs both" — and that reason no longer applies.
 - **`lib/ai/tools/srd-lookup.ts:272`** — a second `queryMonsters` whose `select`
   pulls all four modifier columns and whose projection drops every one. Inert
   today: no production importer. The correctly-projecting one lives in
