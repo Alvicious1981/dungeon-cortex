@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("carga la portada y muestra la creación sin enviar datos", async ({
+test("@smoke carga la portada y muestra la creación sin enviar datos", async ({
   page,
 }) => {
   await page.goto("/");
@@ -29,7 +29,7 @@ test("carga la portada y muestra la creación sin enviar datos", async ({
   ).toBeVisible();
 });
 
-test("mantiene el onboarding usable en escritorio, portátil, tablet y móvil", async ({
+test("@smoke mantiene el onboarding usable en escritorio, portátil, tablet y móvil", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -85,7 +85,7 @@ test("mantiene el onboarding usable en escritorio, portátil, tablet y móvil", 
   }
 });
 
-test("respeta la reducción de movimiento del sistema", async ({ page }) => {
+test("@smoke respeta la reducción de movimiento del sistema", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   const transitionDuration = await page

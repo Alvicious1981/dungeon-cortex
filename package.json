@@ -12,6 +12,8 @@
     "eval:narrative": "promptfoo eval -c evals/narrative/promptfooconfig.yaml",
     "eval:narrative:view": "promptfoo view",
     "test:e2e": "playwright test",
+    "test:e2e:list": "playwright test --list",
+    "test:e2e:smoke": "playwright test --grep @smoke",
     "test:e2e:headed": "playwright test --headed",
     "seed": "tsx prisma/seed-srd.ts",
     "generate": "prisma generate",
