@@ -358,6 +358,20 @@
       },
       "valueGP": 100,
       "iconPath": "/assets/icons/items/meat.svg"
+    },
+    {
+      "name": "Silvered Hunting Sword",
+      "description": "A plain blade whose edge is inlaid with a bright, soft line of silver.",
+      "type": "weapon",
+      "properties": {
+        "damageDice": "1d8",
+        "damageType": "slashing",
+        "qualities": [
+          "silvered"
+        ]
+      },
+      "valueGP": 115,
+      "iconPath": "/assets/icons/items/broadsword.svg"
     }
   ],
   "rare": [
@@ -488,6 +502,20 @@
         "uses": 3
       },
       "valueGP": 150
+    },
+    {
+      "name": "Adamantine Warpick",
+      "description": "Head forged from a single black ingot, heavier than its size explains.",
+      "type": "weapon",
+      "properties": {
+        "damageDice": "1d8",
+        "damageType": "piercing",
+        "qualities": [
+          "adamantine"
+        ]
+      },
+      "valueGP": 500,
+      "iconPath": "/assets/icons/items/battle-axe.svg"
     }
   ],
   "very_rare": [
