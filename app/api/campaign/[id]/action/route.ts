@@ -98,6 +98,25 @@ function sseFrame(frame: ActionStreamFrame): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
 }
 
+/**
+ * Persists `CombatOutcome.systemLogs` — the declared refusals
+ * `executeCombatAction` collects for both the weapon and spell damage paths
+ * (see `unresolvedModifierLog` in `lib/rules/damage-modifiers.ts`) — the same
+ * way `categoryLog` and `unenforcedRangeLog` already reach the game log
+ * elsewhere in this route. Unlike those two, the content here is only known
+ * once `executeCombatAction` has resolved inside the transaction, so this
+ * writes through `tx` rather than the top-level `prisma` client.
+ */
+async function writeSystemLogs(
+  tx: Prisma.TransactionClient,
+  campaignId: string,
+  lines: readonly string[]
+): Promise<void> {
+  for (const content of lines) {
+    await tx.gameLog.create({ data: { campaignId, role: "system", content } });
+  }
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
@@ -296,6 +315,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           flatDamageBonus: attack.flatDamageBonus,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
+
+        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, attackOutcome.systemLogs);
 
         gameEvents.push(...attackOutcome.events);
 
@@ -865,6 +886,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           actorConcentrationSpellId: context.character.concentrationSpellId,
         }, tx as Prisma.TransactionClient);
 
+        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);
+
         gameEvents.push(...spellOutcome.events);
 
         if (context.activeEncounter) {
@@ -926,6 +949,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           healingBonus: consumableProps?.healingBonus,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
+
+        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, itemOutcome.systemLogs);
 
         gameEvents.push(...itemOutcome.events);
 
@@ -1071,6 +1096,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           flatDamageBonus: attack.flatDamageBonus,
           playerCharacterId: context.character.id,
         }, tx as Prisma.TransactionClient);
+
+        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, attackOutcome.systemLogs);
 
         gameEvents.push(...attackOutcome.events);
 

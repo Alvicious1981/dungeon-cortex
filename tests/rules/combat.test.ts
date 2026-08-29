@@ -29,6 +29,7 @@ import type {
   TensionState,
   EncounterSnapshot,
   HitLocation,
+  ComputeConsequencesInput,
 } from "@/lib/rules/combat";
 
 describe("combat rules", () => {
@@ -1006,5 +1007,126 @@ describe("computeConsequences", () => {
     expect(result.combat_facts.hp_after).toBe(0);
     expect(result.combat_facts.overkill).toBeGreaterThan(100);
     expect(result.narrative_intensity).toBe(1.0);
+  });
+});
+
+// ─── computeConsequences applies the target's damage modifiers ─────────────
+
+function consequenceInput(overrides: Partial<ComputeConsequencesInput> = {}): ComputeConsequencesInput {
+  return {
+    attacker: "PC:Kara",
+    defender: "NPC:Goblin",
+    weapon: "Longsword",
+    // 0d1 plus a flat bonus makes the damage deterministic, so these cases
+    // assert the modifier rather than the dice.
+    weaponDice: "0d1",
+    flatDamageBonus: 10,
+    attackModifier: 100,
+    damageType: "slashing",
+    targetAC: 1,
+    targetHp: 50,
+    targetMaxHp: 50,
+    targetIsPlayer: false,
+    targetIsBoss: false,
+    statusApplied: [],
+    attackerConditions: [],
+    defenderConditions: [],
+    isMelee: true,
+    encounterSnapshot: makeSnapshot(),
+    usedSenses: [],
+    zones: [],
+    ...overrides,
+  };
+}
+
+describe("computeConsequences applies the target's damage modifiers", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const NO_MODIFIERS = { immunities: [], resistances: [], vulnerabilities: [] };
+
+  it("halves a hit against a resistant target", () => {
+    // Forced hit and fixed dice: this asserts the modifier, not the roll.
+    vi.spyOn(Math, "random").mockReturnValue(0.45); // nat 10: not a fumble, not a crit
+    const result = computeConsequences({
+      ...consequenceInput(),
+      weaponDice: "0d1",
+      flatDamageBonus: 10,
+      attackModifier: 100,
+      targetAC: 1,
+      damageType: "slashing",
+      targetHp: 50,
+      targetModifiers: { ...NO_MODIFIERS, resistances: ["slashing"] },
+    });
+
+    expect(result.combat_facts.damage).toBe(5);
+    expect(result.combat_facts.hp_after).toBe(45);
+  });
+
+  it("takes an immune target to zero and leaves its hit points alone", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45); // nat 10: not a fumble, not a crit
+    const result = computeConsequences({
+      ...consequenceInput(),
+      weaponDice: "0d1",
+      flatDamageBonus: 10,
+      attackModifier: 100,
+      targetAC: 1,
+      damageType: "fire",
+      targetHp: 50,
+      targetModifiers: { ...NO_MODIFIERS, immunities: ["fire"] },
+    });
+
+    expect(result.combat_facts.damage).toBe(0);
+    expect(result.combat_facts.hp_after).toBe(50);
+  });
+
+  it("reports an unresolvable clause and applies nothing", () => {
+    const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
+    vi.spyOn(Math, "random").mockReturnValue(0.45); // nat 10: not a fumble, not a crit
+    const result = computeConsequences({
+      ...consequenceInput(),
+      weaponDice: "0d1",
+      flatDamageBonus: 10,
+      attackModifier: 100,
+      targetAC: 1,
+      damageType: "slashing",
+      targetHp: 50,
+      targetModifiers: { ...NO_MODIFIERS, resistances: [clause] },
+    });
+
+    expect(result.combat_facts.damage).toBe(10);
+    expect(result.damageUnresolved).toEqual([clause]);
+  });
+
+  it("is unchanged for a target with no modifiers", () => {
+    // The regression guard for every encounter already in flight.
+    vi.spyOn(Math, "random").mockReturnValue(0.45); // nat 10: not a fumble, not a crit
+    const result = computeConsequences({
+      ...consequenceInput(),
+      weaponDice: "0d1",
+      flatDamageBonus: 10,
+      attackModifier: 100,
+      targetAC: 1,
+      damageType: "slashing",
+      targetHp: 50,
+      targetModifiers: NO_MODIFIERS,
+    });
+
+    expect(result.combat_facts.damage).toBe(10);
+    expect(result.damageUnresolved).toEqual([]);
+  });
+
+  it("is unchanged when the caller passes no modifiers at all", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45); // nat 10: not a fumble, not a crit
+    const result = computeConsequences({
+      ...consequenceInput(),
+      weaponDice: "0d1",
+      flatDamageBonus: 10,
+      attackModifier: 100,
+      targetAC: 1,
+      damageType: "slashing",
+      targetHp: 50,
+    });
+
+    expect(result.combat_facts.damage).toBe(10);
   });
 });

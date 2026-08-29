@@ -68,6 +68,18 @@ interface CombatDb {
       select: Record<string, unknown>;
     }): Promise<CombatCampaignRecord | null>;
   };
+  /**
+   * Optional: the real `prisma` client this module defaults to has it, but
+   * the fixture doubles `tests/rules/combat-service-contract.test.ts` passes
+   * as `tx`/`db` predate `CombatOutcome.systemLogs` and don't. Writing is
+   * skipped rather than thrown on when it's absent, so this stays additive
+   * for every existing caller.
+   */
+  gameLog?: {
+    create(args: {
+      data: { campaignId: string; role: string; content: string };
+    }): Promise<unknown>;
+  };
 }
 
 export interface ResolveCombatAttackInput extends ResolveAttackInput {
@@ -217,6 +229,15 @@ export async function resolveCombatAttack(
     }),
     db as unknown as Prisma.TransactionClient
   );
+
+  // Same declared-refusal line the action route writes for the other two
+  // executeCombatAction call sites (see `writeSystemLogs` in
+  // app/api/campaign/[id]/action/route.ts) — this is the AI-tool entry point
+  // for a weapon attack, so it needs its own write rather than sharing that
+  // route's helper.
+  for (const content of attackOutcome.systemLogs) {
+    await db.gameLog?.create({ data: { campaignId: input.campaignId, role: "system", content } });
+  }
 
   const consequences = attackOutcome.consequenceDetails?.[0];
   if (!consequences) {

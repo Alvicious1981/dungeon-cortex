@@ -12,6 +12,13 @@ import type { RollResult } from "./dice";
 import { evaluateAdvantage, isKnownCondition } from "./conditions";
 
 import { calculateDistance, type GridZone } from "./spatial";
+import {
+  applyDamageModifiers,
+  DAMAGE_TYPES,
+  type DamageModifiers,
+  type DamageType,
+  type ModifiedDamage,
+} from "@/lib/rules/damage-modifiers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,16 +207,10 @@ export interface AttackSpatialContext {
   rangeInFeet: number;
 }
 
-export type DamageType =
-  | "slashing" | "piercing" | "bludgeoning"
-  | "fire" | "cold" | "lightning" | "acid" | "poison"
-  | "necrotic" | "radiant" | "psychic" | "thunder" | "force";
-
-export const DAMAGE_TYPES: DamageType[] = [
-  "slashing", "piercing", "bludgeoning",
-  "fire", "cold", "lightning", "acid", "poison",
-  "necrotic", "radiant", "psychic", "thunder", "force",
-];
+// The vocabulary moved to `lib/rules/damage-modifiers.ts`, which needs the list
+// as a value while this file needs `applyDamageModifiers` as one. Re-exported
+// here so no importer had to change.
+export { DAMAGE_TYPES, type DamageType };
 
 export type HitLocation =
   | "head" | "neck" | "shoulder" | "chest" | "abdomen"
@@ -261,6 +262,10 @@ export interface CombatConsequences {
   style_dsl: StyleDSL;
   suggested_senses: string[];
   suggested_actions: string[];
+  /** Modifier clauses the engine could not evaluate. For the system log. */
+  damageUnresolved: readonly string[];
+  /** Which rule, if any, resolved the damage. For the system log's gate. */
+  damageApplied: ModifiedDamage["applied"];
 }
 
 export interface TensionState {
@@ -312,6 +317,12 @@ export interface ComputeConsequencesInput {
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
   zones: Array<{ name: string }>;
+  /**
+   * The target's SRD damage modifiers. Optional so that every existing caller
+   * and fixture keeps compiling; absent means no modifiers, which is what a
+   * combatant spawned before this shipped genuinely has.
+   */
+  targetModifiers?: DamageModifiers;
 }
 
 // ---------------------------------------------------------------------------
@@ -656,6 +667,7 @@ export function computeConsequences(
     defenderConditions,
     attackerArmorPenalty,
     isMelee,
+    targetModifiers,
   } = input;
 
   // 1. Resolve the attack roll.
@@ -685,17 +697,31 @@ export function computeConsequences(
       hitLocation: "chest" as HitLocation, // placeholder for misses
     };
 
-  // 3. Apply damage and compute overkill.
+  // 3. Resolve the damage against what the target resists, then apply it.
+  //
+  // Between the roll and the subtraction, so that `damage` on the facts is the
+  // damage that happened. Carrying both figures would be how the narrator ends
+  // up describing the one that did not.
+  const modified = applyDamageModifiers({
+    damage,
+    damageType,
+    modifiers: targetModifiers ?? {
+      immunities: [],
+      resistances: [],
+      vulnerabilities: [],
+    },
+  });
+
   const hpBefore = targetHp;
-  const hpAfter  = Math.max(0, hpBefore - damage);
-  const overkill = computeOverkill(damage, hpBefore);
+  const hpAfter  = Math.max(0, hpBefore - modified.damage);
+  const overkill = computeOverkill(modified.damage, hpBefore);
 
   // 4. Assemble CombatFacts.
   const combat_facts: CombatFacts = {
     attacker,
     defender,
     weapon,
-    damage,
+    damage: modified.damage,
     damage_type: damageType,
     hp_before:   hpBefore,
     hp_after:    hpAfter,
@@ -729,6 +755,8 @@ export function computeConsequences(
     style_dsl,
     suggested_senses,
     suggested_actions,
+    damageUnresolved: modified.unresolved,
+    damageApplied: modified.applied,
   };
 }
 

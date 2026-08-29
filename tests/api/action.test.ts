@@ -217,6 +217,78 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(consequences?.[0]?.attackModifier).toBe(4);
     });
 
+    it("declares an unresolvable damage-resistance clause instead of applying it silently", async () => {
+      // The chain this covers: computeConsequences produces damageUnresolved →
+      // executeCombatAction collects it into CombatOutcome.systemLogs →
+      // the route's writeSystemLogs persists it as a system gameLog row. An
+      // assertion on outcome.systemLogs alone would stop one layer short of
+      // proving the player is actually told anything.
+      //
+      // `unresolvedModifierLog` only fires when damage > 0 (lib/rules/damage-
+      // modifiers.ts), so this assertion depends on the attack actually
+      // landing. `resolveAttackRoll` is re-exported by `@/lib/rules/combat`
+      // but called internally by `computeConsequences` as a local reference,
+      // so mocking the export does not reach it — the real d20 roll comes
+      // from `Math.random()` and is otherwise left to chance. Pin it to a
+      // natural 10 (neither a fumble nor a crit) so the attack reliably
+      // beats this target's AC 10.
+      const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
+      const resistant = { ...hostile, damageResistances: [clause] };
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resistant]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, resistant]);
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+      try {
+        const res = await attackWith({}, { targetIds: ["t1"] });
+
+        expect(res.status).toBe(200);
+        expect(prisma.gameLog.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              role: "system",
+              content: expect.stringContaining("not applied"),
+            }),
+          })
+        );
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
+    it("stays silent about an unresolvable clause when the attack missed", async () => {
+      // A miss carries no damage, so "full damage was applied" would be a
+      // false claim persisted into the log the narrator reads. Same chain as
+      // the test above, but no gameLog.create for a system row should fire.
+      //
+      // `resolveAttackRoll` is re-exported by `@/lib/rules/combat` but called
+      // internally by `computeConsequences` as a local reference, so mocking
+      // the export does not reach it. A natural 1 is a guaranteed miss
+      // regardless of AC (`hit: critical || (!fumble && total >= targetAC)`
+      // in lib/rules/combat.ts), so forcing the d20 to its lowest face is the
+      // deterministic way to produce one.
+      const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
+      const resistant = { ...hostile, damageResistances: [clause] };
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resistant]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, resistant]);
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+
+      try {
+        const res = await attackWith({}, { targetIds: ["t1"] });
+
+        expect(res.status).toBe(200);
+        expect(prisma.gameLog.create).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              role: "system",
+              content: expect.stringContaining("not applied"),
+            }),
+          })
+        );
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
     it("rejects a targetIds selection naming more than one creature", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, { ...hostile, id: "t3" }]));
 

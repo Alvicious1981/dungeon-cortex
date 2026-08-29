@@ -271,6 +271,11 @@ export async function spawnCombatEncounter(
         // read real numbers. Without this the column kept its {} default and
         // every such rule silently saw 10 for everyone.
         stats,
+        // Explicit, not defaulted: a rule that reads `.length` must never meet
+        // undefined. No rule in this codebase grants a player resistance.
+        damageImmunities: [],
+        damageResistances: [],
+        damageVulnerabilities: [],
         // The player is never a source of the combat XP award (§7 of the decision only
         // sums isPlayer === false combatants), so it never carries an authorized value.
         xpValue: null,
@@ -287,6 +292,12 @@ export async function spawnCombatEncounter(
       ac: acFromMonsterData(buildMonsterRawData(monster)),
       initiativeTotal: entry.initiative,
       stats: monsterAbilityScores(monster),
+      // Snapshotted rather than looked up at damage time: Combatant has no
+      // reference back to SrdMonster, only a name, and resolving by name in the
+      // combat path would be a guess dressed as a query.
+      damageImmunities: monster.damage_immunities ?? [],
+      damageResistances: monster.damage_resistances ?? [],
+      damageVulnerabilities: monster.damage_vulnerabilities ?? [],
       // Backend-authorized SRD figure already resolved in memory by queryMonsters;
       // never xpForCR/adjustedXP/encounterMultiplier.
       xpValue: monster.xp ?? null,

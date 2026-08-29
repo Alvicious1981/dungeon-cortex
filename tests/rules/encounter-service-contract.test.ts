@@ -146,6 +146,9 @@ describe("spawnCombatEncounter service contract", () => {
               ac: 13,
               initiativeTotal: 21,
               stats: { DEX: 14 },
+              damageImmunities: [],
+              damageResistances: [],
+              damageVulnerabilities: [],
               xpValue: null,
             },
             {
@@ -156,6 +159,9 @@ describe("spawnCombatEncounter service contract", () => {
               ac: 13,
               initiativeTotal: 6,
               stats: { STR: 10, DEX: 12, CON: 10, INT: 10, WIS: 10, CHA: 10 },
+              damageImmunities: [],
+              damageResistances: [],
+              damageVulnerabilities: [],
               xpValue: null,
             },
           ],
@@ -280,5 +286,83 @@ describe("spawnCombatEncounter service contract", () => {
       error: "No suitable monsters found for this encounter configuration.",
     });
     expect(db.encounter.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("damage modifiers reach the combatant", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("copies all three arrays from the monster onto the spawned combatant", async () => {
+    // The monster the fixture spawns must carry modifiers for this to mean
+    // anything; assert that first so a fixture change cannot make this vacuous.
+    const fireElemental: Monster = {
+      index: "fire-elemental",
+      name: "Fire Elemental",
+      hit_points: 102,
+      armor_class: [{ type: "natural", value: 13 }],
+      type: "elemental",
+      challenge_rating: 5,
+      dexterity: 17,
+      damage_immunities: ["fire", "poison"],
+      damage_resistances: [
+        "bludgeoning, piercing, and slashing from nonmagical weapons",
+      ],
+      damage_vulnerabilities: [],
+    };
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [fireElemental]);
+    mockRandom([0.9, 0.2]);
+
+    await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 5,
+      theme: "elemental",
+      db,
+      queryMonsters,
+    });
+
+    const call = (db.encounter.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const combatants = call.data.combatants.create as Array<{
+      isPlayer: boolean;
+      damageImmunities: string[];
+      damageResistances: string[];
+      damageVulnerabilities: string[];
+    }>;
+    const enemy = combatants.find((c) => !c.isPlayer)!;
+
+    expect(enemy.damageImmunities).toEqual(["fire", "poison"]);
+    expect(enemy.damageResistances).toEqual([
+      "bludgeoning, piercing, and slashing from nonmagical weapons",
+    ]);
+    expect(enemy.damageVulnerabilities).toEqual([]);
+  });
+
+  it("gives the player three empty arrays, never undefined", async () => {
+    // A rule reading `undefined.length` is the failure this prevents. Nothing
+    // in this codebase grants a player resistance, so empty is the truth.
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [wolf]);
+    mockRandom([0.9, 0.2]);
+
+    await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      theme: "beast",
+      db,
+      queryMonsters,
+    });
+
+    const call = (db.encounter.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const combatants = call.data.combatants.create as Array<{
+      isPlayer: boolean;
+      damageImmunities: string[];
+      damageResistances: string[];
+      damageVulnerabilities: string[];
+    }>;
+    const player = combatants.find((c) => c.isPlayer)!;
+
+    expect(player.damageImmunities).toEqual([]);
+    expect(player.damageResistances).toEqual([]);
+    expect(player.damageVulnerabilities).toEqual([]);
   });
 });

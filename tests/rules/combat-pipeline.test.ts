@@ -30,6 +30,12 @@ import type {
 } from "@/lib/rules/combat-pipeline";
 import type { Prisma } from "@prisma/client";
 import type { SingleTargetConsequence } from "@/lib/events/game-events";
+import {
+  buildEncounter,
+  buildEnemy,
+  buildMockTx,
+  buildPlayer,
+} from "./combat-pipeline-fixtures";
 
 // ---------------------------------------------------------------------------
 // Test utilities
@@ -54,77 +60,6 @@ import type { SingleTargetConsequence } from "@/lib/events/game-events";
 function mockRandom(values: number[]): void {
   let i = 0;
   vi.spyOn(Math, "random").mockImplementation(() => values[i++] ?? 0.5);
-}
-
-/** Build a minimal mock Prisma.TransactionClient with vi.fn() on every method
- *  used by the pipeline. Override characterHp / characterMaxHp to test healing. */
-function buildMockTx(opts: { characterHp?: number; characterMaxHp?: number } = {}) {
-  const { characterHp = 20, characterMaxHp = 20 } = opts;
-  return {
-    character: {
-      update: vi.fn().mockResolvedValue({}),
-      findUnique: vi.fn().mockResolvedValue({
-        id: "char-1",
-        hp: characterHp,
-        maxHp: characterMaxHp,
-        concentrationSpellId: null,
-      }),
-    },
-    combatant: {
-      update: vi.fn().mockResolvedValue({}),
-      findMany: vi.fn().mockResolvedValue([]),
-    },
-    encounter: {
-      update: vi.fn().mockResolvedValue({}),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findUnique: vi.fn().mockResolvedValue({ campaign: { characterId: "char-1" } }),
-    },
-    inventoryItem: {
-      delete: vi.fn().mockResolvedValue({}),
-      update: vi.fn().mockResolvedValue({}),
-    },
-  } as unknown as Prisma.TransactionClient;
-}
-
-function buildEnemy(overrides: Partial<PipelineCombatant> = {}): PipelineCombatant {
-  return {
-    id: "enemy-1",
-    name: "Goblin",
-    isPlayer: false,
-    hp: 15,
-    maxHp: 15,
-    ac: 10,
-    conditions: [],
-    stats: { STR: 8, DEX: 10, CON: 10, INT: 8, WIS: 8, CHA: 8 },
-    concentrationSpellId: null,
-    ...overrides,
-  };
-}
-
-function buildPlayer(overrides: Partial<PipelineCombatant> = {}): PipelineCombatant {
-  return {
-    id: "player-1",
-    name: "Aldric",
-    isPlayer: true,
-    hp: 20,
-    maxHp: 20,
-    ac: 15,
-    conditions: [],
-    stats: { STR: 16, DEX: 12, CON: 10, INT: 10, WIS: 10, CHA: 8 },
-    concentrationSpellId: null,
-    ...overrides,
-  };
-}
-
-function buildEncounter(combatants: PipelineCombatant[]): PipelineEncounterState {
-  return {
-    id: "enc-1",
-    round: 1,
-    currentTurnIndex: 0,
-    totalDamageDealt: 0,
-    status: "active",
-    combatants,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1352,5 +1287,82 @@ describe("finalizeEncounterTurn", () => {
     });
 
     expect(result.events).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeCombatAction — spell damage against the target's modifiers
+// ---------------------------------------------------------------------------
+
+/** A resistant/vulnerable-capable enemy fixture for the modifier tests below. */
+function enemyFixture(): PipelineCombatant {
+  return buildEnemy({ id: "fireball-target", name: "Fire Elemental" });
+}
+
+/**
+ * Drives the real `cast_spell` branch of `executeCombatAction` with a single
+ * fire-damage effect and a deterministic die roll, so `opts.rolledDamage` is
+ * exactly what `roll(effect.dice)` returns before any modifier is applied.
+ *
+ * `Math.random` is pinned to 0 so the one `1d2` die always comes up 1; the
+ * notation's flat modifier then makes up the rest of `rolledDamage`.
+ */
+async function castFireballAt(
+  target: PipelineCombatant,
+  opts: { rolledDamage: number }
+): Promise<{ combatants: PipelineCombatant[]; systemLogs: string[] }> {
+  const restore = vi.spyOn(Math, "random").mockReturnValue(0);
+  try {
+    const tx = buildMockTx();
+    const payload: CombatActionPayload = {
+      actionType: "cast_spell",
+      encounter: buildEncounter([buildPlayer(), target]),
+      actorId: "player-1",
+      actorName: "Aldric",
+      actorConditions: [],
+      targetCombatants: [target],
+      spellName: "Fireball",
+      spellEffect: {
+        type: "damage",
+        dice: `1d2+${opts.rolledDamage - 1}`,
+        damageType: "fire",
+        hasSavingThrow: false,
+      },
+      collectEvents: true,
+    };
+
+    const outcome = await executeCombatAction(payload, tx as unknown as Prisma.TransactionClient);
+    const consequence = outcome.consequences.find((c) => c.targetId === target.id);
+
+    return {
+      combatants: [{ ...target, hp: consequence?.hpAfter ?? target.hp }],
+      systemLogs: outcome.systemLogs,
+    };
+  } finally {
+    restore.mockRestore();
+  }
+}
+
+function systemLogLines(result: { systemLogs: string[] }): string[] {
+  return result.systemLogs;
+}
+
+describe("executeCombatAction — spell damage resolves against modifiers", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("halves spell damage against a resistant target", async () => {
+    const target = { ...enemyFixture(), hp: 50, damageResistances: ["fire"] };
+    const result = await castFireballAt(target, { rolledDamage: 10 });
+
+    expect(result.combatants.find((c) => c.id === target.id)!.hp).toBe(45);
+  });
+
+  it("logs a clause it cannot evaluate instead of applying it", async () => {
+    const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
+    const target = { ...enemyFixture(), hp: 50, damageResistances: [clause] };
+    const result = await castFireballAt(target, { rolledDamage: 10 });
+
+    expect(result.combatants.find((c) => c.id === target.id)!.hp).toBe(40);
+    expect(systemLogLines(result).some((line) => line.includes("not applied"))).toBe(true);
   });
 });

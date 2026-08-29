@@ -251,6 +251,12 @@ model Combatant {
   stats                Json    @default("{}")
   conditions           Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
+  /// SRD damage modifiers, snapshotted from the monster at spawn. Same names
+  /// and shapes as SrdMonster's, so no reader has to translate between them.
+  /// Empty for the player: no rule in this codebase grants a player resistance.
+  damageImmunities      String[] @default([])
+  damageResistances     String[] @default([])
+  damageVulnerabilities String[] @default([])
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
   size                 String  @default("Medium")

@@ -25,6 +25,11 @@ import {
   type HitLocation,
 } from "@/lib/rules/combat";
 import { consumeSlot, type SpellSlots } from "@/lib/rules/magic";
+import {
+  applyDamageModifiers,
+  unresolvedModifierLog,
+  type ModifiedDamage,
+} from "@/lib/rules/damage-modifiers";
 
 export interface PipelineCombatant {
   id: string;
@@ -35,6 +40,9 @@ export interface PipelineCombatant {
   ac: number;
   conditions: unknown;
   stats: unknown;
+  damageImmunities?: string[];
+  damageResistances?: string[];
+  damageVulnerabilities?: string[];
   concentrationSpellId: string | null;
 }
 
@@ -107,6 +115,13 @@ export interface CombatOutcome {
   consequences: SingleTargetConsequence[];
   totalDamageDealt: number;
   consequenceDetails?: CombatConsequences[];
+  /**
+   * Declared refusals for the resolution — e.g. a damage-modifier clause the
+   * engine could not evaluate. The pipeline itself writes no `⚠️` lines to
+   * any transport (unlike the route layer's category/range logs), so this is
+   * the collection those lines land in until a caller persists them.
+   */
+  systemLogs: string[];
 }
 
 export interface FinalizeEncounterTurnInput {
@@ -146,6 +161,7 @@ export async function executeCombatAction(
   const events: GameEvent[] = [];
   const consequences: SingleTargetConsequence[] = [];
   const consequenceDetails: CombatConsequences[] = [];
+  const systemLogs: string[] = [];
   let totalDamageDealt = 0;
 
   const {
@@ -293,6 +309,8 @@ export async function executeCombatAction(
     let newHp = target.hp;
     let naturalRoll = 0;
     let conditionsToApply: string[] = [];
+    let damageUnresolved: readonly string[] = [];
+    let damageApplied: ModifiedDamage["applied"] = "none";
 
     if (actionType === "attack") {
       const snapshot: EncounterSnapshot = {
@@ -332,6 +350,11 @@ export async function executeCombatAction(
         encounterSnapshot: snapshot,
         usedSenses: [],
         zones: [],
+        targetModifiers: {
+          immunities: target.damageImmunities ?? [],
+          resistances: target.damageResistances ?? [],
+          vulnerabilities: target.damageVulnerabilities ?? [],
+        },
       });
 
       damage = consequencesPayload.combat_facts.damage;
@@ -341,6 +364,8 @@ export async function executeCombatAction(
       naturalRoll = consequencesPayload.combat_facts.attack_roll ?? 0;
       hitLoc = consequencesPayload.combat_facts.hit_location as HitLocation;
       tags = consequencesPayload.narrative_tags;
+      damageUnresolved = consequencesPayload.damageUnresolved;
+      damageApplied = consequencesPayload.damageApplied;
       consequenceDetails.push(consequencesPayload);
       
     } else if (actionType === "cast_spell" && payload.spellEffect) {
@@ -364,6 +389,20 @@ export async function executeCombatAction(
       } else if (effect.dice && effect.type !== "healing") {
         damage = roll(effect.dice).total;
       }
+
+      const modified = applyDamageModifiers({
+        damage,
+        damageType: normalizeDamageType(effect.damageType),
+        modifiers: {
+          immunities: target.damageImmunities ?? [],
+          resistances: target.damageResistances ?? [],
+          vulnerabilities: target.damageVulnerabilities ?? [],
+        },
+      });
+
+      damage = modified.damage;
+      damageUnresolved = modified.unresolved;
+      damageApplied = modified.applied;
 
       if (damage > 0) {
         hitLoc = rollHitLocation();
@@ -391,6 +430,12 @@ export async function executeCombatAction(
         conditionsToApply = [effect.condition];
       }
     }
+
+    const modifierLog = unresolvedModifierLog({
+      defenderName: target.name,
+      result: { damage, applied: damageApplied, unresolved: damageUnresolved },
+    });
+    if (modifierLog) systemLogs.push(modifierLog);
 
     totalDamageDealt += damage;
 
@@ -485,6 +530,7 @@ export async function executeCombatAction(
     consequences,
     totalDamageDealt,
     consequenceDetails,
+    systemLogs,
   };
 }
 

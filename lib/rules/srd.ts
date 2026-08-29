@@ -136,6 +136,7 @@ export const MonsterSchema = z.object({
   charisma: z.number().optional(),
   damage_immunities: z.array(z.string()).optional(),
   damage_resistances: z.array(z.string()).optional(),
+  damage_vulnerabilities: z.array(z.string()).optional(),
   condition_immunities: z.array(z.any()).optional(),
   challenge_rating: z.number().optional(),
   xp: z.number().optional(),

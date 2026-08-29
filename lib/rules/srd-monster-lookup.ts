@@ -88,6 +88,9 @@ export async function queryMonsters(opts: MonsterQueryOptions): Promise<Monster[
       intelligence: row.intelligence ?? undefined,
       wisdom: row.wisdom ?? undefined,
       charisma: row.charisma ?? undefined,
+      damage_immunities: row.damageImmunities,
+      damage_resistances: row.damageResistances,
+      damage_vulnerabilities: row.damageVulnerabilities,
       url: undefined,
     }));
 }

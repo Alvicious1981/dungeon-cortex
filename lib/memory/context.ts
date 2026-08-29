@@ -91,6 +91,10 @@ export interface ContextCombatant {
   conditions: Prisma.JsonValue;
   /** Raw JSON — { STR, DEX, CON, INT, WIS, CHA } */
   stats: Prisma.JsonValue;
+  /** SRD damage modifiers, snapshotted at spawn. Empty for the player. */
+  damageImmunities: string[];
+  damageResistances: string[];
+  damageVulnerabilities: string[];
   /** ID of the currently concentrated-on spell, or null. */
   concentrationSpellId: string | null;
   /** Grid column (0-based). Used by tactical movement validation. */
@@ -330,6 +334,9 @@ export async function buildCampaignContext(
             initiativeTotal: true,
             conditions: true,
             stats: true,
+            damageImmunities: true,
+            damageResistances: true,
+            damageVulnerabilities: true,
             concentrationSpellId: true,
             x: true,
             y: true,
