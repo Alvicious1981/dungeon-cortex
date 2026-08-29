@@ -185,6 +185,18 @@ whatever literal the first batch happened to use.
 Anchors verified 2026-08-29. Each is the same shape as the defects above — a
 value produced with no consumer, or a consumer with no producer.
 
+Closed 2026-08-29: the AI tool module's dead surface is gone.
+`lib/ai/tools/srd-lookup.ts` held seven exports no source imported — a
+`queryMonsters`, `MonsterQueryOptions` and `buildMonsterRawData` duplicating
+`lib/rules/srd-monster-lookup.ts` (identical `where`, `orderBy` and `select`;
+only the live one projects the four modifier columns), plus `querySpells`,
+`SpellQueryOptions`, `proficiencyBonusForCR` and `monsterAttackModifier`, dead
+without a copy anywhere. The file went from 480 lines to 236.
+`tests/architecture/srd-monster-single-lookup.test.ts` binds both ends the way
+the equipment guard does: the query is defined in exactly one module, and the
+module's exported surface is written down, so a new export is a line somebody
+changes on purpose.
+
 Closed 2026-08-29: armour marked "Stealth: Disadvantage" now costs the wearer
 the roll. `stealthDisadvantage` had two producers — `projectSrdItem` and
 `addItemToInventory` — and no mechanical reader, so the heaviest plate in the
@@ -218,10 +230,6 @@ mismatch survives a green suite.
   source or an explicit, recorded decision about that boundary. An earlier note
   here called it the highest-value item; that was written without checking the
   spell data, and it was wrong.
-- **`lib/ai/tools/srd-lookup.ts:272`** — a second `queryMonsters` whose `select`
-  pulls all four modifier columns and whose projection drops every one. Inert
-  today: no production importer. The correctly-projecting one lives in
-  `lib/rules/srd-monster-lookup.ts`.
 - **Magical, silvered and adamantine weapons** — no notion of them exists, so
   six shapes of SRD damage clause (`"… from nonmagical weapons that aren't
   silvered"`, `"damage from spells"`, and others) are reported unresolved

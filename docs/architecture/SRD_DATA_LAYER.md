@@ -11,7 +11,7 @@ Dungeon Cortex uses **D&D 5e/SRD 2014** as its only active rules baseline. The c
 The SRD layer currently exists in three overlapping forms:
 
 1. **External API client** — `lib/dnd-api/client.ts` reads list endpoints from `https://www.dnd5eapi.co/api` for character creation choices such as races and classes, with small static fallbacks when the remote API is unavailable.
-2. **Database-backed lookup layer** — `lib/ai/tools/srd-lookup.ts` reads Prisma SRD tables for narrator/tool lookups. It exposes typed helpers for spells, monsters, items, equipment, monster queries, spell queries, and SRD-derived combat helper data.
+2. **Database-backed lookup layer** — `lib/ai/tools/srd-lookup.ts` reads Prisma SRD tables for narrator/tool lookups. It exposes typed helpers for spells, monsters and items, and re-exports the equipment lookup that `lib/rules/srd-equipment-lookup.ts` owns. Its monster and spell *queries* were duplicates of the mechanical ones and are gone: `queryMonsters` and `buildMonsterRawData` live in `lib/rules/srd-monster-lookup.ts`, which is what the encounter service calls. `tests/architecture/srd-monster-single-lookup.test.ts` holds that boundary.
 3. **Bundled local JSON snapshot** — `lib/rules/srd.ts` validates and indexes files under `data/srd-es/` at module load time. This module is explicitly marked as a Spanish 5e SRD snapshot that is historical, derived, and transitional until the technical migration is complete.
 
 These paths should be treated as a transitional architecture, not as three equal sources of truth.
