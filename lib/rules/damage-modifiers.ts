@@ -22,6 +22,9 @@
  * removing.
  */
 
+import { clauseFor } from "@/lib/rules/damage-clauses";
+import type { WeaponQuality } from "@/lib/rules/weapon-quality";
+
 export type DamageType =
   | "slashing" | "piercing" | "bludgeoning"
   | "fire" | "cold" | "lightning" | "acid" | "poison"
@@ -38,6 +41,19 @@ export interface DamageModifiers {
   immunities: readonly string[];
   resistances: readonly string[];
   vulnerabilities: readonly string[];
+}
+
+/**
+ * What struck, for the clauses that ask.
+ *
+ * Optional at every call site on purpose: absent means the engine does not know
+ * what hit, so a clause it can read still goes unevaluated rather than being
+ * resolved on an assumption. That is what lets a caller stay untouched without
+ * silently changing what it computes.
+ */
+export interface DamageAttack {
+  kind: "weapon" | "spell";
+  qualities: readonly WeaponQuality[];
 }
 
 export interface ModifiedDamage {
@@ -84,10 +100,46 @@ function names(entries: readonly string[], damageType: DamageType): boolean {
   return entries.some((entry) => normalise(entry) === damageType);
 }
 
+/**
+ * Whether a recognised clause covers this attack, given what struck.
+ *
+ * A silvered weapon is not a magic weapon, so it lifts `that aren't silvered`
+ * and leaves the plain `nonmagical weapons` wording standing. The two questions
+ * are asked separately here for that reason.
+ */
+function clauseApplies(
+  entry: string,
+  damageType: DamageType,
+  attack: DamageAttack,
+): boolean {
+  const clause = clauseFor(entry);
+  if (clause === null) return false;
+  if (attack.kind !== "weapon") return false;
+  if (!clause.types.includes(damageType)) return false;
+  if (attack.qualities.includes("magical")) return false;
+  if (clause.unless !== null && attack.qualities.includes(clause.unless)) return false;
+  return true;
+}
+
+/**
+ * Whether this list stops the damage: by naming the type outright, or through a
+ * clause the engine could both read and evaluate.
+ */
+function catches(
+  entries: readonly string[],
+  damageType: DamageType,
+  attack: DamageAttack | undefined,
+): boolean {
+  if (names(entries, damageType)) return true;
+  if (attack === undefined) return false;
+  return entries.some((entry) => clauseApplies(entry, damageType, attack));
+}
+
 export function applyDamageModifiers(input: {
   damage: number;
   damageType: DamageType;
   modifiers: DamageModifiers;
+  attack?: DamageAttack;
 }): ModifiedDamage {
   const immunities = asStrings(input.modifiers?.immunities);
   const resistances = asStrings(input.modifiers?.resistances);
@@ -100,6 +152,11 @@ export function applyDamageModifiers(input: {
   const seenClauses = new Set<string>();
   for (const entry of [...immunities, ...resistances, ...vulnerabilities]) {
     if (isBareType(entry)) continue;
+    // A clause the table reads is only unresolved while nothing says what
+    // struck. Once something does, the clause has an answer — applicable or not
+    // — and reporting it as unreadable would hand the narrator a refusal that
+    // no longer happened.
+    if (input.attack !== undefined && clauseFor(entry) !== null) continue;
     const key = normalise(entry);
     if (seenClauses.has(key)) continue;
     seenClauses.add(key);
@@ -108,12 +165,12 @@ export function applyDamageModifiers(input: {
 
   const damage = Math.max(0, Math.floor(input.damage));
 
-  if (names(immunities, input.damageType)) {
+  if (catches(immunities, input.damageType, input.attack)) {
     return { damage: 0, applied: "immune", unresolved };
   }
 
-  const resistant = names(resistances, input.damageType);
-  const vulnerable = names(vulnerabilities, input.damageType);
+  const resistant = catches(resistances, input.damageType, input.attack);
+  const vulnerable = catches(vulnerabilities, input.damageType, input.attack);
 
   // SRD: resistance and vulnerability to the same damage type cancel. Reported
   // as its own outcome rather than folded into "none", because the two differ
@@ -133,6 +190,15 @@ export function applyDamageModifiers(input: {
  * unresolved weapon category. A player whose sword is not bouncing off the
  * werewolf is owed the reason, and a resolution the engine did not make must
  * never look like one it did.
+ *
+ * Its reach narrowed when weapon qualities arrived. The line used to say the
+ * clause "depends on whether the attack was magical, silvered or adamantine,
+ * which this engine does not track" — true when every conditional clause was
+ * beyond reading, and false now that `lib/rules/damage-clauses.ts` reads the
+ * four wordings covering 69 of the data's 72 conditional entries. What survives
+ * here is the remainder: wordings the table does not know, and clauses on a call
+ * site that passed no attack, which is a different silence and reads the same
+ * from the outside.
  *
  * Takes the whole `ModifiedDamage` result, not just the clause list, because
  * the sentence this produces claims "full damage was applied" — a claim that
@@ -157,8 +223,7 @@ export function unresolvedModifierLog(input: {
 
   return (
     `⚠️ ${input.defenderName}: damage modifier not applied — ` +
-    `"${unresolved.join('", "')}" depends on whether the attack was ` +
-    `magical, silvered or adamantine, which this engine does not track. ` +
+    `"${unresolved.join('", "')}" is a condition this engine does not read. ` +
     `Full damage was applied.`
   );
 }

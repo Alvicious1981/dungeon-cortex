@@ -337,3 +337,137 @@ describe("the real monster file", () => {
     expect(all.length - bare.length).toBeGreaterThan(0);
   });
 });
+
+describe("applyDamageModifiers — conditional clauses", () => {
+  const WEREWOLF = {
+    immunities: ["bludgeoning, piercing, and slashing from nonmagical weapons that aren't silvered"],
+    resistances: [] as string[],
+    vulnerabilities: [] as string[],
+  };
+
+  const GARGOYLE = {
+    immunities: [] as string[],
+    resistances: ["bludgeoning, piercing, and slashing from nonmagical weapons"],
+    vulnerabilities: [] as string[],
+  };
+
+  const mundane = { kind: "weapon" as const, qualities: [] };
+
+  it("applies an immunity clause to a mundane weapon", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: WEREWOLF,
+      attack: mundane,
+    });
+
+    expect(result.damage).toBe(0);
+    expect(result.applied).toBe("immune");
+    expect(result.unresolved).toEqual([]);
+  });
+
+  it("lifts that immunity for a silvered weapon", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: WEREWOLF,
+      attack: { kind: "weapon", qualities: ["silvered"] },
+    });
+
+    expect(result.damage).toBe(12);
+    expect(result.applied).toBe("none");
+    expect(result.unresolved).toEqual([]);
+  });
+
+  it("lifts it for a magic weapon too", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: WEREWOLF,
+      attack: { kind: "weapon", qualities: ["magical"] },
+    });
+
+    expect(result.damage).toBe(12);
+    expect(result.applied).toBe("none");
+  });
+
+  it("does not let silver lift a clause that only magic lifts", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: GARGOYLE,
+      attack: { kind: "weapon", qualities: ["silvered"] },
+    });
+
+    expect(result.damage).toBe(6);
+    expect(result.applied).toBe("resistant");
+  });
+
+  it("leaves a damage type the clause does not name alone", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "fire",
+      modifiers: GARGOYLE,
+      attack: mundane,
+    });
+
+    expect(result.damage).toBe(12);
+    expect(result.applied).toBe("none");
+  });
+
+  it("does not apply a weapon clause to spell damage", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: GARGOYLE,
+      attack: { kind: "spell", qualities: [] },
+    });
+
+    expect(result.damage).toBe(12);
+    expect(result.applied).toBe("none");
+    expect(result.unresolved).toEqual([]);
+  });
+
+  it("still reports the clause unresolved when nothing says what struck", () => {
+    // The case that proves no existing caller changed by not being updated.
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: GARGOYLE,
+    });
+
+    expect(result.damage).toBe(12);
+    expect(result.applied).toBe("none");
+    expect(result.unresolved).toEqual([
+      "bludgeoning, piercing, and slashing from nonmagical weapons",
+    ]);
+  });
+
+  it("keeps reporting a wording it cannot read, even with an attack", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: {
+        immunities: [],
+        resistances: ["piercing from magic weapons wielded by good creatures"],
+        vulnerabilities: [],
+      },
+      attack: mundane,
+    });
+
+    expect(result.unresolved).toEqual([
+      "piercing from magic weapons wielded by good creatures",
+    ]);
+  });
+
+  it("writes no warning line when every clause was evaluated", () => {
+    const result = applyDamageModifiers({
+      damage: 12,
+      damageType: "slashing",
+      modifiers: GARGOYLE,
+      attack: mundane,
+    });
+
+    expect(unresolvedModifierLog({ defenderName: "Gargoyle", result })).toBeNull();
+  });
+});
