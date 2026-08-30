@@ -72,6 +72,17 @@ export interface NarrativeStream {
   merchantPayload: Promise<MerchantPayload | null>;
 }
 
+function staticNarrativeStream(text: string): NarrativeStream {
+  return {
+    textStream: (async function* () {
+      yield text;
+    })() as unknown as AsyncIterableStream<string>,
+    textPromise: Promise.resolve(text),
+    levelUpPayload: Promise.resolve(null),
+    merchantPayload: Promise.resolve(null),
+  };
+}
+
 // ─── Tool definitions (shared) ────────────────────────────────────────────────
 
 /**
@@ -109,9 +120,13 @@ export async function streamNarrative(
   options?: StreamNarrativeOptions,
 ): Promise<NarrativeStream> {
   const safePlayerInput = PlayerInputSchema.parse(playerInput);
-  const safeNarrativeContext = narrativeContext
-    ? CombatNarrativeContextSchema.parse(narrativeContext)
-    : undefined;
+  const contextResult = narrativeContext
+    ? CombatNarrativeContextSchema.safeParse(narrativeContext)
+    : null;
+  if (contextResult && !contextResult.success) {
+    return staticNarrativeStream(NEUTRAL_NARRATIVE_FALLBACK);
+  }
+  const safeNarrativeContext = contextResult?.data;
   const fallbackContext: CombatNarrativeContext = safeNarrativeContext ?? { facts: [] };
 
   // Shared promise that resolves once we know whether a level-up occurred.

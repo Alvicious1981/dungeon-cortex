@@ -141,6 +141,24 @@ describe("streamNarrative contained tool surface", () => {
     await expect(result.textPromise).resolves.toBe("La escena continúa.");
   });
 
+  it("fails closed without calling the model when resolved facts exceed the context contract", async () => {
+    const overflowFacts = Array.from({ length: 101 }, (_, index) => ({
+      type: "attack_miss" as const,
+      description: `Attack ${index} missed Goblin`,
+      payload: { targetName: "Goblin" },
+    }));
+
+    const result = await streamNarrative(
+      CAMPAIGN_ID,
+      "I attack.",
+      { facts: overflowFacts },
+    );
+
+    await expect(result.textPromise).resolves.toBe("La escena continúa.");
+    expect(mockBuildCampaignContext).not.toHaveBeenCalled();
+    expect(mockStreamText).not.toHaveBeenCalled();
+  });
+
   it("executes an allowed spell lookup", async () => {
     prisma.srdSpell.findUnique.mockResolvedValue({
       id: "fireball", name: "Fireball", hasHealing: false, damageType: "fire",

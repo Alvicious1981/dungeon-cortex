@@ -200,4 +200,17 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     },
   );
 
+  it.each([
+    'GAME_DATA',
+    'canonicalState',
+    'recentDialogue',
+    'playerAction',
+    'backendResolvedFacts',
+  ])('rejects disclosure of the real narrator JSON boundary %s', (boundaryName) => {
+    const result = validateNarrativeText(`${boundaryName}: copied private campaign context`);
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((issue) => issue.code === 'prompt_disclosure')).toBe(true);
+  });
+
 });

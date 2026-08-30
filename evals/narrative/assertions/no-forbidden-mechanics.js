@@ -91,7 +91,7 @@ const checks = [
   },
   {
     code: 'boundary_markup',
-    regex: /<\/?(?:campaign_state|untrusted_context|player_action|resolved_facts|event_logs)\b/i,
+    regex: /(?:<\/?(?:campaign_state|untrusted_context|player_action|resolved_facts|event_logs)\b|\b(?:GAME_DATA|canonicalState|recentDialogue|playerAction|backendResolvedFacts)\b)/i,
     reason: 'Internal data-boundary markup must not appear in narrative output.',
   },
   {
