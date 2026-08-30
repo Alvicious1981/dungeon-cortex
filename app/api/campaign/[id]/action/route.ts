@@ -6,6 +6,7 @@ import { streamNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatSystemPrompt } from "@/lib/memory/formatter";
 import { parseIntent } from "@/lib/ai/intent";
+import { NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
 import { 
   isSpellSlots, hasAvailableSlot, 
@@ -132,8 +133,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const { action } = body;
 
-  if (!action?.trim()) {
+  if (typeof action !== "string" || !action.trim()) {
     return NextResponse.json({ error: "action is required." }, { status: 400 });
+  }
+
+  const trimmedAction = action.trim();
+  if (trimmedAction.length > NARRATOR_DATA_LIMITS.playerActionChars) {
+    return NextResponse.json(
+      { error: `action must be at most ${NARRATOR_DATA_LIMITS.playerActionChars} characters.` },
+      { status: 400 }
+    );
   }
 
   let user;
@@ -160,8 +169,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (campaign.status !== "active") {
     return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
   }
-
-  const trimmedAction = action.trim();
 
   // Step 1: Persist the player's action to the GameLog
   await prisma.gameLog.create({

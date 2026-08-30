@@ -21,7 +21,7 @@ import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { formatIronLaws, formatCanonicalState } from "@/lib/memory/formatter";
-import { buildNarratorRequest } from "@/lib/ai/trust-boundary";
+import { buildNarratorRequest, NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
 import type { AsyncIterableStream } from "ai";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
 import { selectActiveNarratorTools, type ActiveNarratorToolName } from "@/lib/ai/tool-policy";
@@ -35,7 +35,11 @@ import { buildNarrativePrompt } from "@/lib/narrative/prompt-builder";
 import { validateNarrativeText } from "@/lib/narrative/narrative-validator";
 import { generateFallbackProse } from "@/lib/narrative/fallback-prose";
 
-const PlayerInputSchema = z.string().trim().min(1).max(2_000);
+const PlayerInputSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(NARRATOR_DATA_LIMITS.playerActionChars);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

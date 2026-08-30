@@ -7,6 +7,7 @@ import { buildCampaignContext } from "@/lib/memory/context";
 import { computeConsequences } from "@/lib/rules/combat";
 import { parseIntent } from "@/lib/ai/intent";
 import { streamNarrative } from "@/lib/ai/narrator";
+import { NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -114,6 +115,30 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
         },
       },
     ]);
+  });
+
+  describe("request validation", () => {
+    it("rejects an oversized action before authentication or state changes", async () => {
+      const req = new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "x".repeat(NARRATOR_DATA_LIMITS.playerActionChars + 1),
+        }),
+      });
+
+      const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: `action must be at most ${NARRATOR_DATA_LIMITS.playerActionChars} characters.`,
+      });
+      expect(getAuthUser).not.toHaveBeenCalled();
+      expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
+      expect(prisma.gameLog.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(parseIntent).not.toHaveBeenCalled();
+      expect(streamNarrative).not.toHaveBeenCalled();
+    });
   });
 
   describe("free-text attack targeting", () => {
