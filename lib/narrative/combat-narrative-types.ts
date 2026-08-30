@@ -12,7 +12,6 @@ import { z } from 'zod';
 
 const MAX_FACTS = 100;
 const MAX_TARGETS = 50;
-const MAX_SOURCE_EVENTS = 100;
 const MAX_IDENTIFIER_LENGTH = 200;
 export const MAX_NARRATIVE_NAME_LENGTH = 160;
 const MAX_DESCRIPTION_LENGTH = 1_000;
@@ -98,7 +97,6 @@ export interface CombatNarrativeContext {
   }>;
   tone?: string;
   intensity?: number;
-  sourceEvents?: unknown[];
 }
 
 const NarrativeActorSchema = z.object({
@@ -122,7 +120,6 @@ export const CombatNarrativeContextSchema = z.object({
   targets: z.array(NarrativeTargetSchema).max(MAX_TARGETS).optional(),
   tone: z.string().max(MAX_TONE_LENGTH).optional(),
   intensity: z.number().finite().optional(),
-  sourceEvents: z.array(z.unknown()).max(MAX_SOURCE_EVENTS).optional(),
 }).strict();
 
 /** Issues detected when validating the AI's generated narrative output. */
