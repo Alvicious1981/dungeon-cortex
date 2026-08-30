@@ -117,6 +117,21 @@ the 49 merge commits with two parents in the history all predate that. When
 merging locally without a PR: squash-merge into `master`, **run the suite on
 the merged result rather than only on the branch**, then push.
 
+## Closed plans
+
+**PLAN-058 (session ledger, atomic action journal, `EncounterMap` replacing
+`Zone`) is closed, not implemented.** PR #58
+(`codex/full-session-ledger-tactical-map`) closed without merging on
+2026-08-19. Issues #63 (coordinator), #64 (D0, Prisma reconciliation) and
+#65 (PR #58 stabilization) were closed `not planned` on 2026-08-30, after an
+audit confirmed `EncounterMap`, `ActionRequest` and `GameEventRecord` never
+reached `master` and no file from the PR's change list landed there either.
+`Zone` remains the only spatial model in production.
+
+Do not treat #63/#64/#65 or the PR #58 branch as live work, do not
+cherry-pick from that branch, and do not resume any PLAN-058/D-series
+delivery without a new decision and a new Issue based on current `master`.
+
 ## Dormant defects
 
 The defects that survived longest in this repository were not broken code. They were correct data read with the wrong shape, or values written and never read: inert until something started depending on them. Tests passed throughout, because nothing checked the result.
