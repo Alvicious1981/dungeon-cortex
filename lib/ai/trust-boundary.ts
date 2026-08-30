@@ -150,6 +150,23 @@ function boundedText(value: string | null | undefined, maxChars: number): string
   return asText(value).slice(0, maxChars);
 }
 
+const CANONICAL_OMISSION_MARKER = "\n\n[... canonical state omitted for size ...]\n\n";
+
+function boundedCanonicalState(value: string | null | undefined, maxChars: number): string {
+  const text = asText(value);
+  if (text.length <= maxChars) return text;
+
+  const availableChars = maxChars - CANONICAL_OMISSION_MARKER.length;
+  const leadingChars = Math.floor(availableChars / 3);
+  const trailingChars = availableChars - leadingChars;
+
+  return [
+    text.slice(0, leadingChars),
+    CANONICAL_OMISSION_MARKER,
+    text.slice(-trailingChars),
+  ].join("");
+}
+
 /**
  * Builds a narrator request with an unambiguous separation between stable
  * instructions and variable game data.
@@ -162,7 +179,10 @@ export function buildNarratorRequest(input: NarratorRequestInput): NarratorReque
     backendResolvedFacts: input.backendResolvedFacts
       ? boundedText(input.backendResolvedFacts, NARRATOR_DATA_LIMITS.backendFactsChars)
       : null,
-    canonicalState: boundedText(
+    // Character identity is at the front; current encounter, quests and NPC
+    // context are late sections. Preserve both ends instead of silently dropping
+    // the turn-local authority at the tail of an oversized snapshot.
+    canonicalState: boundedCanonicalState(
       input.canonicalState,
       NARRATOR_DATA_LIMITS.canonicalStateChars,
     ),

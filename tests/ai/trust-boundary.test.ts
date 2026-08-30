@@ -18,6 +18,7 @@ import {
   NARRATOR_AUTHORITY_ORDER,
   TRUST_BOUNDARY_INSTRUCTIONS,
   GAME_DATA_LABEL,
+  NARRATOR_DATA_LIMITS,
   type NarratorRequestInput,
 } from "@/lib/ai/trust-boundary";
 
@@ -129,6 +130,25 @@ describe("buildNarratorRequest — normal context", () => {
   it("labels the data channel as data rather than as instructions", () => {
     const req = buildNarratorRequest(makeInput());
     expect(dataMessage(req).startsWith(`${GAME_DATA_LABEL} (JSON`)).toBe(true);
+  });
+});
+
+describe("buildNarratorRequest — bounded canonical state", () => {
+  it("preserves early identity and late turn-local sections when clipping", () => {
+    const earlyState = "# Current Game State\nEARLY_CHARACTER_IDENTITY";
+    const lateState = "## Active Encounter\nLATE_TURN_LOCAL_STATE";
+    const canonicalState = [
+      earlyState,
+      "x".repeat(NARRATOR_DATA_LIMITS.canonicalStateChars),
+      lateState,
+    ].join("\n\n");
+
+    const req = buildNarratorRequest(makeInput({ canonicalState }));
+
+    expect(req.gameData.canonicalState).toHaveLength(NARRATOR_DATA_LIMITS.canonicalStateChars);
+    expect(req.gameData.canonicalState).toContain("EARLY_CHARACTER_IDENTITY");
+    expect(req.gameData.canonicalState).toContain("LATE_TURN_LOCAL_STATE");
+    expect(req.gameData.canonicalState).toContain("canonical state omitted for size");
   });
 });
 

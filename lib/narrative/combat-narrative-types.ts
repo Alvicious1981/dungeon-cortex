@@ -14,7 +14,7 @@ const MAX_FACTS = 100;
 const MAX_TARGETS = 50;
 const MAX_SOURCE_EVENTS = 100;
 const MAX_IDENTIFIER_LENGTH = 200;
-const MAX_NAME_LENGTH = 160;
+export const MAX_NARRATIVE_NAME_LENGTH = 160;
 const MAX_DESCRIPTION_LENGTH = 1_000;
 const MAX_TONE_LENGTH = 120;
 const MAX_PROMPT_LENGTH = 32_000;
@@ -103,13 +103,13 @@ export interface CombatNarrativeContext {
 
 const NarrativeActorSchema = z.object({
   id: z.string().max(MAX_IDENTIFIER_LENGTH),
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: z.string().min(1).max(MAX_NARRATIVE_NAME_LENGTH),
   isPlayer: z.boolean(),
 }).strict();
 
 const NarrativeTargetSchema = z.object({
   id: z.string().max(MAX_IDENTIFIER_LENGTH),
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: z.string().min(1).max(MAX_NARRATIVE_NAME_LENGTH),
   isPlayer: z.boolean(),
   hpBefore: z.number().finite().optional(),
   hpAfter: z.number().finite(),

@@ -104,7 +104,7 @@ export async function streamNarrative(
   const safeNarrativeContext = narrativeContext
     ? CombatNarrativeContextSchema.parse(narrativeContext)
     : undefined;
-  const validationContext: CombatNarrativeContext = safeNarrativeContext ?? { facts: [] };
+  const fallbackContext: CombatNarrativeContext = safeNarrativeContext ?? { facts: [] };
 
   // Shared promise that resolves once we know whether a level-up occurred.
   // Mutating tool callbacks are disconnected; text completion resolves this with null.
@@ -127,9 +127,9 @@ export async function streamNarrative(
       mockContent = options.mockNarrativeText;
     }
 
-    const validation = validateNarrativeText(mockContent, validationContext);
+    const validation = validateNarrativeText(mockContent, safeNarrativeContext);
     if (!validation.ok) {
-      mockContent = generateFallbackProse(validationContext);
+      mockContent = generateFallbackProse(fallbackContext);
     }
     
     // Resolvemos los payloads de herramientas como null para que no queden colgando
@@ -181,10 +181,10 @@ export async function streamNarrative(
   // Buffer every model response before emission. Streaming unsafe tokens cannot
   // be retracted, so validation must complete before the SSE text chunk exists.
   const finalNarrativeTextPromise = Promise.resolve(result.text).then((fullText) => {
-    const validation = validateNarrativeText(fullText, validationContext);
-    return validation.ok ? fullText : generateFallbackProse(validationContext);
+    const validation = validateNarrativeText(fullText, safeNarrativeContext);
+    return validation.ok ? fullText : generateFallbackProse(fallbackContext);
   }).catch(() => {
-    return generateFallbackProse(validationContext);
+    return generateFallbackProse(fallbackContext);
   });
 
   const finalNarrativeTextStream = (async function* () {

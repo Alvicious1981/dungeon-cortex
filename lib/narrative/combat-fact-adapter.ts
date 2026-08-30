@@ -1,7 +1,15 @@
 import { match } from 'ts-pattern';
 
 import { GameEvent } from '../events/game-events';
-import { CombatNarrativeContext, NarrativeFact } from './combat-narrative-types';
+import {
+  CombatNarrativeContext,
+  MAX_NARRATIVE_NAME_LENGTH,
+  NarrativeFact,
+} from './combat-narrative-types';
+
+function boundedNarrativeName(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, MAX_NARRATIVE_NAME_LENGTH) : '';
+}
 
 /**
  * Helper to compare two facts for exact equality.
@@ -52,7 +60,8 @@ export function adaptCombatEventsToNarrativeContext(
 
   for (const event of events) {
     if (event.type === 'COMBAT_CONSEQUENCE') {
-      const { attackerName, targets: consequenceTargets } = event.payload;
+      const { attackerName: rawAttackerName, targets: consequenceTargets } = event.payload;
+      const attackerName = boundedNarrativeName(rawAttackerName);
 
       actor = {
         id: '',
@@ -62,7 +71,7 @@ export function adaptCombatEventsToNarrativeContext(
 
       for (const target of consequenceTargets) {
         const {
-          targetName,
+          targetName: rawTargetName,
           targetId,
           damage,
           hpAfter,
@@ -71,6 +80,7 @@ export function adaptCombatEventsToNarrativeContext(
           isKill,
           conditionsApplied,
         } = target;
+        const targetName = boundedNarrativeName(rawTargetName);
 
         if (!targets.some(item => item.id === targetId)) {
           targets.push({
@@ -139,7 +149,7 @@ export function adaptCombatEventsToNarrativeContext(
     match(event.type)
       .with('CRITICAL_HIT', () => {
         const payload = event.payload || {};
-        const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+        const targetName = boundedNarrativeName(payload.targetName);
         addFact({
           type: 'critical_hit',
           description: `Critical hit recorded${targetName ? ` on ${targetName}` : ''}`,
@@ -148,7 +158,7 @@ export function adaptCombatEventsToNarrativeContext(
       })
       .with('CRITICAL_MISS', () => {
         const payload = event.payload || {};
-        const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+        const targetName = boundedNarrativeName(payload.targetName);
         addFact({
           type: 'critical_miss',
           description: `Critical miss recorded${targetName ? ` targeting ${targetName}` : ''}`,
@@ -158,7 +168,7 @@ export function adaptCombatEventsToNarrativeContext(
       .with('DAMAGE_DEALT', () => {
         const payload = event.payload || {};
         const damage = typeof payload.damage === 'number' ? payload.damage : 0;
-        const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+        const targetName = boundedNarrativeName(payload.targetName);
 
         addFact({
           type: 'attack_hit',
@@ -173,7 +183,7 @@ export function adaptCombatEventsToNarrativeContext(
       })
       .with('ENEMY_DEFEATED', () => {
         const payload = event.payload || {};
-        const targetName = typeof payload.name === 'string' ? payload.name : '';
+        const targetName = boundedNarrativeName(payload.name);
         if (targetName) {
           addFact({
             type: 'enemy_defeated',
@@ -185,7 +195,7 @@ export function adaptCombatEventsToNarrativeContext(
       .with('HEALING_RECEIVED', () => {
         const payload = event.payload || {};
         const amount = typeof payload.amount === 'number' ? payload.amount : 0;
-        const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+        const targetName = boundedNarrativeName(payload.targetName);
         addFact({
           type: 'healing_confirmed',
           description: `Healing received: ${amount}${targetName ? ` by ${targetName}` : ''}`,
@@ -194,7 +204,7 @@ export function adaptCombatEventsToNarrativeContext(
       })
       .with('CONCENTRATION_BROKEN', () => {
         const payload = event.payload || {};
-        const targetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+        const targetName = boundedNarrativeName(payload.targetName);
         addFact({
           type: 'concentration_broken',
           description: `Concentration broken${targetName ? ` for ${targetName}` : ''}`,

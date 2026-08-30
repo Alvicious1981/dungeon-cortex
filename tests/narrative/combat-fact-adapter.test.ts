@@ -4,7 +4,12 @@ import {
   GameEvent,
   SingleTargetConsequence,
 } from '../../lib/events/game-events';
-import { CombatNarrativeContext, NarrativeFact } from '../../lib/narrative/combat-narrative-types';
+import {
+  CombatNarrativeContext,
+  CombatNarrativeContextSchema,
+  MAX_NARRATIVE_NAME_LENGTH,
+  NarrativeFact,
+} from '../../lib/narrative/combat-narrative-types';
 
 function buildTarget(
   overrides: Pick<SingleTargetConsequence, 'targetId' | 'targetName'> &
@@ -479,6 +484,29 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
     const damageFacts = context.facts.filter((f: NarrativeFact) => f.type === 'damage_confirmed');
     expect(damageFacts).toHaveLength(1);
     expect(damageFacts[0].payload?.damageAmount).toBe(6);
+  });
+
+  it('bounds persisted actor and target names before schema validation', () => {
+    const longActorName = 'A'.repeat(MAX_NARRATIVE_NAME_LENGTH + 1);
+    const longTargetName = 'T'.repeat(MAX_NARRATIVE_NAME_LENGTH + 1);
+    const context = adaptCombatEventsToNarrativeContext([
+      {
+        type: 'COMBAT_CONSEQUENCE',
+        payload: {
+          attackerName: longActorName,
+          targets: [buildTarget({
+            targetId: 'long-name-target',
+            targetName: longTargetName,
+            damage: 4,
+          })],
+        },
+      },
+    ]);
+
+    expect(context.actor?.name).toBe(longActorName.slice(0, MAX_NARRATIVE_NAME_LENGTH));
+    expect(context.targets?.[0]?.name).toBe(longTargetName.slice(0, MAX_NARRATIVE_NAME_LENGTH));
+    expect(context.facts.every((fact) => fact.description.length <= 1_000)).toBe(true);
+    expect(CombatNarrativeContextSchema.safeParse(context).success).toBe(true);
   });
 
 });

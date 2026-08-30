@@ -28,8 +28,8 @@ All variable narrator values share one JSON data message; no variable text is in
 - Memory consolidation accepts at most 20 recent records, clips each record to 600 characters, and requests a strict `{ summary, sourceLogIds }` object capped at 1,200 summary characters.
 - A memory consolidation is persisted only when every cited source ID belongs to the exact bounded input batch; unverifiable or malformed output fails closed.
 - The narrator registers only read-only SRD lookup tools. State-changing tools are unavailable at the model boundary.
-- Every generated response is buffered and validated before it is emitted. With resolved facts, invalid text is replaced with deterministic prose derived only from those facts; without resolved facts, validation uses an empty fact context and falls back to the neutral `La escena continúa.`
-- Validation rejects mechanical-number leakage, invented rewards, unconfirmed death or conditions, hit/miss contradictions, prompt-disclosure language, internal boundary markup, mutation-tool references or tool-call syntax, and forbidden alternate-rules terminology.
+- Every generated response is buffered and validated before it is emitted. With resolved combat facts, it also receives fact-alignment checks and invalid text is replaced with deterministic prose derived only from those facts. Without a combat-fact context, universal output-contract, injection, tool-syntax, forbidden-terminology, and mechanical-number checks still apply; invalid text falls back to the neutral `La escena continúa.`
+- Every path rejects mechanical-number leakage, prompt-disclosure language, internal boundary markup, mutation-tool references or tool-call syntax, and forbidden alternate-rules terminology. When resolved combat facts exist, validation additionally rejects invented rewards, unconfirmed death or conditions, and hit/miss contradictions.
 
 Fallback prose must remain qualitative. It must not expose numerical damage or HP values even when those values exist in backend facts.
 
@@ -58,7 +58,7 @@ The controls reduce risk; they do not make model prompts a security boundary.
 - Context clipping is based on logical characters before JSON escaping, not provider tokens or final encoded bytes. Escape-heavy input remains bounded but can expand in the serialized prompt.
 - The Promptfoo assertion is intentionally independent of the TypeScript validator and can drift. Production Vitest tests are authoritative for application behavior.
 - Buffer-before-emit removes token-level narrative delivery: the existing SSE contract remains, but narration arrives as one verified text chunk after generation completes.
-- An empty fact context blocks explicit mechanics, rewards, conditions, deaths, prompt leakage, and tool syntax, but it cannot prove every semantic claim in otherwise qualitative ungrounded prose.
+- A turn without combat facts still blocks prompt leakage, tool syntax, forbidden terminology, and mechanical-number disclosure, but it does not apply combat-only keyword checks for XP, loot, death, hit/miss, or conditions. Those checks require resolved combat facts; qualitative noncombat prose therefore remains possible, and semantic hallucinations outside structured facts remain a residual model risk.
 - The broader campaign snapshot contains authoritative mechanical numbers for continuity. The resolved-facts prompt removes combat amounts, and output-number enforcement applies to every narrative path.
 - Retrieved or cached text should never contain secrets. Prompt non-disclosure instructions cannot guarantee secrecy if sensitive values are inserted into model context.
 

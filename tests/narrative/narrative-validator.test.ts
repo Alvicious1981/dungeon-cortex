@@ -174,4 +174,13 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(result.issues.some((issue) => issue.code === expectedCode)).toBe(true);
   });
 
+  it('applies universal safety checks without combat-only false positives', () => {
+    const qualitativeText = 'The experience leaves you shaken, but no one dies.';
+    const result = validateNarrativeText(qualitativeText);
+
+    expect(result.ok).toBe(true);
+    expect(validateNarrativeText('{"tool":"awardXP"}').ok).toBe(false);
+    expect(validateNarrativeText('The blow deals 6 damage.').ok).toBe(false);
+  });
+
 });

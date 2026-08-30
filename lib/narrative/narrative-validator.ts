@@ -49,7 +49,7 @@ const forbiddenRegexes = FORBIDDEN_WORDS.map(word => {
  */
 export function validateNarrativeText(
   text: string,
-  context: CombatNarrativeContext
+  context?: CombatNarrativeContext
 ): NarrativeValidationResult {
   const issues: NarrativeValidationIssue[] = [];
 
@@ -66,8 +66,10 @@ export function validateNarrativeText(
     };
   }
 
-  const contextResult = CombatNarrativeContextSchema.safeParse(context);
-  if (!contextResult.success) {
+  const contextResult = context === undefined
+    ? null
+    : CombatNarrativeContextSchema.safeParse(context);
+  if (contextResult && !contextResult.success) {
     return {
       ok: false,
       isValid: false,
@@ -80,7 +82,7 @@ export function validateNarrativeText(
   }
 
   text = textResult.data;
-  context = contextResult.data;
+  context = contextResult?.data;
 
   // 1. Check for forbidden legacy terms (Runtime check)
   for (let i = 0; i < forbiddenRegexes.length; i++) {
@@ -133,7 +135,7 @@ export function validateNarrativeText(
   }
 
   // 4. Reject generic XP mentions
-  if (/(?:xp|experiencia|experience)\b/i.test(text)) {
+  if (context && /(?:xp|experiencia|experience)\b/i.test(text)) {
     issues.push({
       code: 'invented_xp',
       message: 'XP mentions are not allowed in combat narration.',
@@ -142,7 +144,7 @@ export function validateNarrativeText(
   }
 
   // 5. Reject generic loot/currency/magic item drops
-  if (/\b(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)\b/i.test(text)) {
+  if (context && /\b(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)\b/i.test(text)) {
     issues.push({
       code: 'invented_loot',
       message: 'Loot, currency, or magic item drops are not allowed in combat narration.',
@@ -178,7 +180,7 @@ export function validateNarrativeText(
 
   // 7. Muerte no confirmada
   const deathWords = /\b(?:muere|dies|slain|killed|muerto|defeated|derrotad[oa]|cae\s+muerto|morir|die|slay)\b/i;
-  if (deathWords.test(text)) {
+  if (context && deathWords.test(text)) {
     const hasDefeatedFact = context.facts.some(f => f.type === 'enemy_defeated');
     if (!hasDefeatedFact) {
       issues.push({
@@ -190,8 +192,8 @@ export function validateNarrativeText(
   }
 
   // 8. Contradicciones hit/miss
-  const hasMiss = context.facts.some(f => f.type === 'attack_miss');
-  const hasHit = context.facts.some(f => f.type === 'attack_hit');
+  const hasMiss = context?.facts.some(f => f.type === 'attack_miss') ?? false;
+  const hasHit = context?.facts.some(f => f.type === 'attack_hit') ?? false;
 
   const hitPhrases = /(?:alcanza|impacta|hits|hit\b|conecta|golpea|golpe|\bcorta(?!\s+(?:el\s+)?aire\b)\b|\bcut(?:s)?(?!\s+(?:the\s+)?air\b)\b)/i;
   const missPhrases = /(?:falla|misses|miss\b|corta\s+(?:el\s+)?aire|cut(?:s)?\s+(?:the\s+)?air)/i;
@@ -227,7 +229,7 @@ export function validateNarrativeText(
 
   for (const mapping of conditionMappings) {
     const mentionsCondition = mapping.names.some(regex => regex.test(text));
-    if (mentionsCondition) {
+    if (context && mentionsCondition) {
       const isConfirmed = context.facts.some(f => 
         f.type === 'condition_applied' && 
         typeof f.payload?.conditionName === 'string' &&

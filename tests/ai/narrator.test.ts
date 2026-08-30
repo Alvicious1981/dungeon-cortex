@@ -94,6 +94,19 @@ describe("streamNarrative contained tool surface", () => {
     expect(prisma.srdItem.findUnique).not.toHaveBeenCalled();
     expect(prisma.srdMonster.findUnique).not.toHaveBeenCalled();
   });
+
+  it("keeps safe qualitative prose when no combat facts exist", async () => {
+    const qualitativeText = "The experience leaves you shaken, but no one dies.";
+    mockStreamText.mockReturnValueOnce({
+      textStream: (async function* () {})(),
+      text: Promise.resolve(qualitativeText),
+    } as any);
+
+    const result = await streamNarrative(CAMPAIGN_ID, "I speak with the witness.");
+
+    await expect(result.textPromise).resolves.toBe(qualitativeText);
+  });
+
   it("executes an allowed spell lookup", async () => {
     prisma.srdSpell.findUnique.mockResolvedValue({
       id: "fireball", name: "Fireball", hasHealing: false, damageType: "fire",
