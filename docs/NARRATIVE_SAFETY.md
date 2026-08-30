@@ -35,6 +35,9 @@ All variable narrator values share one JSON data message; no variable text is in
 - Ordinary noncombat counts remain valid; implicit verb-plus-number damage checks activate only when resolved combat facts are present, while explicit HP, damage, and healing units remain blocked universally.
 - Explicit XP/loot awards, death statements, and condition outcomes remain blocked even on factless turns, while ordinary uses such as “experience” in qualitative prose remain valid.
 - A schema-valid resolved context whose serialized prompt exceeds its output contract fails closed to neutral prose before campaign context or the model is loaded.
+- Composed English and Spanish number words are rejected when attached to HP, damage, or healing units; the detector is not limited to amounts up to twenty.
+- Model-visible targets receive stable per-request aliases, and confirmed facts carry the matching alias without exposing persistent IDs.
+- Text from every completed model/tool step is aggregated before the single validation and emission pass.
 
 Fallback prose must remain qualitative. It must not expose numerical damage or HP values even when those values exist in backend facts.
 

@@ -99,6 +99,26 @@ describe('Narrative Prompt Builder Tests (Fase 7A/7B.1)', () => {
     expect(prompt.user).not.toMatch(/\b15\b/);
   });
 
+  it('projects stable aliases that preserve target identity for duplicate names', () => {
+    const prompt = buildNarrativePrompt({
+      facts: [
+        { type: 'attack_hit', description: 'Hit Goblin', payload: { targetId: 'goblin-1', targetName: 'Goblin' } },
+        { type: 'attack_miss', description: 'Miss Goblin', payload: { targetId: 'goblin-2', targetName: 'Goblin' } },
+      ],
+      targets: [
+        { id: 'goblin-1', name: 'Goblin', isPlayer: false, hpAfter: 1 },
+        { id: 'goblin-2', name: 'Goblin', isPlayer: false, hpAfter: 1 },
+      ],
+    });
+    const payload = JSON.parse(prompt.user.split('\n')[1]!);
+
+    expect(payload.targets.map((target: { ref: string }) => target.ref)).toEqual(['target_1', 'target_2']);
+    expect(payload.confirmedFacts.map((fact: { targetRef: string }) => fact.targetRef)).toEqual([
+      'target_1',
+      'target_2',
+    ]);
+  });
+
   it('should not contain instructions allowing the AI to roll dice, resolve attacks, calculate HP, or alter state', () => {
     const prompt = buildNarrativePrompt(baseContext);
     expect(prompt.system).toMatch(/do not decide rules.*calculate damage.*alter state.*simulate dice/i);

@@ -88,6 +88,10 @@ export function buildNarrativePrompt(context: CombatNarrativeContext): Narrative
     else if (parsedContext.intensity >= 8) qualitativeIntensity = 'High';
   }
 
+  const targetRefs = new Map(
+    (parsedContext.targets ?? []).map((target, index) => [target.id, `target_${index + 1}`]),
+  );
+
   const resolvedFacts = {
     actor: parsedContext.actor
       ? {
@@ -95,7 +99,8 @@ export function buildNarrativePrompt(context: CombatNarrativeContext): Narrative
           role: parsedContext.actor.isPlayer ? 'player_character' : 'non_player_character',
         }
       : null,
-    targets: (parsedContext.targets ?? []).map((target) => ({
+    targets: (parsedContext.targets ?? []).map((target, index) => ({
+      ref: `target_${index + 1}`,
       name: normalizeDataText(target.name, 160),
       role: target.isPlayer ? 'player_character' : 'non_player_character',
     })),
@@ -103,6 +108,9 @@ export function buildNarrativePrompt(context: CombatNarrativeContext): Narrative
     intensity: qualitativeIntensity ?? null,
     confirmedFacts: parsedContext.facts.map((fact) => ({
       type: fact.type,
+      targetRef: typeof fact.payload?.targetId === 'string'
+        ? targetRefs.get(fact.payload.targetId) ?? null
+        : null,
       description: getQualitativeDescription(fact.type, fact.description, fact.payload),
     })),
   };

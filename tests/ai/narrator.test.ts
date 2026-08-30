@@ -82,6 +82,20 @@ describe("streamNarrative contained tool surface", () => {
     await expect(result.textPromise).resolves.toBe("Narration.");
   });
 
+  it("aggregates narrative text from every completed generation step", async () => {
+    mockStreamText.mockReturnValueOnce({
+      text: Promise.resolve("After the lookup."),
+      steps: Promise.resolve([
+        { text: "Before the lookup." },
+        { text: "After the lookup." },
+      ]),
+    } as any);
+
+    const result = await streamNarrative(CAMPAIGN_ID, "I recall lore.");
+
+    await expect(result.textPromise).resolves.toBe("Before the lookup.\nAfter the lookup.");
+  });
+
   it("does not execute lookups unless the model issues a tool call", async () => {
     mockStreamText.mockReturnValueOnce({
       textStream: (async function* () {})(),

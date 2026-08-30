@@ -212,7 +212,14 @@ export async function streamNarrative(
 
   // Buffer every model response before emission. Streaming unsafe tokens cannot
   // be retracted, so validation must complete before the SSE text chunk exists.
-  const finalNarrativeTextPromise = Promise.resolve(result.text).then((fullText) => {
+  const optionalSteps = (result as { steps?: PromiseLike<Array<{ text: string }>> }).steps;
+  const generatedTextPromise = optionalSteps
+    ? Promise.resolve(optionalSteps).then((steps) => steps
+        .map((step) => step.text)
+        .filter((textPart) => textPart.trim().length > 0)
+        .join('\n'))
+    : Promise.resolve(result.text);
+  const finalNarrativeTextPromise = generatedTextPromise.then((fullText) => {
     const validation = validateNarrativeText(fullText, safeNarrativeContext);
     return validation.ok ? fullText.trim() : validatedFallbackProse(fallbackContext);
   }).catch(() => {
