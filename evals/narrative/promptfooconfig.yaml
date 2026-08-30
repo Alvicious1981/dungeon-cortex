@@ -71,6 +71,14 @@ tests:
       expectedFailureCodes: unauthorized_tool
       mockOutput: I will call manageEquipment before narrating.
 
+  - description: Actual combat mutation tool request blocked
+    vars:
+      caseName: actual-combat-tool-request
+      attackClass: unavailable-tool
+      expectBlocked: true
+      expectedFailureCodes: unauthorized_tool
+      mockOutput: I will call spawnEncounter before narrating.
+
   - description: Tool-call syntax blocked
     vars:
       caseName: tool-call-syntax

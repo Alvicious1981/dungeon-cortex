@@ -30,6 +30,44 @@ export const ACTIVE_NARRATOR_TOOL_NAMES = Object.freeze([
   "getMonsterInfo",
 ] as const);
 
+/**
+ * Complete catalogue of implemented tools that are intentionally absent from
+ * the narrator model boundary. Output mentioning one of these names is an
+ * internal-capability leak even when the surrounding text is plain prose.
+ */
+export const UNAVAILABLE_NARRATOR_TOOL_NAMES = Object.freeze([
+  "spawnEncounter",
+  "resolveAttack",
+  "generateLoot",
+  "generateLocation",
+  "moveToNode",
+  "executeExplorationTurn",
+  "useConsumable",
+  "updateQuestStatus",
+  "generateAndTrackQuest",
+  "awardXP",
+  "triggerLevelUp",
+  "getNPCDetails",
+  "trackNPC",
+  "generateAndTrackNPC",
+  "establishInitialDisposition",
+  "socialCheck",
+  "getRumors",
+  "generateMerchant",
+  "executeTrade",
+  "getTavernName",
+  "getMundaneLoot",
+  "recallLore",
+  "manageEquipment",
+  "executeTravelWatch",
+] as const);
+
+/** Backend operation names that must also never surface as narrator prose. */
+export const BLOCKED_NARRATOR_OPERATION_NAMES = Object.freeze([
+  ...UNAVAILABLE_NARRATOR_TOOL_NAMES,
+  "executeCombatAction",
+] as const);
+
 export type ActiveNarratorToolName = (typeof ACTIVE_NARRATOR_TOOL_NAMES)[number];
 
 type NarratorToolCatalogue = Record<ActiveNarratorToolName, unknown>;

@@ -28,6 +28,36 @@ const forbiddenPatterns = forbiddenTerms.map((term) => ({
   regex: wordPattern(term),
 }));
 
+const unavailableToolNames = [
+  'spawnEncounter',
+  'resolveAttack',
+  'generateLoot',
+  'generateLocation',
+  'moveToNode',
+  'executeExplorationTurn',
+  'useConsumable',
+  'updateQuestStatus',
+  'generateAndTrackQuest',
+  'awardXP',
+  'triggerLevelUp',
+  'getNPCDetails',
+  'trackNPC',
+  'generateAndTrackNPC',
+  'establishInitialDisposition',
+  'socialCheck',
+  'getRumors',
+  'generateMerchant',
+  'executeTrade',
+  'getTavernName',
+  'getMundaneLoot',
+  'recallLore',
+  'manageEquipment',
+  'executeTravelWatch',
+  'executeCombatAction',
+];
+
+const unavailableToolRegex = new RegExp(`\\b(?:${unavailableToolNames.join('|')})\\b`, 'i');
+
 const checks = [
   {
     code: 'invented_hp',
@@ -66,7 +96,7 @@ const checks = [
   },
   {
     code: 'unauthorized_tool',
-    regex: /\b(?:awardXP|executeCombatAction|executeExplorationTurn|generateMerchant|manageEquipment|updateQuestStatus)\b/i,
+    regex: unavailableToolRegex,
     reason: 'Narration must not request or expose unavailable mutation tools.',
   },
   {

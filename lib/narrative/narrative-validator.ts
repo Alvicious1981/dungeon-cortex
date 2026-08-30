@@ -7,6 +7,7 @@ import {
   CombatNarrativeContextSchema,
   NarrativeTextSchema,
 } from './combat-narrative-types';
+import { BLOCKED_NARRATOR_OPERATION_NAMES } from '../ai/tool-policy';
 
 // Build forbidden retro jargon dynamically at runtime to prevent static scan triggers
 const FORBIDDEN_WORDS = [
@@ -33,6 +34,11 @@ const forbiddenRegexes = FORBIDDEN_WORDS.map(word => {
   const end = /[A-Za-z0-9]$/.test(word) ? '\\b' : '';
   return new RegExp(start + escaped.replace(/\s+/g, '\\s+') + end, 'i');
 });
+
+const blockedOperationRegex = new RegExp(
+  `\\b(?:${BLOCKED_NARRATOR_OPERATION_NAMES.join('|')})\\b`,
+  'i',
+);
 
 /**
  * Validates AI narrative text against backend combat context to prevent hallucinations,
@@ -112,8 +118,7 @@ export function validateNarrativeText(
   }
 
   // 3. Reject references to mutation tools and serialized tool-call syntax.
-  const mutationToolRegex = /\b(?:awardXP|establishInitialDisposition|executeCombatAction|executeExplorationTurn|generateLoot|generateMerchant|manageEquipment|triggerLevelUp|updateQuestStatus)\b/i;
-  const mutationToolMatch = text.match(mutationToolRegex);
+  const mutationToolMatch = text.match(blockedOperationRegex);
   if (mutationToolMatch) {
     issues.push({
       code: 'unauthorized_tool',

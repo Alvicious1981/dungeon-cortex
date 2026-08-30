@@ -41,6 +41,14 @@ const PlayerInputSchema = z
   .min(1)
   .max(NARRATOR_DATA_LIMITS.playerActionChars);
 
+const NEUTRAL_NARRATIVE_FALLBACK = "La escena continúa.";
+
+function validatedFallbackProse(context: CombatNarrativeContext): string {
+  const fallback = generateFallbackProse(context);
+  const validation = validateNarrativeText(fallback, context);
+  return validation.ok ? fallback.trim() : NEUTRAL_NARRATIVE_FALLBACK;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface StreamNarrativeOptions {
@@ -129,7 +137,9 @@ export async function streamNarrative(
 
     const validation = validateNarrativeText(mockContent, safeNarrativeContext);
     if (!validation.ok) {
-      mockContent = generateFallbackProse(fallbackContext);
+      mockContent = validatedFallbackProse(fallbackContext);
+    } else {
+      mockContent = mockContent.trim();
     }
     
     // Resolvemos los payloads de herramientas como null para que no queden colgando
@@ -182,9 +192,9 @@ export async function streamNarrative(
   // be retracted, so validation must complete before the SSE text chunk exists.
   const finalNarrativeTextPromise = Promise.resolve(result.text).then((fullText) => {
     const validation = validateNarrativeText(fullText, safeNarrativeContext);
-    return validation.ok ? fullText : generateFallbackProse(fallbackContext);
+    return validation.ok ? fullText.trim() : validatedFallbackProse(fallbackContext);
   }).catch(() => {
-    return generateFallbackProse(fallbackContext);
+    return validatedFallbackProse(fallbackContext);
   });
 
   const finalNarrativeTextStream = (async function* () {

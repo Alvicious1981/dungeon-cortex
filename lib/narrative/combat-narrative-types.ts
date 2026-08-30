@@ -155,4 +155,4 @@ export const NarrativePromptSchema = z.object({
   user: z.string().min(1).max(MAX_PROMPT_LENGTH),
 }).strict();
 
-export const NarrativeTextSchema = z.string().trim().min(1).max(MAX_NARRATIVE_LENGTH);
+export const NarrativeTextSchema = z.string().max(MAX_NARRATIVE_LENGTH).trim().min(1);

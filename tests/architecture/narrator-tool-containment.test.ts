@@ -9,6 +9,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  ACTIVE_NARRATOR_TOOL_NAMES,
+  UNAVAILABLE_NARRATOR_TOOL_NAMES,
+} from "@/lib/ai/tool-policy";
 
 const toolsDir = join(process.cwd(), "lib", "ai", "tools");
 const toolFiles = readdirSync(toolsDir).filter((file) => file.endsWith(".ts"));
@@ -46,7 +50,7 @@ describe("narrator physical tool containment", () => {
       expect(policySource).toMatch(new RegExp(`\\b${name}\\b`));
     }
 
-    expect(policySource).not.toContain("getMundaneLoot");
+    expect(ACTIVE_NARRATOR_TOOL_NAMES).not.toContain("getMundaneLoot");
     expect(narratorSource).not.toContain("executeTrade");
     expect(narratorSource).not.toContain("buildProgressionTools");
     expect(narratorSource).not.toContain("buildCombatTools");
@@ -63,6 +67,18 @@ describe("narrator physical tool containment", () => {
     expect(policySource).not.toMatch(/\bimport\s+.*\bfrom\b/);
     expect(policySource).not.toMatch(/\bprisma\b/);
     expect(policySource).toContain("Object.freeze");
+  });
+
+  it("catalogues every implemented non-SRD tool as unavailable", () => {
+    const declaredNames = toolFiles
+      .filter((file) => !["srd-lookup.ts", "wilderness.ts"].includes(file))
+      .flatMap((file) => Array.from(
+        readTool(file).matchAll(/^\s{4}([A-Za-z][A-Za-z0-9]*): tool\(\{/gm),
+        (match) => match[1]!,
+      ));
+    declaredNames.push("executeTravelWatch");
+
+    expect([...UNAVAILABLE_NARRATOR_TOOL_NAMES].sort()).toEqual(declaredNames.sort());
   });
 });
 

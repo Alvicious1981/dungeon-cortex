@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateNarrativeText } from '../../lib/narrative/narrative-validator';
 import { CombatNarrativeContext, NarrativeFact } from '../../lib/narrative/combat-narrative-types';
+import { BLOCKED_NARRATOR_OPERATION_NAMES } from '../../lib/ai/tool-policy';
 
 describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
   const baseContext: CombatNarrativeContext = {
@@ -182,5 +183,21 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(validateNarrativeText('{"tool":"awardXP"}').ok).toBe(false);
     expect(validateNarrativeText('The blow deals 6 damage.').ok).toBe(false);
   });
+
+  it('measures the raw output before trimming whitespace', () => {
+    const padded = `${' '.repeat(4_001)}Safe.`;
+
+    expect(validateNarrativeText(padded).ok).toBe(false);
+  });
+
+  it.each(BLOCKED_NARRATOR_OPERATION_NAMES)(
+    'rejects unavailable or backend-only operation %s in plain prose',
+    (operationName) => {
+      const result = validateNarrativeText(`I will call ${operationName} before narrating.`);
+
+      expect(result.ok).toBe(false);
+      expect(result.issues.some((issue) => issue.code === 'unauthorized_tool')).toBe(true);
+    },
+  );
 
 });
