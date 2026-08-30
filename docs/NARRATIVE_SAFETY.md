@@ -1,42 +1,65 @@
 # Narrative Safety and Boundaries Specification
 
-This document defines the authoritative guidelines for the narrative execution layer of Dungeon Cortex. It establishes boundaries between mechanical state transitions (backend-first) and fictional representation (AI narration).
+This document records the implemented narrative trust boundary. Rules canon remains authoritative in `docs/DECISION_5E_SRD_API.md`, and architecture law remains authoritative in `MASTER_ARCH_GUIDE.md`.
 
-## 1. Core Architecture Principles
+## 1. Authority and data flow
 
-1. **Separation of Concerns**:
-   - **Backend**: Computes checks, rolls dice, checks Armor Class, updates HP, deducts resources, and resolves conditions.
-   - **AI Narrator**: Translates the resulting mechanical facts into descriptive prose.
+The backend is the only authority for legality, rolls, Armor Class comparisons, damage, healing, resources, rewards, conditions, movement, persistence, and deterministic events. Narration may describe only outcomes already resolved by backend code.
 
-2. **Temporal Ordering (Events First)**:
-   - The SSE stream must emit deterministic state frames (e.g. `COMBAT_CONSEQUENCE`, `SPELL_CAST`) **before** any LLM narrative text tokens are streamed.
-   - The UI updates immediately based on the deterministic events, ensuring no visual latency.
+Deterministic SSE state frames must be emitted before narrative text. The user interface consumes those frames as state truth; prose is never a state transition.
 
-3. **Strict Fact Alignment**:
-   - The narrative must match the resolved facts exactly.
-   - If the backend resolved a miss, the AI must not narrate a physical cut or hit. If the target survived, the AI must not narrate death.
+| Prompt source | Trust classification | Handling |
+| --- | --- | --- |
+| Static narrator instructions | Trusted application code | Kept outside all data tags. |
+| Backend campaign snapshot | Authoritative facts, untrusted text fields | Stored under `canonicalState` in the single JSON `GAME_DATA` user message. |
+| Memories and prior logs | Advisory and untrusted | Stored under separate `memory` and `recentDialogue` keys in `GAME_DATA`, below canonical state in the declared authority hierarchy. |
+| Current player action | Untrusted | Runtime length-checked and stored under `playerAction` in `GAME_DATA`. |
+| Resolved narrative facts | Backend-authoritative event types, untrusted descriptive strings | Runtime schema-checked, mechanically numeric fields removed, and stored under the highest-authority `backendResolvedFacts` key. |
+| Memory-consolidation logs | Untrusted historical records | Speaker-allowlisted, clipped, and serialized as a JSON `GAME_LOGS` payload. |
+| SRD tool results | Read-only reference data | May clarify canonical names or descriptions but cannot authorize outcomes or mutations. |
 
-## 2. Narrative Safety Blocklist
+All variable narrator values share one JSON data message; no variable text is interpolated into the system message. JSON string encoding prevents quotes, newlines, role labels, commands, or apparent closing tags from becoming a new model message or instruction channel.
 
-To prevent the introduction of AD&D/OSR mechanics or jargon, the validation layer and prompt builders must reject the following terms (case-insensitive):
+## 2. Runtime controls
 
-- `morale check` / `tirada de moral` / `chequeo de moral`
-- `OSR morale` / `moral OSR`
-- `THAC0`
-- `AC descendente` / `descending AC`
-- `saving throw vs` / `save vs death` / `save vs wands`
-- `gold for XP` / `XP por oro`
-- `AD&D`
-- `OSR`
+- Player actions are trimmed, must contain text, and are capped at 2,000 characters.
+- Resolved-fact contexts and narrative output use strict Zod schemas with count and length limits.
+- Narrator data is bounded before serialization: canonical state to 24,000 characters, backend facts to 32,000, player action to 2,000, and memory/dialogue to the most recent 20 bounded entries per tier.
+- Memory consolidation accepts at most 20 recent records, clips each record to 600 characters, and requests a strict `{ summary, sourceLogIds }` object capped at 1,200 summary characters.
+- A memory consolidation is persisted only when every cited source ID belongs to the exact bounded input batch; unverifiable or malformed output fails closed.
+- The narrator registers only read-only SRD lookup tools. State-changing tools are unavailable at the model boundary.
+- Every generated response is buffered and validated before it is emitted. With resolved facts, invalid text is replaced with deterministic prose derived only from those facts; without resolved facts, validation uses an empty fact context and falls back to the neutral `La escena continúa.`
+- Validation rejects mechanical-number leakage, invented rewards, unconfirmed death or conditions, hit/miss contradictions, prompt-disclosure language, internal boundary markup, mutation-tool references or tool-call syntax, and forbidden alternate-rules terminology.
 
-## 3. Fallback Prose Strategy
+Fallback prose must remain qualitative. It must not expose numerical damage or HP values even when those values exist in backend facts.
 
-If the LLM fails to return a response, experiences high latency, or is blocked by the safety validator, the backend must instantly emit a deterministic, pre-canned description based on the resolved `CombatFacts` (e.g., "The attack misses target's armor", "A clean hit deals X damage").
+## 3. Adversarial regression coverage
 
-## 4. Known Legacy Debt Outside This Narrative Roadmap
+`tests/security/prompt-injection.test.ts` executes the production builders, narrator wiring, memory-consolidation boundary, output validator, and fallback path against:
 
-There exists legacy code outside of the safe narrative boundary that contains forbidden terms or mechanics:
-- `lib/ai/tools/downtime.ts` and `lib/rules/downtime.ts` contain remnants of the older AD&D/OSR downtime mechanics.
-- These files are out of scope for the current narrative porting roadmap and are not being migrated at this time.
-- The `check-retro` hook is configured to protect only the newly introduced narrative layer.
-- Any future migration of downtime systems must be executed under a separate implementation plan.
+- direct player injection;
+- stored injection in names, quests, memories, and logs;
+- forged closing tags and combined prompt-context leakage;
+- requests for unavailable mutation tools;
+- oversized and escape-amplifying context;
+- instruction-like memory summaries; and
+- English and Spanish validator evasions.
+
+The focused narrative and memory suites retain lower-level contract coverage. `pnpm check-retro` separately checks protected production and narrative paths for forbidden terminology.
+
+`evals/narrative` is a deterministic Promptfoo fixture harness. Its negative cases declare exact expected failure codes. It does not call a model and must not be reported as evidence of live-model injection resistance.
+
+## 4. Residual risk and limitations
+
+The controls reduce risk; they do not make model prompts a security boundary.
+
+- No live-model red-team evaluation is part of the local suite. Adaptive, multi-turn, provider-specific, and tool-selection behavior remains unmeasured.
+- Regex validation is finite. Homoglyphs, zero-width characters, novel paraphrases, unsupported languages, and indirect semantic disclosures may evade it.
+- Context clipping is based on logical characters before JSON escaping, not provider tokens or final encoded bytes. Escape-heavy input remains bounded but can expand in the serialized prompt.
+- The Promptfoo assertion is intentionally independent of the TypeScript validator and can drift. Production Vitest tests are authoritative for application behavior.
+- Buffer-before-emit removes token-level narrative delivery: the existing SSE contract remains, but narration arrives as one verified text chunk after generation completes.
+- An empty fact context blocks explicit mechanics, rewards, conditions, deaths, prompt leakage, and tool syntax, but it cannot prove every semantic claim in otherwise qualitative ungrounded prose.
+- The broader campaign snapshot contains authoritative mechanical numbers for continuity. The resolved-facts prompt removes combat amounts, and output-number enforcement applies to every narrative path.
+- Retrieved or cached text should never contain secrets. Prompt non-disclosure instructions cannot guarantee secrecy if sensitive values are inserted into model context.
+
+Any future live evaluation requires explicit approval and a separate plan for provider selection, credentials, cost, data retention, reproducibility, success thresholds, and rollback.

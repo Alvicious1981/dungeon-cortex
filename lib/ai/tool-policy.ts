@@ -20,12 +20,10 @@
 /**
  * The only tools activated on the narrator model call.
  *
- * Every entry is a read-only lookup or a deterministic generator: it resolves
- * reference data and never mutates campaign state.
+ * Every entry is a read-only SRD lookup. Generators and campaign-aware tools
+ * remain outside the narrator's model-visible surface.
  */
 export const ACTIVE_NARRATOR_TOOL_NAMES = Object.freeze([
-  "getNPCDetails",
-  "getTavernName",
   "getSpellInfo",
   "getItemInfo",
   "getEquipmentInfo",

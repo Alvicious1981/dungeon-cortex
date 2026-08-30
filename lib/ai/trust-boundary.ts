@@ -36,6 +36,17 @@ export type NarratorAuthorityTier = (typeof NARRATOR_AUTHORITY_ORDER)[number];
 /** Label that introduces the untrusted data payload in the user message. */
 export const GAME_DATA_LABEL = "GAME_DATA";
 
+export const NARRATOR_DATA_LIMITS = Object.freeze({
+  canonicalStateChars: 24_000,
+  backendFactsChars: 32_000,
+  memoryEntries: 20,
+  memoryEntryChars: 1_200,
+  dialogueEntries: 20,
+  dialogueContentChars: 2_000,
+  dialogueRoleChars: 32,
+  playerActionChars: 2_000,
+} as const);
+
 /**
  * Stable instructions describing the trust boundary and the authority
  * hierarchy. Constant by construction — no interpolation of runtime values.
@@ -135,6 +146,10 @@ function asText(value: string | null | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
+function boundedText(value: string | null | undefined, maxChars: number): string {
+  return asText(value).slice(0, maxChars);
+}
+
 /**
  * Builds a narrator request with an unambiguous separation between stable
  * instructions and variable game data.
@@ -144,16 +159,25 @@ function asText(value: string | null | undefined): string {
 export function buildNarratorRequest(input: NarratorRequestInput): NarratorRequest {
   const gameData: NarratorGameData = {
     authorityHierarchy: NARRATOR_AUTHORITY_ORDER,
-    backendResolvedFacts: input.backendResolvedFacts ? input.backendResolvedFacts : null,
-    canonicalState: asText(input.canonicalState),
+    backendResolvedFacts: input.backendResolvedFacts
+      ? boundedText(input.backendResolvedFacts, NARRATOR_DATA_LIMITS.backendFactsChars)
+      : null,
+    canonicalState: boundedText(
+      input.canonicalState,
+      NARRATOR_DATA_LIMITS.canonicalStateChars,
+    ),
     // Reserved tier — no derived values are exposed to the narrator yet.
     derivedData: {},
-    memory: (input.memory ?? []).map(asText),
-    recentDialogue: (input.recentDialogue ?? []).map((entry) => ({
-      role: asText(entry?.role),
-      content: asText(entry?.content),
+    memory: (input.memory ?? [])
+      .slice(-NARRATOR_DATA_LIMITS.memoryEntries)
+      .map((entry) => boundedText(entry, NARRATOR_DATA_LIMITS.memoryEntryChars)),
+    recentDialogue: (input.recentDialogue ?? [])
+      .slice(-NARRATOR_DATA_LIMITS.dialogueEntries)
+      .map((entry) => ({
+      role: boundedText(entry?.role, NARRATOR_DATA_LIMITS.dialogueRoleChars),
+      content: boundedText(entry?.content, NARRATOR_DATA_LIMITS.dialogueContentChars),
     })),
-    playerAction: asText(input.playerAction),
+    playerAction: boundedText(input.playerAction, NARRATOR_DATA_LIMITS.playerActionChars),
   };
 
   const system = [

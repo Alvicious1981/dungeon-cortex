@@ -167,4 +167,12 @@ describe('Fallback Prose Generator Tests (Fase 6A)', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('should use a neutral validated fallback when no resolved facts exist', () => {
+    const context: CombatNarrativeContext = { facts: [] };
+    const prose = generateFallbackProse(context);
+
+    expect(prose).toBe('La escena continúa.');
+    expect(validateNarrativeText(prose, context).ok).toBe(true);
+  });
+
 });

@@ -1,4 +1,12 @@
-import { CombatNarrativeContext, NarrativeValidationResult, NarrativeValidationIssue } from './combat-narrative-types';
+import type {
+  CombatNarrativeContext,
+  NarrativeValidationIssue,
+  NarrativeValidationResult,
+} from './combat-narrative-types';
+import {
+  CombatNarrativeContextSchema,
+  NarrativeTextSchema,
+} from './combat-narrative-types';
 
 // Build forbidden retro jargon dynamically at runtime to prevent static scan triggers
 const FORBIDDEN_WORDS = [
@@ -45,6 +53,35 @@ export function validateNarrativeText(
 ): NarrativeValidationResult {
   const issues: NarrativeValidationIssue[] = [];
 
+  const textResult = NarrativeTextSchema.safeParse(text);
+  if (!textResult.success) {
+    return {
+      ok: false,
+      isValid: false,
+      issues: [{
+        code: 'invalid_output_contract',
+        message: 'Narrative output must be non-empty text within the configured length limit.',
+        severity: 'error',
+      }],
+    };
+  }
+
+  const contextResult = CombatNarrativeContextSchema.safeParse(context);
+  if (!contextResult.success) {
+    return {
+      ok: false,
+      isValid: false,
+      issues: [{
+        code: 'invalid_context_contract',
+        message: 'Narrative context does not match the resolved-facts contract.',
+        severity: 'error',
+      }],
+    };
+  }
+
+  text = textResult.data;
+  context = contextResult.data;
+
   // 1. Check for forbidden legacy terms (Runtime check)
   for (let i = 0; i < forbiddenRegexes.length; i++) {
     const regex = forbiddenRegexes[i]!;
@@ -59,7 +96,43 @@ export function validateNarrativeText(
     }
   }
 
-  // 2. Reject generic XP mentions
+  // 2. Reject prompt-policy disclosure or boundary markup in model output.
+  const promptLeakRegex = /\b(?:system\s+prompt|developer\s+(?:message|instructions?)|hidden\s+(?:prompt|instructions?|context)|previous\s+instructions?|mensaje\s+del\s+sistema|prompt\s+del\s+sistema|contexto\s+oculto|instrucciones\s+(?:previas|anteriores)|instrucciones\s+del\s+desarrollador)\b/i;
+  const boundaryMarkupRegex = /<\/?(?:campaign_state|untrusted_context|player_action|resolved_facts|event_logs)\b/i;
+  const promptLeakMatch = text.match(promptLeakRegex) ?? text.match(boundaryMarkupRegex);
+  if (promptLeakMatch) {
+    issues.push({
+      code: 'prompt_disclosure',
+      message: 'Narrative output exposes prompt or data-boundary details.',
+      severity: 'error',
+      matchedText: promptLeakMatch[0],
+    });
+  }
+
+  // 3. Reject references to mutation tools and serialized tool-call syntax.
+  const mutationToolRegex = /\b(?:awardXP|establishInitialDisposition|executeCombatAction|executeExplorationTurn|generateLoot|generateMerchant|manageEquipment|triggerLevelUp|updateQuestStatus)\b/i;
+  const mutationToolMatch = text.match(mutationToolRegex);
+  if (mutationToolMatch) {
+    issues.push({
+      code: 'unauthorized_tool',
+      message: 'Narrative output references a state-changing tool that is unavailable to the narrator.',
+      severity: 'error',
+      matchedText: mutationToolMatch[0],
+    });
+  }
+
+  const toolSyntaxRegex = /<\/?tool_call\b|["'](?:tool|function_call)["']\s*:|\bfunction_call\s*\(/i;
+  const toolSyntaxMatch = text.match(toolSyntaxRegex);
+  if (toolSyntaxMatch) {
+    issues.push({
+      code: 'tool_syntax',
+      message: 'Narrative output contains serialized tool-call syntax.',
+      severity: 'error',
+      matchedText: toolSyntaxMatch[0],
+    });
+  }
+
+  // 4. Reject generic XP mentions
   if (/(?:xp|experiencia|experience)\b/i.test(text)) {
     issues.push({
       code: 'invented_xp',
@@ -68,8 +141,8 @@ export function validateNarrativeText(
     });
   }
 
-  // 3. Reject generic loot/currency/magic item drops
-  if (/(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)/i.test(text)) {
+  // 5. Reject generic loot/currency/magic item drops
+  if (/\b(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)\b/i.test(text)) {
     issues.push({
       code: 'invented_loot',
       message: 'Loot, currency, or magic item drops are not allowed in combat narration.',
@@ -77,11 +150,25 @@ export function validateNarrativeText(
     });
   }
 
-  // 4. Reject any numerical HP, damage, or healing mentions in the text
+  // 6. Reject any numerical HP, damage, or healing mentions in the text
   const numericHpDamageRegex = /\b\d+\s*(?:de\s+)?(?:hp|hit\s*points|puntos\s+de\s+vida|puntos\s+de\s+golpe|daño|damage|vida|healing|curación|cura)\b/i;
   const verbNumericHpDamageRegex = /\b(?:lose|loses|lost|pierde|perdió|deal|deals|dealt|hace|hizo|recibe|recibió|queda\s+con|has|have|left|queda|heal|heals|healed|cura|curó|inflige|inflict|inflicts|recupera|recuperó)\s+\d+\b/i;
+  const numberWord = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieciséis|dieciseis|diecisiete|dieciocho|diecinueve|veinte)';
+  const numberWordHpDamageRegex = new RegExp(
+    `\\b${numberWord}\\s+(?:hp|hit\\s*points?|points?\\s+of\\s+damage|puntos?\\s+de\\s+(?:vida|golpe)|daño|damage|healing|curación|cura|vida)\\b`,
+    'i',
+  );
+  const verbNumberWordHpDamageRegex = new RegExp(
+    `\\b(?:lose|loses|lost|pierde|perdió|deal|deals|dealt|recibe|recibió|heal|heals|healed|cura|curó|inflige|inflict|inflicts|recupera|recuperó)\\s+${numberWord}\\b`,
+    'i',
+  );
 
-  if (numericHpDamageRegex.test(text) || verbNumericHpDamageRegex.test(text)) {
+  if (
+    numericHpDamageRegex.test(text) ||
+    verbNumericHpDamageRegex.test(text) ||
+    numberWordHpDamageRegex.test(text) ||
+    verbNumberWordHpDamageRegex.test(text)
+  ) {
     issues.push({
       code: 'invented_hp',
       message: 'Numerical HP, damage, or healing values are not permitted in AI narration.',
@@ -89,7 +176,7 @@ export function validateNarrativeText(
     });
   }
 
-  // 5. Muerte no confirmada
+  // 7. Muerte no confirmada
   const deathWords = /\b(?:muere|dies|slain|killed|muerto|defeated|derrotad[oa]|cae\s+muerto|morir|die|slay)\b/i;
   if (deathWords.test(text)) {
     const hasDefeatedFact = context.facts.some(f => f.type === 'enemy_defeated');
@@ -102,7 +189,7 @@ export function validateNarrativeText(
     }
   }
 
-  // 6. Contradicciones hit/miss
+  // 8. Contradicciones hit/miss
   const hasMiss = context.facts.some(f => f.type === 'attack_miss');
   const hasHit = context.facts.some(f => f.type === 'attack_hit');
 
@@ -124,10 +211,10 @@ export function validateNarrativeText(
     });
   }
 
-  // 7. Condiciones no confirmadas
+  // 9. Condiciones no confirmadas
   const conditionMappings = [
     { names: [/stunned/i, /aturdido/i], condition: 'Stunned' },
-    { names: [/prone/i, /derribado/i, /suelo/i], condition: 'Prone' },
+    { names: [/prone/i, /derribad[oa]/i], condition: 'Prone' },
     { names: [/poisoned/i, /envenenado/i], condition: 'Poisoned' },
     { names: [/blinded/i, /cegado/i], condition: 'Blinded' },
     { names: [/deafened/i, /ensordecido/i], condition: 'Deafened' },

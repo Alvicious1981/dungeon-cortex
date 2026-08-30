@@ -38,8 +38,6 @@ describe("narrator physical tool containment", () => {
     );
 
     for (const name of [
-      "getNPCDetails",
-      "getTavernName",
       "getSpellInfo",
       "getItemInfo",
       "getEquipmentInfo",

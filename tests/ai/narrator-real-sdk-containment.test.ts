@@ -89,9 +89,7 @@ describe("narrator containment with the real AI SDK", () => {
       "getEquipmentInfo",
       "getItemInfo",
       "getMonsterInfo",
-      "getNPCDetails",
       "getSpellInfo",
-      "getTavernName",
     ]);
     expect(parts).toContainEqual(expect.objectContaining({
       type: "tool-call",

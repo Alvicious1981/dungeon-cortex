@@ -8,6 +8,18 @@
  * Rules: D&D 5e/SRD 2014 only. No legacy rules or forbidden terminology allowed.
  */
 
+import { z } from 'zod';
+
+const MAX_FACTS = 100;
+const MAX_TARGETS = 50;
+const MAX_SOURCE_EVENTS = 100;
+const MAX_IDENTIFIER_LENGTH = 200;
+const MAX_NAME_LENGTH = 160;
+const MAX_DESCRIPTION_LENGTH = 1_000;
+const MAX_TONE_LENGTH = 120;
+const MAX_PROMPT_LENGTH = 32_000;
+const MAX_NARRATIVE_LENGTH = 4_000;
+
 /** Valid 5e-compatible backend fact types. */
 export type NarrativeFactType =
   | 'attack_hit'
@@ -24,12 +36,34 @@ export type NarrativeFactType =
   | 'turn_started'
   | 'turn_ended';
 
+export const NarrativeFactTypeSchema = z.enum([
+  'attack_hit',
+  'attack_miss',
+  'critical_hit',
+  'critical_miss',
+  'damage_confirmed',
+  'healing_confirmed',
+  'condition_applied',
+  'condition_removed',
+  'enemy_defeated',
+  'spell_cast',
+  'concentration_broken',
+  'turn_started',
+  'turn_ended',
+]);
+
 /** A single resolved game event from the backend. */
 export interface NarrativeFact {
   type: NarrativeFactType;
   description: string;
   payload?: Record<string, unknown>;
 }
+
+export const NarrativeFactSchema = z.object({
+  type: NarrativeFactTypeSchema,
+  description: z.string().max(MAX_DESCRIPTION_LENGTH),
+  payload: z.record(z.string(), z.unknown()).optional(),
+}).strict();
 
 /** Complete resolved facts layout used in the negative unit tests. */
 export interface CombatFacts {
@@ -67,6 +101,30 @@ export interface CombatNarrativeContext {
   sourceEvents?: unknown[];
 }
 
+const NarrativeActorSchema = z.object({
+  id: z.string().max(MAX_IDENTIFIER_LENGTH),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  isPlayer: z.boolean(),
+}).strict();
+
+const NarrativeTargetSchema = z.object({
+  id: z.string().max(MAX_IDENTIFIER_LENGTH),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  isPlayer: z.boolean(),
+  hpBefore: z.number().finite().optional(),
+  hpAfter: z.number().finite(),
+}).strict();
+
+/** Runtime boundary for resolved backend facts before they reach a prompt. */
+export const CombatNarrativeContextSchema = z.object({
+  facts: z.array(NarrativeFactSchema).max(MAX_FACTS),
+  actor: NarrativeActorSchema.optional(),
+  targets: z.array(NarrativeTargetSchema).max(MAX_TARGETS).optional(),
+  tone: z.string().max(MAX_TONE_LENGTH).optional(),
+  intensity: z.number().finite().optional(),
+  sourceEvents: z.array(z.unknown()).max(MAX_SOURCE_EVENTS).optional(),
+}).strict();
+
 /** Issues detected when validating the AI's generated narrative output. */
 export interface NarrativeValidationIssue {
   code: string;
@@ -91,3 +149,10 @@ export interface NarrativePrompt {
   system: string;
   user: string;
 }
+
+export const NarrativePromptSchema = z.object({
+  system: z.string().min(1).max(MAX_PROMPT_LENGTH),
+  user: z.string().min(1).max(MAX_PROMPT_LENGTH),
+}).strict();
+
+export const NarrativeTextSchema = z.string().trim().min(1).max(MAX_NARRATIVE_LENGTH);

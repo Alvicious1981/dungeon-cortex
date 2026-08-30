@@ -128,9 +128,9 @@ export function generateFallbackProse(
     parts.push('La criatura cae derrotada.');
   }
 
-  // 9. Default Neutre Statement
+  // 9. Default neutral statement
   if (parts.length === 0) {
-    parts.push('La acción se resuelve y el combate continúa.');
+    parts.push('La escena continúa.');
   }
 
   return parts.join(' ');

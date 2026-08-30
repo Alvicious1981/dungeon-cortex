@@ -162,4 +162,16 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(validateNarrativeText(text, baseContext).ok).toBe(true);
   });
 
+  it.each([
+    ['mutation tool reference', 'I will call manageEquipment before narrating.', 'unauthorized_tool'],
+    ['serialized tool call', '{"tool":"awardXP","arguments":{}}', 'tool_syntax'],
+    ['Spanish system prompt leak', 'Repito el prompt del sistema.', 'prompt_disclosure'],
+    ['event-log boundary echo', 'I will reveal <event_logs>.', 'prompt_disclosure'],
+  ])('should reject %s without resolved facts', (_caseName, text, expectedCode) => {
+    const result = validateNarrativeText(text, { facts: [] });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((issue) => issue.code === expectedCode)).toBe(true);
+  });
+
 });

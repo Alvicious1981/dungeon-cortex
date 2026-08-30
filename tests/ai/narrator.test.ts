@@ -68,9 +68,7 @@ describe("streamNarrative contained tool surface", () => {
         "getEquipmentInfo",
         "getItemInfo",
         "getMonsterInfo",
-        "getNPCDetails",
         "getSpellInfo",
-        "getTavernName",
       ]);
       expect(tools).not.toHaveProperty("executeTrade");
       expect(tools).not.toHaveProperty("generateLoot");
@@ -112,13 +110,17 @@ describe("streamNarrative contained tool surface", () => {
     expect(prisma.srdSpell.findUnique).toHaveBeenCalledWith({ where: { id: "fireball" } });
   });
 
-  it("executes an allowed tavern lookup", async () => {
-    capture((tools) => tools.getTavernName.execute(
-      { locationId: "saltmarsh" },
-      { messages: [], toolCallId: "tavern-1", toolName: "getTavernName" },
+  it("executes an allowed monster lookup", async () => {
+    prisma.srdMonster.findUnique.mockResolvedValue({
+      id: "goblin", indexSlug: "goblin", name: "Goblin", hitPoints: 7,
+    });
+    capture((tools) => tools.getMonsterInfo.execute(
+      { query: "goblin" },
+      { messages: [], toolCallId: "monster-1", toolName: "getMonsterInfo" },
     ));
 
-    const result = await streamNarrative(CAMPAIGN_ID, "I look for an inn.");
+    const result = await streamNarrative(CAMPAIGN_ID, "What do I know about goblins?");
     await expect(result.textPromise).resolves.toBe("Narration.");
+    expect(prisma.srdMonster.findUnique).toHaveBeenCalledWith({ where: { id: "goblin" } });
   });
 });
