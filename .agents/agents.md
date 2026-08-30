@@ -1,15 +1,13 @@
 # Antigravity Agents Bootstrap
 
-Read `/PROJECT_CONTEXT.md` first.
+> **Legacy / compatibility notice.** This directory is retained for agents built
+> against earlier Antigravity workflows. It defines no authority of its own.
+> `AGENTS.md` at the repository root is the current primary operating guide; on
+> any conflict, defer to the source-of-truth order defined there ("Source of
+> truth order"). The sections below specialize execution style within that
+> order and must never be read as contradicting it.
 
-## Primary instruction
-
-`/PROJECT_CONTEXT.md` is the authoritative project context for this repository.
-
-If there is a conflict:
-1. current user instruction wins;
-2. `/PROJECT_CONTEXT.md` wins over older docs;
-3. narrower rules/skills may refine execution but must not silently contradict the source of truth.
+Read `AGENTS.md` first.
 
 ## Agent operating policy
 
