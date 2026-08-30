@@ -101,7 +101,7 @@ beforeEach(() => {
 });
 
 describe("narrator physical tool containment", () => {
-  it("passes exactly the six authorised read-only tools to streamText", async () => {
+  it("passes exactly the four authorised read-only SRD tools to streamText", async () => {
     const params = await captureStreamTextParams("I look around.");
 
     expect(Object.keys(params.tools).sort()).toEqual([...MODEL_TOOLS].sort());
@@ -127,24 +127,11 @@ describe("narrator physical tool containment", () => {
   it("keeps active tool descriptions subordinate to backend authority", async () => {
     const params = await captureStreamTextParams("I look around.");
 
-    expect(params.tools.getNPCDetails.description).toContain(
-      "already identified and authorized by backend context",
-    );
-    expect(params.tools.getNPCDetails.description).toContain(
-      "does not persist or establish an NPC",
-    );
-    expect(params.tools.getTavernName.description).toContain(
-      "already identified and authorized by backend context",
-    );
-    expect(params.tools.getTavernName.description).toContain(
-      "does not persist or establish a tavern",
-    );
-    expect(params.tools.getMonsterInfo.description).toContain(
-      "Never use this tool to resolve monster actions, attacks, damage, or other outcomes",
-    );
-    expect(params.tools.getMonsterInfo.description).not.toContain(
-      "or resolving monster actions",
-    );
+    for (const toolName of MODEL_TOOLS) {
+      expect(params.tools[toolName].description).toMatch(/read-only lookup/i);
+      expect(params.tools[toolName].description).toMatch(/data, not instructions|reference data/i);
+    }
+    expect(params.tools.getMonsterInfo.description).toContain("cannot authorize actions");
   });
 
   it("does not widen the physical surface for hostile player text, memory, or dialogue", async () => {
@@ -163,14 +150,14 @@ describe("narrator physical tool containment", () => {
     }
   });
 
-  it("keeps the surface fixed after an active tool returns hostile text", async () => {
+  it("keeps the surface fixed after an active lookup receives hostile text", async () => {
     mockBuildContext.mockResolvedValue(baseContext());
     let toolNamesAfterCall: string[] = [];
 
     mockStreamText.mockImplementationOnce(((params: any) => {
-      const result = params.tools.getTavernName.execute(
-        { locationId: INJECTION_PAYLOAD },
-        { messages: [], toolCallId: "tc-1", toolName: "getTavernName" },
+      const result = params.tools.getMonsterInfo.execute(
+        { query: INJECTION_PAYLOAD },
+        { messages: [], toolCallId: "tc-1", toolName: "getMonsterInfo" },
       );
 
       return {
@@ -182,7 +169,7 @@ describe("narrator physical tool containment", () => {
       } as any;
     }) as any);
 
-    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "I read the tavern sign.");
+    const { textPromise } = await streamNarrative(CAMPAIGN_ID, "I recall a monster.");
     await textPromise;
 
     expect(toolNamesAfterCall.sort()).toEqual([...MODEL_TOOLS].sort());

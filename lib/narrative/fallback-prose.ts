@@ -84,22 +84,27 @@ export function generateFallbackProse(
     parts.push('¡Una pifia! El ataque resulta en un fallo torpe.');
   }
 
-  // 3. Standard Hit Description
-  if (hasHit && !hasCritHit) {
+  // 3. Mixed Outcome Description
+  if (hasHit && hasMiss) {
+    parts.push('La ofensiva obtiene resultados dispares entre los objetivos.');
+  }
+
+  // 4. Standard Hit Description
+  if (hasHit && !hasMiss && !hasCritHit) {
     parts.push('El golpe alcanza a su objetivo y lo obliga a retroceder.');
   }
 
-  // 4. Standard Miss Description (Avoids terms like 'corta' which can imply hits in Spanish)
-  if (hasMiss && !hasCritMiss) {
+  // 5. Standard Miss Description (Avoids terms like 'corta' which can imply hits in Spanish)
+  if (hasMiss && !hasHit && !hasCritMiss) {
     parts.push('El ataque es esquivado y se desvía sin encontrar resistencia.');
   }
 
-  // 5. Healing Description
+  // 6. Healing Description
   if (hasHealing) {
     parts.push('Una oleada de energía restauradora infunde vigor.');
   }
 
-  // 6. Conditions Applied
+  // 7. Conditions Applied
   const conditionAppliedFacts = facts.filter(f => f.type === 'condition_applied');
   for (const fact of conditionAppliedFacts) {
     const condName = typeof fact.payload?.conditionName === 'string' ? fact.payload.conditionName : '';
@@ -118,19 +123,19 @@ export function generateFallbackProse(
     }
   }
 
-  // 7. Concentration Broken
+  // 8. Concentration Broken
   if (hasConcBroken) {
     parts.push('La concentración del conjurador se rompe.');
   }
 
-  // 8. Enemy Defeated
+  // 9. Enemy Defeated
   if (hasDefeated) {
     parts.push('La criatura cae derrotada.');
   }
 
-  // 9. Default Neutre Statement
+  // 10. Default neutral statement
   if (parts.length === 0) {
-    parts.push('La acción se resuelve y el combate continúa.');
+    parts.push('La escena continúa.');
   }
 
   return parts.join(' ');

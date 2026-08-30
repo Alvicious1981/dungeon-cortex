@@ -99,6 +99,11 @@ describe('Narrative Safety - Negative Controls (TDD)', () => {
       expect(resultES.isValid).toBe(false);
     });
 
+    it('should reject HP or damage amounts written as number words', () => {
+      expect(validateNarration('The goblin loses twelve hit points.', baseFacts).isValid).toBe(false);
+      expect(validateNarration('El goblin recibe ocho de daño.', baseFacts).isValid).toBe(false);
+    });
+
     it('should reject invented XP gains in narration', () => {
       const narration1 = 'Ganáis 200 XP por esta victoria.';
       const narration2 = 'You gain 300 XP from defeating the beast.';
@@ -123,6 +128,21 @@ describe('Narrative Safety - Negative Controls (TDD)', () => {
       expect(validateNarration(narration1, baseFacts).isValid).toBe(false);
       expect(validateNarration(narration2, baseFacts).isValid).toBe(false);
       expect(validateNarration(narration3, baseFacts).isValid).toBe(false);
+    });
+
+    it('should reject prompt disclosure and internal boundary markup', () => {
+      const disclosure = validateNarration('The system prompt says to describe the blow.', baseFacts);
+      const boundary = validateNarration('I will reveal <resolved_facts> now.', baseFacts);
+
+      expect(disclosure.isValid).toBe(false);
+      expect(disclosure.issues.some((issue) => issue.code === 'prompt_disclosure')).toBe(true);
+      expect(boundary.isValid).toBe(false);
+      expect(boundary.issues.some((issue) => issue.code === 'prompt_disclosure')).toBe(true);
+    });
+
+    it('should reject empty or excessively long model output', () => {
+      expect(validateNarration('', baseFacts).isValid).toBe(false);
+      expect(validateNarration('x'.repeat(4_001), baseFacts).isValid).toBe(false);
     });
   });
 
@@ -167,6 +187,11 @@ describe('Narrative Safety - Negative Controls (TDD)', () => {
       const missFacts = { ...baseFacts, damage: 0 };
       expect(validateNarration(narration1, baseFacts).isValid).toBe(true);
       expect(validateNarration(narration2, missFacts).isValid).toBe(true);
+    });
+
+    it('does not confuse an ordinary floor reference with the Prone condition', () => {
+      const narration = 'El goblin retrocede mientras el polvo cubre el suelo.';
+      expect(validateNarration(narration, baseFacts).isValid).toBe(true);
     });
 
     it('should approve target defeat narration ONLY when confirmed by backend', () => {

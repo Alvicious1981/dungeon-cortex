@@ -24,6 +24,8 @@
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
 /** Stable discriminant shared by every narrator tool result. */
+import { z } from "zod";
+
 export const TOOL_RESULT_STATUS = ["ok", "error"] as const;
 
 /**
@@ -59,6 +61,29 @@ export interface ToolFailure {
 }
 
 export type ToolResult<T> = ToolSuccess<T> | ToolFailure;
+
+/** Builds the exact model-visible schema for a typed tool result. */
+export function createToolResultSchema<TSchema extends z.ZodType>(dataSchema: TSchema) {
+  const successSchema = z.strictObject({
+    status: z.literal("ok"),
+    data: dataSchema,
+  });
+  const failureSchema = z.strictObject({
+    status: z.literal("error"),
+    reason: z.enum(TOOL_FAILURE_REASONS),
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/).optional(),
+  }).superRefine((failure, context) => {
+    if (failure.code !== undefined && failure.reason !== "rejected") {
+      context.addIssue({
+        code: "custom",
+        path: ["code"],
+        message: "code is permitted only for rejected tool results",
+      });
+    }
+  });
+
+  return z.union([successSchema, failureSchema]);
+}
 
 // ─── Domain-code sanitisation ─────────────────────────────────────────────────
 

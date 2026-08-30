@@ -1,14 +1,23 @@
-# Narrative Promptfoo Evals
+# Narrative Promptfoo Fixture Harness
 
-This folder contains a minimal Promptfoo evaluation for Dungeon Cortex narrative safety.
+This directory contains a deterministic, offline assertion harness for Dungeon Cortex narrative safety. It checks known-safe and known-unsafe output fixtures for:
 
-It evaluates simulated narration output against local safety checks: no invented mechanical numbers, no invented XP, no invented loot, no unconfirmed death, no unconfirmed conditions, and no forbidden legacy terminology.
+- invented mechanical values, rewards, death, and conditions;
+- direct and stored prompt-disclosure language;
+- combined-context and delimiter leakage;
+- unavailable mutation-tool names and tool-call syntax;
+- oversized output; and
+- English and Spanish number-word evasions.
 
-This does not replace Vitest. The existing unit and integration tests remain the source for production behavior, while this eval gives a fast local harness for mocked narrative outputs.
+## What it proves
 
-The provider is local and simulated. It does not use API keys, does not call real models, and does not call external providers. It simply returns `vars.output` or `vars.mockOutput` for each test case.
+Each blocked fixture declares `expectedFailureCodes`. A negative case passes only when the local assertion reports the intended category, so an unrelated regex match cannot hide a missing defense. Safe controls must produce no local failures.
 
-Run the eval:
+The local provider validates the fixture shape and returns `mockOutput`, or a bounded `repeatOutput` used for the size case. It uses no API key, model, network request, production prompt builder, or production validator.
+
+Production behavior is covered by `tests/security/prompt-injection.test.ts` and the focused narrative and memory Vitest suites. Run both layers when prompt security changes.
+
+## Run
 
 ```bash
 pnpm run eval:narrative
@@ -20,4 +29,10 @@ View saved results:
 pnpm run eval:narrative:view
 ```
 
-Future evaluations against real models must be added in a separate task with explicit scope, provider choice, secrets handling, tests, rollback, and risk review.
+## Limitations
+
+This harness does **not** measure whether a live model follows the production system prompt, resists adaptive attacks, avoids tool calls, or leaks context. Its assertion intentionally overlaps the production validator but is an independent JavaScript implementation, so the production Vitest corpus is the drift check.
+
+It also does not cover homoglyphs, zero-width characters, every language, multi-turn attacks, retrieved external content, tokenizer-specific context limits, or provider-specific tool behavior.
+
+Any live-model evaluation requires a separate approved task covering provider choice, secrets, cost, data handling, reproducibility, pass criteria, and rollback. Do not add credentials or live-provider configuration to this local suite.

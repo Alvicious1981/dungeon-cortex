@@ -39,8 +39,11 @@ import { saveMemory } from "@/lib/memory/store";
 /** Upper bound on a stored summary. Keeps recall prompts compact and bounded. */
 export const MAX_SUMMARY_LENGTH = 1200;
 
+/** Maximum number of recent records included in one consolidation request. */
+export const MAX_CONSOLIDATION_LOGS = 20;
+
 /** Maximum characters of each log entry forwarded to the model. */
-const MAX_LOG_CONTENT_LENGTH = 600;
+export const MAX_LOG_CONTENT_LENGTH = 600;
 
 /**
  * Strict consolidation contract. Unknown keys are rejected outright, the
@@ -93,8 +96,8 @@ function roleLabel(role: string): string {
   switch (role) {
     case "user":      return "Player";
     case "assistant": return "DM";
-    case "system":    return "System";
-    default:          return role;
+    case "system":    return "Backend Event";
+    default:          return "Other";
   }
 }
 
@@ -104,7 +107,10 @@ function roleLabel(role: string): string {
  */
 export function collectBatchLogIds(logs: readonly GameLog[]): Set<string> {
   const ids = new Set<string>();
-  for (const log of logs ?? []) {
+  const eligibleLogs = (logs ?? [])
+    .filter((log) => typeof log?.id === "string" && log.id.length > 0)
+    .slice(-MAX_CONSOLIDATION_LOGS);
+  for (const log of eligibleLogs) {
     if (typeof log?.id === "string" && log.id.length > 0) ids.add(log.id);
   }
   return ids;
@@ -117,6 +123,7 @@ export function collectBatchLogIds(logs: readonly GameLog[]): Set<string> {
 export function buildConsolidationPayload(logs: readonly GameLog[]): string {
   const entries = (logs ?? [])
     .filter((log) => typeof log?.id === "string" && log.id.length > 0)
+    .slice(-MAX_CONSOLIDATION_LOGS)
     .map((log) => ({
       id: log.id,
       speaker: roleLabel(log.role),
