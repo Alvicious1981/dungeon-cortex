@@ -21,8 +21,17 @@ function areFactsEqual(a: NarrativeFact, b: NarrativeFact): boolean {
 
   const payloadA = a.payload || {};
   const payloadB = b.payload || {};
-  const keysA = Object.keys(payloadA);
-  const keysB = Object.keys(payloadB);
+  const targetIdA = payloadA.targetId;
+  const targetIdB = payloadB.targetId;
+  if (typeof targetIdA === 'string' && typeof targetIdB === 'string' && targetIdA !== targetIdB) {
+    return false;
+  }
+
+  // Some companion events do not carry a target ID. Ignore the identity field
+  // only for their cross-event comparison, while preserving it when both facts
+  // identify different targets.
+  const keysA = Object.keys(payloadA).filter(key => key !== 'targetId');
+  const keysB = Object.keys(payloadB).filter(key => key !== 'targetId');
 
   if (keysA.length !== keysB.length) return false;
 
@@ -81,6 +90,7 @@ export function adaptCombatEventsToNarrativeContext(
           conditionsApplied,
         } = target;
         const targetName = boundedNarrativeName(rawTargetName);
+        const targetIdentity = { targetId, targetName };
 
         if (!targets.some(item => item.id === targetId)) {
           targets.push({
@@ -95,18 +105,18 @@ export function adaptCombatEventsToNarrativeContext(
           addFact({
             type: 'attack_hit',
             description: `Attack hit on ${targetName}`,
-            payload: { targetName }
+            payload: targetIdentity
           });
           addFact({
             type: 'damage_confirmed',
             description: `Damage confirmed: ${damage} to ${targetName}`,
-            payload: { damageAmount: damage, targetName }
+            payload: { damageAmount: damage, ...targetIdentity }
           });
         } else {
           addFact({
             type: 'attack_miss',
             description: `Attack missed ${targetName}`,
-            payload: { targetName }
+            payload: targetIdentity
           });
         }
 
@@ -114,7 +124,7 @@ export function adaptCombatEventsToNarrativeContext(
           addFact({
             type: 'critical_hit',
             description: `Critical hit on ${targetName}`,
-            payload: { targetName }
+            payload: targetIdentity
           });
         }
 
@@ -122,7 +132,7 @@ export function adaptCombatEventsToNarrativeContext(
           addFact({
             type: 'critical_miss',
             description: `Critical miss targeting ${targetName}`,
-            payload: { targetName }
+            payload: targetIdentity
           });
         }
 
@@ -130,7 +140,7 @@ export function adaptCombatEventsToNarrativeContext(
           addFact({
             type: 'condition_applied',
             description: `Condition ${conditionName} applied to ${targetName}`,
-            payload: { conditionName, targetName }
+            payload: { conditionName, ...targetIdentity }
           });
         }
 
@@ -138,7 +148,7 @@ export function adaptCombatEventsToNarrativeContext(
           addFact({
             type: 'enemy_defeated',
             description: `${targetName} was defeated`,
-            payload: { targetName }
+            payload: targetIdentity
           });
         }
       }

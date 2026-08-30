@@ -32,6 +32,7 @@ All variable narrator values share one JSON data message; no variable text is in
 - A resolved-fact context that exceeds its strict count or shape contract fails closed to neutral prose before campaign context is loaded or a model is called, so narration cannot throw after the backend has already committed authoritative events.
 - Deterministic fallback prose represents mixed hit/miss batches qualitatively as mixed outcomes, avoiding both factual overclaiming and false contradiction rejection.
 - Every path rejects mechanical-number leakage, prompt-disclosure language, internal boundary markup, mutation-tool references or tool-call syntax, and forbidden alternate-rules terminology. When resolved combat facts exist, validation additionally rejects invented rewards, unconfirmed death or conditions, and hit/miss contradictions.
+- Ordinary noncombat counts remain valid; implicit verb-plus-number damage checks activate only when resolved combat facts are present, while explicit HP, damage, and healing units remain blocked universally.
 
 Fallback prose must remain qualitative. It must not expose numerical damage or HP values even when those values exist in backend facts.
 

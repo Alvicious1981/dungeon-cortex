@@ -509,4 +509,28 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
     expect(CombatNarrativeContextSchema.safeParse(context).success).toBe(true);
   });
 
+  it('preserves distinct facts when bounded target names collide', () => {
+    const sharedPrefix = 'T'.repeat(MAX_NARRATIVE_NAME_LENGTH);
+    const context = adaptCombatEventsToNarrativeContext([
+      {
+        type: 'COMBAT_CONSEQUENCE',
+        payload: {
+          attackerName: 'Hero',
+          targets: [
+            buildTarget({ targetId: 'target-one', targetName: `${sharedPrefix} one`, damage: 4 }),
+            buildTarget({ targetId: 'target-two', targetName: `${sharedPrefix} two`, damage: 4 }),
+          ],
+        },
+      },
+    ]);
+
+    const hitFacts = context.facts.filter((fact) => fact.type === 'attack_hit');
+    const damageFacts = context.facts.filter((fact) => fact.type === 'damage_confirmed');
+
+    expect(hitFacts).toHaveLength(2);
+    expect(damageFacts).toHaveLength(2);
+    expect(hitFacts.map((fact) => fact.payload?.targetId)).toEqual(['target-one', 'target-two']);
+    expect(damageFacts.map((fact) => fact.payload?.targetId)).toEqual(['target-one', 'target-two']);
+  });
+
 });

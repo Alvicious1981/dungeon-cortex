@@ -132,6 +132,18 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(validateNarrativeText('The blade cuts the goblin.', missContext).ok).toBe(false);
   });
 
+  it.each([
+    'The corridor has 3 doors.',
+    'You have 2 torches left.',
+    'Queda 1 hora para el amanecer.',
+  ])('allows ordinary numeric counts without combat facts: %s', (text) => {
+    expect(validateNarrativeText(text).ok).toBe(true);
+  });
+
+  it('retains implicit damage-number protection when combat facts exist', () => {
+    expect(validateNarrativeText('The target loses 5.', baseContext).ok).toBe(false);
+  });
+
   it('should reject forbidden legacy terms', () => {
     // Obfuscate forbidden terms using string concatenation to pass static scans but fail narrative validation at runtime.
     const terms = [

@@ -175,9 +175,11 @@ export function validateNarrativeText(
 
   if (
     numericHpDamageRegex.test(text) ||
-    verbNumericHpDamageRegex.test(text) ||
     numberWordHpDamageRegex.test(text) ||
-    verbNumberWordHpDamageRegex.test(text)
+    (context !== undefined && (
+      verbNumericHpDamageRegex.test(text) ||
+      verbNumberWordHpDamageRegex.test(text)
+    ))
   ) {
     issues.push({
       code: 'invented_hp',
