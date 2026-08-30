@@ -181,6 +181,37 @@ describe("streamNarrative contained tool surface", () => {
     expect(mockStreamText).not.toHaveBeenCalled();
   });
 
+  it("fails closed when a schema-valid resolved context exceeds the prompt contract", async () => {
+    const targets = Array.from({ length: 50 }, (_, index) => ({
+      id: `target-${index}`,
+      name: `${String(index).padStart(2, "0")}${"N".repeat(158)}`,
+      isPlayer: false,
+      hpAfter: 1,
+    }));
+    const facts = targets.flatMap((target) => [
+      {
+        type: "attack_hit" as const,
+        description: `Attack hit on ${target.name}`,
+        payload: { targetName: target.name },
+      },
+      {
+        type: "damage_confirmed" as const,
+        description: `Damage confirmed to ${target.name}`,
+        payload: { damageAmount: 1, targetName: target.name },
+      },
+    ]);
+
+    const result = await streamNarrative(
+      CAMPAIGN_ID,
+      "I attack every target.",
+      { facts, targets },
+    );
+
+    await expect(result.textPromise).resolves.toBe("La escena continúa.");
+    expect(mockBuildCampaignContext).not.toHaveBeenCalled();
+    expect(mockStreamText).not.toHaveBeenCalled();
+  });
+
   it("executes an allowed spell lookup", async () => {
     prisma.srdSpell.findUnique.mockResolvedValue({
       id: "fireball", name: "Fireball", hasHealing: false, damageType: "fire",

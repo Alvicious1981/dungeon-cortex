@@ -144,6 +144,27 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(validateNarrativeText('The target loses 5.', baseContext).ok).toBe(false);
   });
 
+  it('rejects explicit mechanical outcomes without resolved combat facts', () => {
+    const reward = validateNarrativeText('You gain 50 XP and find gold.');
+    const outcome = validateNarrativeText('El goblin muere y queda aturdido.');
+
+    expect(reward.ok).toBe(false);
+    expect(reward.issues.some((issue) => issue.code === 'invented_xp')).toBe(true);
+    expect(reward.issues.some((issue) => issue.code === 'invented_loot')).toBe(true);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.issues.some((issue) => issue.code === 'unconfirmed_death')).toBe(true);
+    expect(outcome.issues.some((issue) => issue.code === 'unconfirmed_condition')).toBe(true);
+    expect(validateNarrativeText('The experience leaves you shaken.').ok).toBe(true);
+  });
+
+  it('rejects explicit prone narration without a confirmed condition', () => {
+    const hitOnlyContext: CombatNarrativeContext = {
+      facts: [{ type: 'attack_hit', description: 'Hit' }],
+    };
+
+    expect(validateNarrativeText('El goblin cae al suelo.', hitOnlyContext).ok).toBe(false);
+  });
+
   it('should reject forbidden legacy terms', () => {
     // Obfuscate forbidden terms using string concatenation to pass static scans but fail narrative validation at runtime.
     const terms = [

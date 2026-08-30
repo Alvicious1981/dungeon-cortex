@@ -33,6 +33,8 @@ All variable narrator values share one JSON data message; no variable text is in
 - Deterministic fallback prose represents mixed hit/miss batches qualitatively as mixed outcomes, avoiding both factual overclaiming and false contradiction rejection.
 - Every path rejects mechanical-number leakage, prompt-disclosure language, internal boundary markup, mutation-tool references or tool-call syntax, and forbidden alternate-rules terminology. When resolved combat facts exist, validation additionally rejects invented rewards, unconfirmed death or conditions, and hit/miss contradictions.
 - Ordinary noncombat counts remain valid; implicit verb-plus-number damage checks activate only when resolved combat facts are present, while explicit HP, damage, and healing units remain blocked universally.
+- Explicit XP/loot awards, death statements, and condition outcomes remain blocked even on factless turns, while ordinary uses such as “experience” in qualitative prose remain valid.
+- A schema-valid resolved context whose serialized prompt exceeds its output contract fails closed to neutral prose before campaign context or the model is loaded.
 
 Fallback prose must remain qualitative. It must not expose numerical damage or HP values even when those values exist in backend facts.
 

@@ -142,8 +142,11 @@ export function validateNarrativeText(
     });
   }
 
-  // 4. Reject generic XP mentions
-  if (context && /(?:xp|experiencia|experience)\b/i.test(text)) {
+  // 4. Reject generic XP mentions with combat facts, and explicit awards on
+  // factless turns without rejecting ordinary uses of "experience".
+  const genericXpRegex = /(?:xp|experiencia|experience)\b/i;
+  const explicitXpAwardRegex = /(?:\b(?:gain|gains|gained|earn|earns|earned|receive|receives|received|ganas?|obtienes?|recibes?|otorga|concede)\s+\d+\s*(?:xp|experiencia)\b|\b\d+\s*(?:xp|puntos?\s+de\s+experiencia)\b)/i;
+  if ((context && genericXpRegex.test(text)) || (!context && explicitXpAwardRegex.test(text))) {
     issues.push({
       code: 'invented_xp',
       message: 'XP mentions are not allowed in combat narration.',
@@ -151,8 +154,11 @@ export function validateNarrativeText(
     });
   }
 
-  // 5. Reject generic loot/currency/magic item drops
-  if (context && /\b(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)\b/i.test(text)) {
+  // 5. Reject generic loot with combat facts, and explicit acquisition on
+  // factless turns without rejecting incidental words such as colour names.
+  const genericLootRegex = /\b(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)\b/i;
+  const explicitLootAwardRegex = /\b(?:finds?|found|discovers?|discovered|receives?|received|encuentras?|encuentra|hall[ao]|obtienes?|recibes?)\s+(?:some\s+|un(?:a|as)?\s+|el\s+|la\s+)?(?:monedas|oro|gold|coins|magic\s+sword|cofre|loot|botín|espada\s+mágica)\b/i;
+  if ((context && genericLootRegex.test(text)) || (!context && explicitLootAwardRegex.test(text))) {
     issues.push({
       code: 'invented_loot',
       message: 'Loot, currency, or magic item drops are not allowed in combat narration.',
@@ -190,8 +196,10 @@ export function validateNarrativeText(
 
   // 7. Muerte no confirmada
   const deathWords = /\b(?:muere|dies|slain|killed|muerto|defeated|derrotad[oa]|cae\s+muerto|morir|die|slay)\b/i;
-  if (context && deathWords.test(text)) {
-    const hasDefeatedFact = context.facts.some(f => f.type === 'enemy_defeated');
+  const negatedDeathRegex = /\b(?:no\s+one|nobody)\s+(?:dies|is\s+(?:killed|slain))\b|\b(?:does|did)\s+not\s+die\b|\b(?:nadie|ningun[oa])\s+muere\b|\bno\s+muere\b/gi;
+  const assertedDeathText = text.replace(negatedDeathRegex, '');
+  if (deathWords.test(assertedDeathText)) {
+    const hasDefeatedFact = context?.facts.some(f => f.type === 'enemy_defeated') ?? false;
     if (!hasDefeatedFact) {
       issues.push({
         code: 'unconfirmed_death',
@@ -226,7 +234,7 @@ export function validateNarrativeText(
   // 9. Condiciones no confirmadas
   const conditionMappings = [
     { names: [/stunned/i, /aturdido/i], condition: 'Stunned' },
-    { names: [/prone/i, /derribad[oa]/i], condition: 'Prone' },
+    { names: [/prone/i, /derribad[oa]/i, /cae\s+al\s+suelo/i], condition: 'Prone' },
     { names: [/poisoned/i, /envenenado/i], condition: 'Poisoned' },
     { names: [/blinded/i, /cegado/i], condition: 'Blinded' },
     { names: [/deafened/i, /ensordecido/i], condition: 'Deafened' },
@@ -236,6 +244,15 @@ export function validateNarrativeText(
     { names: [/restrained/i, /atrapado/i, /sujeto/i], condition: 'Restrained' },
     { names: [/unconscious/i, /inconsciente/i], condition: 'Unconscious' }
   ];
+
+  const explicitFactlessConditionRegex = /(?:\b(?:is|becomes?|queda|quedó|quedo)\s+(?:stunned|aturdid[oa]|prone|derribad[oa]|poisoned|envenenad[oa]|blinded|cegad[oa]|deafened|ensordecid[oa]|frightened|asustad[oa]|aterrad[oa]|paralyzed|paralizad[oa]|petrified|petrificad[oa]|restrained|atrapad[oa]|sujet[oa]|unconscious|inconsciente)\b|\bcae\s+al\s+suelo\b)/i;
+  if (!context && explicitFactlessConditionRegex.test(text)) {
+    issues.push({
+      code: 'unconfirmed_condition',
+      message: 'Narrated condition is not confirmed by backend consequences.',
+      severity: 'error',
+    });
+  }
 
   for (const mapping of conditionMappings) {
     const mentionsCondition = mapping.names.some(regex => regex.test(text));

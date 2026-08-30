@@ -171,12 +171,19 @@ export async function streamNarrative(
     };
   }
 
-  const context = await buildCampaignContext(campaignId);
-
   // Backend-resolved facts (highest authority) and the extra safety rules that
   // accompany them are kept apart: the rules are stable instructions, the facts
   // are data.
-  const safetyPrompt = safeNarrativeContext ? buildNarrativePrompt(safeNarrativeContext) : null;
+  let safetyPrompt: ReturnType<typeof buildNarrativePrompt> | null = null;
+  if (safeNarrativeContext) {
+    try {
+      safetyPrompt = buildNarrativePrompt(safeNarrativeContext);
+    } catch {
+      return staticNarrativeStream(NEUTRAL_NARRATIVE_FALLBACK);
+    }
+  }
+
+  const context = await buildCampaignContext(campaignId);
 
   // Stable instructions go to `system`; every variable value — player input,
   // memory, logs, quest/NPC/location text — travels in the JSON data message.
