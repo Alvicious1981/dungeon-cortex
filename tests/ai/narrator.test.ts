@@ -141,6 +141,28 @@ describe("streamNarrative contained tool surface", () => {
     await expect(result.textPromise).resolves.toBe("La escena continúa.");
   });
 
+  it("retains qualitative fallback prose for mixed hit and miss outcomes", async () => {
+    mockStreamText.mockReturnValueOnce({
+      textStream: (async function* () {})(),
+      text: Promise.resolve('<tool_call>{"tool":"spawnEncounter"}</tool_call>'),
+    } as any);
+
+    const result = await streamNarrative(
+      CAMPAIGN_ID,
+      "I attack both targets.",
+      {
+        facts: [
+          { type: "attack_hit", description: "Orc hit", payload: { targetName: "Orc" } },
+          { type: "attack_miss", description: "Goblin missed", payload: { targetName: "Goblin" } },
+        ],
+      },
+    );
+
+    await expect(result.textPromise).resolves.toBe(
+      "La ofensiva obtiene resultados dispares entre los objetivos.",
+    );
+  });
+
   it("fails closed without calling the model when resolved facts exceed the context contract", async () => {
     const overflowFacts = Array.from({ length: 101 }, (_, index) => ({
       type: "attack_miss" as const,

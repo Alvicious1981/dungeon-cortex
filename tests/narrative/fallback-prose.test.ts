@@ -39,6 +39,21 @@ describe('Fallback Prose Generator Tests (Fase 6A)', () => {
     expect(prose).not.toMatch(/(?:alcanza|impacta|golpea|corta\b)/i);
   });
 
+  it('should preserve mixed hit and miss outcomes as validated qualitative prose', () => {
+    const context: CombatNarrativeContext = {
+      facts: [
+        { type: 'attack_hit', description: 'Orc hit', payload: { targetName: 'Orc' } },
+        { type: 'attack_miss', description: 'Goblin missed', payload: { targetName: 'Goblin' } },
+      ],
+    };
+
+    const prose = generateFallbackProse(context);
+
+    expect(prose).toContain('resultados dispares');
+    expect(prose).not.toBe('La escena continúa.');
+    expect(validateNarrativeText(prose, context).ok).toBe(true);
+  });
+
   it('should generate safe critical_hit prose without inventing extra mechanics', () => {
     const context: CombatNarrativeContext = {
       facts: [
