@@ -281,11 +281,21 @@ mismatch survives a green suite.
   reviving two models and taking the rules decision that migration parked, which
   is a project call and not an increment. Do not propose it as a next step
   without that decision being made first.
-- **`buildSocialTools` and `buildWorldTools`** (`lib/ai/tools/social.ts:40`,
-  `lib/ai/tools/world.ts:28`) — twelve AI-SDK tool definitions with no
-  production caller. `a0bb009` stopped `buildNarratorTools` spreading them;
-  their only importers now are `tests/ai/tools/social.test.ts` and
-  `tests/ai/tools/tool-result-contract.test.ts`. This is the same shape as
+- **The entire non-SRD AI tool surface** — 24 tool definitions across seven
+  builders, none with a production caller. `buildNarratorTools` spreads only
+  `buildSrdTools()`; `buildCombatTools`, `buildExplorationTools`,
+  `buildInventoryTools`, `buildProgressionTools`, `buildSocialTools`,
+  `buildWildernessTool` and `buildWorldTools` are all unreferenced outside
+  their own tests. `UNAVAILABLE_NARRATOR_TOOL_NAMES` in `lib/ai/tool-policy.ts`
+  is the full list.
+
+  **This entry said "twelve tool definitions across `social.ts` and
+  `world.ts`" until 2026-08-31.** That was the two files a defect scan
+  happened to surface; the directory was never listed. Same error as the rest
+  of this section — measuring the part that was handed over and describing it
+  as the whole.
+
+  `a0bb009` stopped `buildNarratorTools` spreading them. This is the shape of
   the dead `srd-lookup.ts` surface deleted in `8806e06`, with one difference
   that kept it hidden: `lib/ai/tool-policy.ts` called the reduction temporary
   and named "SEC-AI-001 PR 3" as what would restore them, which reads as the
@@ -401,6 +411,42 @@ mismatch survives a green suite.
   −10..10), `personalityTags`, `traits`, `race`/`profession`/`alignment` and
   `trackMerchantState` have **no equivalent on the route at all** — it cannot
   set a disposition. Deleting this one removes capability, not redundancy.
+
+  ### What to do with the tool surface
+
+  **Do not bulk-delete the wrappers.** Two reasons, both concrete.
+
+  First, they are what the AI-layer boundary is enforced *against*. Around ten
+  `tests/architecture/*-tool-no-direct-prisma.test.ts` files exist to prove the
+  AI layer never reaches for Prisma, and `narrator-tool-containment.test.ts:72`
+  — "catalogues every implemented non-SRD tool as unavailable" — binds both
+  ends by enumerating what exists. With no non-SRD tools implemented that
+  assertion is vacuous: it passes forever and guards nothing. A test that
+  cannot fail is worse than no test, and this would produce ten of them.
+
+  Second, they are the only written record of what the game was meant to do.
+  SEC-AI-001 correctly took the AI's hands off the wheel but did not build
+  replacement controls for everything it removed. Today the game can attack,
+  cast, equip, rest, level up and trade through the UI. It **cannot** run a
+  social check, set an NPC disposition, or track a merchant. Deleting the
+  wrappers erases the map of that gap while the gap is still open.
+
+  So this is a product backlog wearing dead code's clothes, and it resolves
+  capability by capability, never in bulk:
+
+  - `equipment-service` — delete; the live gate wins outright and the service
+    has already rotted.
+  - `trade-service` and its guard — delete, once `narrator-tool-containment`
+    is confirmed to cover the invariant the trade-specific guard asserts.
+  - `npc-service`, `social-service` — **product decisions.** Does the game
+    want NPC disposition and social checks? Yes means building a route, as
+    trade and equip have. No means deleting tool and service together.
+  - combat, exploration, inventory, progression — **four builders whose
+    services were never compared.** Do not assume they match any verdict here.
+  - wilderness — leave alone; it is blocked by the recorded decision above.
+
+  The four pairs that *were* compared produced four different verdicts. Any
+  rule applied across the surface would have been right about one of them.
 
 ## Work style
 
