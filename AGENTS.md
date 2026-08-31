@@ -302,14 +302,17 @@ mismatch survives a green suite.
   | Service | Dead entry points | Live parallel path |
   | --- | --- | --- |
   | `lib/rules/trade-service.ts` | `resolveTradeTransaction`, `getCampaignCharacterIdForTrade` | `app/actions/trade.ts` → its own `prisma.$transaction`, from `components/trade/TradeOverlayController.tsx` |
-  | `lib/rules/npc-service.ts` | `trackNpcState`, `upsertGeneratedNpc`, `establishInitialNpcDisposition` | `app/api/campaign/[id]/npc/route.ts` → its own `prisma.nPC.upsert` |
-  | `lib/rules/equipment-service.ts` | `equipCharacterItem` | `app/api/campaign/[id]/inventory/route.ts`, prisma direct |
+  | `lib/rules/npc-service.ts` | `trackNpcState`, `upsertGeneratedNpc`, `establishInitialNpcDisposition`, `trackMerchantState` | `app/api/campaign/[id]/npc/route.ts` → its own `prisma.nPC.upsert` |
+  | `lib/rules/equipment-service.ts` | `equipCharacterItem` | the `equip` gate in `app/api/campaign/[id]/action/route.ts:987` |
   | `lib/rules/social-service.ts` | `resolveSocialCheck`, `resolveRumors` | **none — there is no social route at all** |
 
-  Three of the four are the `srd-lookup.ts` shape again: a service and an
-  ad-hoc route doing the same job, one of them unreachable. The fourth is not
-  a duplicate at all: no social check can occur in the game today, and whether
-  one should is a product decision, not a cleanup.
+  The equipment row named `app/api/campaign/[id]/inventory/route.ts` until
+  2026-08-31. That route is `GET` only and equips nothing; the real live path
+  is the action route's `equip` gate. A row in this table is a claim about
+  behaviour, and that one was written from a directory listing.
+
+  All three comparisons are now done, and **they do not share a verdict** —
+  which is the point. Reading each pair was the only way to find that out.
 
   **Trade was compared line by line on 2026-08-31. Neither copy is whole, and
   an earlier version of this note guessed the wrong way about which is.** It
@@ -372,10 +375,32 @@ mismatch survives a green suite.
   production import graph and calling a module deletable is how this paragraph
   was wrong twice.
 
-  **`npc-service` and `equipment-service` have not been compared yet.** Their
-  rows above are import-graph facts only. Do not carry the trade conclusion
-  across to them; read both sides first, as the trade comparison shows what
-  guessing from shape is worth.
+  **`equipment-service` — the live path wins outright.** The `equip` gate runs
+  inside `prisma.$transaction` while `equipCharacterItem` fires its updates
+  through `Promise.all`, so a half-applied equip is possible in the dead one
+  and not in the live one. The gate also *derives* the slot with `slotFor`,
+  where the service accepts a `targetSlot` from its caller and validates it —
+  deriving is the stronger of the two, since no illegal value can be supplied
+  at all. The service carries the same phantom `campaignId` on `InventoryItem`
+  as trade (line 154), on a branch real Prisma never reaches. It holds nothing
+  the gate lacks.
+
+  **`npc-service` — not a duplicate, and the only one of the three worth
+  keeping on its merits.** The route derives its statblock from `generateNPC`
+  and refuses to trust the body, keeps `name`/`maxHp`/`ac` immutable after
+  creation, whitelists three roles and requires an active campaign. The
+  service does none of that: it takes `name`/`maxHp`/`ac` from its caller's
+  descriptor, lets an update rewrite them, accepts any non-empty `role`, and
+  its ownership check is opt-in — `if (input.userId && campaign?.userId && …)`
+  — which **never fires, because neither caller passes `userId`**. That reads
+  like an AI-supplies-monster-stats breach and **is not one**: both
+  `trackNPC` and `generateAndTrackNPC` call `generateNPC(seed, role)` and hand
+  over the derived statblock. The boundary holds at the call site, not in the
+  service, so the exposure is latent for a future caller rather than live.
+  What makes it worth keeping is the other half: `disposition` (validated to
+  −10..10), `personalityTags`, `traits`, `race`/`profession`/`alignment` and
+  `trackMerchantState` have **no equivalent on the route at all** — it cannot
+  set a disposition. Deleting this one removes capability, not redundancy.
 
 ## Work style
 
