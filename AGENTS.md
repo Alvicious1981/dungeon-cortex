@@ -342,11 +342,35 @@ mismatch survives a green suite.
     table: the exact pair of defects this file warns about.
 
   So the live path holds the auth check, the working schema, the prose log the
-  narrator consumes and now the input validation too. That leaves
-  `trade-service.ts` with nothing the live path lacks and one thing it gets
-  wrong, so the remaining question is only whether to delete it — a decision,
-  not an investigation. Deleting it also drops `getCampaignCharacterIdForTrade`
-  and the `TradeServiceError` codes, which nothing else imports.
+  narrator consumes and now the input validation too, leaving `trade-service.ts`
+  with nothing the live path lacks and one thing it gets wrong.
+
+  **It still cannot be deleted on its own, and an earlier version of this
+  paragraph said otherwise.** That version listed only what production code
+  would lose — `getCampaignCharacterIdForTrade` and the `TradeServiceError`
+  codes — because the production import graph was the only thing checked. The
+  test bindings were not, and they are what block the delete:
+
+  - `lib/ai/tools/social.ts:31` imports both functions for its `executeTrade`
+    tool, so removing the module fails `pnpm typecheck`.
+  - `tests/architecture/social-tool-no-direct-trade-prisma.test.ts:29`
+    **requires** that import to exist. Its thirteen assertions are a Code is
+    Law guard written in the negative: `executeTrade` must not call
+    `prisma.$transaction`, must not mutate `campaign.gold`, must not write
+    `InventoryItem`, must not compose trade prose while persisting. Deleting
+    the service deletes the proof that the AI layer cannot touch money.
+  - `tests/rules/trade-service-contract.test.ts` plus `vi.mock` lines in
+    `tests/ai/tools/tool-result-contract.test.ts:87` and
+    `tests/ai/narrator-real-sdk-containment.test.ts:20`.
+
+  The guard now protects dead code — `executeTrade` has no production caller
+  either — so removing both together is coherent. But that is five files and
+  the retirement of an architectural barrier, not a one-module delete, and
+  `executeTrade` is one of twelve tools in `buildSocialTools`/`buildWorldTools`
+  whose siblings will have bindings of their own. **Decide the fate of those
+  two builders as a whole; do not pick trade off separately.** Checking the
+  production import graph and calling a module deletable is how this paragraph
+  was wrong twice.
 
   **`npc-service` and `equipment-service` have not been compared yet.** Their
   rows above are import-graph facts only. Do not carry the trade conclusion
