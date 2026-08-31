@@ -124,7 +124,6 @@ describe("SocialCheckInputSchema", () => {
   const valid = {
     npcSeed: "merchant-01",
     approach: "persuade" as const,
-    dispositionDelta: 2,
     intent: "Ask for a discount.",
   };
 
@@ -132,9 +131,10 @@ describe("SocialCheckInputSchema", () => {
     expect(() => SocialCheckInputSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects out-of-range dispositionDelta", () => {
-    expect(() => SocialCheckInputSchema.parse({ ...valid, dispositionDelta: 5 })).toThrow();
-    expect(() => SocialCheckInputSchema.parse({ ...valid, dispositionDelta: 0 })).toThrow();
+  it("rejects a caller-supplied dispositionDelta", () => {
+    expect(() =>
+      SocialCheckInputSchema.parse({ ...valid, dispositionDelta: 2 })
+    ).toThrow();
   });
 });
 
@@ -145,18 +145,17 @@ describe("SocialCheckInputSchema", () => {
 describe("SocialCheckResultSchema", () => {
   const valid = {
     approach: "persuade" as const,
+    skill: "Persuasion" as const,
     roll: 12,
-    charismaModifier: 2,
+    abilityModifier: 2,
+    proficiencyApplied: 2,
     total: 14,
     dc: 10,
     success: true,
-    isCriticalSuccess: false,
-    isCriticalFailure: false,
+    attitudeBefore: "Indifferent" as const,
+    attitudeAfter: "Indifferent" as const,
     dispositionBefore: 0,
     dispositionAfter: 2,
-    dispositionBandBefore: "Indifferent" as const,
-    dispositionBandAfter: "Indifferent" as const,
-    backfire: false,
   };
 
   it("parses valid check result", () => {
@@ -165,6 +164,10 @@ describe("SocialCheckResultSchema", () => {
 
   it("rejects incompatible disposition before/after types", () => {
     expect(() => SocialCheckResultSchema.parse({ ...valid, dispositionAfter: "great" })).toThrow();
+  });
+
+  it("rejects a skill outside the three Charisma social skills", () => {
+    expect(() => SocialCheckResultSchema.parse({ ...valid, skill: "Athletics" })).toThrow();
   });
 });
 

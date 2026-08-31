@@ -147,8 +147,6 @@ type ResolveSocialCheck = (input: {
   characterId: string;
   npcSeed: string;
   approach: "persuade" | "intimidate" | "deceive";
-  dispositionDelta: number;
-  roll: number;
   tx: {
     campaign: { findUnique: ReturnType<typeof vi.fn> };
     character: { findUnique: ReturnType<typeof vi.fn> };
@@ -890,8 +888,6 @@ describe("npc-service generated NPC persistence contract", () => {
       characterId: "character-1",
       npcSeed: "gate_guard",
       approach: "persuade",
-      dispositionDelta: 2,
-      roll: 15,
       tx,
     });
 

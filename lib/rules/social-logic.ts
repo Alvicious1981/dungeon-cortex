@@ -5,8 +5,9 @@
  * Moved from social.ts to adhere to Milestone N Slice 2 separation.
  */
 
-import { rollDie, d20Check } from "@/lib/rules/dice";
+import { rollDie } from "@/lib/rules/dice";
 import { pickSeeded } from "@/lib/rules/generators";
+import { resolveAbilityCheck, type AbilityCheckActor, type Skill } from "@/lib/rules/ability-check";
 import {
   NPCPersonality,
   DispositionBand,
@@ -21,6 +22,7 @@ import {
   MOTIVATIONS,
   SECRETS,
   DISTINCTIVE_TRAITS,
+  ATTITUDE_DIFFICULTY,
   type NpcAttitude
 } from "./social";
 
@@ -152,61 +154,53 @@ export function establishInitialDisposition(input: InitialDispositionInput): Ini
   };
 }
 
-/**
- * Computes the Difficulty Class for a social check.
- */
-export function computeSocialDC(
-  disposition: number,
-  attempt: number,
-  approach: "persuade" | "intimidate" | "deceive",
-): number {
-  const baseDC           = 10;
-  const dispositionPenalty = Math.max(0, -disposition);
-  const ambitionPenalty  = (attempt - 1) * 3;
-  const approachModifier = approach === "intimidate" ? -2 : 0;
-
-  return baseDC + dispositionPenalty + ambitionPenalty + approachModifier;
-}
+const APPROACH_SKILL = {
+  persuade: "Persuasion",
+  intimidate: "Intimidation",
+  deceive: "Deception",
+} as const satisfies Record<SocialCheckInput["approach"], Skill>;
 
 /**
- * Resolves a social action (Persuade / Intimidate / Deceive).
+ * Resolves one attempt to talk a creature round.
+ *
+ * The dice, the ability, the proficiency bonus and advantage all come from
+ * `resolveAbilityCheck` — this is a Charisma skill check like any other, and
+ * reimplementing it here is how the two would come to disagree. What is social
+ * about it is only which skill the approach names and where the DC comes from.
+ *
+ * `isCriticalSuccess` and `isCriticalFailure` are deliberately not read: in 5e
+ * a natural 20 or 1 has no special effect on an ability check. The natural
+ * roll is reported so narration can mention it, but no rule turns on it.
  */
 export function resolveSocialCheck(
   input: SocialCheckInput,
-  charismaModifier: number,
-  currentDisposition: number,
+  actor: AbilityCheckActor,
+  disposition: number | null
 ): SocialCheckResult {
-  const dc          = computeSocialDC(currentDisposition, input.dispositionDelta, input.approach);
-  const checkResult = d20Check(charismaModifier, dc);
-  const natural     = checkResult.roll.dice[0]!.result;
+  const attitudeBefore = attitudeFor(disposition);
+  const skill = APPROACH_SKILL[input.approach];
 
-  let dispositionShift: number;
-  if (checkResult.isCriticalSuccess) {
-    dispositionShift = input.dispositionDelta + 1;
-  } else if (checkResult.success) {
-    dispositionShift = input.dispositionDelta;
-  } else if (checkResult.isCriticalFailure) {
-    dispositionShift = input.approach === "intimidate" ? -2 : 0;
-  } else {
-    dispositionShift = input.approach === "intimidate" ? -1 : 0;
-  }
+  const check = resolveAbilityCheck(
+    { skill, band: ATTITUDE_DIFFICULTY[attitudeBefore] },
+    actor
+  );
 
-  const dispositionAfter = clamp(currentDisposition + dispositionShift, -10, 10);
+  const dispositionBefore = disposition ?? 0;
+  const dispositionAfter = shiftDisposition(dispositionBefore, check.success);
 
   return {
-    approach:             input.approach,
-    roll:                 natural,
-    charismaModifier,
-    total:                checkResult.roll.total,
-    dc,
-    success:              checkResult.success,
-    isCriticalSuccess:    checkResult.isCriticalSuccess,
-    isCriticalFailure:    checkResult.isCriticalFailure,
-    dispositionBefore:    currentDisposition,
+    approach: input.approach,
+    skill,
+    roll: check.roll,
+    abilityModifier: check.abilityModifier,
+    proficiencyApplied: check.proficiencyApplied,
+    total: check.total,
+    dc: check.dc,
+    success: check.success,
+    attitudeBefore,
+    attitudeAfter: attitudeFor(dispositionAfter),
+    dispositionBefore,
     dispositionAfter,
-    dispositionBandBefore: getDispositionBand(currentDisposition),
-    dispositionBandAfter:  getDispositionBand(dispositionAfter),
-    backfire:             input.approach === "intimidate" && !checkResult.success,
   };
 }
 

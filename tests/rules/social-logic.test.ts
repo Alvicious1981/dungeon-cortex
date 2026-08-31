@@ -4,19 +4,20 @@
  * 100% branch coverage for Social Interaction Engine (Milestone N Slice 2).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as dice from "@/lib/rules/dice";
 import {
   generateNPCPersonality,
   establishInitialDisposition,
-  computeSocialDC,
   resolveSocialCheck,
   getRumorsPayload,
   getDispositionBand,
   attitudeFor,
-  shiftDisposition
+  shiftDisposition,
+  ATTITUDE_SHIFT
 } from "@/lib/rules/social-logic";
-import { NPC_ATTITUDES } from "@/lib/rules/social";
+import { NPC_ATTITUDES, SocialCheckInputSchema } from "@/lib/rules/social";
+import type { AbilityCheckActor } from "@/lib/rules/ability-check";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -26,8 +27,11 @@ vi.mock("@/lib/rules/dice", async () => {
   const actual = await vi.importActual<typeof dice>("@/lib/rules/dice");
   return {
     ...actual,
-    rollDie: vi.fn(),
-    d20Check: vi.fn(),
+    // Default to the real implementation so tests that roll through
+    // resolveAbilityCheck (via Math.random) still get genuine dice; tests
+    // that need a specific roll override with mockReturnValueOnce.
+    rollDie: vi.fn(actual.rollDie),
+    d20Check: vi.fn(actual.d20Check),
   };
 });
 
@@ -99,85 +103,6 @@ describe("Social Logic Engine", () => {
        mockedRollDie.mockReturnValueOnce(1); // Base 1
        const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: -5 });
        expect(res.total).toBe(1);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // computeSocialDC
-  // ---------------------------------------------------------------------------
-
-  describe("computeSocialDC", () => {
-    it("calculates base DC 10 for indifferent NPC", () => {
-      expect(computeSocialDC(0, 1, "persuade")).toBe(10);
-    });
-
-    it("adds penalty for negative disposition", () => {
-      expect(computeSocialDC(-5, 1, "persuade")).toBe(15);
-    });
-
-    it("does not give bonus for positive disposition in this version", () => {
-      expect(computeSocialDC(5, 1, "persuade")).toBe(10);
-    });
-
-    it("adds penalty for ambitious attempts (dispositionDelta)", () => {
-      // (2 - 1) * 3 = 3 penalty
-      expect(computeSocialDC(0, 2, "persuade")).toBe(13);
-    });
-
-    it("applies intimidation bonus to efficacy (-2 DC)", () => {
-      expect(computeSocialDC(0, 1, "intimidate")).toBe(8);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // resolveSocialCheck
-  // ---------------------------------------------------------------------------
-
-  describe("resolveSocialCheck", () => {
-    const input = { npcSeed: "test", characterId: "player", approach: "persuade" as const, dispositionDelta: 2, intent: "test" };
-
-    it("handles success", () => {
-      mockedD20Check.mockReturnValue({ success: true, isCriticalSuccess: false, isCriticalFailure: false, roll: { total: 15, notation: "1d20+0", dice: [{faces:20, result: 15}], diceTotal: 15, modifier: 0 }, abilityModifier: 0, dc: 10 });
-      const res = resolveSocialCheck(input, 0, 0);
-      expect(res.success).toBe(true);
-      expect(res.dispositionAfter).toBe(2);
-    });
-
-    it("handles critical success (+1 bonus shift)", () => {
-      mockedD20Check.mockReturnValue({ success: true, isCriticalSuccess: true, isCriticalFailure: false, roll: { total: 20, notation: "1d20+0", dice: [{faces:20, result: 20}], diceTotal: 20, modifier: 0 }, abilityModifier: 0, dc: 10 });
-      const res = resolveSocialCheck(input, 0, 0);
-      expect(res.isCriticalSuccess).toBe(true);
-      expect(res.dispositionAfter).toBe(3); // 2 + 1
-    });
-
-    it("handles failure (persuade)", () => {
-      mockedD20Check.mockReturnValue({ success: false, isCriticalSuccess: false, isCriticalFailure: false, roll: { total: 5, notation: "1d20+0", dice: [{faces:20, result: 5}], diceTotal: 5, modifier: 0 }, abilityModifier: 0, dc: 10 });
-      const res = resolveSocialCheck(input, 0, 0);
-      expect(res.success).toBe(false);
-      expect(res.dispositionAfter).toBe(0); // No change
-    });
-
-    it("handles failure (intimidate) — minimal loss", () => {
-      const intInput = { ...input, approach: "intimidate" as const };
-      mockedD20Check.mockReturnValue({ success: false, isCriticalSuccess: false, isCriticalFailure: false, roll: { total: 5, notation: "1d20+0", dice: [{faces:20, result: 5}], diceTotal: 5, modifier: 0 }, abilityModifier: 0, dc: 10 });
-      const res = resolveSocialCheck(intInput, 0, 0);
-      expect(res.success).toBe(false);
-      expect(res.dispositionAfter).toBe(-1); 
-      expect(res.backfire).toBe(true);
-    });
-
-    it("handles critical failure (intimidate) — heavier loss", () => {
-      const intInput = { ...input, approach: "intimidate" as const };
-      mockedD20Check.mockReturnValue({ success: false, isCriticalSuccess: false, isCriticalFailure: true, roll: { total: 1, notation: "1d20+0", dice: [{faces:20, result: 1}], diceTotal: 1, modifier: 0 }, abilityModifier: 0, dc: 10 });
-      const res = resolveSocialCheck(intInput, 0, 0);
-      expect(res.isCriticalFailure).toBe(true);
-      expect(res.dispositionAfter).toBe(-2);
-    });
-    
-    it("handles critical failure (persuade) — no loss", () => {
-      mockedD20Check.mockReturnValue({ success: false, isCriticalSuccess: false, isCriticalFailure: true, roll: { total: 1, notation: "1d20+0", dice: [{faces:20, result: 1}], diceTotal: 1, modifier: 0 }, abilityModifier: 0, dc: 10 });
-      const res = resolveSocialCheck(input, 0, 0);
-      expect(res.dispositionAfter).toBe(0);
     });
   });
 
@@ -276,5 +201,89 @@ describe("shiftDisposition", () => {
   it("moves in the direction the outcome dictates", () => {
     expect(shiftDisposition(0, true)).toBeGreaterThan(0);
     expect(shiftDisposition(0, false)).toBeLessThan(0);
+  });
+});
+
+const BASE_ACTOR: AbilityCheckActor = { stats: { CHA: 10 }, level: 1 };
+
+function socialInput(approach: "persuade" | "intimidate" | "deceive" = "persuade") {
+  return { npcSeed: "innkeeper_1", approach, intent: "a room for the night" };
+}
+
+describe("resolveSocialCheck — SRD conformance", () => {
+  afterEach(() => {
+    vi.spyOn(Math, "random").mockRestore();
+  });
+
+  it("takes its DC from the attitude", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45); // natural 10
+    expect(resolveSocialCheck(socialInput(), BASE_ACTOR, -10).dc).toBe(20);
+    expect(resolveSocialCheck(socialInput(), BASE_ACTOR, 0).dc).toBe(15);
+    expect(resolveSocialCheck(socialInput(), BASE_ACTOR, 10).dc).toBe(10);
+  });
+
+  it("adds the proficiency bonus for a proficient character", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45);
+    const plain = resolveSocialCheck(socialInput(), BASE_ACTOR, 0);
+    const proficient = resolveSocialCheck(
+      socialInput(),
+      { ...BASE_ACTOR, skillProficiencies: ["Persuasion"] },
+      0
+    );
+    expect(proficient.proficiencyApplied).toBeGreaterThan(0);
+    expect(proficient.total).toBeGreaterThan(plain.total);
+  });
+
+  it("rolls the skill the approach names", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45);
+    expect(resolveSocialCheck(socialInput("persuade"), BASE_ACTOR, 0).skill).toBe("Persuasion");
+    expect(resolveSocialCheck(socialInput("intimidate"), BASE_ACTOR, 0).skill).toBe("Intimidation");
+    expect(resolveSocialCheck(socialInput("deceive"), BASE_ACTOR, 0).skill).toBe("Deception");
+  });
+
+  // NOTE: `resolveAbilityCheck` (lib/rules/ability-check.ts) auto-succeeds a
+  // natural 20 and auto-fails a natural 1 regardless of total-vs-DC — an
+  // existing, separately-tested contract of the engine this function must
+  // delegate to (see tests/rules/ability-check.test.ts:106-128). That is a
+  // real tension with 5e RAW, where nat 20/1 only auto-resolve *attack*
+  // rolls, not ability checks — but fixing the shared engine is out of this
+  // task's scope. What THIS task owns is making sure resolveSocialCheck adds
+  // no *further* crit-based special-casing on top of whatever `success` the
+  // engine returns: the disposition shift must be the plain, single-step
+  // ATTITUDE_SHIFT in the outcome's direction, never a bonus/penalty keyed
+  // off isCriticalSuccess/isCriticalFailure (the old implementation's bug).
+  it("gives a natural 20 the standard shift, not an extra crit bonus", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.9999); // natural 20
+    const result = resolveSocialCheck(socialInput(), { stats: { CHA: 1 }, level: 1 }, -10);
+    expect(result.roll).toBe(20);
+    expect(result.success).toBe(true);
+    expect(result.dispositionAfter - result.dispositionBefore).toBe(ATTITUDE_SHIFT);
+  });
+
+  it("gives a natural 1 the standard shift, not an extra crit penalty", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // natural 1
+    const result = resolveSocialCheck(socialInput(), { stats: { CHA: 30 }, level: 1 }, 10);
+    expect(result.roll).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.dispositionBefore - result.dispositionAfter).toBe(ATTITUDE_SHIFT);
+  });
+
+  it("shifts disposition identically for every approach on the same outcome", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.45);
+    const shifts = (["persuade", "intimidate", "deceive"] as const).map((a) => {
+      const r = resolveSocialCheck(socialInput(a), BASE_ACTOR, 0);
+      return r.dispositionAfter - r.dispositionBefore;
+    });
+    expect(new Set(shifts).size).toBe(1);
+  });
+});
+
+describe("SocialCheckInputSchema", () => {
+  it("refuses a caller-supplied disposition delta", () => {
+    const parsed = SocialCheckInputSchema.safeParse({
+      ...socialInput(),
+      dispositionDelta: 4,
+    });
+    expect(parsed.success).toBe(false);
   });
 });

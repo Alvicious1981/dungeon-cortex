@@ -102,7 +102,11 @@ describe("social AI tools", () => {
   });
 
   it("socialCheck uses persisted disposition and persists the resolved update", async () => {
-    prismaMock.nPC.findUnique.mockResolvedValueOnce({ hasMetPlayer: true, disposition: 4 });
+    prismaMock.nPC.findUnique.mockResolvedValueOnce({
+      seed: "gate_guard",
+      hasMetPlayer: true,
+      disposition: 4,
+    });
     prismaMock.campaign.findUnique.mockResolvedValueOnce({ characterId: "char-1" });
     prismaMock.character.findUnique.mockResolvedValueOnce({ stats: { CHA: 10 } });
     prismaMock.nPC.update.mockResolvedValueOnce({});
@@ -111,18 +115,19 @@ describe("social AI tools", () => {
     const envelope = await tools.socialCheck.execute({
       npcSeed: "gate_guard",
       approach: "persuade",
-      dispositionDelta: 2,
       intent: "Ask for directions.",
     });
 
     expect(envelope.status).toBe("ok");
     const result = envelope.data;
 
+    // The mocked d20Check always succeeds (see vi.mock("@/lib/rules/dice") above),
+    // so the check succeeds and disposition moves by the standard ATTITUDE_SHIFT (4).
     expect(result.dispositionBefore).toBe(4);
-    expect(result.dispositionAfter).toBe(6);
+    expect(result.dispositionAfter).toBe(8);
     expect(prismaMock.nPC.update).toHaveBeenCalledWith({
       where: { campaignId_seed: { campaignId: "campaign-1", seed: "gate_guard" } },
-      data: { disposition: 6 },
+      data: { disposition: 8 },
     });
   });
   it("getRumors resolves persisted social context outside the AI tool", async () => {

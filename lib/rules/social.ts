@@ -130,7 +130,6 @@ export const SocialCheckInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
-    dispositionDelta: z.number().int().min(1).max(4),
     intent: z.string().max(200),
   })
   .strict();
@@ -139,18 +138,17 @@ export type SocialCheckInput = z.infer<typeof SocialCheckInputSchema>;
 
 export const SocialCheckResultSchema = z.object({
   approach: z.enum(["persuade", "intimidate", "deceive"]),
+  skill: z.enum(["Persuasion", "Intimidation", "Deception"]),
   roll: z.number().int(),
-  charismaModifier: z.number().int(),
+  abilityModifier: z.number().int(),
+  proficiencyApplied: z.number().int(),
   total: z.number().int(),
   dc: z.number().int(),
   success: z.boolean(),
-  isCriticalSuccess: z.boolean(),
-  isCriticalFailure: z.boolean(),
+  attitudeBefore: NpcAttitudeSchema,
+  attitudeAfter: NpcAttitudeSchema,
   dispositionBefore: z.number().int().min(-10).max(10),
   dispositionAfter: z.number().int().min(-10).max(10),
-  dispositionBandBefore: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
-  dispositionBandAfter: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
-  backfire: z.boolean(),
 });
 
 export type SocialCheckResult = z.infer<typeof SocialCheckResultSchema>;

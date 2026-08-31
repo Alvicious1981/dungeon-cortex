@@ -170,21 +170,20 @@ export function buildSocialTools(
     socialCheck: tool({
       description:
         "Resolve a social action — Persuade, Intimidate, or Deceive — against an NPC. " +
-        "Rolls 1d20 + the character's CHA modifier against a DC derived from " +
-        "the NPC's current disposition and the magnitude of the shift attempted. " +
-        "On success, the NPC's disposition increases. Intimidation failure causes backfire. " +
+        "Rolls the matching SRD 5e Charisma skill (Persuasion, Intimidation, or Deception) " +
+        "against a DC set by the NPC's current attitude. " +
+        "On success, the NPC's disposition improves; on failure, it worsens. " +
         "MUST be called whenever the player attempts to influence an NPC through social means. " +
         "NEVER decide the outcome of a social interaction without calling this tool. " +
         "Narrate the result — and ONLY the result — that the tool returns. " +
         "Code is Law.",
       inputSchema: SocialCheckInputSchema,
-      execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
+      execute: async ({ npcSeed, approach, intent }) => {
         return runTool(() =>
           resolveSocialCheck({
             campaignId,
             npcSeed,
             approach,
-            dispositionDelta,
             intent,
           }),
         );

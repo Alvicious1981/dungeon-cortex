@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type CampaignFixture = {
   id: string;
@@ -47,10 +47,7 @@ type ResolveSocialCheckInput = {
   characterId: string;
   npcId: string;
   approach: SocialApproach | string;
-  dispositionDelta: number;
   intent?: string;
-  roll?: number;
-  dc?: number;
   tx: SocialCheckTx;
 };
 
@@ -216,9 +213,7 @@ function input(
     characterId: "character-1",
     npcId: "npc-1",
     approach: "persuade",
-    dispositionDelta: 2,
     intent: "Ask the guard to allow entry.",
-    roll: 15,
     tx,
     ...overrides,
   };
@@ -228,6 +223,17 @@ function findNpc(npcs: NpcFixture[], id: string): NpcFixture {
   const npc = npcs.find((candidate) => candidate.id === id);
   if (!npc) throw new Error(`Missing NPC ${id}`);
   return npc;
+}
+
+/**
+ * Pins the natural d20 result `resolveAbilityCheck` (via rollDie -> Math.random)
+ * will produce, without reimplementing dice math here. `resolveSocialCheck`
+ * no longer accepts a manual roll/dc override — the DC comes from the NPC's
+ * attitude and the roll comes from the dice, exactly like every other SRD
+ * ability check, so tests drive it the same way social-logic.test.ts does.
+ */
+function mockNaturalRoll(natural: number): void {
+  vi.spyOn(Math, "random").mockReturnValue((natural - 0.5) / 20);
 }
 
 function expectStructuredFacts(result: SocialCheckServiceResult) {
@@ -256,6 +262,10 @@ describe("social-service resolveSocialCheck contract", () => {
 
   beforeEach(async () => {
     ({ resolveSocialCheck } = await loadSocialService());
+  });
+
+  afterEach(() => {
+    vi.spyOn(Math, "random").mockRestore();
   });
 
   it("rejects a missing campaign", async () => {
@@ -318,16 +328,6 @@ describe("social-service resolveSocialCheck contract", () => {
     expect(tx.nPC.update).not.toHaveBeenCalled();
   });
 
-  it("rejects an invalid dispositionDelta", async () => {
-    const { tx } = createTx();
-
-    await expect(
-      resolveSocialCheck(input(tx, { dispositionDelta: 99 }))
-    ).rejects.toMatchObject({ code: "INVALID_DISPOSITION_DELTA" });
-
-    expect(tx.nPC.update).not.toHaveBeenCalled();
-  });
-
   it("does not allow disposition below the minimum", async () => {
     const { npcs, tx } = createTx({
       npcs: [
@@ -341,10 +341,9 @@ describe("social-service resolveSocialCheck contract", () => {
         },
       ],
     });
+    mockNaturalRoll(1); // a natural 1 auto-fails the ability check
 
-    const result = await resolveSocialCheck(
-      input(tx, { approach: "intimidate", dispositionDelta: 4, roll: 1 })
-    );
+    const result = await resolveSocialCheck(input(tx, { approach: "intimidate" }));
 
     expect(findNpc(npcs, "npc-1").disposition).toBe(-10);
     expect(result.dispositionAfter).toBe(-10);
@@ -363,8 +362,9 @@ describe("social-service resolveSocialCheck contract", () => {
         },
       ],
     });
+    mockNaturalRoll(20); // a natural 20 auto-succeeds the ability check
 
-    const result = await resolveSocialCheck(input(tx, { dispositionDelta: 4, roll: 20 }));
+    const result = await resolveSocialCheck(input(tx));
 
     expect(findNpc(npcs, "npc-1").disposition).toBe(10);
     expect(result.dispositionAfter).toBe(10);
@@ -372,54 +372,54 @@ describe("social-service resolveSocialCheck contract", () => {
 
   it("improves disposition deterministically on valid success", async () => {
     const { npcs, tx } = createTx();
+    mockNaturalRoll(15); // 15 + CHA 14's +2 = 17, past the Indifferent DC of 15
 
-    const result = await resolveSocialCheck(input(tx, { roll: 15 }));
+    const result = await resolveSocialCheck(input(tx));
 
     expect(result).toMatchObject({
       ok: true,
       success: true,
       dispositionBefore: 0,
-      dispositionAfter: 2,
+      dispositionAfter: 4,
     });
-    expect(findNpc(npcs, "npc-1").disposition).toBe(2);
+    expect(findNpc(npcs, "npc-1").disposition).toBe(4);
   });
 
-  it("conserves disposition on failed non-intimidation checks", async () => {
+  it("conserves — and does not specially worsen — disposition on any failed check", async () => {
     const { npcs, tx } = createTx();
+    mockNaturalRoll(5); // 5 + 2 = 7, short of the Indifferent DC of 15
 
-    const result = await resolveSocialCheck(
-      input(tx, { approach: "deceive", dispositionDelta: 2, roll: 2 })
-    );
+    const result = await resolveSocialCheck(input(tx, { approach: "deceive" }));
 
     expect(result).toMatchObject({
       ok: true,
       success: false,
       dispositionBefore: 0,
-      dispositionAfter: 0,
+      dispositionAfter: -4,
     });
-    expect(findNpc(npcs, "npc-1").disposition).toBe(0);
+    expect(findNpc(npcs, "npc-1").disposition).toBe(-4);
   });
 
-  it("worsens disposition on failed intimidation checks", async () => {
+  it("shifts disposition the same amount on a failed intimidation check as any other approach", async () => {
     const { npcs, tx } = createTx();
+    mockNaturalRoll(5);
 
-    const result = await resolveSocialCheck(
-      input(tx, { approach: "intimidate", dispositionDelta: 2, roll: 2 })
-    );
+    const result = await resolveSocialCheck(input(tx, { approach: "intimidate" }));
 
     expect(result).toMatchObject({
       ok: true,
       success: false,
       dispositionBefore: 0,
-      dispositionAfter: -1,
+      dispositionAfter: -4,
     });
-    expect(findNpc(npcs, "npc-1").disposition).toBe(-1);
+    expect(findNpc(npcs, "npc-1").disposition).toBe(-4);
   });
 
   it("does not touch other NPCs", async () => {
     const { npcs, tx } = createTx();
+    mockNaturalRoll(15);
 
-    await resolveSocialCheck(input(tx, { roll: 15 }));
+    await resolveSocialCheck(input(tx));
 
     expect(findNpc(npcs, "npc-2")).toMatchObject({
       campaignId: "campaign-1",
@@ -429,8 +429,9 @@ describe("social-service resolveSocialCheck contract", () => {
 
   it("does not touch other characters", async () => {
     const { characters, tx } = createTx();
+    mockNaturalRoll(15);
 
-    await resolveSocialCheck(input(tx, { roll: 15 }));
+    await resolveSocialCheck(input(tx));
 
     expect(characters).toContainEqual({
       id: "character-2",
@@ -442,8 +443,9 @@ describe("social-service resolveSocialCheck contract", () => {
 
   it("does not touch another campaign", async () => {
     const { npcs, tx } = createTx();
+    mockNaturalRoll(15);
 
-    await resolveSocialCheck(input(tx, { roll: 15 }));
+    await resolveSocialCheck(input(tx));
 
     expect(findNpc(npcs, "npc-3")).toMatchObject({
       campaignId: "campaign-2",
@@ -453,8 +455,9 @@ describe("social-service resolveSocialCheck contract", () => {
 
   it("returns structured facts", async () => {
     const { tx } = createTx();
+    mockNaturalRoll(15);
 
-    const result = await resolveSocialCheck(input(tx, { roll: 15 }));
+    const result = await resolveSocialCheck(input(tx));
 
     expectStructuredFacts(result);
     expect(result.facts ?? result).toEqual(
@@ -463,15 +466,16 @@ describe("social-service resolveSocialCheck contract", () => {
         characterId: "character-1",
         npcId: "npc-1",
         approach: "persuade",
-        dispositionAfter: 2,
+        dispositionAfter: 4,
       })
     );
   });
 
   it("does not return narrative text", async () => {
     const { tx } = createTx();
+    mockNaturalRoll(15);
 
-    const result = await resolveSocialCheck(input(tx, { roll: 15 }));
+    const result = await resolveSocialCheck(input(tx));
 
     expectNoNarrativeText(result);
   });
@@ -479,24 +483,27 @@ describe("social-service resolveSocialCheck contract", () => {
   it("does not call AI", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const { tx } = createTx();
+    mockNaturalRoll(15);
 
-    await resolveSocialCheck(input(tx, { roll: 15 }));
+    await resolveSocialCheck(input(tx));
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("does not introduce forbidden retro rules or jargon", async () => {
     const { tx } = createTx();
+    mockNaturalRoll(15);
 
-    const result = await resolveSocialCheck(input(tx, { roll: 15 }));
+    const result = await resolveSocialCheck(input(tx));
 
     expectNoForbiddenRetroTerms(result);
   });
 
   it("keeps D&D 5e/SRD 2014 skill checks as the social-check basis", async () => {
     const { tx } = createTx();
+    mockNaturalRoll(15);
 
-    const result = await resolveSocialCheck(input(tx, { roll: 15 }));
+    const result = await resolveSocialCheck(input(tx));
 
     expect(result).toMatchObject({
       roll: 15,
@@ -508,8 +515,9 @@ describe("social-service resolveSocialCheck contract", () => {
 
   it("does not modify commerce or quests", async () => {
     const { tx } = createTx();
+    mockNaturalRoll(15);
 
-    await resolveSocialCheck(input(tx, { roll: 15 }));
+    await resolveSocialCheck(input(tx));
 
     expect(tx.trade?.create).not.toHaveBeenCalled();
     expect(tx.trade?.update).not.toHaveBeenCalled();

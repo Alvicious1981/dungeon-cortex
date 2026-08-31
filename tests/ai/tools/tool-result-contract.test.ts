@@ -180,7 +180,6 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   socialCheck: {
     npcSeed: "gate_guard",
     approach: "persuade",
-    dispositionDelta: 2,
     intent: "Ask for directions.",
   },
   getRumors: { npcSeed: "gate_guard" },
