@@ -79,27 +79,23 @@ considered and rejected as inventing a margin the SRD does not sanction.
 is removed. It let the AI tool decide how far a mechanical outcome moved,
 which the project's own authority rule forbids.
 
-The backend sets it, by outcome and approach only:
+The backend sets it, by outcome alone:
 
 | Outcome | Shift |
 | --- | --- |
-| Success (any approach) | `+4` |
-| Failure, persuade or deceive | `0` |
-| Failure, intimidate | `−4` |
+| Success | `+4` |
+| Failure | `−4` |
 
 Clamped to −10..10. Each band is seven points wide, so ±4 moves attitude by at
 most one step from any starting value — the bound the decision requires.
 
-Failing to persuade someone costs nothing but the attempt; failing to
-*threaten* them costs standing. That asymmetry is the one the current code
-already encodes, and it is kept.
-
-> **Needs confirmation.** The option approved during design read "success up
-> one step, failure down one, and a failed intimidate one extra" — which is two
-> steps, contradicting the same option's "never more than one step per check".
-> The table above resolves it toward the bound and toward the existing
-> behaviour. If the intent was that every failure costs a step, this table is
-> what changes.
+**Approach does not affect the shift.** Persuade, intimidate and deceive
+differ in which skill is rolled, and therefore in who is good at them; they do
+not differ in what a success or a failure is worth. This is a deliberate
+change from the current code, where failing to persuade cost nothing and only
+a failed intimidate cost standing. Every attempt now carries the same stake,
+which is what makes the choice of approach a question of the character's
+skills rather than of which failure is cheapest.
 
 Attitude change is not in the SRD — the DMG's social interaction rules are not
 part of SRD 5.1. This is therefore a declared house rule: small, bounded, and
@@ -131,8 +127,8 @@ intimidate `−2`.
 `AbilityCheckResult` reports `isCriticalSuccess` / `isCriticalFailure`.
 Reporting that the die showed a 20 is a fact and may reach the narrator.
 **The attitude shift must ignore both fields.** In 5e a natural 20 or 1 has no
-special effect on an ability check; the shift depends only on success,
-failure, and whether the approach was intimidate.
+special effect on an ability check; the shift depends on nothing but whether
+the check succeeded.
 
 ### Attitude derives from the stored number
 
@@ -193,6 +189,7 @@ separately, per `AGENTS.md`.
 | **No criticals** | A natural 20 that misses the DC is a failure; a natural 1 that beats it is a success | Reintroducing the crit branch |
 | Proficiency | Same Charisma, one proficient → different totals | Dropping the proficiency term |
 | Backend-set shift | The `.strict()` schema **rejects** a supplied `dispositionDelta` | Without this the removal is only a compile-time fact |
+| Shift is outcome-only | All three approaches shift identically on the same outcome | Reintroducing any per-approach branch |
 | One-step bound | From **every** disposition in −10..10, one check moves attitude at most one step | Stated as an invariant, not sampled |
 | Formatter | The constraint line names the right attitude; the secret is withheld below Friendly and present at Friendly | The only path where a wrong value reaches the narrator silently |
 
