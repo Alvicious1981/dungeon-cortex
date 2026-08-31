@@ -197,8 +197,9 @@ whatever literal the first batch happened to use.
 
 ### Known dormant values, still open
 
-Anchors verified 2026-08-29. Each is the same shape as the defects above — a
-value produced with no consumer, or a consumer with no producer.
+Anchors verified 2026-08-29, except the tool-builder entry, verified
+2026-08-30. Each is the same shape as the defects above — a value produced
+with no consumer, or a consumer with no producer.
 
 Closed 2026-08-29: weapons now have qualities, so the SRD's conditional damage
 clauses resolve. `lib/rules/weapon-quality.ts` reads `magical`, `silvered` and
@@ -280,6 +281,23 @@ mismatch survives a green suite.
   reviving two models and taking the rules decision that migration parked, which
   is a project call and not an increment. Do not propose it as a next step
   without that decision being made first.
+- **`buildSocialTools` and `buildWorldTools`** (`lib/ai/tools/social.ts:40`,
+  `lib/ai/tools/world.ts:28`) — twelve AI-SDK tool definitions with no
+  production caller. `a0bb009` stopped `buildNarratorTools` spreading them;
+  their only importers now are `tests/ai/tools/social.test.ts` and
+  `tests/ai/tools/tool-result-contract.test.ts`. This is the same shape as
+  the dead `srd-lookup.ts` surface deleted in `8806e06`, with one difference
+  that kept it hidden: `lib/ai/tool-policy.ts` called the reduction temporary
+  and named "SEC-AI-001 PR 3" as what would restore them, which reads as the
+  "no callers yet, and the plan says so" exception. **That plan was cancelled,
+  not delayed.** SEC-AI-001 closed completed on 2026-08-30 having replaced
+  PR 3's design — contextual activation became physical exclusion — so nothing
+  is scheduled to call these again. The comment has been corrected; the
+  modules have not been touched.
+  **Not blocked, but not a one-file delete either.** The wrappers are dead;
+  the `lib/rules/*` functions they wrap may still have real backend callers,
+  and each needs checking before anything is removed. Verify both ends per
+  AGENTS.md's own method rather than deleting on the strength of this note.
 
 ## Work style
 

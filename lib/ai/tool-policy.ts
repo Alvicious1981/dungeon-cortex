@@ -4,11 +4,14 @@
  * Least-privilege containment for the narrator's tool surface (SEC-AI-001).
  *
  * The narrator receives only the read-only subset below. The remaining tools
- * stay implemented for their backend-owned callers, but are absent from the
- * object passed to the model call.
+ * are absent from the object passed to the model call.
  *
- * TEMPORARY, REVERSIBLE REDUCTION — the state-changing tools are inactive
- * until SEC-AI-001 PR 3 restores them behind backend-authorised activation.
+ * The reduction is permanent. SEC-AI-001 closed as completed on 2026-08-30
+ * having *replaced* the restoration it originally planned: contextual
+ * activation of a wide catalogue became physical exclusion, and LLM-based
+ * classification became deterministic and fail-closed. Nothing is scheduled
+ * to widen this list; widening it is a new decision against Code is Law, and
+ * needs its own Issue.
  *
  * The list is a frozen module constant: it is computed once, at module load,
  * and there is no input — no campaign state, scene, player text, memory,
