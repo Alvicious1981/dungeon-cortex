@@ -5,7 +5,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as dice from "@/lib/rules/dice";
 import {
   generateNPCPersonality,
   initialAttitudeFor,
@@ -19,25 +18,6 @@ import {
 } from "@/lib/rules/social-logic";
 import { NPC_ATTITUDES, SocialCheckInputSchema } from "@/lib/rules/social";
 import type { AbilityCheckActor } from "@/lib/rules/ability-check";
-
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-vi.mock("@/lib/rules/dice", async () => {
-  const actual = await vi.importActual<typeof dice>("@/lib/rules/dice");
-  return {
-    ...actual,
-    // Default to the real implementation so tests that roll through
-    // resolveAbilityCheck (via Math.random) still get genuine dice; tests
-    // that need a specific roll override with mockReturnValueOnce.
-    rollDie: vi.fn(actual.rollDie),
-    d20Check: vi.fn(actual.d20Check),
-  };
-});
-
-const mockedRollDie = vi.mocked(dice.rollDie);
-const mockedD20Check = vi.mocked(dice.d20Check);
 
 describe("Social Logic Engine", () => {
   beforeEach(() => {
