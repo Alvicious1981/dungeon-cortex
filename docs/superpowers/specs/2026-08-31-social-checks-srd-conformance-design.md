@@ -101,6 +101,34 @@ Attitude change is not in the SRD — the DMG's social interaction rules are not
 part of SRD 5.1. This is therefore a declared house rule: small, bounded, and
 recorded here as such.
 
+### 5. Initial attitude is derived, not rolled
+
+`establishInitialDisposition` currently rolls `d20 + charismaModifier` and maps
+the total to a band. That is a reaction roll — the same procedure as the AD&D
+2d6 `rollReaction` that §8 had removed, surviving on a different die under a
+different name. `docs/DECISION_5E_SRD_API.md` §3 prohibits reaction and
+loyalty procedures as authoritative mechanics.
+
+It is replaced by deterministic derivation from the seed, the pattern the rest
+of the NPC already uses — `generateNPC(seed, role)` derives name, race,
+profession, alignment, ability scores, HP and traits through
+`pickSeeded(seed + ":salt", …)`.
+
+```ts
+const ATTITUDE_BY_ROLE: Record<NPCRole, readonly NpcAttitude[]> = {
+  bandit:   ["Hostile", "Hostile", "Indifferent"],
+  guard:    ["Indifferent", "Indifferent", "Friendly"],
+  commoner: ["Indifferent", "Friendly", "Friendly"],
+};
+
+initialAttitude = pickSeeded(seed + ":attitude", ATTITUDE_BY_ROLE[role]);
+```
+
+The same NPC always greets the party the same way, no die is involved, and how
+a stranger receives you depends on who they are rather than on the party
+face's Charisma. `DISPOSITION_BANDS[band].initial` and `getBandFromD20Total`
+go with the roll.
+
 ## Increment 1 — rules conformance
 
 Pure functions and their consumers. No route changes, no new intent, no event
@@ -148,8 +176,10 @@ Existing rows stay valid, and `DialogueOverlay`'s meter arithmetic
 Each of these is inside the blast radius of the change; none is opportunistic
 refactoring.
 
-- `DISPOSITION_BANDS.min` / `.max` are never read — `getDispositionBand`
-  hardcodes its thresholds. The constant is reduced to what is consumed.
+- `DISPOSITION_BANDS.min` / `.max` are never read — both `getDispositionBand`
+  and `getBandFromD20Total` hardcode their thresholds. `.initial` **is** read,
+  by the reaction roll decision 5 removes. With that gone the whole constant
+  goes, replaced by `ATTITUDE_BY_ROLE` and the three-attitude thresholds.
 - `components/NPCRoster.tsx:104` holds a **second copy** of
   `getDispositionBand`. It is deleted and the module's function imported,
   restoring the lib→UI direction the project mandates.
@@ -190,6 +220,7 @@ separately, per `AGENTS.md`.
 | Proficiency | Same Charisma, one proficient → different totals | Dropping the proficiency term |
 | Backend-set shift | The `.strict()` schema **rejects** a supplied `dispositionDelta` | Without this the removal is only a compile-time fact |
 | Shift is outcome-only | All three approaches shift identically on the same outcome | Reintroducing any per-approach branch |
+| Initial attitude | The same seed and role always yield the same attitude, and Charisma does not enter it | Reintroducing a roll or a modifier term |
 | One-step bound | From **every** disposition in −10..10, one check moves attitude at most one step | Stated as an invariant, not sampled |
 | Formatter | The constraint line names the right attitude; the secret is withheld below Friendly and present at Friendly | The only path where a wrong value reaches the narrator silently |
 
