@@ -24,6 +24,24 @@ export async function executeTradeAction(
     throw e;
   }
 
+  // The backend owns mechanical legality, so an illegal quantity is refused
+  // here rather than carried into the transaction. A negative one is the case
+  // that matters: it makes `totalCost` negative, survives the insufficient
+  // funds check, and reaches `gold: { decrement: <negative> }`, which raises
+  // the balance. `Number.isInteger` also covers zero, fractions, NaN and
+  // Infinity in the same line.
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    return {
+      success: false,
+      action,
+      itemName: "Unknown",
+      quantity: 0,
+      goldDelta: 0,
+      newGoldBalance: 0,
+      error: "Invalid quantity",
+    };
+  }
+
   try {
     const result = await prisma.$transaction(async (tx) => {
       const campaign = await tx.campaign.findUnique({
