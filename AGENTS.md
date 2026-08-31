@@ -307,18 +307,44 @@ mismatch survives a green suite.
   | `lib/rules/social-service.ts` | `resolveSocialCheck`, `resolveRumors` | **none — there is no social route at all** |
 
   Three of the four are the `srd-lookup.ts` shape again: a service and an
-  ad-hoc route doing the same job, one of them unreachable. There, the live
-  copy was the better one — it alone projected the modifier columns. **Do not
-  assume that holds here.** These services are transactional and Zod-validated
-  while the routes reach for prisma directly, so the dead copy may well be the
-  correct one, and deleting by reachability would delete the better
-  implementation. The fourth is not a duplicate at all: no social check can
-  occur in the game today, and whether one should is a product decision, not
-  a cleanup.
+  ad-hoc route doing the same job, one of them unreachable. The fourth is not
+  a duplicate at all: no social check can occur in the game today, and whether
+  one should is a product decision, not a cleanup.
 
-  What is verified is the import graph, not behaviour — no line-by-line
-  comparison of the pairs has been done. Doing that is the next step and it is
-  three comparisons plus a product question, not a delete.
+  **Trade was compared line by line on 2026-08-31. Neither copy is whole, and
+  an earlier version of this note guessed the wrong way about which is.** It
+  said the dead services were "transactional and Zod-validated" and that the
+  dead copy "may well be the correct one" — for trade that is false, and the
+  guess was made from module shape without reading either file.
+
+  - `app/actions/trade.ts` **does not validate `quantity` at all.** A negative
+    quantity on buy makes `totalCost` negative, passes the `gold < totalCost`
+    check, and reaches `gold: { decrement: <negative> }` — which raises the
+    balance. It is a Server Action, so the UI is not the only caller. The
+    `campaign.userId !== user.id` check keeps this inside the caller's own
+    save, so it is self-cheating rather than privilege escalation, but
+    accepting an illegal quantity and mutating state from it is a **direct
+    breach of backend mechanical authority**, whoever it harms.
+  - `lib/rules/trade-service.ts` **does not match the schema.** `InventoryItem`
+    has no `campaignId` column and `Character` has no `campaignId` field, yet
+    the service passes `campaignId` to `inventoryItem.create` (real Prisma
+    would throw `Unknown argument` on the first purchase) and asserts against
+    `item.campaignId` and `character.campaignId`, which are always `undefined`
+    against real rows — so half of each ownership check is a no-op. It stays
+    green because `resolveDb` casts `prisma as unknown as TradeDb` and its
+    contract test injects a fake `tx`. Mocked shape, never checked against the
+    table: the exact pair of defects this file warns about.
+
+  So the live path holds the auth check, the working schema and the prose log
+  the narrator consumes; the dead one holds the input validation the live path
+  lacks. The likely shape is to keep the live entry point, port its asserts,
+  then delete the service — but the `quantity` hole is its own increment and
+  should probably land first and alone.
+
+  **`npc-service` and `equipment-service` have not been compared yet.** Their
+  rows above are import-graph facts only. Do not carry the trade conclusion
+  across to them; read both sides first, as the trade comparison shows what
+  guessing from shape is worth.
 
 ## Work style
 
