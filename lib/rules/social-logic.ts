@@ -7,9 +7,9 @@
 
 import { rollDie, d20Check } from "@/lib/rules/dice";
 import { pickSeeded } from "@/lib/rules/generators";
-import { 
-  NPCPersonality, 
-  DispositionBand, 
+import {
+  NPCPersonality,
+  DispositionBand,
   DISPOSITION_BANDS,
   DefaultNPCSocialState,
   InitialDispositionInput,
@@ -20,7 +20,8 @@ import {
   RumorItem,
   MOTIVATIONS,
   SECRETS,
-  DISTINCTIVE_TRAITS
+  DISTINCTIVE_TRAITS,
+  type NpcAttitude
 } from "./social";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,38 @@ function getBandFromD20Total(total: number): DispositionBand {
   if (total <= 14) return "Indifferent";
   if (total <= 19) return "Friendly";
   return "Helpful";
+}
+
+/** How far one check moves the stored disposition. */
+export const ATTITUDE_SHIFT = 4;
+
+const MIN_DISPOSITION = -10;
+const MAX_DISPOSITION = 10;
+
+/**
+ * The attitude a stored disposition represents.
+ *
+ * Null means the party has never spoken to this NPC. A stranger is
+ * Indifferent — the 5e default — rather than a special fourth state.
+ */
+export function attitudeFor(disposition: number | null | undefined): NpcAttitude {
+  const value = disposition ?? 0;
+  if (value <= -4) return "Hostile";
+  if (value <= 3) return "Indifferent";
+  return "Friendly";
+}
+
+/**
+ * The disposition after one social check.
+ *
+ * Success and failure are worth the same in opposite directions, and the
+ * approach does not enter it: persuading, deceiving and threatening differ in
+ * which skill is rolled, not in what the attempt is worth. Each band is seven
+ * points wide, so a shift of four moves attitude by at most one step.
+ */
+export function shiftDisposition(disposition: number, success: boolean): number {
+  const shifted = disposition + (success ? ATTITUDE_SHIFT : -ATTITUDE_SHIFT);
+  return Math.max(MIN_DISPOSITION, Math.min(MAX_DISPOSITION, shifted));
 }
 
 /**

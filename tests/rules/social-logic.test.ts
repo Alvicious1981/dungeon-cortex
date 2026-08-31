@@ -12,8 +12,11 @@ import {
   computeSocialDC,
   resolveSocialCheck,
   getRumorsPayload,
-  getDispositionBand
+  getDispositionBand,
+  attitudeFor,
+  shiftDisposition
 } from "@/lib/rules/social-logic";
+import { NPC_ATTITUDES } from "@/lib/rules/social";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -234,5 +237,44 @@ describe("Social Logic Engine", () => {
       expect(getDispositionBand(8)).toBe("Helpful");
       expect(getDispositionBand(10)).toBe("Helpful");
     });
+  });
+});
+
+describe("attitudeFor", () => {
+  it("reads the three bands off the stored disposition", () => {
+    expect(attitudeFor(-10)).toBe("Hostile");
+    expect(attitudeFor(-4)).toBe("Hostile");
+    expect(attitudeFor(-3)).toBe("Indifferent");
+    expect(attitudeFor(0)).toBe("Indifferent");
+    expect(attitudeFor(3)).toBe("Indifferent");
+    expect(attitudeFor(4)).toBe("Friendly");
+    expect(attitudeFor(10)).toBe("Friendly");
+  });
+
+  it("treats an unmet NPC as Indifferent", () => {
+    expect(attitudeFor(null)).toBe("Indifferent");
+    expect(attitudeFor(undefined)).toBe("Indifferent");
+  });
+});
+
+describe("shiftDisposition", () => {
+  it("clamps to the stored range", () => {
+    expect(shiftDisposition(10, true)).toBe(10);
+    expect(shiftDisposition(-10, false)).toBe(-10);
+  });
+
+  it("moves attitude by at most one step from every starting value", () => {
+    for (let d = -10; d <= 10; d++) {
+      for (const success of [true, false]) {
+        const before = NPC_ATTITUDES.indexOf(attitudeFor(d));
+        const after = NPC_ATTITUDES.indexOf(attitudeFor(shiftDisposition(d, success)));
+        expect(Math.abs(after - before)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("moves in the direction the outcome dictates", () => {
+    expect(shiftDisposition(0, true)).toBeGreaterThan(0);
+    expect(shiftDisposition(0, false)).toBeLessThan(0);
   });
 });
