@@ -10,6 +10,7 @@
  */
 
 import { z } from "zod";
+import { type DifficultyBand } from "@/lib/rules/ability-check";
 
 // ---------------------------------------------------------------------------
 // Constants & Bands
@@ -28,6 +29,36 @@ export const DISPOSITION_BANDS = {
 } as const;
 
 export type DispositionBand = keyof typeof DISPOSITION_BANDS;
+
+/**
+ * How an NPC currently regards the party.
+ *
+ * These are 5e's three attitudes. An earlier five-step ladder
+ * (Hostile/Unfriendly/Indifferent/Friendly/Helpful) came from 3.5e Diplomacy
+ * and is not a 5e construct. `DISPOSITION_BANDS`/`DispositionBand` above are
+ * retained only until their remaining consumers migrate to this type.
+ */
+export type NpcAttitude = "Hostile" | "Indifferent" | "Friendly";
+
+export const NPC_ATTITUDES: readonly NpcAttitude[] = [
+  "Hostile",
+  "Indifferent",
+  "Friendly",
+] as const;
+
+export const NpcAttitudeSchema = z.enum(["Hostile", "Indifferent", "Friendly"]);
+
+/**
+ * The difficulty of talking a creature round, by how it already regards you.
+ *
+ * Every value resolves through `DIFFICULTY_DC`, so the DCs are the SRD's own
+ * Typical Difficulty Classes (20 / 15 / 10) rather than numbers invented here.
+ */
+export const ATTITUDE_DIFFICULTY: Record<NpcAttitude, DifficultyBand> = {
+  Hostile: "hard",
+  Indifferent: "medium",
+  Friendly: "easy",
+};
 
 // ---------------------------------------------------------------------------
 // Core Types

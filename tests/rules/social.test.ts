@@ -18,7 +18,11 @@ import {
   GetRumorsInputSchema,
   RumorItemSchema,
   RumorPayloadSchema,
+  NPC_ATTITUDES,
+  ATTITUDE_DIFFICULTY,
+  type NpcAttitude,
 } from "@/lib/rules/social";
+import { DIFFICULTY_DC } from "@/lib/rules/ability-check";
 
 // ---------------------------------------------------------------------------
 // NPCSocialStateSchema
@@ -202,5 +206,24 @@ describe("Rumor Schemas", () => {
       rumors: [],
       refusalReason: "No."
     })).not.toThrow();
+  });
+});
+
+describe("NPC attitude", () => {
+  it("has exactly the three 5e attitudes", () => {
+    expect(NPC_ATTITUDES).toEqual(["Hostile", "Indifferent", "Friendly"]);
+  });
+
+  it("maps each attitude to its SRD difficulty class", () => {
+    expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Hostile]).toBe(20);
+    expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Indifferent]).toBe(15);
+    expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Friendly]).toBe(10);
+  });
+
+  it("draws every DC from the SRD difficulty table", () => {
+    const canonical = Object.values(DIFFICULTY_DC) as number[];
+    for (const attitude of NPC_ATTITUDES) {
+      expect(canonical).toContain(DIFFICULTY_DC[ATTITUDE_DIFFICULTY[attitude]]);
+    }
   });
 });
