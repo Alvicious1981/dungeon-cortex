@@ -8,7 +8,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as dice from "@/lib/rules/dice";
 import {
   generateNPCPersonality,
-  establishInitialDisposition,
+  initialAttitudeFor,
+  INITIAL_DISPOSITION,
   resolveSocialCheck,
   getRumorsPayload,
   getDispositionBand,
@@ -62,47 +63,6 @@ describe("Social Logic Engine", () => {
       const p2 = generateNPCPersonality("seed-b");
       // Statistically high chance to differ
       expect(p1.motivation !== p2.motivation || p1.secret !== p2.secret || p1.distinctiveTrait !== p2.distinctiveTrait).toBe(true);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // establishInitialDisposition
-  // ---------------------------------------------------------------------------
-
-  describe("establishInitialDisposition", () => {
-    it("uses d20 and maps to Hostile boundary", () => {
-      mockedRollDie.mockReturnValueOnce(1); // d20 total 1
-      const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 0 });
-      expect(res.dispositionBand).toBe("Hostile");
-      expect(res.initialDisposition).toBe(-8);
-      expect(mockedRollDie).toHaveBeenCalledOnce();
-      expect(mockedRollDie).toHaveBeenCalledWith(20);
-    });
-
-    it("uses d20 and maps to Helpful boundary", () => {
-      mockedRollDie.mockReturnValueOnce(20); // d20 total 20
-      const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 0 });
-      expect(res.dispositionBand).toBe("Helpful");
-      expect(res.initialDisposition).toBe(8);
-    });
-
-    it("applies charisma modifier and clamps result", () => {
-      mockedRollDie.mockReturnValueOnce(5); // 5 + 5 = 10 (Indifferent)
-      const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 5 });
-      expect(res.total).toBe(10);
-      expect(res.dispositionBand).toBe("Indifferent");
-    });
-    
-    it("clamps very high checks to 25", () => {
-       mockedRollDie.mockReturnValueOnce(20); // Base 20
-       const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: 5 });
-       expect(res.total).toBe(25);
-    });
-
-    it("clamps very low checks to 1", () => {
-       mockedRollDie.mockReturnValueOnce(1); // Base 1
-       const res = establishInitialDisposition({ npcSeed: "test", npcRole: "guard", charismaModifier: -5 });
-       expect(res.total).toBe(1);
     });
   });
 
@@ -162,6 +122,40 @@ describe("Social Logic Engine", () => {
       expect(getDispositionBand(8)).toBe("Helpful");
       expect(getDispositionBand(10)).toBe("Helpful");
     });
+  });
+});
+
+describe("initialAttitudeFor", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("gives the same NPC the same greeting every time", () => {
+    const first = initialAttitudeFor("innkeeper_saltmarsh", "commoner");
+    for (let i = 0; i < 20; i++) {
+      expect(initialAttitudeFor("innkeeper_saltmarsh", "commoner")).toBe(first);
+    }
+  });
+
+  it("does not depend on any roll", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const low = initialAttitudeFor("gate_guard_north", "guard");
+    vi.spyOn(Math, "random").mockReturnValue(0.9999);
+    const high = initialAttitudeFor("gate_guard_north", "guard");
+    expect(low).toBe(high);
+  });
+
+  it("varies between NPCs of the same role", () => {
+    const seen = new Set(
+      Array.from({ length: 40 }, (_, i) => initialAttitudeFor(`commoner_${i}`, "commoner"))
+    );
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it("seats each attitude at a disposition that reads back as itself", () => {
+    for (const [attitude, disposition] of Object.entries(INITIAL_DISPOSITION)) {
+      expect(attitudeFor(disposition)).toBe(attitude);
+    }
   });
 });
 

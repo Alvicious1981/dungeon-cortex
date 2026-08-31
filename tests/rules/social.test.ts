@@ -68,20 +68,23 @@ describe("InitialDispositionInputSchema", () => {
   const valid = {
     npcSeed: "guard-99",
     npcRole: "guard" as const,
-    charismaModifier: 2,
   };
 
   it("parses valid input", () => {
     expect(() => InitialDispositionInputSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects out-of-range charismaModifier", () => {
-    expect(() => InitialDispositionInputSchema.parse({ ...valid, charismaModifier: 6 })).toThrow();
-    expect(() => InitialDispositionInputSchema.parse({ ...valid, charismaModifier: -6 })).toThrow();
-  });
-
   it("rejects invalid npcRole", () => {
     expect(() => InitialDispositionInputSchema.parse({ ...valid, npcRole: "king" })).toThrow();
+  });
+
+  it("rejects a caller-supplied charismaModifier", () => {
+    // Initial attitude is now derived from seed and role alone — a
+    // Charisma term would make how a stranger receives you depend on who
+    // is doing the talking, which the schema no longer allows.
+    expect(() =>
+      InitialDispositionInputSchema.parse({ ...valid, charismaModifier: 2 })
+    ).toThrow();
   });
 });
 
@@ -91,11 +94,8 @@ describe("InitialDispositionInputSchema", () => {
 
 describe("InitialDispositionResultSchema", () => {
   const valid = {
-    roll: 15,
-    total: 17,
-    charismaModifier: 2,
-    dispositionBand: "Friendly" as const,
-    initialDisposition: 4,
+    attitude: "Friendly" as const,
+    disposition: 7,
     personality: {
       motivation: "Safety.",
       secret: "None.",
@@ -107,12 +107,8 @@ describe("InitialDispositionResultSchema", () => {
     expect(() => InitialDispositionResultSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects non-d20 roll values", () => {
-    expect(() => InitialDispositionResultSchema.parse({ ...valid, roll: 21 })).toThrow();
-  });
-
-  it("rejects invalid dispositionBand", () => {
-    expect(() => InitialDispositionResultSchema.parse({ ...valid, dispositionBand: "Angry" })).toThrow();
+  it("rejects an invalid attitude", () => {
+    expect(() => InitialDispositionResultSchema.parse({ ...valid, attitude: "Angry" })).toThrow();
   });
 });
 

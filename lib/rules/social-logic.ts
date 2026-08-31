@@ -5,16 +5,13 @@
  * Moved from social.ts to adhere to Milestone N Slice 2 separation.
  */
 
-import { rollDie } from "@/lib/rules/dice";
 import { pickSeeded } from "@/lib/rules/generators";
+import { type NPCRole } from "@/lib/rules/npc";
 import { resolveAbilityCheck, type AbilityCheckActor, type Skill } from "@/lib/rules/ability-check";
 import {
   NPCPersonality,
   DispositionBand,
-  DISPOSITION_BANDS,
   DefaultNPCSocialState,
-  InitialDispositionInput,
-  InitialDispositionResult,
   SocialCheckInput,
   SocialCheckResult,
   RumorPayload,
@@ -30,11 +27,6 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Clamps `value` to the inclusive range [min, max]. */
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 /**
  * Maps a numeric disposition value to its human-readable band label.
  */
@@ -48,7 +40,12 @@ export function getDispositionBand(disposition: number): DispositionBand {
 
 /**
  * Maps a modified D&D 5e d20 ability check total to a DispositionBand.
+ *
+ * Unused now that initial attitude is derived rather than rolled (see
+ * `initialAttitudeFor` below). Left in place — a later task removes this
+ * together with `getDispositionBand`, its remaining sibling.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept intentionally; see doc comment above.
 function getBandFromD20Total(total: number): DispositionBand {
   if (total <= 5)  return "Hostile";
   if (total <= 9)  return "Unfriendly";
@@ -134,24 +131,36 @@ export function generateNPCPersonality(seed: string): NPCPersonality {
 }
 
 /**
- * Establishes first-contact disposition with a backend-owned D&D 5e d20
- * Charisma ability check. The AI may narrate only this resolved result.
+ * How a stranger of each role tends to receive the party.
+ *
+ * Weighted by repetition rather than by a probability table, because
+ * `pickSeeded` picks uniformly and the weighting should be visible in the
+ * data rather than hidden in arithmetic.
  */
-export function establishInitialDisposition(input: InitialDispositionInput): InitialDispositionResult {
-  const roll = rollDie(20);
-  const total = clamp(roll + input.charismaModifier, 1, 25);
-  const dispositionBand = getBandFromD20Total(total);
-  const initialDisposition = DISPOSITION_BANDS[dispositionBand].initial;
-  const personality = generateNPCPersonality(input.npcSeed);
+const ATTITUDE_BY_ROLE: Record<NPCRole, readonly NpcAttitude[]> = {
+  bandit: ["Hostile", "Hostile", "Indifferent"],
+  guard: ["Indifferent", "Indifferent", "Friendly"],
+  commoner: ["Indifferent", "Friendly", "Friendly"],
+};
 
-  return {
-    roll,
-    total,
-    charismaModifier: input.charismaModifier,
-    dispositionBand,
-    initialDisposition,
-    personality,
-  };
+/** The stored disposition each attitude starts at — the middle of its band. */
+export const INITIAL_DISPOSITION: Record<NpcAttitude, number> = {
+  Hostile: -7,
+  Indifferent: 0,
+  Friendly: 7,
+};
+
+/**
+ * The attitude an NPC holds the first time the party meets them.
+ *
+ * Derived from the seed, like every other fact about an NPC, so the same
+ * person always greets the party the same way. This replaces a d20 + Charisma
+ * roll: that was a reaction roll, which this project does not use as an
+ * authoritative mechanic, and it made how a stranger felt about you depend on
+ * who happened to be doing the talking.
+ */
+export function initialAttitudeFor(seed: string, role: NPCRole): NpcAttitude {
+  return pickSeeded(seed + ":attitude", ATTITUDE_BY_ROLE[role]);
 }
 
 const APPROACH_SKILL = {

@@ -103,18 +103,14 @@ export const InitialDispositionInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
     npcRole: z.enum(["guard", "bandit", "commoner"]),
-    charismaModifier: z.number().int().min(-5).max(5),
   })
   .strict();
 
 export type InitialDispositionInput = z.infer<typeof InitialDispositionInputSchema>;
 
 export const InitialDispositionResultSchema = z.object({
-  roll: z.number().int().min(1).max(20),
-  total: z.number().int(),
-  charismaModifier: z.number().int(),
-  dispositionBand: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
-  initialDisposition: z.number().int().min(-10).max(10),
+  attitude: NpcAttitudeSchema,
+  disposition: z.number().int(),
   personality: z.object({
     motivation: z.string(),
     secret: z.string(),

@@ -13,7 +13,9 @@ import {
   GetRumorsInputSchema,
 } from "@/lib/rules/social";
 import {
-  establishInitialDisposition as establishInitialDispositionPure,
+  initialAttitudeFor,
+  INITIAL_DISPOSITION,
+  generateNPCPersonality,
 } from "@/lib/rules/social-logic";
 import {
   resolveRumors,
@@ -128,17 +130,19 @@ export function buildSocialTools(
     }),
     establishInitialDisposition: tool({
       description:
-        "Establish an NPC's first-contact disposition with the D&D 5e/SRD 2014-compatible backend d20 Charisma check. " +
+        "Establish an NPC's first-contact attitude, deterministically derived from the NPC's seed and role — no roll. " +
         "MUST be called the FIRST TIME the party speaks to any NPC in a scene. " +
         "Do NOT call this if NPC.hasMetPlayer is true — use the persisted disposition instead. " +
         "The backend result determines the NPC's opening attitude and persists disposition, personalityTags, and hasMetPlayer. " +
-        "The Narrator MUST voice the NPC using ONLY the returned dispositionBand and personality tags. " +
+        "The Narrator MUST voice the NPC using ONLY the returned attitude and personality tags. " +
         "NEVER invent NPC attitudes, motivations, or secrets without calling this tool first. " +
         "Code is Law.",
       inputSchema: InitialDispositionInputSchema,
-      execute: async ({ npcSeed, npcRole, charismaModifier }) => {
+      execute: async ({ npcSeed, npcRole }) => {
         return runTool(async () => {
-          const result = establishInitialDispositionPure({ npcSeed, npcRole, charismaModifier });
+          const attitude = initialAttitudeFor(npcSeed, npcRole as NPCRole);
+          const disposition = INITIAL_DISPOSITION[attitude];
+          const personality = generateNPCPersonality(npcSeed);
           const statblock = generateNPC(npcSeed, npcRole as NPCRole);
           const descriptor: NpcDescriptor = {
             seed: npcSeed,
@@ -157,12 +161,12 @@ export function buildSocialTools(
           await establishInitialNpcDisposition({
             campaignId,
             npcSeed,
-            disposition: result.initialDisposition,
-            personalityTags: result.personality,
+            disposition,
+            personalityTags: personality,
             descriptor,
           });
 
-          return result;
+          return { attitude, disposition, personality };
         });
       },
     }),

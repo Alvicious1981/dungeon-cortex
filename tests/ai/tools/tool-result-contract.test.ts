@@ -31,7 +31,7 @@ const services = vi.hoisted(() => ({
   createTrackedQuest: vi.fn(),
   updateQuestStatus: vi.fn(),
   generateNPC: vi.fn(),
-  establishInitialDisposition: vi.fn(),
+  initialAttitudeFor: vi.fn(),
   resolveRumors: vi.fn(),
   resolveSocialCheck: vi.fn(),
   buildMerchantPayload: vi.fn(),
@@ -74,7 +74,7 @@ vi.mock("@/lib/rules/npc", async (importOriginal) => ({
 }));
 vi.mock("@/lib/rules/social-logic", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/social-logic")>()),
-  establishInitialDisposition: services.establishInitialDisposition,
+  initialAttitudeFor: services.initialAttitudeFor,
 }));
 vi.mock("@/lib/rules/social-service", () => ({
   resolveRumors: services.resolveRumors,
@@ -176,7 +176,7 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   getNPCDetails: { seed: "gate_guard", role: "guard" },
   trackNPC: { seed: "gate_guard", role: "guard", notes: "Gruff.", hp: 10 },
   generateAndTrackNPC: { seed: "gate_guard", role: "guard", notes: "Gruff." },
-  establishInitialDisposition: { npcSeed: "gate_guard", npcRole: "guard", charismaModifier: 0 },
+  establishInitialDisposition: { npcSeed: "gate_guard", npcRole: "guard" },
   socialCheck: {
     npcSeed: "gate_guard",
     approach: "persuade",
@@ -229,11 +229,7 @@ function primeSuccess(): void {
   services.createTrackedQuest.mockResolvedValue({ questId: "quest-1", title: "The Black Messenger" });
   services.updateQuestStatus.mockResolvedValue({ questId: "quest-1", status: "completed" });
   services.generateNPC.mockReturnValue(NPC_STATBLOCK);
-  services.establishInitialDisposition.mockReturnValue({
-    initialDisposition: 6,
-    personality: { motivation: "m", secret: "s", distinctiveTrait: "d" },
-    dispositionBand: "Friendly",
-  });
+  services.initialAttitudeFor.mockReturnValue("Friendly");
   services.resolveRumors.mockResolvedValue({ npcName: "Bert", rumors: [] });
   services.resolveSocialCheck.mockResolvedValue({ dispositionBefore: 4, dispositionAfter: 6 });
   services.buildMerchantPayload.mockReturnValue({
@@ -330,7 +326,7 @@ function primeFailure(): void {
     // Synchronous generators must throw; async services must reject.
     if (
       name === "generateNPC" ||
-      name === "establishInitialDisposition" ||
+      name === "initialAttitudeFor" ||
       name === "buildMerchantPayload" ||
       name === "generateTavernName" ||
       name === "generateMundaneLoot"
