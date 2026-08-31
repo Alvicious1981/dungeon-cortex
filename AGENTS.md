@@ -317,14 +317,20 @@ mismatch survives a green suite.
   dead copy "may well be the correct one" — for trade that is false, and the
   guess was made from module shape without reading either file.
 
-  - `app/actions/trade.ts` **does not validate `quantity` at all.** A negative
-    quantity on buy makes `totalCost` negative, passes the `gold < totalCost`
-    check, and reaches `gold: { decrement: <negative> }` — which raises the
-    balance. It is a Server Action, so the UI is not the only caller. The
-    `campaign.userId !== user.id` check keeps this inside the caller's own
-    save, so it is self-cheating rather than privilege escalation, but
-    accepting an illegal quantity and mutating state from it is a **direct
-    breach of backend mechanical authority**, whoever it harms.
+  - `app/actions/trade.ts` **did not validate `quantity` at all — fixed in
+    `12267bf`.** A negative quantity on buy made `totalCost` negative, passed
+    the `gold < totalCost` check, and reached `gold: { decrement: <negative> }`,
+    which raises the balance. It is a Server Action, so the UI was never the
+    only caller. The `campaign.userId !== user.id` check confined it to the
+    caller's own save — self-cheating rather than privilege escalation — but
+    accepting an illegal quantity and mutating gold from it breached backend
+    mechanical authority regardless. The guard now refuses before the
+    transaction opens, so nothing partial can be written, and
+    `tests/actions/trade-quantity-validation.test.ts` covers the negative,
+    zero, fractional and non-finite cases plus one asserting a valid quantity
+    still gets through. **The defect is worth remembering even though it is
+    closed:** it sat on the live path the whole time the review attention was
+    on the dead one.
   - `lib/rules/trade-service.ts` **does not match the schema.** `InventoryItem`
     has no `campaignId` column and `Character` has no `campaignId` field, yet
     the service passes `campaignId` to `inventoryItem.create` (real Prisma
@@ -335,11 +341,12 @@ mismatch survives a green suite.
     contract test injects a fake `tx`. Mocked shape, never checked against the
     table: the exact pair of defects this file warns about.
 
-  So the live path holds the auth check, the working schema and the prose log
-  the narrator consumes; the dead one holds the input validation the live path
-  lacks. The likely shape is to keep the live entry point, port its asserts,
-  then delete the service — but the `quantity` hole is its own increment and
-  should probably land first and alone.
+  So the live path holds the auth check, the working schema, the prose log the
+  narrator consumes and now the input validation too. That leaves
+  `trade-service.ts` with nothing the live path lacks and one thing it gets
+  wrong, so the remaining question is only whether to delete it — a decision,
+  not an investigation. Deleting it also drops `getCampaignCharacterIdForTrade`
+  and the `TradeServiceError` codes, which nothing else imports.
 
   **`npc-service` and `equipment-service` have not been compared yet.** Their
   rows above are import-graph facts only. Do not carry the trade conclusion
