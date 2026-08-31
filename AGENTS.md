@@ -294,10 +294,31 @@ mismatch survives a green suite.
   PR 3's design — contextual activation became physical exclusion — so nothing
   is scheduled to call these again. The comment has been corrected; the
   modules have not been touched.
-  **Not blocked, but not a one-file delete either.** The wrappers are dead;
-  the `lib/rules/*` functions they wrap may still have real backend callers,
-  and each needs checking before anything is removed. Verify both ends per
-  AGENTS.md's own method rather than deleting on the strength of this note.
+  **Not blocked, but not a one-file delete either.** The import graph was
+  verified across `app/`, `lib/`, `components/`, `scripts/`, `workflows/` and
+  `evals/` on 2026-08-31, and it is worse than two dead wrappers: **four
+  backend services are now reachable only through them.**
+
+  | Service | Dead entry points | Live parallel path |
+  | --- | --- | --- |
+  | `lib/rules/trade-service.ts` | `resolveTradeTransaction`, `getCampaignCharacterIdForTrade` | `app/actions/trade.ts` → its own `prisma.$transaction`, from `components/trade/TradeOverlayController.tsx` |
+  | `lib/rules/npc-service.ts` | `trackNpcState`, `upsertGeneratedNpc`, `establishInitialNpcDisposition` | `app/api/campaign/[id]/npc/route.ts` → its own `prisma.nPC.upsert` |
+  | `lib/rules/equipment-service.ts` | `equipCharacterItem` | `app/api/campaign/[id]/inventory/route.ts`, prisma direct |
+  | `lib/rules/social-service.ts` | `resolveSocialCheck`, `resolveRumors` | **none — there is no social route at all** |
+
+  Three of the four are the `srd-lookup.ts` shape again: a service and an
+  ad-hoc route doing the same job, one of them unreachable. There, the live
+  copy was the better one — it alone projected the modifier columns. **Do not
+  assume that holds here.** These services are transactional and Zod-validated
+  while the routes reach for prisma directly, so the dead copy may well be the
+  correct one, and deleting by reachability would delete the better
+  implementation. The fourth is not a duplicate at all: no social check can
+  occur in the game today, and whether one should is a product decision, not
+  a cleanup.
+
+  What is verified is the import graph, not behaviour — no line-by-line
+  comparison of the pairs has been done. Doing that is the next step and it is
+  three comparisons plus a product question, not a delete.
 
 ## Work style
 
