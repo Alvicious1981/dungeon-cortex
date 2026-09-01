@@ -23,7 +23,7 @@ import { requestDungeonAction } from "@/lib/events/action-transport";
 interface NpcSelectedDetail {
   npcId: string;
   name: string;
-  disposition: number;
+  disposition: number | null;
   hasMetPlayer: boolean;
 }
 
@@ -33,7 +33,7 @@ interface DialogueNpc {
   name: string;
   race: string | null;
   profession: string | null;
-  disposition: number;
+  disposition: number | null;
   personalityTags: {
     motivation: string;
     secret: string;

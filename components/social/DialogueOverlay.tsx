@@ -22,7 +22,7 @@ interface DialogueOverlayProps {
     name: string;
     race: string | null;
     profession: string | null;
-    disposition: number;
+    disposition: number | null;
     personalityTags: {
       motivation: string;
       secret: string; // RECEIVED: for NPC context
@@ -69,6 +69,11 @@ export default function DialogueOverlay({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const band = attitudeFor(npc.disposition);
+  // Rendering-only fallback: an NPC with no disposition yet (never met, or
+  // simply unknown) is drawn at the meter's midpoint. `attitudeFor(null)`
+  // already treats this as Indifferent by design; this local value exists
+  // only for the numeric meter math below and is never sent back out.
+  const dispositionValue = npc.disposition ?? 0;
   /**
    * NEVER RENDER: secret is for engine use only. 
    * The player only sees Motivation and Distinctive Trait.
@@ -114,7 +119,7 @@ export default function DialogueOverlay({
     }
   }, [narrationText]);
 
-  const dispositionPercent = ((npc.disposition + 10) / 20) * 100;
+  const dispositionPercent = ((dispositionValue + 10) / 20) * 100;
 
   return (
     <div 
@@ -168,7 +173,9 @@ export default function DialogueOverlay({
               {band}
             </span>
             <div className="text-xs text-amber-500/40">
-              {npc.disposition > 0 ? "+" : ""}{npc.disposition} Engagement
+              {npc.disposition === null
+                ? "Unknown Engagement"
+                : `${npc.disposition > 0 ? "+" : ""}${npc.disposition} Engagement`}
             </div>
           </div>
         </header>
@@ -183,7 +190,7 @@ export default function DialogueOverlay({
           <div 
             className="h-2.5 w-full bg-[#08080c] rounded-full border border-neutral-900 overflow-hidden relative"
             role="meter"
-            aria-valuenow={npc.disposition}
+            aria-valuenow={dispositionValue}
             aria-valuemin={-10}
             aria-valuemax={10}
             aria-label="NPC Disposition"

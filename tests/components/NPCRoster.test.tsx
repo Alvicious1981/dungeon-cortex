@@ -21,9 +21,12 @@ describe("NPCRoster", () => {
     fireEvent.click(screen.getByRole("button", { name: /Greta the Ironmonger/ }));
 
     expect(listener).toHaveBeenCalledTimes(1);
-    expect((listener.mock.calls[0][0] as CustomEvent).detail).toMatchObject({
+    const detail = (listener.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail).toEqual({
       npcId: "npc_1",
       name: "Greta the Ironmonger",
+      disposition: 5,
+      hasMetPlayer: true,
     });
 
     window.removeEventListener("dungeon-npc-selected", listener);
