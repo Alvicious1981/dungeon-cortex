@@ -197,36 +197,34 @@ function NPCCard({ npc }: { npc: NPC }) {
       className="rounded overflow-hidden"
       style={{ background: cfg.bg, border: `1px solid ${cfg.borderColor}` }}
     >
-      <button
-        type="button"
-        aria-label={`Hablar con ${npc.name}`}
-        className="w-full text-left px-3 py-3 space-y-2.5"
-        onClick={() =>
-          window.dispatchEvent(
-            new CustomEvent("dungeon-npc-selected", {
-              detail: {
-                npcId: npc.id,
-                name: npc.name,
-                disposition: npc.disposition,
-                hasMetPlayer: npc.hasMetPlayer,
-              },
-            })
-          )
-        }
-      >
+      <div className="w-full text-left px-3 py-3 space-y-2.5">
       {/* ── Name + role badge ── */}
       <div className="flex items-start justify-between gap-2">
-        <span
-          className="font-semibold leading-snug"
+        <button
+          type="button"
+          aria-label={`Hablar con ${npc.name}`}
+          className="font-semibold leading-snug text-left"
           style={{
             fontFamily: "var(--font-cinzel)",
             color: "#E8C84A",
             fontSize: "0.82rem",
             letterSpacing: "0.03em",
           }}
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("dungeon-npc-selected", {
+                detail: {
+                  npcId: npc.id,
+                  name: npc.name,
+                  disposition: npc.disposition,
+                  hasMetPlayer: npc.hasMetPlayer,
+                },
+              })
+            )
+          }
         >
           {npc.name}
-        </span>
+        </button>
         <span
           className="shrink-0 rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider leading-none"
           style={{ color: cfg.accentColor, background: "rgba(0,0,0,0.35)" }}
@@ -384,7 +382,7 @@ function NPCCard({ npc }: { npc: NPC }) {
           {npc.notes}
         </p>
       )}
-      </button>
+      </div>
     </li>
   );
 }

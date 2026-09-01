@@ -77,6 +77,7 @@ describe("DialogueOverlayController", () => {
 
     expect(await screen.findByText(/18/)).toBeTruthy();
     expect(await screen.findByText(/DC 15/i)).toBeTruthy();
+    expect(await screen.findByText(/\+9 Engagement/)).toBeTruthy();
   });
 
   it("posts the same route call when approaching an unmet NPC", async () => {

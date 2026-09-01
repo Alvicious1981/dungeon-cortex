@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/campaign/[id]/social/route";
 import { prisma } from "@/lib/db/prisma";
-import { getAuthUser } from "@/lib/auth/session";
+import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { resolveSocialCheck } from "@/lib/rules/social-service";
 
 vi.mock("@/lib/db/prisma", () => ({
@@ -64,26 +64,46 @@ describe("POST /api/campaign/[id]/social", () => {
     await expect(response.json()).resolves.toMatchObject({ attitudeAfter: "Hostile" });
   });
 
+  it("refuses an unauthenticated request", async () => {
+    (getAuthUser as never as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new AuthError("Not authenticated.")
+    );
+
+    const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "x" }), { params });
+
+    expect(response.status).toBe(401);
+    expect(resolveSocialCheck).not.toHaveBeenCalled();
+    expect(prisma.nPC.update).not.toHaveBeenCalled();
+  });
+
   it("refuses a campaign belonging to another user", async () => {
     (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       userId: "someone_else", status: "active",
+    });
+    (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "npc_1", campaignId: "camp_1", seed: "innkeeper_1", role: "commoner", hasMetPlayer: false,
     });
 
     const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "x" }), { params });
 
     expect(response.status).toBe(403);
     expect(resolveSocialCheck).not.toHaveBeenCalled();
+    expect(prisma.nPC.update).not.toHaveBeenCalled();
   });
 
   it("refuses an inactive campaign", async () => {
     (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       userId: "user_1", status: "completed",
     });
+    (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "npc_1", campaignId: "camp_1", seed: "innkeeper_1", role: "commoner", hasMetPlayer: false,
+    });
 
     const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "x" }), { params });
 
     expect(response.status).toBe(409);
     expect(resolveSocialCheck).not.toHaveBeenCalled();
+    expect(prisma.nPC.update).not.toHaveBeenCalled();
   });
 
   it("refuses an unknown approach without resolving anything", async () => {
@@ -123,6 +143,18 @@ describe("POST /api/campaign/[id]/social", () => {
     await POST(request({ npcId: "npc_1", approach: "persuade", intent: "x" }), { params });
 
     expect(prisma.nPC.update).not.toHaveBeenCalled();
+  });
+
+  it("forwards a non-persuade approach unchanged", async () => {
+    const response = await POST(
+      request({ npcId: "npc_1", approach: "intimidate", intent: "x" }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect(resolveSocialCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ approach: "intimidate" })
+    );
   });
 
   it("refuses an NPC from another campaign", async () => {
