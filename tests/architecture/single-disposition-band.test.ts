@@ -64,3 +64,13 @@ describe("one banding rule", () => {
     expect(copies).toEqual([]);
   });
 });
+
+describe("retired dialogue frames", () => {
+  it("leaves no reference to a frame type nothing emits", () => {
+    const survivors = SOURCES.filter(([, text]) =>
+      /dialogue_open|dungeon-dialogue-open|dialogue_update|dungeon-dialogue-update/.test(text),
+    ).map(([path]) => relative(path));
+
+    expect(survivors).toEqual([]);
+  });
+});

@@ -130,24 +130,6 @@ export interface LevelUpResolvedPayload {
 }
 
 /**
- * Payload emitted when an NPC dialogue sequence is initiated.
- */
-export interface DialogueOpenPayload {
-  npcSeed: string;
-  npcId:   string;
-  name:    string;
-  race:    string | null;
-  profession: string | null;
-  disposition:  number;
-  personalityTags: {
-    motivation:      string;
-    secret:          string; // Received for future context; overlay must NOT render
-    distinctiveTrait: string;
-  } | null;
-  hasMetPlayer: boolean;
-}
-
-/**
  * Discriminated union for frames sent over the action SSE stream.
  *
  *   t:"evt"      — a deterministic game event (fires before any LLM tokens)
@@ -159,8 +141,6 @@ export interface DialogueOpenPayload {
  *   t:"txt"      — a text delta from the AI narrator
  *   t:"level_up" — reserved for a backend-authorised level-up resolution
  *   t:"merchant" — reserved for a backend-authorised merchant resolution
- *   t:"dialogue_open" — dialogue initiated; contains the full DialogueOpenPayload
- *   t:"dialogue_update" — social check resolved; contains the updated disposition
  *   t:"done"     — stream complete; client should call router.refresh()
  */
 export type ActionStreamFrame =
@@ -169,6 +149,4 @@ export type ActionStreamFrame =
   | { t: "txt"; d: string }
   | { t: "level_up"; payload: LevelUpResolvedPayload }
   | { t: "merchant"; payload: MerchantPayload }
-  | { t: "dialogue_open"; payload: DialogueOpenPayload }
-  | { t: "dialogue_update"; disposition: number }
   | { t: "done" };

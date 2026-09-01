@@ -170,16 +170,6 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             window.dispatchEvent(
               new CustomEvent("dungeon-merchant", { detail: parsed.payload })
             );
-          } else if (parsed.t === "dialogue_open") {
-            window.dispatchEvent(
-              new CustomEvent("dungeon-dialogue-open", { detail: parsed.payload })
-            );
-          } else if (parsed.t === "dialogue_update") {
-            window.dispatchEvent(
-              new CustomEvent("dungeon-dialogue-update", {
-                detail: { disposition: parsed.disposition },
-              })
-            );
           } else if (parsed.t === "done") {
             done = true;
             break;
