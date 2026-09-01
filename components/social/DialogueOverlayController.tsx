@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import DialogueOverlay from "./DialogueOverlay";
-import { requestDungeonAction } from "@/lib/events/action-transport";
 
 /**
  * DialogueOverlayController.tsx — Milestone N: Slice 3
@@ -42,16 +41,31 @@ interface DialogueNpc {
   hasMetPlayer: boolean;
 }
 
+/** Facts the social route resolves and returns; rendered verbatim, never narrated. */
+export interface SocialCheckDisplay {
+  approach: "persuade" | "intimidate" | "deceive";
+  skill: string;
+  roll: number;
+  total: number;
+  dc: number;
+  success: boolean;
+  attitudeBefore: string;
+  attitudeAfter: string;
+  dispositionBefore: number;
+  dispositionAfter: number;
+}
+
 interface Props {
   campaignId: string;
   characterId: string;
 }
 
-export default function DialogueOverlayController({ characterId }: Props) {
+export default function DialogueOverlayController({ campaignId, characterId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [npc, setNpc] = useState<DialogueNpc | null>(null);
   const [narrationText, setNarrationText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [result, setResult] = useState<SocialCheckDisplay | null>(null);
 
   useEffect(() => {
     // 1. Open dialogue when the roster selects an NPC
@@ -69,6 +83,7 @@ export default function DialogueOverlayController({ characterId }: Props) {
       });
       setIsOpen(true);
       setNarrationText(""); // Clear for new conversation
+      setResult(null); // Clear the prior check's facts for a new conversation
     }
 
     // 2. Accumulate narrative tokens
@@ -106,25 +121,48 @@ export default function DialogueOverlayController({ characterId }: Props) {
 
   if (!isOpen || !npc) return null;
 
-  const dispatchAction = (text: string) => {
-    requestDungeonAction({ action: text });
+  // Backend code owns mechanical truth: this posts who, which approach, and
+  // what the player wants. It never sends (or computes) a roll, a DC, or a
+  // disposition — those come back from the route, and are rendered as-is.
+  const resolveSocial = async (
+    approach: "persuade" | "intimidate" | "deceive",
+    intent: string
+  ) => {
+    if (!npc) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch(`/api/campaign/${campaignId}/social`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ npcId: npc.id, approach, intent }),
+      });
+      if (!response.ok) return;
+      const facts = (await response.json()) as SocialCheckDisplay;
+      setResult(facts);
+      setNpc((prev) => (prev ? { ...prev, disposition: facts.dispositionAfter, hasMetPlayer: true } : prev));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSocialIntent = (approach: "persuade" | "intimidate" | "deceive") => {
-    const verb = approach === "persuade" ? "to persuade" : approach;
-    dispatchAction(`I try ${verb} ${npc.name}.`);
+    void resolveSocial(approach, "");
   };
 
   const handleSpeak = (words: string, approach: "persuade" | "intimidate" | "deceive") => {
-    dispatchAction(`"${words}" (I am trying to ${approach} them)`);
+    void resolveSocial(approach, words);
   };
 
   const handleAskRumors = () => {
-    dispatchAction(`I ask ${npc.name} what rumors they have heard lately.`);
+    // No backend route resolves this yet; nothing to post and nothing to
+    // narrate without a resolved fact to render.
   };
 
   const handleApproach = () => {
-    dispatchAction(`I approach ${npc.name} and introduce myself.`);
+    // Establishes first contact and resolves in the same call — the route
+    // flips hasMetPlayer and returns dispositionAfter, which moves the
+    // overlay into its "met" branch on the next render.
+    void resolveSocial("persuade", "");
   };
 
   return (
@@ -132,6 +170,7 @@ export default function DialogueOverlayController({ characterId }: Props) {
       npc={npc}
       narrationText={narrationText}
       characterId={characterId}
+      result={result}
       onSpeak={handleSpeak}
       onSocialIntent={handleSocialIntent}
       onAskRumors={handleAskRumors}

@@ -32,6 +32,18 @@ interface DialogueOverlayProps {
   };
   narrationText: string;
   characterId: string;
+  result: {
+    approach: "persuade" | "intimidate" | "deceive";
+    skill: string;
+    roll: number;
+    total: number;
+    dc: number;
+    success: boolean;
+    attitudeBefore: string;
+    attitudeAfter: string;
+    dispositionBefore: number;
+    dispositionAfter: number;
+  } | null;
   onSpeak: (words: string, approach: "persuade" | "intimidate" | "deceive") => void;
   onSocialIntent: (approach: "persuade" | "intimidate" | "deceive") => void;
   onAskRumors: () => void;
@@ -55,6 +67,7 @@ const DISPOSITION_COLORS: Record<NpcAttitude, string> = {
 export default function DialogueOverlay({
   npc,
   narrationText,
+  result,
   onSpeak,
   onSocialIntent,
   onAskRumors,
@@ -216,7 +229,7 @@ export default function DialogueOverlay({
         <div className="flex-1 flex min-h-0">
           {/* Narration Log */}
           <section className="flex-1 p-6 overflow-y-auto bg-[#0a0a0f]" ref={scrollRef}>
-            <div 
+            <div
               className="text-amber-100/90 text-lg leading-relaxed whitespace-pre-wrap"
               style={{ fontFamily: "var(--font-crimson)" }}
             >
@@ -225,6 +238,30 @@ export default function DialogueOverlay({
                 <span className="inline-block w-2 h-4 ml-1 bg-amber-600 animate-pulse align-middle" />
               )}
             </div>
+
+            {/* Resolved check facts — rendered as returned by the route, never narrated. */}
+            {result && (
+              <div
+                className="mt-4 border border-amber-900/30 rounded-lg p-4 bg-[#11111d] text-sm"
+                style={{ fontFamily: "var(--font-inter)" }}
+                data-testid="social-check-result"
+              >
+                <div className="flex items-center justify-between text-amber-200">
+                  <span className="font-bold uppercase tracking-widest text-xs">
+                    {result.skill} ({result.approach})
+                  </span>
+                  <span className={result.success ? "text-green-400" : "text-red-400"}>
+                    {result.success ? "Success" : "Failure"}
+                  </span>
+                </div>
+                <div className="mt-1 text-amber-100/80">
+                  Roll {result.roll} + modifiers = {result.total} vs DC {result.dc}
+                </div>
+                <div className="mt-1 text-amber-100/60 text-xs">
+                  {result.attitudeBefore} &rarr; {result.attitudeAfter}
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Personality Sidebar (Discoverable) */}
@@ -297,14 +334,16 @@ export default function DialogueOverlay({
 
               {/* Custom Input */}
               <div className="flex flex-col gap-2">
-                <div className="flex gap-1">
+                <div className="flex gap-1" role="tablist" aria-label="Approach for spoken words">
                   {(["persuade", "intimidate", "deceive"] as const).map((mode) => (
                     <button
                       key={mode}
+                      role="tab"
+                      aria-selected={approach === mode}
                       onClick={() => setApproach(mode)}
                       className={`px-3 py-1 text-[9px] uppercase font-bold tracking-widest rounded-t border-t border-x transition-colors ${
-                        approach === mode 
-                          ? 'bg-[#0c0c16] text-amber-500 border-amber-900/40' 
+                        approach === mode
+                          ? 'bg-[#0c0c16] text-amber-500 border-amber-900/40'
                           : 'bg-transparent text-neutral-600 border-transparent hover:text-neutral-400'
                       }`}
                     >
