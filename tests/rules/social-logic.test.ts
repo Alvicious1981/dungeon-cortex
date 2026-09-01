@@ -226,20 +226,33 @@ describe("resolveSocialCheck — SRD conformance", () => {
   // engine returns: the disposition shift must be the plain, single-step
   // ATTITUDE_SHIFT in the outcome's direction, never a bonus/penalty keyed
   // off isCriticalSuccess/isCriticalFailure (the old implementation's bug).
-  it("gives a natural 20 the standard shift, not an extra crit bonus", () => {
+  /**
+   * These two were written when `resolveAbilityCheck` made a natural 20 an
+   * automatic success and a natural 1 an automatic failure — a rule the SRD
+   * applies to attack rolls and death saves, never to ability checks. Their
+   * setups were chosen so the crit decided the outcome, which was the right
+   * way to prove no *extra* shift was layered on top. With the engine
+   * corrected the same setups prove something stronger: the natural roll does
+   * not decide the check at all, and the shift is one step either way.
+   */
+  it("lets a natural 20 fail when the total misses the DC, and moves one step", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.9999); // natural 20
-    const result = resolveSocialCheck(socialInput(), { stats: { CHA: 1 }, level: 1 }, -10);
+    // CHA 1 is a -5 modifier: 20 - 5 = 15, short of a Hostile DC of 20.
+    // Starts at -4 rather than -10 so the clamp does not swallow the step.
+    const result = resolveSocialCheck(socialInput(), { stats: { CHA: 1 }, level: 1 }, -4);
     expect(result.roll).toBe(20);
-    expect(result.success).toBe(true);
-    expect(result.dispositionAfter - result.dispositionBefore).toBe(ATTITUDE_SHIFT);
-  });
-
-  it("gives a natural 1 the standard shift, not an extra crit penalty", () => {
-    vi.spyOn(Math, "random").mockReturnValue(0); // natural 1
-    const result = resolveSocialCheck(socialInput(), { stats: { CHA: 30 }, level: 1 }, 10);
-    expect(result.roll).toBe(1);
     expect(result.success).toBe(false);
     expect(result.dispositionBefore - result.dispositionAfter).toBe(ATTITUDE_SHIFT);
+  });
+
+  it("lets a natural 1 succeed when the total clears the DC, and moves one step", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0); // natural 1
+    // CHA 30 is a +10 modifier: 1 + 10 = 11, past a Friendly DC of 10.
+    // Starts at 4 rather than 10 so the clamp does not swallow the step.
+    const result = resolveSocialCheck(socialInput(), { stats: { CHA: 30 }, level: 1 }, 4);
+    expect(result.roll).toBe(1);
+    expect(result.success).toBe(true);
+    expect(result.dispositionAfter - result.dispositionBefore).toBe(ATTITUDE_SHIFT);
   });
 
   it("shifts disposition identically for every approach on the same outcome", () => {

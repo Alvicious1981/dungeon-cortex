@@ -103,7 +103,13 @@ describe("resolveAbilityCheck", () => {
     expect(result.total).toBe(10);
   });
 
-  it("succeeds on a natural 20 even when the total misses the DC", () => {
+  /**
+   * In D&D 5e/SRD 2014 a natural 20 or 1 has no special effect on an ability
+   * check — only on attack rolls and death saving throws. These two tests
+   * previously asserted the opposite, pinning a rule this engine had copied up
+   * from `combat.ts`'s attack resolution, where it is correct.
+   */
+  it("gives a natural 20 no special effect when the total misses the DC", () => {
     vi.spyOn(Math, "random").mockReturnValue(d20(20));
 
     const result = resolveAbilityCheck(
@@ -115,10 +121,10 @@ describe("resolveAbilityCheck", () => {
     expect(result.dc).toBe(30);
     expect(result.total).toBe(19); // 20 + CHA -1, no proficiency
     expect(result.isCriticalSuccess).toBe(true);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
-  it("fails on a natural 1 even when the total clears the DC", () => {
+  it("gives a natural 1 no special effect when the total clears the DC", () => {
     vi.spyOn(Math, "random").mockReturnValue(d20(1));
 
     const result = resolveAbilityCheck({ skill: "Athletics", band: "very_easy" }, HERO);
@@ -126,7 +132,26 @@ describe("resolveAbilityCheck", () => {
     expect(result.roll).toBe(1);
     expect(result.total).toBe(7); // 1 + 3 + 3, clears DC 5
     expect(result.isCriticalFailure).toBe(true);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+  });
+
+  /**
+   * The natural roll stays reported even though no rule turns on it: the
+   * narrator may say a 20 came up, and `action/route.ts` appends exactly that
+   * to its log line. Reporting the die is a fact; letting it decide the
+   * outcome is a mechanic, and only the second one was wrong.
+   */
+  it("still reports the natural roll it no longer acts on", () => {
+    vi.spyOn(Math, "random").mockReturnValue(d20(20));
+
+    const result = resolveAbilityCheck(
+      { skill: "Persuasion", band: "nearly_impossible" },
+      HERO
+    );
+
+    expect(result.isCriticalSuccess).toBe(true);
+    expect(result.isCriticalFailure).toBe(false);
+    expect(result.roll).toBe(20);
   });
 
   it("reports the roll mode and cancels advantage against disadvantage", () => {
