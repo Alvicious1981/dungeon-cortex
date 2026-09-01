@@ -49,6 +49,7 @@ interface SocialNpcRecord {
   name?: string;
   disposition?: number | null;
   hasMetPlayer?: boolean;
+  knownRumors?: unknown;
 }
 
 interface SocialLocationNodeRecord {
@@ -103,7 +104,9 @@ export interface ResolveSocialCheckInput {
 
 export interface ResolveRumorsInput {
   campaignId: string;
-  npcSeed: string;
+  /** Either identifier resolves the NPC; the route holds an id, older callers a seed. */
+  npcId?: string;
+  npcSeed?: string;
   tx?: SocialDb;
   db?: SocialDb;
 }
@@ -145,17 +148,29 @@ export async function resolveRumors(
   input: ResolveRumorsInput
 ): Promise<RumorPayload> {
   const db = resolveDb(input);
+
+  // Either identifier works, the way `findNpc` already resolves one for a
+  // social check. The route holds an `npcId` because the roster clicked one;
+  // the seed path predates it and still serves callers that only know a seed.
   const npc = await db.nPC.findUnique({
-    where: {
-      campaignId_seed: {
-        campaignId: input.campaignId,
-        seed: input.npcSeed,
-      },
-    },
+    where: input.npcId
+      ? { id: input.npcId }
+      : {
+          campaignId_seed: {
+            campaignId: input.campaignId,
+            seed: input.npcSeed ?? "",
+          },
+        },
     select: {
       id: true,
+      campaignId: true,
+      seed: true,
       name: true,
       disposition: true,
+      // Selected because `getRumorsPayload` takes it and nothing was passing
+      // it: the column exists, the parameter exists, and the personal rumours
+      // an NPC knows came out empty every time.
+      knownRumors: true,
     },
   });
   if (!npc) {
@@ -164,6 +179,7 @@ export async function resolveRumors(
       "NPC not found. Cannot retrieve rumors."
     );
   }
+  assertNpcOwnership(npc, input.campaignId);
 
   const campaign = await db.campaign.findUnique({
     where: { id: input.campaignId },
@@ -181,11 +197,13 @@ export async function resolveRumors(
     select: { id: true, name: true, feature: true, description: true },
   });
 
+  const seed = npc.seed ?? input.npcSeed ?? "";
   return getRumorsPayload(
-    input.npcSeed,
-    npc.name ?? input.npcSeed,
+    seed,
+    npc.name ?? seed,
     npc.disposition ?? 0,
-    nodes
+    nodes,
+    Array.isArray(npc.knownRumors) ? npc.knownRumors : []
   );
 }
 

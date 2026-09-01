@@ -54,14 +54,27 @@ describe("one banding rule", () => {
     expect(definers).toEqual(["/lib/rules/social-logic.ts"]);
   });
 
-  it("leaves no second copy of the old banding thresholds in the UI", () => {
-    const copies = SOURCES.filter(
-      ([path, text]) =>
-        relative(path).startsWith("/components/") &&
-        /function\s+getDispositionBand/.test(text),
+  /**
+   * The five-band ladder is gone entirely, so this no longer scopes to
+   * `components/`. It used to, because `getRumorsPayload` still needed the old
+   * function and the guard could only forbid a *second* copy in the UI. With
+   * rumours migrated there is no first copy to except, and the guard can say
+   * what it always meant: this vocabulary does not come back anywhere.
+   */
+  it("leaves no copy of the superseded five-band function anywhere", () => {
+    const copies = SOURCES.filter(([, text]) =>
+      /function\s+getDispositionBand/.test(text),
     ).map(([path]) => relative(path));
 
     expect(copies).toEqual([]);
+  });
+
+  it("leaves no reference to the superseded five-band names", () => {
+    const survivors = SOURCES.filter(([, text]) =>
+      /\bDISPOSITION_BANDS\b|\bDispositionBand\b|"Unfriendly"|"Helpful"/.test(text),
+    ).map(([path]) => relative(path));
+
+    expect(survivors).toEqual([]);
   });
 });
 

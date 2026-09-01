@@ -11,7 +11,6 @@ import {
   INITIAL_DISPOSITION,
   resolveSocialCheck,
   getRumorsPayload,
-  getDispositionBand,
   attitudeFor,
   shiftDisposition,
   ATTITUDE_SHIFT
@@ -53,23 +52,43 @@ describe("Social Logic Engine", () => {
   describe("getRumorsPayload", () => {
     const nodes = [{ id: "n1", name: "Cave", feature: "treasure", description: "Shining gold." }];
 
-    it("refuses if disposition < 3 (Indifferent/Unfriendly)", () => {
+    /**
+     * These three used to pin the raw thresholds `< 3` and `< -2`, numbers that
+     * matched neither the old five-band boundaries nor anything else. They now
+     * pin the attitude the same `attitudeFor` resolves everywhere else, so a
+     * change to the bands moves the rumour gate with them instead of leaving
+     * the two to disagree.
+     */
+    it("refuses an Indifferent NPC, without saying it is hostile", () => {
       const res = getRumorsPayload("seed", "Bert", 0, nodes);
+      expect(res.attitude).toBe("Indifferent");
       expect(res.rumors).toHaveLength(0);
       expect(res.refusalReason).toContain("indifferent");
+      expect(res.refusalReason).not.toContain("hostile");
     });
 
-    it("refuses if disposition < -2 (Hostile)", () => {
+    it("refuses a Hostile NPC with a different reason", () => {
       const res = getRumorsPayload("seed", "Bert", -5, nodes);
+      expect(res.attitude).toBe("Hostile");
       expect(res.rumors).toHaveLength(0);
       expect(res.refusalReason).toContain("hostile");
     });
 
-    it("returns rumors if friendly", () => {
+    it("shares with a Friendly NPC", () => {
       const res = getRumorsPayload("seed", "Bert", 5, nodes);
+      expect(res.attitude).toBe("Friendly");
       expect(res.rumors).toHaveLength(1);
       expect(res.rumors[0].nodeName).toBe("Cave");
       expect(res.rumors[0].rumor).toContain("worth finding");
+    });
+
+    /**
+     * The boundary the old `< 3` got wrong. Disposition 3 is Indifferent under
+     * the three-attitude bands, so it must refuse; 4 is where Friendly starts.
+     */
+    it("draws the line where Friendly begins, not at the old magic number", () => {
+      expect(getRumorsPayload("seed", "Bert", 3, nodes).rumors).toHaveLength(0);
+      expect(getRumorsPayload("seed", "Bert", 4, nodes).rumors).toHaveLength(1);
     });
 
     it("filters out 'empty' features", () => {
@@ -85,24 +104,6 @@ describe("Social Logic Engine", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // getDispositionBand
-  // ---------------------------------------------------------------------------
-
-  describe("getDispositionBand", () => {
-    it("maps values correctly", () => {
-      expect(getDispositionBand(-10)).toBe("Hostile");
-      expect(getDispositionBand(-7)).toBe("Hostile");
-      expect(getDispositionBand(-6)).toBe("Unfriendly");
-      expect(getDispositionBand(-2)).toBe("Unfriendly");
-      expect(getDispositionBand(-1)).toBe("Indifferent");
-      expect(getDispositionBand(2)).toBe("Indifferent");
-      expect(getDispositionBand(3)).toBe("Friendly");
-      expect(getDispositionBand(7)).toBe("Friendly");
-      expect(getDispositionBand(8)).toBe("Helpful");
-      expect(getDispositionBand(10)).toBe("Helpful");
-    });
-  });
 });
 
 describe("initialAttitudeFor", () => {

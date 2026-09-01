@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import DialogueOverlay from "./DialogueOverlay";
+import type { RumorPayload } from "@/lib/rules/social";
 
 /**
  * DialogueOverlayController.tsx — Milestone N: Slice 3
@@ -67,6 +68,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<SocialCheckDisplay | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rumors, setRumors] = useState<RumorPayload | null>(null);
 
   useEffect(() => {
     // 1. Open dialogue when the roster selects an NPC
@@ -86,6 +88,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
       setNarrationText(""); // Clear for new conversation
       setResult(null); // Clear the prior check's facts for a new conversation
       setError(null); // Clear any error from a prior conversation
+      setRumors(null); // Another NPC's rumours are not this one's
     }
 
     // 2. Accumulate narrative tokens
@@ -170,9 +173,35 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
     void resolveSocial(approach, words);
   };
 
-  const handleAskRumors = () => {
-    // No backend route resolves this yet; nothing to post and nothing to
-    // narrate without a resolved fact to render.
+  /**
+   * Asks the NPC what they have heard.
+   *
+   * Whether they answer is the backend's call, not this handler's: a refusal
+   * arrives as a normal 200 carrying `refusalReason` and an empty list, so it
+   * renders as the NPC declining rather than as a failure. Only a transport or
+   * gating error becomes the error banner.
+   */
+  const handleAskRumors = async () => {
+    if (!npc) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/campaign/${campaignId}/social/rumors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ npcId: npc.id }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setError(body?.error ?? "Could not ask for rumours. Please try again.");
+        return;
+      }
+      setRumors(await response.json());
+    } catch {
+      setError("Could not reach the server. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleApproach = () => {
@@ -189,6 +218,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
       characterId={characterId}
       result={result}
       error={error}
+      rumors={rumors}
       onSpeak={handleSpeak}
       onSocialIntent={handleSocialIntent}
       onAskRumors={handleAskRumors}

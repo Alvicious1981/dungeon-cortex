@@ -8,11 +8,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function openWith(npcId = "npc_1") {
+function openWith(npcId = "npc_1", disposition: number | null = 5) {
   act(() => {
     window.dispatchEvent(
       new CustomEvent("dungeon-npc-selected", {
-        detail: { npcId, name: "Greta", disposition: 5, hasMetPlayer: true },
+        detail: { npcId, name: "Greta", disposition, hasMetPlayer: true },
       })
     );
   });
@@ -132,11 +132,66 @@ describe("DialogueOverlayController", () => {
     process.off("unhandledRejection", unhandled);
   });
 
-  it("keeps Gather Rumors disabled even at a Friendly disposition", async () => {
-    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
-    openWith();
+  // The "keeps Gather Rumors disabled" test stood here while no route
+  // resolved rumours, so the control would not look live and swallow clicks.
+  // It has one now, so the assertion is deliberately gone rather than skipped.
+});
 
-    const rumorsButton = await screen.findByRole("button", { name: /gather rumors/i });
-    expect(rumorsButton).toBeDisabled();
+describe("DialogueOverlayController — rumours", () => {
+  /**
+   * Whether the NPC actually talks is the rules' call, not the button's: the
+   * route answers a refusal with 200 and a `refusalReason`. The control is
+   * enabled whenever the party can ask, and asking is what surfaces the no.
+   */
+  it("asks the rumours route and lists what comes back", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        npcName: "Greta",
+        disposition: 7,
+        attitude: "Friendly",
+        rumors: [
+          {
+            nodeId: "n1",
+            nodeName: "Cave",
+            feature: "treasure",
+            rumor: "Something worth finding in Cave.",
+            source: "spatial",
+          },
+        ],
+      }),
+    } as Response);
+
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith("npc_1", 7);
+
+    fireEvent.click(await screen.findByRole("button", { name: /gather rumors/i }));
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe("/api/campaign/camp_1/social/rumors");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ npcId: "npc_1" });
+
+    expect(await screen.findByText(/Something worth finding in Cave/)).toBeTruthy();
+  });
+
+  it("shows the NPC's refusal rather than an empty list", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        npcName: "Greta",
+        disposition: 0,
+        attitude: "Indifferent",
+        rumors: [],
+        refusalReason: "This NPC is indifferent and unwilling to share information freely.",
+      }),
+    } as Response);
+
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith("npc_1", 0);
+
+    fireEvent.click(await screen.findByRole("button", { name: /gather rumors/i }));
+
+    expect(await screen.findByText(/unwilling to share/)).toBeTruthy();
   });
 });
