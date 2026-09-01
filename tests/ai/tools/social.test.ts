@@ -41,6 +41,8 @@ vi.mock("@/lib/rules/dice", async (importOriginal) => {
 });
 
 import { buildSocialTools } from "@/lib/ai/tools/social";
+import { NPC_ATTITUDES, type NpcAttitude } from "@/lib/rules/social";
+import { INITIAL_DISPOSITION } from "@/lib/rules/social-logic";
 
 describe("social AI tools", () => {
   beforeEach(() => {
@@ -56,17 +58,18 @@ describe("social AI tools", () => {
     const envelope = await tools.establishInitialDisposition.execute({
       npcSeed: "gate_guard",
       npcRole: "guard",
-      charismaModifier: 0,
     });
 
     expect(envelope.status).toBe("ok");
     const result = envelope.data;
 
-    expect(result.roll).toBe(20);
-    expect(result.dispositionBand).toBe("Helpful");
+    // No roll: the attitude is a pure function of seed and role, and its
+    // disposition is the corresponding seat from INITIAL_DISPOSITION.
+    expect(NPC_ATTITUDES).toContain(result.attitude);
+    expect(result.disposition).toBe(INITIAL_DISPOSITION[result.attitude as NpcAttitude]);
     expect(prismaMock.nPC.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
-        disposition: 8,
+        disposition: result.disposition,
         personalityTags: expect.objectContaining({
           motivation: expect.any(String),
           secret: expect.any(String),
@@ -75,7 +78,7 @@ describe("social AI tools", () => {
         hasMetPlayer: true,
       }),
       update: expect.objectContaining({
-        disposition: 8,
+        disposition: result.disposition,
         personalityTags: expect.any(Object),
         hasMetPlayer: true,
       }),
@@ -89,7 +92,6 @@ describe("social AI tools", () => {
     const result = await tools.establishInitialDisposition.execute({
       npcSeed: "gate_guard",
       npcRole: "guard",
-      charismaModifier: 0,
     });
 
     // The rejection surfaces as a stable domain code — never the raw message.
@@ -102,7 +104,11 @@ describe("social AI tools", () => {
   });
 
   it("socialCheck uses persisted disposition and persists the resolved update", async () => {
-    prismaMock.nPC.findUnique.mockResolvedValueOnce({ hasMetPlayer: true, disposition: 4 });
+    prismaMock.nPC.findUnique.mockResolvedValueOnce({
+      seed: "gate_guard",
+      hasMetPlayer: true,
+      disposition: 4,
+    });
     prismaMock.campaign.findUnique.mockResolvedValueOnce({ characterId: "char-1" });
     prismaMock.character.findUnique.mockResolvedValueOnce({ stats: { CHA: 10 } });
     prismaMock.nPC.update.mockResolvedValueOnce({});
@@ -111,18 +117,19 @@ describe("social AI tools", () => {
     const envelope = await tools.socialCheck.execute({
       npcSeed: "gate_guard",
       approach: "persuade",
-      dispositionDelta: 2,
       intent: "Ask for directions.",
     });
 
     expect(envelope.status).toBe("ok");
     const result = envelope.data;
 
+    // The mocked d20Check always succeeds (see vi.mock("@/lib/rules/dice") above),
+    // so the check succeeds and disposition moves by the standard ATTITUDE_SHIFT (4).
     expect(result.dispositionBefore).toBe(4);
-    expect(result.dispositionAfter).toBe(6);
+    expect(result.dispositionAfter).toBe(8);
     expect(prismaMock.nPC.update).toHaveBeenCalledWith({
       where: { campaignId_seed: { campaignId: "campaign-1", seed: "gate_guard" } },
-      data: { disposition: 6 },
+      data: { disposition: 8 },
     });
   });
   it("getRumors resolves persisted social context outside the AI tool", async () => {

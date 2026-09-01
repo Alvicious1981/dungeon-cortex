@@ -381,17 +381,21 @@ model NPC {
   abilityScores        Json?
   /// Personality traits { personality, ideal, bond, flaw }. Null for legacy records.
   traits               Json?
-  /// Current disposition toward the party. Range: −10 (Hostile) to +10 (Helpful).
-  /// Set by rollReaction on first meeting; updated by socialCheck on social actions.
-  /// Null for NPCs the party has never spoken to (legacy reaction roll pending).
+  /// Current disposition toward the party. Range: −10 to +10, mapped to one of
+  /// 5e's three attitudes (Hostile/Indifferent/Friendly) by attitudeFor().
+  /// Set from the NPC's derived initial attitude on first meeting (see
+  /// initialAttitudeFor in lib/rules/social-logic.ts); updated by socialCheck
+  /// on social actions via shiftDisposition.
+  /// Null for NPCs the party has never spoken to (initial attitude not yet derived).
   disposition          Int?
   /// Personality Tags generated deterministically from the seed.
   /// JSON object: { motivation: string, secret: string, distinctiveTrait: string }
   /// Populated by generateNPCPersonality(seed) on first interaction.
   /// Never null after first meeting; null for legacy/unmet NPCs.
   personalityTags      Json?
-  /// True once the party has formally met this NPC (rollReaction has fired).
-  /// Prevents duplicate legacy reaction rolls on subsequent encounters.
+  /// True once the party has formally met this NPC and its initial attitude
+  /// has been derived (see initialAttitudeFor in lib/rules/social-logic.ts).
+  /// Prevents re-deriving the initial attitude on subsequent encounters.
   hasMetPlayer         Boolean  @default(false)
   knownRumors          String[] @default([])
   /// The ID of the spell currently being concentrated on. Null = no active concentration.

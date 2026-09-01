@@ -18,7 +18,11 @@ import {
   GetRumorsInputSchema,
   RumorItemSchema,
   RumorPayloadSchema,
+  NPC_ATTITUDES,
+  ATTITUDE_DIFFICULTY,
+  type NpcAttitude,
 } from "@/lib/rules/social";
+import { DIFFICULTY_DC } from "@/lib/rules/ability-check";
 
 // ---------------------------------------------------------------------------
 // NPCSocialStateSchema
@@ -64,20 +68,23 @@ describe("InitialDispositionInputSchema", () => {
   const valid = {
     npcSeed: "guard-99",
     npcRole: "guard" as const,
-    charismaModifier: 2,
   };
 
   it("parses valid input", () => {
     expect(() => InitialDispositionInputSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects out-of-range charismaModifier", () => {
-    expect(() => InitialDispositionInputSchema.parse({ ...valid, charismaModifier: 6 })).toThrow();
-    expect(() => InitialDispositionInputSchema.parse({ ...valid, charismaModifier: -6 })).toThrow();
-  });
-
   it("rejects invalid npcRole", () => {
     expect(() => InitialDispositionInputSchema.parse({ ...valid, npcRole: "king" })).toThrow();
+  });
+
+  it("rejects a caller-supplied charismaModifier", () => {
+    // Initial attitude is now derived from seed and role alone — a
+    // Charisma term would make how a stranger receives you depend on who
+    // is doing the talking, which the schema no longer allows.
+    expect(() =>
+      InitialDispositionInputSchema.parse({ ...valid, charismaModifier: 2 })
+    ).toThrow();
   });
 });
 
@@ -87,11 +94,8 @@ describe("InitialDispositionInputSchema", () => {
 
 describe("InitialDispositionResultSchema", () => {
   const valid = {
-    roll: 15,
-    total: 17,
-    charismaModifier: 2,
-    dispositionBand: "Friendly" as const,
-    initialDisposition: 4,
+    attitude: "Friendly" as const,
+    disposition: 7,
     personality: {
       motivation: "Safety.",
       secret: "None.",
@@ -103,12 +107,8 @@ describe("InitialDispositionResultSchema", () => {
     expect(() => InitialDispositionResultSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects non-d20 roll values", () => {
-    expect(() => InitialDispositionResultSchema.parse({ ...valid, roll: 21 })).toThrow();
-  });
-
-  it("rejects invalid dispositionBand", () => {
-    expect(() => InitialDispositionResultSchema.parse({ ...valid, dispositionBand: "Angry" })).toThrow();
+  it("rejects an invalid attitude", () => {
+    expect(() => InitialDispositionResultSchema.parse({ ...valid, attitude: "Angry" })).toThrow();
   });
 });
 
@@ -120,7 +120,6 @@ describe("SocialCheckInputSchema", () => {
   const valid = {
     npcSeed: "merchant-01",
     approach: "persuade" as const,
-    dispositionDelta: 2,
     intent: "Ask for a discount.",
   };
 
@@ -128,9 +127,10 @@ describe("SocialCheckInputSchema", () => {
     expect(() => SocialCheckInputSchema.parse(valid)).not.toThrow();
   });
 
-  it("rejects out-of-range dispositionDelta", () => {
-    expect(() => SocialCheckInputSchema.parse({ ...valid, dispositionDelta: 5 })).toThrow();
-    expect(() => SocialCheckInputSchema.parse({ ...valid, dispositionDelta: 0 })).toThrow();
+  it("rejects a caller-supplied dispositionDelta", () => {
+    expect(() =>
+      SocialCheckInputSchema.parse({ ...valid, dispositionDelta: 2 })
+    ).toThrow();
   });
 });
 
@@ -141,18 +141,17 @@ describe("SocialCheckInputSchema", () => {
 describe("SocialCheckResultSchema", () => {
   const valid = {
     approach: "persuade" as const,
+    skill: "Persuasion" as const,
     roll: 12,
-    charismaModifier: 2,
+    abilityModifier: 2,
+    proficiencyApplied: 2,
     total: 14,
     dc: 10,
     success: true,
-    isCriticalSuccess: false,
-    isCriticalFailure: false,
+    attitudeBefore: "Indifferent" as const,
+    attitudeAfter: "Indifferent" as const,
     dispositionBefore: 0,
     dispositionAfter: 2,
-    dispositionBandBefore: "Indifferent" as const,
-    dispositionBandAfter: "Indifferent" as const,
-    backfire: false,
   };
 
   it("parses valid check result", () => {
@@ -161,6 +160,10 @@ describe("SocialCheckResultSchema", () => {
 
   it("rejects incompatible disposition before/after types", () => {
     expect(() => SocialCheckResultSchema.parse({ ...valid, dispositionAfter: "great" })).toThrow();
+  });
+
+  it("rejects a skill outside the three Charisma social skills", () => {
+    expect(() => SocialCheckResultSchema.parse({ ...valid, skill: "Athletics" })).toThrow();
   });
 });
 
@@ -202,5 +205,17 @@ describe("Rumor Schemas", () => {
       rumors: [],
       refusalReason: "No."
     })).not.toThrow();
+  });
+});
+
+describe("NPC attitude", () => {
+  it("has exactly the three 5e attitudes", () => {
+    expect(NPC_ATTITUDES).toEqual(["Hostile", "Indifferent", "Friendly"]);
+  });
+
+  it("maps each attitude to its SRD difficulty class", () => {
+    expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Hostile]).toBe(20);
+    expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Indifferent]).toBe(15);
+    expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Friendly]).toBe(10);
   });
 });

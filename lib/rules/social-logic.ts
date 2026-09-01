@@ -5,35 +5,43 @@
  * Moved from social.ts to adhere to Milestone N Slice 2 separation.
  */
 
-import { rollDie, d20Check } from "@/lib/rules/dice";
 import { pickSeeded } from "@/lib/rules/generators";
-import { 
-  NPCPersonality, 
-  DispositionBand, 
-  DISPOSITION_BANDS,
+import { type NPCRole } from "@/lib/rules/npc";
+import { resolveAbilityCheck, type AbilityCheckActor, type Skill } from "@/lib/rules/ability-check";
+import {
+  NPCPersonality,
+  DispositionBand,
   DefaultNPCSocialState,
-  InitialDispositionInput,
-  InitialDispositionResult,
   SocialCheckInput,
   SocialCheckResult,
   RumorPayload,
   RumorItem,
   MOTIVATIONS,
   SECRETS,
-  DISTINCTIVE_TRAITS
+  DISTINCTIVE_TRAITS,
+  ATTITUDE_DIFFICULTY,
+  type NpcAttitude
 } from "./social";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Clamps `value` to the inclusive range [min, max]. */
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 /**
- * Maps a numeric disposition value to its human-readable band label.
+ * SUPERSEDED — not the current model. Maps a numeric disposition value to
+ * the five-band label (Hostile/Unfriendly/Indifferent/Friendly/Helpful)
+ * inherited from 3.5e Diplomacy, not a 5e construct. The authoritative model
+ * is `NpcAttitude`/`attitudeFor` (three 5e attitudes), used by every live
+ * consumer. This function survives only because `getRumorsPayload` below
+ * still calls it for `RumorPayload.dispositionBand`, and the rumour path was
+ * explicitly out of scope for the SRD-conformance change (see
+ * `.superpowers/sdd/2026-08-31-social-checks-srd-conformance/task-7-report.md`).
+ * That path is itself unreachable in production: `getRumorsPayload` is
+ * called only from `lib/rules/social-service.ts`, which is called only from
+ * `lib/ai/tools/social.ts`'s `buildSocialTools`, and `buildSocialTools` has
+ * had no caller in `buildNarratorTools` (`lib/ai/narrator.ts`) since commit
+ * `a0bb009` — `buildNarratorTools` there now spreads only `buildSrdTools()`.
+ * Verify with: `git show a0bb009 --stat` and reading `buildNarratorTools`.
  */
 export function getDispositionBand(disposition: number): DispositionBand {
   if (disposition <= -7) return "Hostile";
@@ -43,15 +51,36 @@ export function getDispositionBand(disposition: number): DispositionBand {
   return "Helpful";
 }
 
+/** How far one check moves the stored disposition. */
+export const ATTITUDE_SHIFT = 4;
+
+const MIN_DISPOSITION = -10;
+const MAX_DISPOSITION = 10;
+
 /**
- * Maps a modified D&D 5e d20 ability check total to a DispositionBand.
+ * The attitude a stored disposition represents.
+ *
+ * Null means the party has never spoken to this NPC. A stranger is
+ * Indifferent — the 5e default — rather than a special fourth state.
  */
-function getBandFromD20Total(total: number): DispositionBand {
-  if (total <= 5)  return "Hostile";
-  if (total <= 9)  return "Unfriendly";
-  if (total <= 14) return "Indifferent";
-  if (total <= 19) return "Friendly";
-  return "Helpful";
+export function attitudeFor(disposition: number | null | undefined): NpcAttitude {
+  const value = disposition ?? 0;
+  if (value <= -4) return "Hostile";
+  if (value <= 3) return "Indifferent";
+  return "Friendly";
+}
+
+/**
+ * The disposition after one social check.
+ *
+ * Success and failure are worth the same in opposite directions, and the
+ * approach does not enter it: persuading, deceiving and threatening differ in
+ * which skill is rolled, not in what the attempt is worth. Each band is seven
+ * points wide, so a shift of four moves attitude by at most one step.
+ */
+export function shiftDisposition(disposition: number, success: boolean): number {
+  const shifted = disposition + (success ? ATTITUDE_SHIFT : -ATTITUDE_SHIFT);
+  return Math.max(MIN_DISPOSITION, Math.min(MAX_DISPOSITION, shifted));
 }
 
 /**
@@ -99,81 +128,85 @@ export function generateNPCPersonality(seed: string): NPCPersonality {
 }
 
 /**
- * Establishes first-contact disposition with a backend-owned D&D 5e d20
- * Charisma ability check. The AI may narrate only this resolved result.
+ * How a stranger of each role tends to receive the party.
+ *
+ * Weighted by repetition rather than by a probability table, because
+ * `pickSeeded` picks uniformly and the weighting should be visible in the
+ * data rather than hidden in arithmetic.
  */
-export function establishInitialDisposition(input: InitialDispositionInput): InitialDispositionResult {
-  const roll = rollDie(20);
-  const total = clamp(roll + input.charismaModifier, 1, 25);
-  const dispositionBand = getBandFromD20Total(total);
-  const initialDisposition = DISPOSITION_BANDS[dispositionBand].initial;
-  const personality = generateNPCPersonality(input.npcSeed);
+const ATTITUDE_BY_ROLE: Record<NPCRole, readonly NpcAttitude[]> = {
+  bandit: ["Hostile", "Hostile", "Indifferent"],
+  guard: ["Indifferent", "Indifferent", "Friendly"],
+  commoner: ["Indifferent", "Friendly", "Friendly"],
+};
 
-  return {
-    roll,
-    total,
-    charismaModifier: input.charismaModifier,
-    dispositionBand,
-    initialDisposition,
-    personality,
-  };
-}
+/** The stored disposition each attitude starts at — the middle of its band. */
+export const INITIAL_DISPOSITION: Record<NpcAttitude, number> = {
+  Hostile: -7,
+  Indifferent: 0,
+  Friendly: 7,
+};
 
 /**
- * Computes the Difficulty Class for a social check.
+ * The attitude an NPC holds the first time the party meets them.
+ *
+ * Derived from the seed, like every other fact about an NPC, so the same
+ * person always greets the party the same way. This replaces a d20 + Charisma
+ * roll: that was a reaction roll, which this project does not use as an
+ * authoritative mechanic, and it made how a stranger felt about you depend on
+ * who happened to be doing the talking.
  */
-export function computeSocialDC(
-  disposition: number,
-  attempt: number,
-  approach: "persuade" | "intimidate" | "deceive",
-): number {
-  const baseDC           = 10;
-  const dispositionPenalty = Math.max(0, -disposition);
-  const ambitionPenalty  = (attempt - 1) * 3;
-  const approachModifier = approach === "intimidate" ? -2 : 0;
-
-  return baseDC + dispositionPenalty + ambitionPenalty + approachModifier;
+export function initialAttitudeFor(seed: string, role: NPCRole): NpcAttitude {
+  return pickSeeded(seed + ":attitude", ATTITUDE_BY_ROLE[role]);
 }
 
+const APPROACH_SKILL = {
+  persuade: "Persuasion",
+  intimidate: "Intimidation",
+  deceive: "Deception",
+} as const satisfies Record<SocialCheckInput["approach"], Skill>;
+
 /**
- * Resolves a social action (Persuade / Intimidate / Deceive).
+ * Resolves one attempt to talk a creature round.
+ *
+ * The dice, the ability, the proficiency bonus and advantage all come from
+ * `resolveAbilityCheck` — this is a Charisma skill check like any other, and
+ * reimplementing it here is how the two would come to disagree. What is social
+ * about it is only which skill the approach names and where the DC comes from.
+ *
+ * `isCriticalSuccess` and `isCriticalFailure` are deliberately not read: in 5e
+ * a natural 20 or 1 has no special effect on an ability check. The natural
+ * roll is reported so narration can mention it, but no rule turns on it.
  */
 export function resolveSocialCheck(
   input: SocialCheckInput,
-  charismaModifier: number,
-  currentDisposition: number,
+  actor: AbilityCheckActor,
+  disposition: number | null
 ): SocialCheckResult {
-  const dc          = computeSocialDC(currentDisposition, input.dispositionDelta, input.approach);
-  const checkResult = d20Check(charismaModifier, dc);
-  const natural     = checkResult.roll.dice[0]!.result;
+  const attitudeBefore = attitudeFor(disposition);
+  const skill = APPROACH_SKILL[input.approach];
 
-  let dispositionShift: number;
-  if (checkResult.isCriticalSuccess) {
-    dispositionShift = input.dispositionDelta + 1;
-  } else if (checkResult.success) {
-    dispositionShift = input.dispositionDelta;
-  } else if (checkResult.isCriticalFailure) {
-    dispositionShift = input.approach === "intimidate" ? -2 : 0;
-  } else {
-    dispositionShift = input.approach === "intimidate" ? -1 : 0;
-  }
+  const check = resolveAbilityCheck(
+    { skill, band: ATTITUDE_DIFFICULTY[attitudeBefore] },
+    actor
+  );
 
-  const dispositionAfter = clamp(currentDisposition + dispositionShift, -10, 10);
+  const dispositionBefore = disposition ?? 0;
+  const dispositionAfter = shiftDisposition(dispositionBefore, check.success);
 
   return {
-    approach:             input.approach,
-    roll:                 natural,
-    charismaModifier,
-    total:                checkResult.roll.total,
-    dc,
-    success:              checkResult.success,
-    isCriticalSuccess:    checkResult.isCriticalSuccess,
-    isCriticalFailure:    checkResult.isCriticalFailure,
-    dispositionBefore:    currentDisposition,
+    approach: input.approach,
+    skill,
+    roll: check.roll,
+    abilityModifier: check.abilityModifier,
+    proficiencyApplied: check.proficiencyApplied,
+    total: check.total,
+    dc: check.dc,
+    success: check.success,
+    attitudeBefore,
+    attitudeAfter: attitudeFor(dispositionAfter),
+    dispositionBefore,
     dispositionAfter,
-    dispositionBandBefore: getDispositionBand(currentDisposition),
-    dispositionBandAfter:  getDispositionBand(dispositionAfter),
-    backfire:             input.approach === "intimidate" && !checkResult.success,
   };
 }
 

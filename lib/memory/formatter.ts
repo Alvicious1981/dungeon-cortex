@@ -18,8 +18,8 @@ import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, getLevelFromXP, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
-import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
-import { getDispositionBand } from "@/lib/rules/social-logic";
+import { type NPCPersonality, type NpcAttitude } from "@/lib/rules/social";
+import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
@@ -448,22 +448,36 @@ export interface ActiveNPC {
   hasMetPlayer: boolean;
 }
 
-const DISPOSITION_ICONS: Record<DispositionBand, string> = {
+const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile:     "🔴",
-  Unfriendly:  "🟠",
   Indifferent: "⚪",
   Friendly:    "🟢",
-  Helpful:     "💛",
 };
+
+/**
+ * The stored disposition at which an NPC's secret reaches the narrator.
+ *
+ * Deliberately a number, where everything else in this area now speaks in
+ * attitudes. Attitude drives the mechanics — it sets the DC of a social check
+ * — and it has only three bands, the highest of which begins at 4. Being
+ * liked is not the same as being trusted with something that could hurt you,
+ * so this sits above where Friendly starts. Eight is where the original
+ * five-band design put it, at the top of a longer ladder; keeping the number
+ * keeps that intent after the ladder got shorter.
+ */
+const SECRET_DISCLOSURE_DISPOSITION = 8;
 
 /**
  * Returns a "## 🎭 NPC" prompt section for the AI, grounding the narrator in
  * the NPC's persisted personality and current disposition.
  *
  * - Unmet NPC: identifies that the NPC has not yet met the character.
- * - Met NPC: injects disposition band, icon, motivation, and distinctive trait.
- *   The secret is intentionally withheld from the narrator prompt to prevent
- *   premature disclosure — it is revealed only at Helpful disposition.
+ * - Met NPC: injects attitude, icon, motivation, and distinctive trait.
+ *   The NPC's secret is never included here — `personalityTags.secret`
+ *   is campaign data the narrator is not given, at any attitude. Do not
+ *   add a note telling the model to "reveal" it: the model was never
+ *   handed the secret, so an instruction to reveal it only invites the
+ *   model to fabricate one, which breaches Code is Law (no invented facts).
  *
  * @pure — no I/O, deterministic output for the same input.
  */
@@ -472,24 +486,34 @@ export function formatNPCContext(npc: ActiveNPC): string {
     return `## 🎭 NPC: ${npc.name}\n*(Not yet met.)*`;
   }
 
-  const band = getDispositionBand(npc.disposition ?? 0);
-  const icon = DISPOSITION_ICONS[band];
+  const attitude = attitudeFor(npc.disposition);
+  const icon = DISPOSITION_ICONS[attitude];
   const tags = npc.personalityTags;
 
   const lines: string[] = [
     `## 🎭 NPC: ${npc.name}`,
-    `**Disposition:** ${icon} ${band} (${npc.disposition ?? 0})`,
+    `**Disposition:** ${icon} ${attitude} (${npc.disposition ?? 0})`,
   ];
 
   if (tags) {
     lines.push(`**Motivation:** ${tags.motivation}`);
     lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);
-  }
 
-  lines.push(
-    "*(Note: The NPC's secret is known to them but concealed from the party. " +
-    "Reveal it only if disposition reaches Helpful and the player asks the right question.)*"
-  );
+    // The secret travels only above the disclosure threshold, and never
+    // without the condition attached. An earlier version of this function did
+    // the opposite — it told the narrator to reveal a secret it was never
+    // given, which left the model nothing to disclose but an invention.
+    // Handing over the real fact is what stops that; the sentence below is
+    // what stops the fact being spent the moment it arrives.
+    if ((npc.disposition ?? 0) >= SECRET_DISCLOSURE_DISPOSITION) {
+      lines.push(`**Secret:** ${tags.secret}`);
+      lines.push(
+        "*(This secret is yours only because the NPC now trusts the party. " +
+        "Do not volunteer it — let it surface only if the player earns it in " +
+        "conversation.)*"
+      );
+    }
+  }
 
   return lines.join("\n");
 }

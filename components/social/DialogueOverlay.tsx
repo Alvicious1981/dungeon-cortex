@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getDispositionBand } from "@/lib/rules/social-logic";
-import type { DispositionBand } from "@/lib/rules/social";
+import { attitudeFor } from "@/lib/rules/social-logic";
+import type { NpcAttitude } from "@/lib/rules/social";
 
 /**
  * DialogueOverlay.tsx — Milestone N: Slice 3
@@ -35,25 +35,21 @@ interface DialogueOverlayProps {
   onSpeak: (words: string, approach: "persuade" | "intimidate" | "deceive") => void;
   onSocialIntent: (approach: "persuade" | "intimidate" | "deceive") => void;
   onAskRumors: () => void;
-  onApproach: () => void; // Unmet -> rollReaction
+  onApproach: () => void; // Unmet -> derive initial attitude
   onClose: () => void;
   isLoading: boolean;
 }
 
-const DISPOSITION_ICONS: Record<DispositionBand, string> = {
+const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile: "💀",
-  Unfriendly: "⚔️",
   Indifferent: "👁️",
-  Friendly: "🤝",
-  Helpful: "⭐"
+  Friendly: "🤝"
 };
 
-const DISPOSITION_COLORS: Record<DispositionBand, string> = {
+const DISPOSITION_COLORS: Record<NpcAttitude, string> = {
   Hostile: "#ef4444",     // Red
-  Unfriendly: "#f97316",  // Orange
   Indifferent: "#a1a1aa", // Zinc
-  Friendly: "#eab308",    // Yellow
-  Helpful: "#22c55e"      // Green
+  Friendly: "#22c55e"     // Green
 };
 
 export default function DialogueOverlay({
@@ -72,7 +68,7 @@ export default function DialogueOverlay({
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const band = getDispositionBand(npc.disposition);
+  const band = attitudeFor(npc.disposition);
   /**
    * NEVER RENDER: secret is for engine use only. 
    * The player only sees Motivation and Distinctive Trait.
@@ -182,7 +178,7 @@ export default function DialogueOverlay({
           <div className="flex justify-between text-[9px] font-bold text-amber-900 mb-1 uppercase tracking-tighter">
             <span>Hostile</span>
             <span>Indifferent</span>
-            <span>Helpful</span>
+            <span>Friendly</span>
           </div>
           <div 
             className="h-2.5 w-full bg-[#08080c] rounded-full border border-neutral-900 overflow-hidden relative"
@@ -334,15 +330,15 @@ export default function DialogueOverlay({
 
               {/* Utility Row */}
               <div className="flex items-center justify-between pt-2">
-                <button 
+                <button
                   onClick={onAskRumors}
-                  disabled={isLoading || npc.disposition < 3}
+                  disabled={isLoading || attitudeFor(npc.disposition) !== "Friendly"}
                   className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors ${
-                    npc.disposition < 3 ? 'text-neutral-700 cursor-not-allowed' : 'text-amber-600 hover:text-amber-400'
+                    attitudeFor(npc.disposition) !== "Friendly" ? 'text-neutral-700 cursor-not-allowed' : 'text-amber-600 hover:text-amber-400'
                   }`}
-                  aria-label={npc.disposition < 3 ? "Disposition too low to ask for rumors" : "Ask for rumors"}
+                  aria-label={attitudeFor(npc.disposition) !== "Friendly" ? "Disposition too low to ask for rumors" : "Ask for rumors"}
                 >
-                  {npc.disposition < 3 ? "🔒" : "📜"} Gather Rumors
+                  {attitudeFor(npc.disposition) !== "Friendly" ? "🔒" : "📜"} Gather Rumors
                 </button>
                 <button 
                   onClick={onClose}

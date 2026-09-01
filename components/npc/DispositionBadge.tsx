@@ -9,24 +9,22 @@
  *   from the database (via the caller) and maps it to a visual representation.
  *   It never mutates state, calls the AI, or invents values.
  *
- * Icon map mirrors the spec (§5.10) and formatter.ts:
- *   🔴 Hostile  🟠 Unfriendly  ⚪ Indifferent  🟢 Friendly  💛 Helpful
+ * Icon map mirrors the SRD's three NPC attitudes:
+ *   🔴 Hostile  ⚪ Indifferent  🟢 Friendly
  */
 
 import React from "react";
-import { type DispositionBand } from "@/lib/rules/social";
-import { getDispositionBand } from "@/lib/rules/social-logic";
+import { type NpcAttitude } from "@/lib/rules/social";
+import { attitudeFor } from "@/lib/rules/social-logic";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DISPOSITION_ICONS: Record<DispositionBand, string> = {
+const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile:     "🔴",
-  Unfriendly:  "🟠",
   Indifferent: "⚪",
   Friendly:    "🟢",
-  Helpful:     "💛",
 };
 
 // ---------------------------------------------------------------------------
@@ -57,7 +55,7 @@ export default function DispositionBadge({
     return (
       <span
         className={className}
-        aria-label="Disposition: unknown — rollReaction not yet called"
+        aria-label="Disposition: unknown — NPC not yet met"
         data-band="unknown"
       >
         ⬜ Unknown
@@ -65,7 +63,7 @@ export default function DispositionBadge({
     );
   }
 
-  const band = getDispositionBand(disposition);
+  const band = attitudeFor(disposition);
   const icon = DISPOSITION_ICONS[band];
 
   return (

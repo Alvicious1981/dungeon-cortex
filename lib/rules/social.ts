@@ -10,14 +10,29 @@
  */
 
 import { z } from "zod";
+import { type DifficultyBand } from "@/lib/rules/ability-check";
 
 // ---------------------------------------------------------------------------
 // Constants & Bands
 // ---------------------------------------------------------------------------
 
 /**
- * The five social disposition bands and their persisted seed values.
- * Initial disposition is established by a backend-owned D&D 5e d20 ability check.
+ * SUPERSEDED — not the current model. This is the five-band ladder
+ * (Hostile/Unfriendly/Indifferent/Friendly/Helpful) inherited from 3.5e
+ * Diplomacy, not a 5e construct. The authoritative model is `NpcAttitude`
+ * (below) plus `attitudeFor` in `lib/rules/social-logic.ts` — three 5e
+ * attitudes, which every live consumer now uses.
+ *
+ * `DISPOSITION_BANDS` survives only because `getRumorsPayload` and
+ * `RumorPayloadSchema.dispositionBand` (this file, below) still read it, and
+ * the rumour path was explicitly out of scope for the SRD-conformance change
+ * (see `.superpowers/sdd/2026-08-31-social-checks-srd-conformance/task-7-report.md`).
+ * That path is itself unreachable in production: `getRumorsPayload` is
+ * called only from `lib/rules/social-service.ts`, which is called only from
+ * `lib/ai/tools/social.ts`'s `buildSocialTools`, and `buildSocialTools` has
+ * had no caller in `buildNarratorTools` (`lib/ai/narrator.ts`) since commit
+ * `a0bb009` — `buildNarratorTools` there now spreads only `buildSrdTools()`.
+ * Verify with: `git show a0bb009 --stat` and reading `buildNarratorTools`.
  */
 export const DISPOSITION_BANDS = {
   Hostile:     { min: 1,  max: 5,        initial: -8 },
@@ -27,7 +42,39 @@ export const DISPOSITION_BANDS = {
   Helpful:     { min: 20, max: Infinity, initial:  8 },
 } as const;
 
+/** SUPERSEDED — see the `DISPOSITION_BANDS` doc comment above. */
 export type DispositionBand = keyof typeof DISPOSITION_BANDS;
+
+/**
+ * How an NPC currently regards the party.
+ *
+ * These are 5e's three attitudes — the authoritative model. An earlier
+ * five-step ladder (Hostile/Unfriendly/Indifferent/Friendly/Helpful) came
+ * from 3.5e Diplomacy and is not a 5e construct. `DISPOSITION_BANDS`/
+ * `DispositionBand` above are retained only for the still-unmigrated rumour
+ * path; see the doc comment on `DISPOSITION_BANDS`.
+ */
+export type NpcAttitude = "Hostile" | "Indifferent" | "Friendly";
+
+export const NPC_ATTITUDES: readonly NpcAttitude[] = [
+  "Hostile",
+  "Indifferent",
+  "Friendly",
+] as const;
+
+export const NpcAttitudeSchema = z.enum(["Hostile", "Indifferent", "Friendly"]);
+
+/**
+ * The difficulty of talking a creature round, by how it already regards you.
+ *
+ * Every value resolves through `DIFFICULTY_DC`, so the DCs are the SRD's own
+ * Typical Difficulty Classes (20 / 15 / 10) rather than numbers invented here.
+ */
+export const ATTITUDE_DIFFICULTY: Record<NpcAttitude, DifficultyBand> = {
+  Hostile: "hard",
+  Indifferent: "medium",
+  Friendly: "easy",
+};
 
 // ---------------------------------------------------------------------------
 // Core Types
@@ -72,18 +119,14 @@ export const InitialDispositionInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
     npcRole: z.enum(["guard", "bandit", "commoner"]),
-    charismaModifier: z.number().int().min(-5).max(5),
   })
   .strict();
 
 export type InitialDispositionInput = z.infer<typeof InitialDispositionInputSchema>;
 
 export const InitialDispositionResultSchema = z.object({
-  roll: z.number().int().min(1).max(20),
-  total: z.number().int(),
-  charismaModifier: z.number().int(),
-  dispositionBand: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
-  initialDisposition: z.number().int().min(-10).max(10),
+  attitude: NpcAttitudeSchema,
+  disposition: z.number().int(),
   personality: z.object({
     motivation: z.string(),
     secret: z.string(),
@@ -99,7 +142,6 @@ export const SocialCheckInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
-    dispositionDelta: z.number().int().min(1).max(4),
     intent: z.string().max(200),
   })
   .strict();
@@ -108,18 +150,17 @@ export type SocialCheckInput = z.infer<typeof SocialCheckInputSchema>;
 
 export const SocialCheckResultSchema = z.object({
   approach: z.enum(["persuade", "intimidate", "deceive"]),
+  skill: z.enum(["Persuasion", "Intimidation", "Deception"]),
   roll: z.number().int(),
-  charismaModifier: z.number().int(),
+  abilityModifier: z.number().int(),
+  proficiencyApplied: z.number().int(),
   total: z.number().int(),
   dc: z.number().int(),
   success: z.boolean(),
-  isCriticalSuccess: z.boolean(),
-  isCriticalFailure: z.boolean(),
+  attitudeBefore: NpcAttitudeSchema,
+  attitudeAfter: NpcAttitudeSchema,
   dispositionBefore: z.number().int().min(-10).max(10),
   dispositionAfter: z.number().int().min(-10).max(10),
-  dispositionBandBefore: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
-  dispositionBandAfter: z.enum(["Hostile", "Unfriendly", "Indifferent", "Friendly", "Helpful"]),
-  backfire: z.boolean(),
 });
 
 export type SocialCheckResult = z.infer<typeof SocialCheckResultSchema>;

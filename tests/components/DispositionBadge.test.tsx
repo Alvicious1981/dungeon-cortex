@@ -41,7 +41,7 @@ describe("DispositionBadge — null disposition", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Hostile — disposition ≤ −7
+// Hostile — disposition ≤ −4
 // ---------------------------------------------------------------------------
 
 describe("DispositionBadge — Hostile", () => {
@@ -61,30 +61,14 @@ describe("DispositionBadge — Hostile", () => {
   });
 
   it("sets data-band to 'Hostile'", () => {
-    render(<DispositionBadge disposition={-7} />);
+    render(<DispositionBadge disposition={-4} />);
     const el = document.querySelector("[data-band]");
     expect(el?.getAttribute("data-band")).toBe("Hostile");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Unfriendly — −6 to −2
-// ---------------------------------------------------------------------------
-
-describe("DispositionBadge — Unfriendly", () => {
-  it("renders 🟠 icon for disposition −3", () => {
-    const { container } = render(<DispositionBadge disposition={-3} />);
-    expect(container.textContent).toContain("🟠");
-  });
-
-  it("renders 'Unfriendly' band label", () => {
-    render(<DispositionBadge disposition={-3} />);
-    expect(screen.getByText(/Unfriendly/)).toBeDefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Indifferent — −1 to +2
+// Indifferent — −3 to +3
 // ---------------------------------------------------------------------------
 
 describe("DispositionBadge — Indifferent", () => {
@@ -97,10 +81,22 @@ describe("DispositionBadge — Indifferent", () => {
     render(<DispositionBadge disposition={0} />);
     expect(screen.getByText(/Indifferent/)).toBeDefined();
   });
+
+  it("renders ⚪ icon at the −3 boundary", () => {
+    const { container } = render(<DispositionBadge disposition={-3} />);
+    expect(container.textContent).toContain("⚪");
+    expect(screen.getByText(/Indifferent/)).toBeDefined();
+  });
+
+  it("renders ⚪ icon at the +3 boundary", () => {
+    const { container } = render(<DispositionBadge disposition={3} />);
+    expect(container.textContent).toContain("⚪");
+    expect(screen.getByText(/Indifferent/)).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Friendly — +3 to +7
+// Friendly — +4 and above
 // ---------------------------------------------------------------------------
 
 describe("DispositionBadge — Friendly", () => {
@@ -120,21 +116,10 @@ describe("DispositionBadge — Friendly", () => {
     expect(el?.getAttribute("aria-label")).toContain("Friendly");
     expect(el?.getAttribute("aria-label")).toContain("5");
   });
-});
 
-// ---------------------------------------------------------------------------
-// Helpful — +8 to +10
-// ---------------------------------------------------------------------------
-
-describe("DispositionBadge — Helpful", () => {
-  it("renders 💛 icon for disposition 10", () => {
-    const { container } = render(<DispositionBadge disposition={10} />);
-    expect(container.textContent).toContain("💛");
-  });
-
-  it("renders 'Helpful' band label", () => {
+  it("renders 'Friendly' band label for disposition 10", () => {
     render(<DispositionBadge disposition={10} />);
-    expect(screen.getByText(/Helpful/)).toBeDefined();
+    expect(screen.getByText(/Friendly/)).toBeDefined();
   });
 });
 

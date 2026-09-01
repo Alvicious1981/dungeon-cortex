@@ -1,11 +1,10 @@
 import { prisma } from "@/lib/db/prisma";
-import { abilityModifier, d20Check } from "@/lib/rules/dice";
 import type { RumorPayload, SocialCheckResult } from "@/lib/rules/social";
 import {
-  computeSocialDC,
-  getDispositionBand,
+  resolveSocialCheck as resolveSocialCheckPure,
   getRumorsPayload,
 } from "@/lib/rules/social-logic";
+import type { AbilityCheckActor, Ability } from "@/lib/rules/ability-check";
 
 export type SocialApproach = "persuade" | "intimidate" | "deceive";
 
@@ -17,10 +16,7 @@ export type SocialServiceErrorCode =
   | "NPC_OWNERSHIP_MISMATCH"
   | "NPC_NOT_MET"
   | "LOCATION_NOT_FOUND"
-  | "INVALID_SOCIAL_APPROACH"
-  | "INVALID_DISPOSITION_DELTA"
-  | "INVALID_ROLL"
-  | "INVALID_DC";
+  | "INVALID_SOCIAL_APPROACH";
 
 export class SocialServiceError extends Error {
   constructor(
@@ -42,6 +38,8 @@ interface SocialCharacterRecord {
   id: string;
   campaignId?: string;
   stats: unknown;
+  level?: number;
+  skillProficiencies?: unknown;
 }
 
 interface SocialNpcRecord {
@@ -99,9 +97,6 @@ export interface ResolveSocialCheckInput {
   npcSeed?: string;
   approach: SocialApproach | string;
   intent?: string;
-  dispositionDelta?: number;
-  roll?: number;
-  dc?: number;
   tx?: SocialDb;
   db?: SocialDb;
 }
@@ -122,14 +117,15 @@ export interface SocialCheckFacts {
   npcId: string;
   npcSeed: string;
   approach: SocialApproach;
+  skill: SocialCheckResult["skill"];
   roll: number;
-  charismaModifier: number;
+  abilityModifier: number;
+  proficiencyApplied: number;
   total: number;
   dc: number;
   success: boolean;
   dispositionBefore: number;
   dispositionAfter: number;
-  backfire: boolean;
 }
 
 export type ResolveSocialCheckResult = SocialCheckResult & {
@@ -202,111 +198,27 @@ function assertApproach(approach: string): asserts approach is SocialApproach {
   }
 }
 
-function assertDispositionDelta(delta: number): void {
-  if (!Number.isInteger(delta) || delta < 1 || delta > 4) {
-    throw new SocialServiceError(
-      "INVALID_DISPOSITION_DELTA",
-      `Invalid disposition delta: ${delta}`
-    );
-  }
-}
+/**
+ * Builds the actor `resolveSocialCheck` (the pure function) rolls against,
+ * from a loosely-typed persisted character record. Unknown or malformed
+ * stats/level/proficiencies degrade to safe defaults rather than throwing —
+ * this wrapper is dead code and its job here is only to shape the call, not
+ * to validate the database. Dead since commit a0bb009 removed `buildSocialTools`
+ * from `buildNarratorTools`: `buildNarratorTools` in `lib/ai/narrator.ts` now
+ * spreads only `buildSrdTools()`, so nothing calls this module's exports from
+ * production.
+ */
+function toAbilityCheckActor(character: SocialCharacterRecord): AbilityCheckActor {
+  const stats =
+    typeof character.stats === "object" && character.stats !== null
+      ? (character.stats as Partial<Record<Ability, number>>)
+      : {};
+  const level = typeof character.level === "number" ? character.level : 1;
+  const skillProficiencies = Array.isArray(character.skillProficiencies)
+    ? (character.skillProficiencies as AbilityCheckActor["skillProficiencies"])
+    : undefined;
 
-function assertRoll(roll: number): void {
-  if (!Number.isInteger(roll) || roll < 1 || roll > 20) {
-    throw new SocialServiceError("INVALID_ROLL", `Invalid d20 roll: ${roll}`);
-  }
-}
-
-function assertDc(dc: number): void {
-  if (!Number.isInteger(dc) || dc < 1) {
-    throw new SocialServiceError("INVALID_DC", `Invalid social DC: ${dc}`);
-  }
-}
-
-function getChaModifier(stats: unknown): number {
-  if (typeof stats !== "object" || stats === null) return abilityModifier(10);
-
-  const cha = (stats as Record<string, unknown>).CHA;
-  return abilityModifier(typeof cha === "number" ? cha : 10);
-}
-
-function clampDisposition(value: number): number {
-  return Math.min(10, Math.max(-10, value));
-}
-
-function resolveD20Check(input: {
-  approach: SocialApproach;
-  dispositionDelta: number;
-  charismaModifier: number;
-  currentDisposition: number;
-  roll?: number;
-  dc?: number;
-}): SocialCheckResult {
-  if (input.roll !== undefined) assertRoll(input.roll);
-  if (input.dc !== undefined) assertDc(input.dc);
-
-  const dc =
-    input.dc ??
-    computeSocialDC(
-      input.currentDisposition,
-      input.dispositionDelta,
-      input.approach
-    );
-  const checkResult =
-    input.roll === undefined
-      ? d20Check(input.charismaModifier, dc)
-      : {
-          roll: {
-            notation: "1d20",
-            dice: [{ faces: 20, result: input.roll }],
-            diceTotal: input.roll,
-            modifier: 0,
-            total: input.roll + input.charismaModifier,
-          },
-          abilityModifier: input.charismaModifier,
-          dc,
-          isCriticalSuccess: input.roll === 20,
-          isCriticalFailure: input.roll === 1,
-          success:
-            input.roll === 20 ||
-            (input.roll !== 1 && input.roll + input.charismaModifier >= dc),
-        };
-  const natural = checkResult.roll.dice[0]!.result;
-  const total = checkResult.roll.total;
-  const isCriticalSuccess = checkResult.isCriticalSuccess;
-  const isCriticalFailure = checkResult.isCriticalFailure;
-  const success = checkResult.success;
-
-  let dispositionShift: number;
-  if (isCriticalSuccess) {
-    dispositionShift = input.dispositionDelta + 1;
-  } else if (success) {
-    dispositionShift = input.dispositionDelta;
-  } else if (isCriticalFailure) {
-    dispositionShift = input.approach === "intimidate" ? -2 : 0;
-  } else {
-    dispositionShift = input.approach === "intimidate" ? -1 : 0;
-  }
-
-  const dispositionAfter = clampDisposition(
-    input.currentDisposition + dispositionShift
-  );
-
-  return {
-    approach: input.approach,
-    roll: natural,
-    charismaModifier: input.charismaModifier,
-    total,
-    dc,
-    success,
-    isCriticalSuccess,
-    isCriticalFailure,
-    dispositionBefore: input.currentDisposition,
-    dispositionAfter,
-    dispositionBandBefore: getDispositionBand(input.currentDisposition),
-    dispositionBandAfter: getDispositionBand(dispositionAfter),
-    backfire: input.approach === "intimidate" && !success,
-  };
+  return { stats, level, skillProficiencies };
 }
 
 function assertCharacterOwnership(
@@ -384,8 +296,6 @@ async function resolveSocialCheckInTransaction(
   input: ResolveSocialCheckInput
 ): Promise<ResolveSocialCheckResult> {
   assertApproach(input.approach);
-  const dispositionDelta = input.dispositionDelta ?? 1;
-  assertDispositionDelta(dispositionDelta);
 
   const campaign = await db.campaign.findUnique({
     where: { id: input.campaignId },
@@ -405,7 +315,7 @@ async function resolveSocialCheckInTransaction(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
-    select: { id: true, campaignId: true, stats: true },
+    select: { id: true, campaignId: true, stats: true, level: true, skillProficiencies: true },
   });
   if (!character) {
     throw new SocialServiceError(
@@ -431,16 +341,13 @@ async function resolveSocialCheckInTransaction(
     );
   }
 
-  const charismaModifier = getChaModifier(character.stats);
-  const currentDisposition = npc.disposition ?? 0;
-  const socialResult = resolveD20Check({
-    approach: input.approach,
-    dispositionDelta,
-    charismaModifier,
-    currentDisposition,
-    roll: input.roll,
-    dc: input.dc,
-  });
+  const actor = toAbilityCheckActor(character);
+  const currentDisposition = npc.disposition ?? null;
+  const socialResult = resolveSocialCheckPure(
+    { npcSeed: npc.seed ?? input.npcSeed ?? "", approach: input.approach, intent: input.intent ?? "" },
+    actor,
+    currentDisposition
+  );
 
   const npcId = npc.id ?? input.npcId ?? input.npcSeed;
   const npcSeed = npc.seed ?? input.npcSeed ?? npcId;
@@ -464,14 +371,15 @@ async function resolveSocialCheckInTransaction(
     npcId,
     npcSeed,
     approach: socialResult.approach,
+    skill: socialResult.skill,
     roll: socialResult.roll,
-    charismaModifier: socialResult.charismaModifier,
+    abilityModifier: socialResult.abilityModifier,
+    proficiencyApplied: socialResult.proficiencyApplied,
     total: socialResult.total,
     dc: socialResult.dc,
     success: socialResult.success,
     dispositionBefore: socialResult.dispositionBefore,
     dispositionAfter: socialResult.dispositionAfter,
-    backfire: socialResult.backfire,
   };
 
   return {

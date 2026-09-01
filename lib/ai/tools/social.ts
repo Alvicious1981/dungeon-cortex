@@ -13,7 +13,9 @@ import {
   GetRumorsInputSchema,
 } from "@/lib/rules/social";
 import {
-  establishInitialDisposition as establishInitialDispositionPure,
+  initialAttitudeFor,
+  INITIAL_DISPOSITION,
+  generateNPCPersonality,
 } from "@/lib/rules/social-logic";
 import {
   resolveRumors,
@@ -128,17 +130,19 @@ export function buildSocialTools(
     }),
     establishInitialDisposition: tool({
       description:
-        "Establish an NPC's first-contact disposition with the D&D 5e/SRD 2014-compatible backend d20 Charisma check. " +
+        "Establish an NPC's first-contact attitude, deterministically derived from the NPC's seed and role — no roll. " +
         "MUST be called the FIRST TIME the party speaks to any NPC in a scene. " +
         "Do NOT call this if NPC.hasMetPlayer is true — use the persisted disposition instead. " +
         "The backend result determines the NPC's opening attitude and persists disposition, personalityTags, and hasMetPlayer. " +
-        "The Narrator MUST voice the NPC using ONLY the returned dispositionBand and personality tags. " +
+        "The Narrator MUST voice the NPC using ONLY the returned attitude and personality tags. " +
         "NEVER invent NPC attitudes, motivations, or secrets without calling this tool first. " +
         "Code is Law.",
       inputSchema: InitialDispositionInputSchema,
-      execute: async ({ npcSeed, npcRole, charismaModifier }) => {
+      execute: async ({ npcSeed, npcRole }) => {
         return runTool(async () => {
-          const result = establishInitialDispositionPure({ npcSeed, npcRole, charismaModifier });
+          const attitude = initialAttitudeFor(npcSeed, npcRole as NPCRole);
+          const disposition = INITIAL_DISPOSITION[attitude];
+          const personality = generateNPCPersonality(npcSeed);
           const statblock = generateNPC(npcSeed, npcRole as NPCRole);
           const descriptor: NpcDescriptor = {
             seed: npcSeed,
@@ -157,12 +161,12 @@ export function buildSocialTools(
           await establishInitialNpcDisposition({
             campaignId,
             npcSeed,
-            disposition: result.initialDisposition,
-            personalityTags: result.personality,
+            disposition,
+            personalityTags: personality,
             descriptor,
           });
 
-          return result;
+          return { attitude, disposition, personality };
         });
       },
     }),
@@ -170,21 +174,20 @@ export function buildSocialTools(
     socialCheck: tool({
       description:
         "Resolve a social action — Persuade, Intimidate, or Deceive — against an NPC. " +
-        "Rolls 1d20 + the character's CHA modifier against a DC derived from " +
-        "the NPC's current disposition and the magnitude of the shift attempted. " +
-        "On success, the NPC's disposition increases. Intimidation failure causes backfire. " +
+        "Rolls the matching SRD 5e Charisma skill (Persuasion, Intimidation, or Deception) " +
+        "against a DC set by the NPC's current attitude. " +
+        "On success, the NPC's disposition improves; on failure, it worsens. " +
         "MUST be called whenever the player attempts to influence an NPC through social means. " +
         "NEVER decide the outcome of a social interaction without calling this tool. " +
         "Narrate the result — and ONLY the result — that the tool returns. " +
         "Code is Law.",
       inputSchema: SocialCheckInputSchema,
-      execute: async ({ npcSeed, approach, dispositionDelta, intent }) => {
+      execute: async ({ npcSeed, approach, intent }) => {
         return runTool(() =>
           resolveSocialCheck({
             campaignId,
             npcSeed,
             approach,
-            dispositionDelta,
             intent,
           }),
         );
@@ -194,7 +197,7 @@ export function buildSocialTools(
     getRumors: tool({
       description:
         "Ask an NPC what they know about nearby areas. " +
-        "Only NPCs with disposition ≥ 3 (Friendly or better) will share information. " +
+        "Only NPCs with a Friendly attitude will share information. " +
         "The returned rumors are derived ENTIRELY from persisted database records — " +
         "the NPC cannot share information the world does not contain. " +
         "MUST be called when a player asks an NPC for directions, local knowledge, " +

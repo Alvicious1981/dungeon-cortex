@@ -9,6 +9,8 @@
  */
 
 import { abilityModifier } from "@/lib/rules/dice";
+import { attitudeFor } from "@/lib/rules/social-logic";
+import type { NpcAttitude } from "@/lib/rules/social";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -85,29 +87,17 @@ const STAT_KEYS: ReadonlyArray<keyof AbilityScores> = [
   "STR", "DEX", "CON", "INT", "WIS", "CHA",
 ];
 
-const DISPOSITION_ICONS: Record<string, string> = {
+const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile: "💀",
-  Unfriendly: "⚔️",
   Indifferent: "👁️",
-  Friendly: "🤝",
-  Helpful: "⭐"
+  Friendly: "🤝"
 };
 
-const DISPOSITION_COLORS: Record<string, string> = {
+const DISPOSITION_COLORS: Record<NpcAttitude, string> = {
   Hostile: "#ef4444",
-  Unfriendly: "#f97316",
   Indifferent: "#71717a",
-  Friendly: "#eab308",
-  Helpful: "#22c55e"
+  Friendly: "#22c55e"
 };
-
-function getDispositionBand(disposition: number) {
-  if (disposition <= -7) return "Hostile";
-  if (disposition <= -2) return "Unfriendly";
-  if (disposition <=  2) return "Indifferent";
-  if (disposition <=  7) return "Friendly";
-  return "Helpful";
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -226,14 +216,14 @@ function NPCCard({ npc }: { npc: NPC }) {
         {npc.hasMetPlayer && npc.disposition !== null && (
           <span
             className="shrink-0 rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider leading-none flex items-center gap-1"
-            style={{ 
-              color: DISPOSITION_COLORS[getDispositionBand(npc.disposition)], 
+            style={{
+              color: DISPOSITION_COLORS[attitudeFor(npc.disposition)],
               background: "rgba(0,0,0,0.35)",
-              border: `1px solid ${DISPOSITION_COLORS[getDispositionBand(npc.disposition)]}44`
+              border: `1px solid ${DISPOSITION_COLORS[attitudeFor(npc.disposition)]}44`
             }}
           >
-            <span>{DISPOSITION_ICONS[getDispositionBand(npc.disposition)]}</span>
-            <span>{getDispositionBand(npc.disposition)}</span>
+            <span>{DISPOSITION_ICONS[attitudeFor(npc.disposition)]}</span>
+            <span>{attitudeFor(npc.disposition)}</span>
           </span>
         )}
       </div>
