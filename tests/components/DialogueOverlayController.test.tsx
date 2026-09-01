@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
 
 afterEach(() => {
@@ -28,6 +28,15 @@ function openUnmet(npcId = "npc_1") {
   });
 }
 
+// The quick-action "Persuade" button and the free-text approach-selector
+// share the accessible name "persuade" — scope to the quick-actions group so
+// findByRole doesn't throw on ambiguity.
+function findPersuadeQuickAction() {
+  return within(screen.getByRole("group", { name: /quick actions/i })).findByRole("button", {
+    name: /persuade/i,
+  });
+}
+
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue({
     ok: true,
@@ -49,7 +58,7 @@ describe("DialogueOverlayController", () => {
     render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
     openWith();
 
-    fireEvent.click(await screen.findByRole("button", { name: /persuade/i }));
+    fireEvent.click(await findPersuadeQuickAction());
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -64,7 +73,7 @@ describe("DialogueOverlayController", () => {
     render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
     openWith();
 
-    fireEvent.click(await screen.findByRole("button", { name: /persuade/i }));
+    fireEvent.click(await findPersuadeQuickAction());
 
     expect(await screen.findByText(/18/)).toBeTruthy();
     expect(await screen.findByText(/DC 15/i)).toBeTruthy();
@@ -84,5 +93,49 @@ describe("DialogueOverlayController", () => {
       approach: "persuade",
       intent: "",
     });
+  });
+
+  it("shows the route's error message on a failed check and leaves disposition unchanged", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "NPC not found." }),
+    } as Response);
+
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+
+    expect(await screen.findByText("NPC not found.")).toBeTruthy();
+    // The disposition meter still reads the value from the selection event.
+    expect(screen.getByText(/\+5 Engagement/)).toBeTruthy();
+  });
+
+  it("shows a generic error and no unhandled rejection when fetch itself fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+
+    expect(await screen.findByText(/could not reach the server/i)).toBeTruthy();
+    expect(screen.getByText(/\+5 Engagement/)).toBeTruthy();
+
+    // Give any unhandled rejection a tick to surface before asserting none did.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(unhandled).not.toHaveBeenCalled();
+    process.off("unhandledRejection", unhandled);
+  });
+
+  it("keeps Gather Rumors disabled even at a Friendly disposition", async () => {
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    const rumorsButton = await screen.findByRole("button", { name: /gather rumors/i });
+    expect(rumorsButton).toBeDisabled();
   });
 });

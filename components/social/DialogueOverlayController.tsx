@@ -66,6 +66,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
   const [narrationText, setNarrationText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<SocialCheckDisplay | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // 1. Open dialogue when the roster selects an NPC
@@ -84,6 +85,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
       setIsOpen(true);
       setNarrationText(""); // Clear for new conversation
       setResult(null); // Clear the prior check's facts for a new conversation
+      setError(null); // Clear any error from a prior conversation
     }
 
     // 2. Accumulate narrative tokens
@@ -130,16 +132,31 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
   ) => {
     if (!npc) return;
     setIsLoading(true);
+    setError(null);
     try {
       const response = await fetch(`/api/campaign/${campaignId}/social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ npcId: npc.id, approach, intent }),
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        let message = "Something went wrong resolving that.";
+        try {
+          const body = await response.json();
+          if (body && typeof body.error === "string") message = body.error;
+        } catch {
+          // Body wasn't JSON, or was empty — keep the generic fallback.
+        }
+        setError(message);
+        return;
+      }
       const facts = (await response.json()) as SocialCheckDisplay;
       setResult(facts);
       setNpc((prev) => (prev ? { ...prev, disposition: facts.dispositionAfter, hasMetPlayer: true } : prev));
+    } catch {
+      // Network failure, or fetch rejected for any other reason: the player
+      // still deserves feedback rather than a click that silently did nothing.
+      setError("Could not reach the server. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -171,6 +188,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
       narrationText={narrationText}
       characterId={characterId}
       result={result}
+      error={error}
       onSpeak={handleSpeak}
       onSocialIntent={handleSocialIntent}
       onAskRumors={handleAskRumors}

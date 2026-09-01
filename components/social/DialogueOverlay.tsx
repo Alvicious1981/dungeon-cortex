@@ -44,6 +44,7 @@ interface DialogueOverlayProps {
     dispositionBefore: number;
     dispositionAfter: number;
   } | null;
+  error: string | null;
   onSpeak: (words: string, approach: "persuade" | "intimidate" | "deceive") => void;
   onSocialIntent: (approach: "persuade" | "intimidate" | "deceive") => void;
   onAskRumors: () => void;
@@ -68,6 +69,7 @@ export default function DialogueOverlay({
   npc,
   narrationText,
   result,
+  error,
   onSpeak,
   onSocialIntent,
   onAskRumors,
@@ -239,6 +241,17 @@ export default function DialogueOverlay({
               )}
             </div>
 
+            {/* Error feedback — a failed attempt says something, rather than looking like a no-op. */}
+            {error && (
+              <div
+                className="mt-4 border border-red-900/40 rounded-lg p-4 bg-red-950/20 text-sm text-red-300"
+                role="alert"
+                data-testid="social-check-error"
+              >
+                {error}
+              </div>
+            )}
+
             {/* Resolved check facts — rendered as returned by the route, never narrated. */}
             {result && (
               <div
@@ -305,7 +318,7 @@ export default function DialogueOverlay({
           {npc.hasMetPlayer ? (
             <>
               {/* Intent Quick Actions */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-3" role="group" aria-label="Quick actions">
                 <button 
                   disabled={isLoading}
                   onClick={() => onSocialIntent("persuade")}
@@ -334,12 +347,10 @@ export default function DialogueOverlay({
 
               {/* Custom Input */}
               <div className="flex flex-col gap-2">
-                <div className="flex gap-1" role="tablist" aria-label="Approach for spoken words">
+                <div className="flex gap-1">
                   {(["persuade", "intimidate", "deceive"] as const).map((mode) => (
                     <button
                       key={mode}
-                      role="tab"
-                      aria-selected={approach === mode}
                       onClick={() => setApproach(mode)}
                       className={`px-3 py-1 text-[9px] uppercase font-bold tracking-widest rounded-t border-t border-x transition-colors ${
                         approach === mode
@@ -378,13 +389,11 @@ export default function DialogueOverlay({
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={onAskRumors}
-                  disabled={isLoading || attitudeFor(npc.disposition) !== "Friendly"}
-                  className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors ${
-                    attitudeFor(npc.disposition) !== "Friendly" ? 'text-neutral-700 cursor-not-allowed' : 'text-amber-600 hover:text-amber-400'
-                  }`}
-                  aria-label={attitudeFor(npc.disposition) !== "Friendly" ? "Disposition too low to ask for rumors" : "Ask for rumors"}
+                  disabled
+                  title="Rumours are not available yet"
+                  className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors text-neutral-700 cursor-not-allowed"
                 >
-                  {attitudeFor(npc.disposition) !== "Friendly" ? "🔒" : "📜"} Gather Rumors
+                  🔒 Gather Rumors (not available yet)
                 </button>
                 <button 
                   onClick={onClose}
