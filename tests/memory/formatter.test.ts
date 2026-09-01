@@ -151,9 +151,9 @@ const metNPC: ActiveNPC = {
 
 describe("formatNPCContext", () => {
   it("renders visible NPC traits but keeps secret hidden", () => {
-    const output = formatNPCContext(metNPC);
+    const output = formatNPCContext({ ...metNPC, disposition: 0 });
     expect(output).toContain("Greta the Ironmonger");
-    expect(output).toContain("Friendly");
+    expect(output).toContain("Indifferent");
     expect(output).toContain("left side of their jaw");
     expect(output).not.toContain("owe money to people");
   });
@@ -167,6 +167,26 @@ describe("formatNPCContext", () => {
     });
     expect(output).toContain("Not yet met");
     expect(output).not.toContain("establishInitialDisposition");
+  });
+});
+
+describe("formatNPCContext — attitude", () => {
+  it("names the attitude the rules would resolve", () => {
+    const line = formatNPCContext({ ...metNPC, disposition: -8 });
+    expect(line).toContain("Hostile");
+    expect(line).not.toContain("Unfriendly");
+    expect(line).not.toContain("Helpful");
+  });
+
+  it("withholds the secret below Friendly", () => {
+    const line = formatNPCContext({ ...metNPC, disposition: 0 });
+    expect(line).toContain("Indifferent");
+    expect(line).not.toContain("owe money to people");
+  });
+
+  it("offers the secret at Friendly", () => {
+    const line = formatNPCContext({ ...metNPC, disposition: 7 });
+    expect(line).toContain("owe money to people");
   });
 });
 

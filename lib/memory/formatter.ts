@@ -18,8 +18,8 @@ import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, getLevelFromXP, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
-import { type NPCPersonality, type DispositionBand } from "@/lib/rules/social";
-import { getDispositionBand } from "@/lib/rules/social-logic";
+import { type NPCPersonality, type NpcAttitude } from "@/lib/rules/social";
+import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
@@ -448,12 +448,10 @@ export interface ActiveNPC {
   hasMetPlayer: boolean;
 }
 
-const DISPOSITION_ICONS: Record<DispositionBand, string> = {
+const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile:     "🔴",
-  Unfriendly:  "🟠",
   Indifferent: "⚪",
   Friendly:    "🟢",
-  Helpful:     "💛",
 };
 
 /**
@@ -461,9 +459,9 @@ const DISPOSITION_ICONS: Record<DispositionBand, string> = {
  * the NPC's persisted personality and current disposition.
  *
  * - Unmet NPC: identifies that the NPC has not yet met the character.
- * - Met NPC: injects disposition band, icon, motivation, and distinctive trait.
+ * - Met NPC: injects attitude, icon, motivation, and distinctive trait.
  *   The secret is intentionally withheld from the narrator prompt to prevent
- *   premature disclosure — it is revealed only at Helpful disposition.
+ *   premature disclosure — it is revealed only at Friendly attitude.
  *
  * @pure — no I/O, deterministic output for the same input.
  */
@@ -472,13 +470,13 @@ export function formatNPCContext(npc: ActiveNPC): string {
     return `## 🎭 NPC: ${npc.name}\n*(Not yet met.)*`;
   }
 
-  const band = getDispositionBand(npc.disposition ?? 0);
-  const icon = DISPOSITION_ICONS[band];
+  const attitude = attitudeFor(npc.disposition);
+  const icon = DISPOSITION_ICONS[attitude];
   const tags = npc.personalityTags;
 
   const lines: string[] = [
     `## 🎭 NPC: ${npc.name}`,
-    `**Disposition:** ${icon} ${band} (${npc.disposition ?? 0})`,
+    `**Disposition:** ${icon} ${attitude} (${npc.disposition ?? 0})`,
   ];
 
   if (tags) {
@@ -486,10 +484,14 @@ export function formatNPCContext(npc: ActiveNPC): string {
     lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);
   }
 
-  lines.push(
-    "*(Note: The NPC's secret is known to them but concealed from the party. " +
-    "Reveal it only if disposition reaches Helpful and the player asks the right question.)*"
-  );
+  if (attitude === "Friendly" && tags) {
+    lines.push(`**Secret:** ${tags.secret}`);
+  } else {
+    lines.push(
+      "*(Note: The NPC's secret is known to them but concealed from the party. " +
+      "Reveal it only if disposition reaches Friendly and the player asks the right question.)*"
+    );
+  }
 
   return lines.join("\n");
 }
