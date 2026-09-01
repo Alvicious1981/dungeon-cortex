@@ -2,21 +2,45 @@
 
 import { useEffect, useState } from "react";
 import DialogueOverlay from "./DialogueOverlay";
-import type { DialogueOpenPayload } from "@/lib/events/game-events";
 import { requestDungeonAction } from "@/lib/events/action-transport";
 
 /**
  * DialogueOverlayController.tsx — Milestone N: Slice 3
- * 
+ *
  * The bridging component between the AI Narrator (via ActionInput SSE)
- * and the DialogueOverlay UI. 
- * 
+ * and the DialogueOverlay UI.
+ *
  * Responsibilities:
- *  - Opens the overlay when a `dialogue_open` frame arrives.
+ *  - Opens the overlay when the NPC roster dispatches `dungeon-npc-selected`.
  *  - Accumulates narrative tokens into `narrationText`.
- *  - Updates NPC disposition in real-time from `dialogue_update` frames.
  *  - Dispatches social intents as natural-language actions.
  */
+
+/**
+ * Detail carried by the `dungeon-npc-selected` window CustomEvent, dispatched
+ * by NPCRoster when a player activates an NPC row.
+ */
+interface NpcSelectedDetail {
+  npcId: string;
+  name: string;
+  disposition: number;
+  hasMetPlayer: boolean;
+}
+
+/** Shape DialogueOverlay expects for the NPC it is rendering. */
+interface DialogueNpc {
+  id: string;
+  name: string;
+  race: string | null;
+  profession: string | null;
+  disposition: number;
+  personalityTags: {
+    motivation: string;
+    secret: string;
+    distinctiveTrait: string;
+  } | null;
+  hasMetPlayer: boolean;
+}
 
 interface Props {
   campaignId: string;
@@ -25,35 +49,35 @@ interface Props {
 
 export default function DialogueOverlayController({ characterId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
-  const [npc, setNpc] = useState<DialogueOpenPayload | null>(null);
+  const [npc, setNpc] = useState<DialogueNpc | null>(null);
   const [narrationText, setNarrationText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    // 1. Open dialogue when event arrives
-    function handleDialogueOpen(e: Event) {
-      const customEvent = e as CustomEvent<DialogueOpenPayload>;
-      setNpc(customEvent.detail);
+    // 1. Open dialogue when the roster selects an NPC
+    function handleNpcSelected(e: Event) {
+      const customEvent = e as CustomEvent<NpcSelectedDetail>;
+      const { npcId, name, disposition, hasMetPlayer } = customEvent.detail;
+      setNpc({
+        id: npcId,
+        name,
+        race: null,
+        profession: null,
+        disposition,
+        personalityTags: null,
+        hasMetPlayer,
+      });
       setIsOpen(true);
       setNarrationText(""); // Clear for new conversation
     }
 
-    // 2. Real-time disposition update
-    function handleDispositionUpdate(e: Event) {
-      const customEvent = e as CustomEvent<{ disposition: number }>;
-      setNpc(prev => {
-        if (!prev) return null;
-        return { ...prev, disposition: customEvent.detail.disposition };
-      });
-    }
-
-    // 3. Accumulate narrative tokens
+    // 2. Accumulate narrative tokens
     function handleToken(e: Event) {
       const customEvent = e as CustomEvent<{ chunk: string }>;
       setNarrationText(prev => prev + customEvent.detail.chunk);
     }
 
-    // 4. Track loading state from ActionInput
+    // 3. Track loading state from ActionInput
     function handleActionStart() {
       setIsLoading(true);
       setNarrationText(""); // Clear for new turn
@@ -67,15 +91,13 @@ export default function DialogueOverlayController({ characterId }: Props) {
       setIsLoading(false);
     }
 
-    window.addEventListener("dungeon-dialogue-open", handleDialogueOpen);
-    window.addEventListener("dungeon-dialogue-update", handleDispositionUpdate);
+    window.addEventListener("dungeon-npc-selected", handleNpcSelected);
     window.addEventListener("dungeon-token", handleToken);
     window.addEventListener("dungeon-action-start", handleActionStart);
     window.addEventListener("dungeon-action-end", handleActionEnd);
-    
+
     return () => {
-      window.removeEventListener("dungeon-dialogue-open", handleDialogueOpen);
-      window.removeEventListener("dungeon-dialogue-update", handleDispositionUpdate);
+      window.removeEventListener("dungeon-npc-selected", handleNpcSelected);
       window.removeEventListener("dungeon-token", handleToken);
       window.removeEventListener("dungeon-action-start", handleActionStart);
       window.removeEventListener("dungeon-action-end", handleActionEnd);
@@ -107,10 +129,7 @@ export default function DialogueOverlayController({ characterId }: Props) {
 
   return (
     <DialogueOverlay
-      npc={{
-        ...npc,
-        id: npc.npcId
-      }}
+      npc={npc}
       narrationText={narrationText}
       characterId={characterId}
       onSpeak={handleSpeak}
