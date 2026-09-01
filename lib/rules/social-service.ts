@@ -202,11 +202,9 @@ function assertApproach(approach: string): asserts approach is SocialApproach {
  * Builds the actor `resolveSocialCheck` (the pure function) rolls against,
  * from a loosely-typed persisted character record. Unknown or malformed
  * stats/level/proficiencies degrade to safe defaults rather than throwing —
- * this wrapper is dead code and its job here is only to shape the call, not
- * to validate the database. Dead since commit a0bb009 removed `buildSocialTools`
- * from `buildNarratorTools`: `buildNarratorTools` in `lib/ai/narrator.ts` now
- * spreads only `buildSrdTools()`, so nothing calls this module's exports from
- * production.
+ * its job here is only to shape the call, not to validate the database.
+ * `resolveSocialCheck` is called from production by
+ * `POST /api/campaign/[id]/social` (`app/api/campaign/[id]/social/route.ts`).
  */
 function toAbilityCheckActor(character: SocialCharacterRecord): AbilityCheckActor {
   const stats =
@@ -223,18 +221,18 @@ function toAbilityCheckActor(character: SocialCharacterRecord): AbilityCheckActo
 
 function assertCharacterOwnership(
   campaign: SocialCampaignRecord,
-  character: SocialCharacterRecord,
   characterId: string,
   campaignId: string
 ): void {
-  if (campaign.characterId && campaign.characterId !== characterId) {
-    throw new SocialServiceError(
-      "CHARACTER_OWNERSHIP_MISMATCH",
-      `Character ${characterId} does not belong to campaign ${campaignId}.`
-    );
-  }
-
-  if (character.campaignId && character.campaignId !== campaignId) {
+  // This guards a caller that supplies its own `characterId` for a character
+  // other than the campaign's own. The production route never does this — it
+  // omits `characterId` entirely, so `resolveSocialCheckInTransaction` falls
+  // back to `campaign.characterId` and the comparison below is satisfied by
+  // construction (`x !== x` is always false). The route's real protection is
+  // its own `campaign.userId !== user.id` gate, upstream of this call. This
+  // check only fires for a caller — today, only tests — that passes a
+  // `characterId` sourced from somewhere other than the campaign row.
+  if (campaign.characterId !== characterId) {
     throw new SocialServiceError(
       "CHARACTER_OWNERSHIP_MISMATCH",
       `Character ${characterId} does not belong to campaign ${campaignId}.`
@@ -315,7 +313,7 @@ async function resolveSocialCheckInTransaction(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
-    select: { id: true, campaignId: true, stats: true, level: true, skillProficiencies: true },
+    select: { id: true, stats: true, level: true, skillProficiencies: true },
   });
   if (!character) {
     throw new SocialServiceError(
@@ -323,7 +321,7 @@ async function resolveSocialCheckInTransaction(
       `Character not found: ${characterId}`
     );
   }
-  assertCharacterOwnership(campaign, character, characterId, input.campaignId);
+  assertCharacterOwnership(campaign, characterId, input.campaignId);
 
   const npc = await findNpc(db, input);
   if (!npc) {

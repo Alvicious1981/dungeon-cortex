@@ -357,7 +357,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       <AscensionOverlayController />
       {/* Trade Overlay — self-wiring, listens for dungeon-merchant events */}
       <TradeOverlayController campaignId={campaign.id} initialGold={campaign.gold} playerInventory={character.inventory} />
-      {/* Dialogue Overlay — self-wiring, listens for dungeon-dialogue-open events */}
+      {/* Dialogue Overlay — self-wiring, listens for dungeon-npc-selected events */}
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
       
       {/* Detailed Character Sheet — Floating toggle (mobile / expanded view) */}

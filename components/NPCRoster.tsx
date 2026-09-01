@@ -1,11 +1,14 @@
+"use client";
+
 /**
  * components/NPCRoster.tsx
  *
- * Server Component — renders the campaign's known NPC roster.
+ * Client Component — renders the campaign's known NPC roster.
  * Displays: name, role badge, race/profession/alignment identity line,
  * HP bar, AC, ability score grid, and four personality pillars.
  *
- * No client-side JS required.
+ * Each row is a button; activating it dispatches a `dungeon-npc-selected`
+ * window CustomEvent that DialogueOverlayController listens for.
  */
 
 import { abilityModifier } from "@/lib/rules/dice";
@@ -191,22 +194,37 @@ function NPCCard({ npc }: { npc: NPC }) {
 
   return (
     <li
-      className="rounded px-3 py-3 space-y-2.5"
+      className="rounded overflow-hidden"
       style={{ background: cfg.bg, border: `1px solid ${cfg.borderColor}` }}
     >
+      <div className="w-full text-left px-3 py-3 space-y-2.5">
       {/* ── Name + role badge ── */}
       <div className="flex items-start justify-between gap-2">
-        <span
-          className="font-semibold leading-snug"
+        <button
+          type="button"
+          aria-label={`Hablar con ${npc.name}`}
+          className="font-semibold leading-snug text-left"
           style={{
             fontFamily: "var(--font-cinzel)",
             color: "#E8C84A",
             fontSize: "0.82rem",
             letterSpacing: "0.03em",
           }}
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("dungeon-npc-selected", {
+                detail: {
+                  npcId: npc.id,
+                  name: npc.name,
+                  disposition: npc.disposition,
+                  hasMetPlayer: npc.hasMetPlayer,
+                },
+              })
+            )
+          }
         >
           {npc.name}
-        </span>
+        </button>
         <span
           className="shrink-0 rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider leading-none"
           style={{ color: cfg.accentColor, background: "rgba(0,0,0,0.35)" }}
@@ -364,6 +382,7 @@ function NPCCard({ npc }: { npc: NPC }) {
           {npc.notes}
         </p>
       )}
+      </div>
     </li>
   );
 }

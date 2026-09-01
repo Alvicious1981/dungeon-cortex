@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type CampaignFixture = {
   id: string;
+  characterId: string;
 };
 
 type CharacterFixture = {
@@ -76,8 +77,8 @@ type ResolveSocialCheck = (
 ) => Promise<SocialCheckServiceResult>;
 
 const baseCampaigns: CampaignFixture[] = [
-  { id: "campaign-1" },
-  { id: "campaign-2" },
+  { id: "campaign-1", characterId: "character-1" },
+  { id: "campaign-2", characterId: "character-2" },
 ];
 
 const baseCharacters: CharacterFixture[] = [
@@ -275,6 +276,98 @@ function expectNoForbiddenRetroTerms(result: unknown) {
     /AD&D|OSR|THAC0|descending AC|AC descendente|saving throw vs|save vs death|gold for XP|XP por oro/i
   );
 }
+
+/**
+ * A Prisma double that behaves like Prisma on the two points that matter:
+ * it returns only what `select` named, and it refuses a field the model does
+ * not have. The permissive fake it replaces returned whatever it was asked
+ * for, which is how `campaignId` came to be selected from `Character` — a
+ * model with no such scalar — and why the ownership check reading it has
+ * never once fired.
+ */
+const CHARACTER_FIELDS = ["id", "stats", "level", "skillProficiencies"] as const;
+const NPC_FIELDS = ["id", "campaignId", "seed", "name", "disposition", "hasMetPlayer"] as const;
+const CAMPAIGN_FIELDS = ["id", "characterId", "userId", "status"] as const;
+
+function project<T extends Record<string, unknown>>(
+  model: string,
+  row: T | null,
+  known: readonly string[],
+  select?: Record<string, boolean>
+): Record<string, unknown> | null {
+  if (!select) return row;
+  for (const field of Object.keys(select)) {
+    if (!known.includes(field)) {
+      throw new Error(`Unknown field \`${field}\` for select statement on model \`${model}\`.`);
+    }
+  }
+  if (row === null) return null;
+  const out: Record<string, unknown> = {};
+  for (const field of Object.keys(select)) {
+    if (select[field]) out[field] = row[field as keyof T];
+  }
+  return out;
+}
+
+function makeSocialDb(rows: {
+  campaign: Record<string, unknown> | null;
+  character: Record<string, unknown> | null;
+  npc: Record<string, unknown> | null;
+}) {
+  const updates: Array<Record<string, unknown>> = [];
+  return {
+    updates,
+    campaign: {
+      findUnique: async (args: { where?: unknown; select?: Record<string, boolean> }) =>
+        project("Campaign", rows.campaign, CAMPAIGN_FIELDS, args.select),
+    },
+    character: {
+      findUnique: async (args: { where?: unknown; select?: Record<string, boolean> }) =>
+        project("Character", rows.character, CHARACTER_FIELDS, args.select),
+    },
+    nPC: {
+      findUnique: async (args: { where?: unknown; select?: Record<string, boolean> }) =>
+        project("NPC", rows.npc, NPC_FIELDS, args.select),
+      update: async (args: { data: Record<string, unknown> }) => {
+        updates.push(args.data);
+        return { ...rows.npc, ...args.data };
+      },
+    },
+  };
+}
+
+describe("makeSocialDb (a Prisma double that honours select)", () => {
+  it("returns only the fields a caller selected", async () => {
+    const db = makeSocialDb({
+      campaign: { id: "camp_1", characterId: "char_1", userId: "user_1" },
+      character: { id: "char_1", stats: { CHA: 14 }, level: 5, skillProficiencies: ["Persuasion"] },
+      npc: { id: "npc_1", campaignId: "camp_1", seed: "innkeeper_1", name: "Greta", disposition: 8, hasMetPlayer: true },
+    });
+
+    const row = await db.character.findUnique({
+      where: { id: "char_1" },
+      select: { id: true, stats: true },
+    });
+
+    expect(row).toEqual({ id: "char_1", stats: { CHA: 14 } });
+    expect(row).not.toHaveProperty("level");
+  });
+
+  it("refuses a select for a field the model does not have", async () => {
+    const db = makeSocialDb({
+      campaign: { id: "camp_1", characterId: "char_1", userId: "user_1" },
+      character: { id: "char_1", stats: {}, level: 1, skillProficiencies: [] },
+      npc: { id: "npc_1", campaignId: "camp_1", seed: "s", name: "n", disposition: 0, hasMetPlayer: true },
+    });
+
+    await expect(
+      db.character.findUnique({
+        where: { id: "char_1" },
+        select: { id: true, campaignId: true },
+      })
+    ).rejects.toThrow(/Unknown field .*campaignId.* on model .*Character/);
+  });
+});
 
 describe("social-service resolveSocialCheck contract", () => {
   let resolveSocialCheck: ResolveSocialCheck;
@@ -551,6 +644,25 @@ describe("social-service resolveSocialCheck contract", () => {
 
     const facts = (result.facts ?? result) as { proficiencyApplied?: number };
     expect(facts.proficiencyApplied).toBeGreaterThan(0);
+  });
+
+  it("rejects a character that does not belong to the campaign", async () => {
+    const db = makeSocialDb({
+      campaign: { id: "camp_1", characterId: "char_OTHER", userId: "user_1" },
+      character: { id: "char_1", stats: { CHA: 10 }, level: 1, skillProficiencies: [] },
+      npc: { id: "npc_1", campaignId: "camp_1", seed: "s", name: "n", disposition: 8, hasMetPlayer: true },
+    });
+
+    await expect(
+      resolveSocialCheck({
+        campaignId: "camp_1",
+        characterId: "char_1",
+        npcId: "npc_1",
+        approach: "persuade",
+        intent: "a room",
+        tx: db as never,
+      })
+    ).rejects.toMatchObject({ code: "CHARACTER_OWNERSHIP_MISMATCH" });
   });
 
   it("does not modify commerce or quests", async () => {

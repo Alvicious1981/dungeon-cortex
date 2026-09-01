@@ -22,7 +22,7 @@ interface DialogueOverlayProps {
     name: string;
     race: string | null;
     profession: string | null;
-    disposition: number;
+    disposition: number | null;
     personalityTags: {
       motivation: string;
       secret: string; // RECEIVED: for NPC context
@@ -32,6 +32,19 @@ interface DialogueOverlayProps {
   };
   narrationText: string;
   characterId: string;
+  result: {
+    approach: "persuade" | "intimidate" | "deceive";
+    skill: string;
+    roll: number;
+    total: number;
+    dc: number;
+    success: boolean;
+    attitudeBefore: string;
+    attitudeAfter: string;
+    dispositionBefore: number;
+    dispositionAfter: number;
+  } | null;
+  error: string | null;
   onSpeak: (words: string, approach: "persuade" | "intimidate" | "deceive") => void;
   onSocialIntent: (approach: "persuade" | "intimidate" | "deceive") => void;
   onAskRumors: () => void;
@@ -55,6 +68,8 @@ const DISPOSITION_COLORS: Record<NpcAttitude, string> = {
 export default function DialogueOverlay({
   npc,
   narrationText,
+  result,
+  error,
   onSpeak,
   onSocialIntent,
   onAskRumors,
@@ -69,6 +84,11 @@ export default function DialogueOverlay({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const band = attitudeFor(npc.disposition);
+  // Rendering-only fallback: an NPC with no disposition yet (never met, or
+  // simply unknown) is drawn at the meter's midpoint. `attitudeFor(null)`
+  // already treats this as Indifferent by design; this local value exists
+  // only for the numeric meter math below and is never sent back out.
+  const dispositionValue = npc.disposition ?? 0;
   /**
    * NEVER RENDER: secret is for engine use only. 
    * The player only sees Motivation and Distinctive Trait.
@@ -114,7 +134,7 @@ export default function DialogueOverlay({
     }
   }, [narrationText]);
 
-  const dispositionPercent = ((npc.disposition + 10) / 20) * 100;
+  const dispositionPercent = ((dispositionValue + 10) / 20) * 100;
 
   return (
     <div 
@@ -168,7 +188,9 @@ export default function DialogueOverlay({
               {band}
             </span>
             <div className="text-xs text-amber-500/40">
-              {npc.disposition > 0 ? "+" : ""}{npc.disposition} Engagement
+              {npc.disposition === null
+                ? "Unknown Engagement"
+                : `${npc.disposition > 0 ? "+" : ""}${npc.disposition} Engagement`}
             </div>
           </div>
         </header>
@@ -183,7 +205,7 @@ export default function DialogueOverlay({
           <div 
             className="h-2.5 w-full bg-[#08080c] rounded-full border border-neutral-900 overflow-hidden relative"
             role="meter"
-            aria-valuenow={npc.disposition}
+            aria-valuenow={dispositionValue}
             aria-valuemin={-10}
             aria-valuemax={10}
             aria-label="NPC Disposition"
@@ -209,7 +231,7 @@ export default function DialogueOverlay({
         <div className="flex-1 flex min-h-0">
           {/* Narration Log */}
           <section className="flex-1 p-6 overflow-y-auto bg-[#0a0a0f]" ref={scrollRef}>
-            <div 
+            <div
               className="text-amber-100/90 text-lg leading-relaxed whitespace-pre-wrap"
               style={{ fontFamily: "var(--font-crimson)" }}
             >
@@ -218,6 +240,41 @@ export default function DialogueOverlay({
                 <span className="inline-block w-2 h-4 ml-1 bg-amber-600 animate-pulse align-middle" />
               )}
             </div>
+
+            {/* Error feedback — a failed attempt says something, rather than looking like a no-op. */}
+            {error && (
+              <div
+                className="mt-4 border border-red-900/40 rounded-lg p-4 bg-red-950/20 text-sm text-red-300"
+                role="alert"
+                data-testid="social-check-error"
+              >
+                {error}
+              </div>
+            )}
+
+            {/* Resolved check facts — rendered as returned by the route, never narrated. */}
+            {result && (
+              <div
+                className="mt-4 border border-amber-900/30 rounded-lg p-4 bg-[#11111d] text-sm"
+                style={{ fontFamily: "var(--font-inter)" }}
+                data-testid="social-check-result"
+              >
+                <div className="flex items-center justify-between text-amber-200">
+                  <span className="font-bold uppercase tracking-widest text-xs">
+                    {result.skill} ({result.approach})
+                  </span>
+                  <span className={result.success ? "text-green-400" : "text-red-400"}>
+                    {result.success ? "Success" : "Failure"}
+                  </span>
+                </div>
+                <div className="mt-1 text-amber-100/80">
+                  Roll {result.roll} + modifiers = {result.total} vs DC {result.dc}
+                </div>
+                <div className="mt-1 text-amber-100/60 text-xs">
+                  {result.attitudeBefore} &rarr; {result.attitudeAfter}
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Personality Sidebar (Discoverable) */}
@@ -261,7 +318,7 @@ export default function DialogueOverlay({
           {npc.hasMetPlayer ? (
             <>
               {/* Intent Quick Actions */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-3" role="group" aria-label="Quick actions">
                 <button 
                   disabled={isLoading}
                   onClick={() => onSocialIntent("persuade")}
@@ -296,8 +353,8 @@ export default function DialogueOverlay({
                       key={mode}
                       onClick={() => setApproach(mode)}
                       className={`px-3 py-1 text-[9px] uppercase font-bold tracking-widest rounded-t border-t border-x transition-colors ${
-                        approach === mode 
-                          ? 'bg-[#0c0c16] text-amber-500 border-amber-900/40' 
+                        approach === mode
+                          ? 'bg-[#0c0c16] text-amber-500 border-amber-900/40'
                           : 'bg-transparent text-neutral-600 border-transparent hover:text-neutral-400'
                       }`}
                     >
@@ -332,13 +389,11 @@ export default function DialogueOverlay({
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={onAskRumors}
-                  disabled={isLoading || attitudeFor(npc.disposition) !== "Friendly"}
-                  className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors ${
-                    attitudeFor(npc.disposition) !== "Friendly" ? 'text-neutral-700 cursor-not-allowed' : 'text-amber-600 hover:text-amber-400'
-                  }`}
-                  aria-label={attitudeFor(npc.disposition) !== "Friendly" ? "Disposition too low to ask for rumors" : "Ask for rumors"}
+                  disabled
+                  title="Rumours are not available yet"
+                  className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors text-neutral-700 cursor-not-allowed"
                 >
-                  {attitudeFor(npc.disposition) !== "Friendly" ? "🔒" : "📜"} Gather Rumors
+                  🔒 Gather Rumors (not available yet)
                 </button>
                 <button 
                   onClick={onClose}
