@@ -10,7 +10,6 @@ import { type NPCRole } from "@/lib/rules/npc";
 import { resolveAbilityCheck, type AbilityCheckActor, type Skill } from "@/lib/rules/ability-check";
 import {
   NPCPersonality,
-  DispositionBand,
   DefaultNPCSocialState,
   SocialCheckInput,
   SocialCheckResult,
@@ -27,29 +26,6 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * SUPERSEDED — not the current model. Maps a numeric disposition value to
- * the five-band label (Hostile/Unfriendly/Indifferent/Friendly/Helpful)
- * inherited from 3.5e Diplomacy, not a 5e construct. The authoritative model
- * is `NpcAttitude`/`attitudeFor` (three 5e attitudes), used by every live
- * consumer. This function survives only because `getRumorsPayload` below
- * still calls it for `RumorPayload.dispositionBand`, and the rumour path was
- * explicitly out of scope for the SRD-conformance change (see
- * `.superpowers/sdd/2026-08-31-social-checks-srd-conformance/task-7-report.md`).
- * That path is itself unreachable in production: `getRumorsPayload` is
- * called only from `lib/rules/social-service.ts`, which is called only from
- * `lib/ai/tools/social.ts`'s `buildSocialTools`, and `buildSocialTools` has
- * had no caller in `buildNarratorTools` (`lib/ai/narrator.ts`) since commit
- * `a0bb009` — `buildNarratorTools` there now spreads only `buildSrdTools()`.
- * Verify with: `git show a0bb009 --stat` and reading `buildNarratorTools`.
- */
-export function getDispositionBand(disposition: number): DispositionBand {
-  if (disposition <= -7) return "Hostile";
-  if (disposition <= -2) return "Unfriendly";
-  if (disposition <=  2) return "Indifferent";
-  if (disposition <=  7) return "Friendly";
-  return "Helpful";
-}
 
 /** How far one check moves the stored disposition. */
 export const ATTITUDE_SHIFT = 4;
@@ -220,14 +196,19 @@ export function getRumorsPayload(
   nearbyNodes: Array<{ id: string; name: string; feature: string; description: string }>,
   knownRumors: string[] = [],
 ): RumorPayload {
-  const dispositionBand = getDispositionBand(disposition);
+  // Gated on the attitude every other rule reads, not on raw numbers. The
+  // thresholds this replaces — `< 3` to refuse, `< -2` to be hostile about it —
+  // matched neither the old five-band boundaries nor anything else in the
+  // codebase, so the rumour gate and the disposition meter could disagree
+  // about the same NPC.
+  const attitude = attitudeFor(disposition);
 
-  if (disposition < 3) {
+  if (attitude !== "Friendly") {
     const refusalReason =
-      disposition < -2
+      attitude === "Hostile"
         ? "This NPC is hostile and will not speak."
         : "This NPC is indifferent and unwilling to share information freely.";
-    return { npcName, disposition, dispositionBand, rumors: [], refusalReason };
+    return { npcName, disposition, attitude, rumors: [], refusalReason };
   }
 
   const rumors: RumorItem[] = nearbyNodes
@@ -251,5 +232,5 @@ export function getRumorsPayload(
     });
   });
 
-  return { npcName, disposition, dispositionBand, rumors };
+  return { npcName, disposition, attitude, rumors };
 }

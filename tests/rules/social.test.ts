@@ -183,7 +183,7 @@ describe("Rumor Schemas", () => {
   const validPayload = {
     npcName: "Bert",
     disposition: 5,
-    dispositionBand: "Friendly" as const,
+    attitude: "Friendly" as const,
     rumors: [validItem],
   };
 
