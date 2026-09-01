@@ -55,6 +55,12 @@ describe("POST /api/campaign/[id]/social", () => {
 
     expect(response.status).toBe(200);
     expect(resolveSocialCheck).toHaveBeenCalledTimes(1);
+    expect(resolveSocialCheck).toHaveBeenCalledWith({
+      campaignId: "camp_1",
+      npcId: "npc_1",
+      approach: "persuade",
+      intent: "a room",
+    });
     await expect(response.json()).resolves.toMatchObject({ attitudeAfter: "Hostile" });
   });
 
@@ -82,6 +88,16 @@ describe("POST /api/campaign/[id]/social", () => {
 
   it("refuses an unknown approach without resolving anything", async () => {
     const response = await POST(request({ npcId: "npc_1", approach: "seduce", intent: "x" }), { params });
+
+    expect(response.status).toBe(400);
+    expect(resolveSocialCheck).not.toHaveBeenCalled();
+  });
+
+  it("refuses a body with an extra, unrecognized field", async () => {
+    const response = await POST(
+      request({ npcId: "npc_1", approach: "persuade", intent: "x", roll: 20 }),
+      { params }
+    );
 
     expect(response.status).toBe(400);
     expect(resolveSocialCheck).not.toHaveBeenCalled();
