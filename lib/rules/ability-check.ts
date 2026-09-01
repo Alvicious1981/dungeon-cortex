@@ -301,8 +301,18 @@ export function resolveAbilityCheck(
     abilityModifier: abilityMod,
     proficiencyApplied,
     total,
-    // Natural 20 always succeeds; natural 1 always fails.
-    success: isCriticalSuccess || (!isCriticalFailure && total >= dc),
+    // The total against the DC, and nothing else. In D&D 5e/SRD 2014 a natural
+    // 20 or 1 has no special effect on an ability check — that rule belongs to
+    // attack rolls and death saving throws. This line used to read
+    // `isCriticalSuccess || (!isCriticalFailure && total >= dc)`, the same
+    // shape as `hit:` in `combat.ts`, where it is correct; it had been copied
+    // one layer up to a roll the SRD does not treat that way.
+    //
+    // The two critical fields below survive on purpose. Reporting that the die
+    // showed a 20 is a fact the narrator may use — `action/route.ts` appends
+    // exactly that to its log line — while letting the 20 decide the outcome
+    // is a mechanic. Only the second was wrong.
+    success: total >= dc,
     isCriticalSuccess,
     isCriticalFailure,
     rollMode,
