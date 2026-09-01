@@ -28,7 +28,20 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps a numeric disposition value to its human-readable band label.
+ * SUPERSEDED — not the current model. Maps a numeric disposition value to
+ * the five-band label (Hostile/Unfriendly/Indifferent/Friendly/Helpful)
+ * inherited from 3.5e Diplomacy, not a 5e construct. The authoritative model
+ * is `NpcAttitude`/`attitudeFor` (three 5e attitudes), used by every live
+ * consumer. This function survives only because `getRumorsPayload` below
+ * still calls it for `RumorPayload.dispositionBand`, and the rumour path was
+ * explicitly out of scope for the SRD-conformance change (see
+ * `.superpowers/sdd/2026-08-31-social-checks-srd-conformance/task-7-report.md`).
+ * That path is itself unreachable in production: `getRumorsPayload` is
+ * called only from `lib/rules/social-service.ts`, which is called only from
+ * `lib/ai/tools/social.ts`'s `buildSocialTools`, and `buildSocialTools` has
+ * had no caller in `buildNarratorTools` (`lib/ai/narrator.ts`) since commit
+ * `a0bb009` — `buildNarratorTools` there now spreads only `buildSrdTools()`.
+ * Verify with: `git show a0bb009 --stat` and reading `buildNarratorTools`.
  */
 export function getDispositionBand(disposition: number): DispositionBand {
   if (disposition <= -7) return "Hostile";
