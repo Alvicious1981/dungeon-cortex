@@ -25,7 +25,24 @@ function sourceFiles(dir: string): string[] {
 const ROOTS = ["lib", "app", "components", "scripts", "prisma"].map((dir) =>
   join(process.cwd(), dir),
 );
-const SOURCES = ROOTS.flatMap(sourceFiles);
+/**
+ * Every source file, read once at module load rather than inside each test.
+ *
+ * Reading the tree is fast on an idle machine and slow on a busy one, and
+ * inside a test that difference is the gap between passing and exceeding the
+ * five-second budget — this file failed that way repeatedly in one session
+ * while guarding code that had not changed. Module-level work happens during
+ * import, which no per-test timeout bounds, so the flake goes away instead of
+ * merely becoming less likely.
+ */
+const SOURCES: ReadonlyArray<readonly [string, string]> = ROOTS.flatMap(
+  sourceFiles,
+).map((path) => [path, readFileSync(path, "utf8")] as const);
+
+/** Repo-relative and forward-slashed, so the assertion reads the same on Windows. */
+function relative(path: string): string {
+  return path.replace(process.cwd(), "").replace(/\\/g, "/");
+}
 
 const SRD_LOOKUP = join(process.cwd(), "lib", "ai", "tools", "srd-lookup.ts");
 
@@ -51,21 +68,17 @@ function exportedNames(source: string): string[] {
 
 describe("SRD monster lookup architecture", () => {
   it("defines the monster query in exactly one module", () => {
-    const definers = SOURCES.filter((path) =>
-      /export\s+async\s+function\s+queryMonsters\s*\(/.test(
-        readFileSync(path, "utf8"),
-      ),
-    ).map((path) => path.replace(process.cwd(), "").replace(/\\/g, "/"));
+    const definers = SOURCES.filter(([, text]) =>
+      /export\s+async\s+function\s+queryMonsters\s*\(/.test(text),
+    ).map(([path]) => relative(path));
 
     expect(definers).toEqual(["/lib/rules/srd-monster-lookup.ts"]);
   });
 
   it("defines the monster raw-data helper in exactly one module", () => {
-    const definers = SOURCES.filter((path) =>
-      /export\s+function\s+buildMonsterRawData\s*\(/.test(
-        readFileSync(path, "utf8"),
-      ),
-    ).map((path) => path.replace(process.cwd(), "").replace(/\\/g, "/"));
+    const definers = SOURCES.filter(([, text]) =>
+      /export\s+function\s+buildMonsterRawData\s*\(/.test(text),
+    ).map(([path]) => relative(path));
 
     expect(definers).toEqual(["/lib/rules/srd-monster-lookup.ts"]);
   });

@@ -25,23 +25,42 @@ function sourceFiles(dir: string): string[] {
 const ROOTS = ["app", "lib", "components"].map((dir) =>
   join(process.cwd(), dir),
 );
-const SOURCES = ROOTS.flatMap(sourceFiles);
+
+/**
+ * Every source file, read once at module load rather than inside each test.
+ *
+ * Reading two hundred files is fast on an idle machine and slow on a busy
+ * one, and inside a test that difference is the gap between passing and
+ * exceeding the five-second budget — this file failed that way three times
+ * in one session while guarding code that had not changed. Module-level work
+ * happens during import, which no per-test timeout bounds, so the flake goes
+ * away instead of merely becoming less likely.
+ */
+const SOURCES: ReadonlyArray<readonly [string, string]> = ROOTS.flatMap(
+  sourceFiles,
+).map((path) => [path, readFileSync(path, "utf8")] as const);
+
+/** Repo-relative and forward-slashed, so the assertion reads the same on Windows. */
+function relative(path: string): string {
+  return path.replace(process.cwd(), "").replace(/\\/g, "/");
+}
 
 describe("one banding rule", () => {
   it("defines attitudeFor in exactly one module", () => {
-    const definers = SOURCES.filter((path) =>
-      /function\s+attitudeFor\s*\(/.test(readFileSync(path, "utf8")),
-    ).map((path) => path.replace(process.cwd(), "").replace(/\\/g, "/"));
+    const definers = SOURCES.filter(([, text]) =>
+      /function\s+attitudeFor\s*\(/.test(text),
+    ).map(([path]) => relative(path));
 
     expect(definers).toEqual(["/lib/rules/social-logic.ts"]);
   });
 
   it("leaves no second copy of the old banding thresholds in the UI", () => {
-    const components = sourceFiles(join(process.cwd(), "components"));
-    for (const file of components) {
-      expect(readFileSync(file, "utf8")).not.toMatch(
-        /function\s+getDispositionBand/,
-      );
-    }
+    const copies = SOURCES.filter(
+      ([path, text]) =>
+        relative(path).startsWith("/components/") &&
+        /function\s+getDispositionBand/.test(text),
+    ).map(([path]) => relative(path));
+
+    expect(copies).toEqual([]);
   });
 });
