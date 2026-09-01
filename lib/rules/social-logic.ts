@@ -38,22 +38,6 @@ export function getDispositionBand(disposition: number): DispositionBand {
   return "Helpful";
 }
 
-/**
- * Maps a modified D&D 5e d20 ability check total to a DispositionBand.
- *
- * Unused now that initial attitude is derived rather than rolled (see
- * `initialAttitudeFor` below). Left in place — a later task removes this
- * together with `getDispositionBand`, its remaining sibling.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept intentionally; see doc comment above.
-function getBandFromD20Total(total: number): DispositionBand {
-  if (total <= 5)  return "Hostile";
-  if (total <= 9)  return "Unfriendly";
-  if (total <= 14) return "Indifferent";
-  if (total <= 19) return "Friendly";
-  return "Helpful";
-}
-
 /** How far one check moves the stored disposition. */
 export const ATTITUDE_SHIFT = 4;
 

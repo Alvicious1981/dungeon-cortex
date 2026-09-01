@@ -218,11 +218,4 @@ describe("NPC attitude", () => {
     expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Indifferent]).toBe(15);
     expect(DIFFICULTY_DC[ATTITUDE_DIFFICULTY.Friendly]).toBe(10);
   });
-
-  it("draws every DC from the SRD difficulty table", () => {
-    const canonical = Object.values(DIFFICULTY_DC) as number[];
-    for (const attitude of NPC_ATTITUDES) {
-      expect(canonical).toContain(DIFFICULTY_DC[ATTITUDE_DIFFICULTY[attitude]]);
-    }
-  });
 });

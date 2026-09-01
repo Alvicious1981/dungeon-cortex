@@ -202,8 +202,11 @@ function assertApproach(approach: string): asserts approach is SocialApproach {
  * Builds the actor `resolveSocialCheck` (the pure function) rolls against,
  * from a loosely-typed persisted character record. Unknown or malformed
  * stats/level/proficiencies degrade to safe defaults rather than throwing —
- * this wrapper is dead code (see module note below) and its job here is only
- * to shape the call, not to validate the database.
+ * this wrapper is dead code and its job here is only to shape the call, not
+ * to validate the database. Dead since commit a0bb009 removed `buildSocialTools`
+ * from `buildNarratorTools`: `buildNarratorTools` in `lib/ai/narrator.ts` now
+ * spreads only `buildSrdTools()`, so nothing calls this module's exports from
+ * production.
  */
 function toAbilityCheckActor(character: SocialCharacterRecord): AbilityCheckActor {
   const stats =
