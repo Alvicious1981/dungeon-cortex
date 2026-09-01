@@ -460,8 +460,11 @@ const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
  *
  * - Unmet NPC: identifies that the NPC has not yet met the character.
  * - Met NPC: injects attitude, icon, motivation, and distinctive trait.
- *   The secret is intentionally withheld from the narrator prompt to prevent
- *   premature disclosure — it is revealed only at Friendly attitude.
+ *   The NPC's secret is never included here — `personalityTags.secret`
+ *   is campaign data the narrator is not given, at any attitude. Do not
+ *   add a note telling the model to "reveal" it: the model was never
+ *   handed the secret, so an instruction to reveal it only invites the
+ *   model to fabricate one, which breaches Code is Law (no invented facts).
  *
  * @pure — no I/O, deterministic output for the same input.
  */
@@ -482,15 +485,6 @@ export function formatNPCContext(npc: ActiveNPC): string {
   if (tags) {
     lines.push(`**Motivation:** ${tags.motivation}`);
     lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);
-  }
-
-  if (attitude === "Friendly" && tags) {
-    lines.push(`**Secret:** ${tags.secret}`);
-  } else {
-    lines.push(
-      "*(Note: The NPC's secret is known to them but concealed from the party. " +
-      "Reveal it only if disposition reaches Friendly and the player asks the right question.)*"
-    );
   }
 
   return lines.join("\n");

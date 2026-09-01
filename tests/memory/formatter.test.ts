@@ -178,15 +178,14 @@ describe("formatNPCContext — attitude", () => {
     expect(line).not.toContain("Helpful");
   });
 
-  it("withholds the secret below Friendly", () => {
-    const line = formatNPCContext({ ...metNPC, disposition: 0 });
-    expect(line).toContain("Indifferent");
-    expect(line).not.toContain("owe money to people");
-  });
+  it("never discloses the NPC's secret, at any attitude", () => {
+    const hostile = formatNPCContext({ ...metNPC, disposition: -8 });
+    const indifferent = formatNPCContext({ ...metNPC, disposition: 0 });
+    const friendly = formatNPCContext({ ...metNPC, disposition: 7 });
 
-  it("offers the secret at Friendly", () => {
-    const line = formatNPCContext({ ...metNPC, disposition: 7 });
-    expect(line).toContain("owe money to people");
+    expect(hostile).not.toContain("owe money to people");
+    expect(indifferent).not.toContain("owe money to people");
+    expect(friendly).not.toContain("owe money to people");
   });
 });
 
