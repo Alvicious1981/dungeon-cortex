@@ -45,6 +45,16 @@ interface DialogueOverlayProps {
     dispositionAfter: number;
   } | null;
   error: string | null;
+  /**
+   * What the NPC said when asked what they had heard. A refusal is a normal
+   * answer, not an error: `rumors` is empty and `refusalReason` explains why,
+   * which is a fact the player should read rather than an empty panel.
+   */
+  rumors: {
+    attitude: string;
+    rumors: Array<{ nodeId: string; nodeName: string; rumor: string; source: string }>;
+    refusalReason?: string;
+  } | null;
   onSpeak: (words: string, approach: "persuade" | "intimidate" | "deceive") => void;
   onSocialIntent: (approach: "persuade" | "intimidate" | "deceive") => void;
   onAskRumors: () => void;
@@ -70,6 +80,7 @@ export default function DialogueOverlay({
   narrationText,
   result,
   error,
+  rumors,
   onSpeak,
   onSocialIntent,
   onAskRumors,
@@ -241,6 +252,27 @@ export default function DialogueOverlay({
               )}
             </div>
 
+            {/* What the NPC had to say when asked. A refusal renders as their
+                answer, not as an empty list or an error. */}
+            {rumors && (
+              <div
+                className="mt-4 border border-amber-900/30 rounded-lg p-4 bg-amber-950/10 text-sm"
+                data-testid="rumor-payload"
+              >
+                {rumors.refusalReason ? (
+                  <p className="text-neutral-400 italic">{rumors.refusalReason}</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {rumors.rumors.map((r) => (
+                      <li key={r.nodeId} className="text-amber-200/90">
+                        {r.rumor}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             {/* Error feedback — a failed attempt says something, rather than looking like a no-op. */}
             {error && (
               <div
@@ -389,11 +421,11 @@ export default function DialogueOverlay({
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={onAskRumors}
-                  disabled
-                  title="Rumours are not available yet"
-                  className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors text-neutral-700 cursor-not-allowed"
+                  disabled={isLoading}
+                  title="Ask what this NPC has heard"
+                  className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors text-amber-600 hover:text-amber-400 disabled:opacity-50"
                 >
-                  🔒 Gather Rumors (not available yet)
+                  📜 Gather Rumors
                 </button>
                 <button 
                   onClick={onClose}
