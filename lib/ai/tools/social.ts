@@ -197,7 +197,7 @@ export function buildSocialTools(
     getRumors: tool({
       description:
         "Ask an NPC what they know about nearby areas. " +
-        "Only NPCs with disposition ≥ 3 (Friendly or better) will share information. " +
+        "Only NPCs with a Friendly attitude will share information. " +
         "The returned rumors are derived ENTIRELY from persisted database records — " +
         "the NPC cannot share information the world does not contain. " +
         "MUST be called when a player asks an NPC for directions, local knowledge, " +

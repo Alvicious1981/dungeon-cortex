@@ -315,7 +315,7 @@ async function resolveSocialCheckInTransaction(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
-    select: { id: true, campaignId: true, stats: true },
+    select: { id: true, campaignId: true, stats: true, level: true, skillProficiencies: true },
   });
   if (!character) {
     throw new SocialServiceError(

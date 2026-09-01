@@ -332,13 +332,13 @@ export default function DialogueOverlay({
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={onAskRumors}
-                  disabled={isLoading || attitudeFor(npc.disposition) === "Hostile"}
+                  disabled={isLoading || attitudeFor(npc.disposition) !== "Friendly"}
                   className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors ${
-                    attitudeFor(npc.disposition) === "Hostile" ? 'text-neutral-700 cursor-not-allowed' : 'text-amber-600 hover:text-amber-400'
+                    attitudeFor(npc.disposition) !== "Friendly" ? 'text-neutral-700 cursor-not-allowed' : 'text-amber-600 hover:text-amber-400'
                   }`}
-                  aria-label={attitudeFor(npc.disposition) === "Hostile" ? "Disposition too low to ask for rumors" : "Ask for rumors"}
+                  aria-label={attitudeFor(npc.disposition) !== "Friendly" ? "Disposition too low to ask for rumors" : "Ask for rumors"}
                 >
-                  {attitudeFor(npc.disposition) === "Hostile" ? "🔒" : "📜"} Gather Rumors
+                  {attitudeFor(npc.disposition) !== "Friendly" ? "🔒" : "📜"} Gather Rumors
                 </button>
                 <button 
                   onClick={onClose}

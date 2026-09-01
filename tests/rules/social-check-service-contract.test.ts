@@ -8,6 +8,8 @@ type CharacterFixture = {
   id: string;
   campaignId: string;
   stats: Record<string, number>;
+  level?: number;
+  skillProficiencies?: string[];
 };
 
 type NpcFixture = {
@@ -141,8 +143,25 @@ function createTx(options?: {
       ),
     },
     character: {
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
-        characters.find((character) => character.id === where.id) ?? null
+      findUnique: vi.fn(
+        async ({
+          where,
+          select,
+        }: {
+          where: { id: string };
+          select?: Record<string, boolean>;
+        }) => {
+          const character = characters.find((c) => c.id === where.id);
+          if (!character) return null;
+          if (!select) return character;
+          const projected: Record<string, unknown> = {};
+          for (const key of Object.keys(select)) {
+            if (select[key]) {
+              projected[key] = (character as unknown as Record<string, unknown>)[key];
+            }
+          }
+          return projected;
+        }
       ),
     },
     nPC: {
@@ -511,6 +530,27 @@ describe("social-service resolveSocialCheck contract", () => {
       success: true,
     });
     expect(JSON.stringify(result.facts ?? result)).toMatch(/5e|SRD|d20/i);
+  });
+
+  it("applies the character's SRD proficiency bonus when the approach's skill is a known proficiency", async () => {
+    const { tx } = createTx({
+      characters: [
+        {
+          id: "character-1",
+          campaignId: "campaign-1",
+          stats: { CHA: 14 },
+          level: 5,
+          skillProficiencies: ["Persuasion"],
+        },
+        { id: "character-2", campaignId: "campaign-2", stats: { CHA: 8 } },
+      ],
+    });
+    mockNaturalRoll(15);
+
+    const result = await resolveSocialCheck(input(tx, { approach: "persuade" }));
+
+    const facts = (result.facts ?? result) as { proficiencyApplied?: number };
+    expect(facts.proficiencyApplied).toBeGreaterThan(0);
   });
 
   it("does not modify commerce or quests", async () => {

@@ -10,6 +10,7 @@
 
 import { abilityModifier } from "@/lib/rules/dice";
 import { attitudeFor } from "@/lib/rules/social-logic";
+import type { NpcAttitude } from "@/lib/rules/social";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,13 +87,13 @@ const STAT_KEYS: ReadonlyArray<keyof AbilityScores> = [
   "STR", "DEX", "CON", "INT", "WIS", "CHA",
 ];
 
-const DISPOSITION_ICONS: Record<string, string> = {
+const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile: "💀",
   Indifferent: "👁️",
   Friendly: "🤝"
 };
 
-const DISPOSITION_COLORS: Record<string, string> = {
+const DISPOSITION_COLORS: Record<NpcAttitude, string> = {
   Hostile: "#ef4444",
   Indifferent: "#71717a",
   Friendly: "#22c55e"
