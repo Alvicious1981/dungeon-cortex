@@ -485,6 +485,21 @@ export function formatNPCContext(npc: ActiveNPC): string {
   if (tags) {
     lines.push(`**Motivation:** ${tags.motivation}`);
     lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);
+
+    // The secret travels only once the NPC regards the party as Friendly, and
+    // never without the condition attached. An earlier version of this
+    // function did the opposite — it told the narrator to reveal a secret it
+    // was never given, which left the model nothing to disclose but an
+    // invention. Handing over the real fact is what stops that; the sentence
+    // below is what stops the fact being volunteered the moment it arrives.
+    if (attitude === "Friendly") {
+      lines.push(`**Secret:** ${tags.secret}`);
+      lines.push(
+        "*(This secret is yours only because the NPC now trusts the party. " +
+        "Do not volunteer it — let it surface only if the player earns it in " +
+        "conversation.)*"
+      );
+    }
   }
 
   return lines.join("\n");

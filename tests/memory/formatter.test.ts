@@ -178,14 +178,36 @@ describe("formatNPCContext — attitude", () => {
     expect(line).not.toContain("Helpful");
   });
 
-  it("never discloses the NPC's secret, at any attitude", () => {
+  it("withholds the secret below Friendly", () => {
     const hostile = formatNPCContext({ ...metNPC, disposition: -8 });
     const indifferent = formatNPCContext({ ...metNPC, disposition: 0 });
-    const friendly = formatNPCContext({ ...metNPC, disposition: 7 });
 
     expect(hostile).not.toContain("owe money to people");
     expect(indifferent).not.toContain("owe money to people");
-    expect(friendly).not.toContain("owe money to people");
+  });
+
+  it("gives the narrator the secret at Friendly", () => {
+    const friendly = formatNPCContext({ ...metNPC, disposition: 7 });
+
+    expect(friendly).toContain("owe money to people");
+  });
+
+  /**
+   * The narrator receives the secret, so it no longer has to invent one — but
+   * a fact handed over without a condition is a fact the model may volunteer
+   * on its first turn. This asserts the constraint travels with the data.
+   */
+  it("tells the narrator the secret must be earned, not volunteered", () => {
+    const friendly = formatNPCContext({ ...metNPC, disposition: 7 });
+
+    expect(friendly).toContain("Do not volunteer it");
+  });
+
+  it("sends no secret line when the NPC has no personality tags", () => {
+    const untagged = formatNPCContext({ ...metNPC, disposition: 7, personalityTags: null });
+
+    expect(untagged).not.toContain("**Secret:**");
+    expect(untagged).not.toContain("Do not volunteer it");
   });
 });
 
