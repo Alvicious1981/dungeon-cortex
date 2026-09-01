@@ -455,6 +455,19 @@ const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
 };
 
 /**
+ * The stored disposition at which an NPC's secret reaches the narrator.
+ *
+ * Deliberately a number, where everything else in this area now speaks in
+ * attitudes. Attitude drives the mechanics — it sets the DC of a social check
+ * — and it has only three bands, the highest of which begins at 4. Being
+ * liked is not the same as being trusted with something that could hurt you,
+ * so this sits above where Friendly starts. Eight is where the original
+ * five-band design put it, at the top of a longer ladder; keeping the number
+ * keeps that intent after the ladder got shorter.
+ */
+const SECRET_DISCLOSURE_DISPOSITION = 8;
+
+/**
  * Returns a "## 🎭 NPC" prompt section for the AI, grounding the narrator in
  * the NPC's persisted personality and current disposition.
  *
@@ -486,13 +499,13 @@ export function formatNPCContext(npc: ActiveNPC): string {
     lines.push(`**Motivation:** ${tags.motivation}`);
     lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);
 
-    // The secret travels only once the NPC regards the party as Friendly, and
-    // never without the condition attached. An earlier version of this
-    // function did the opposite — it told the narrator to reveal a secret it
-    // was never given, which left the model nothing to disclose but an
-    // invention. Handing over the real fact is what stops that; the sentence
-    // below is what stops the fact being volunteered the moment it arrives.
-    if (attitude === "Friendly") {
+    // The secret travels only above the disclosure threshold, and never
+    // without the condition attached. An earlier version of this function did
+    // the opposite — it told the narrator to reveal a secret it was never
+    // given, which left the model nothing to disclose but an invention.
+    // Handing over the real fact is what stops that; the sentence below is
+    // what stops the fact being spent the moment it arrives.
+    if ((npc.disposition ?? 0) >= SECRET_DISCLOSURE_DISPOSITION) {
       lines.push(`**Secret:** ${tags.secret}`);
       lines.push(
         "*(This secret is yours only because the NPC now trusts the party. " +

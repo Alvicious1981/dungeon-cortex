@@ -178,7 +178,7 @@ describe("formatNPCContext — attitude", () => {
     expect(line).not.toContain("Helpful");
   });
 
-  it("withholds the secret below Friendly", () => {
+  it("withholds the secret at hostile and indifferent dispositions", () => {
     const hostile = formatNPCContext({ ...metNPC, disposition: -8 });
     const indifferent = formatNPCContext({ ...metNPC, disposition: 0 });
 
@@ -186,10 +186,22 @@ describe("formatNPCContext — attitude", () => {
     expect(indifferent).not.toContain("owe money to people");
   });
 
-  it("gives the narrator the secret at Friendly", () => {
-    const friendly = formatNPCContext({ ...metNPC, disposition: 7 });
+  /**
+   * The boundary that proves the gate is the threshold and not the attitude.
+   * Disposition 7 is Friendly — the top attitude — and the secret still does
+   * not travel. Being liked is not the same as being trusted with this.
+   */
+  it("withholds the secret from a Friendly NPC below the threshold", () => {
+    const friendlyButGuarded = formatNPCContext({ ...metNPC, disposition: 7 });
 
-    expect(friendly).toContain("owe money to people");
+    expect(friendlyButGuarded).toContain("Friendly");
+    expect(friendlyButGuarded).not.toContain("owe money to people");
+  });
+
+  it("gives the narrator the secret at the disclosure threshold", () => {
+    const trusted = formatNPCContext({ ...metNPC, disposition: 8 });
+
+    expect(trusted).toContain("owe money to people");
   });
 
   /**
@@ -198,13 +210,13 @@ describe("formatNPCContext — attitude", () => {
    * on its first turn. This asserts the constraint travels with the data.
    */
   it("tells the narrator the secret must be earned, not volunteered", () => {
-    const friendly = formatNPCContext({ ...metNPC, disposition: 7 });
+    const trusted = formatNPCContext({ ...metNPC, disposition: 8 });
 
-    expect(friendly).toContain("Do not volunteer it");
+    expect(trusted).toContain("Do not volunteer it");
   });
 
   it("sends no secret line when the NPC has no personality tags", () => {
-    const untagged = formatNPCContext({ ...metNPC, disposition: 7, personalityTags: null });
+    const untagged = formatNPCContext({ ...metNPC, disposition: 8, personalityTags: null });
 
     expect(untagged).not.toContain("**Secret:**");
     expect(untagged).not.toContain("Do not volunteer it");
