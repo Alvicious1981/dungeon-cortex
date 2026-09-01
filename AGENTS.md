@@ -344,6 +344,18 @@ mismatch survives a green suite.
     still gets through. **The defect is worth remembering even though it is
     closed:** it sat on the live path the whole time the review attention was
     on the dead one.
+  - **`lib/rules/social-service.ts` has the same defect, found 2026-09-01.**
+    Its character lookup selects `campaignId`, and `Character` has no such
+    scalar — only the `campaigns Campaign[]` relation — so real Prisma throws
+    `Unknown field campaignId` on the first call. Worse, lines 237 and 246
+    read that field to check ownership, so **the character ownership guard has
+    never checked anything.** Same cause as trade's: `resolveDb` casts Prisma
+    through a hand-written interface, and the contract test injects a fake
+    `tx` that returns whatever it is asked for. Repairing it is scoped into
+    `docs/superpowers/specs/2026-09-01-social-actions-reachable-design.md`,
+    which gives the module its first production caller. **Two modules with the
+    same phantom field is a pattern, not a coincidence — assume the other
+    service wrappers have it too until each is read against `schema.prisma`.**
   - `lib/rules/trade-service.ts` **does not match the schema.** `InventoryItem`
     has no `campaignId` column and `Character` has no `campaignId` field, yet
     the service passes `campaignId` to `inventoryItem.create` (real Prisma
