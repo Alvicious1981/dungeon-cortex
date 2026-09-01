@@ -227,14 +227,11 @@ function assertCharacterOwnership(
   characterId: string,
   campaignId: string
 ): void {
-  if (campaign.characterId && campaign.characterId !== characterId) {
-    throw new SocialServiceError(
-      "CHARACTER_OWNERSHIP_MISMATCH",
-      `Character ${characterId} does not belong to campaign ${campaignId}.`
-    );
-  }
-
-  if (character.campaignId && character.campaignId !== campaignId) {
+  // `Character` has no campaignId scalar — only a campaigns relation — so the
+  // earlier version of this check read `character.campaignId`, was always
+  // undefined, and never once fired. `Campaign.characterId` is the field that
+  // actually records the link, and this function already has the campaign row.
+  if (campaign.characterId !== characterId) {
     throw new SocialServiceError(
       "CHARACTER_OWNERSHIP_MISMATCH",
       `Character ${characterId} does not belong to campaign ${campaignId}.`
@@ -315,7 +312,7 @@ async function resolveSocialCheckInTransaction(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
-    select: { id: true, campaignId: true, stats: true, level: true, skillProficiencies: true },
+    select: { id: true, stats: true, level: true, skillProficiencies: true },
   });
   if (!character) {
     throw new SocialServiceError(
