@@ -110,19 +110,29 @@ const KNOWN_OUTSTANDING_DRIFT: Record<string, string[]> = {};
  * repara nada. Cierra la vía por la que el daño podía pasar inadvertido; no
  * cierra la deuda.
  *
- * SEC-AI-001 PR3 (que activa applyLevelUp) SIGUE BLOQUEADO por dos motivos
- * todavía abiertos:
+ * NOTA 2026-09-02: la cabecera de abajo decía que "SEC-AI-001 PR3 (que activa
+ * applyLevelUp) SIGUE BLOQUEADO". Ya no es cierto por dos vías comprobadas:
+ * `applyLevelUp` está **activo en producción** (`app/api/campaign/[id]/
+ * level-up/route.ts:106`), y la Issue #66 se cerró como *completada* el
+ * 2026-08-30 registrando PR3 como sustituida, no aplazada. De los dos motivos
+ * siguientes, el segundo describe un contrato que ya no existe; el primero
+ * sigue abierto.
+ *
+ * SEC-AI-001 PR3 se daba por bloqueado por dos motivos:
  *
  *   1. No existe la herramienta TypeScript de diagnóstico y reparación. La
  *      guarda aborta, pero nadie repara: un hitDiceTotal incorrecto sigue
  *      haciendo que applyLevelUp rechace la subida con INVALID_LEVEL_UP_STATE
  *      de forma permanente para ese personaje.
  *
- *   2. El contrato multinivel entre applyExperienceAward y applyLevelUp sigue
- *      desajustado: el primero puede subir varios niveles de una sola concesión
- *      de XP sin tocar hitDiceTotal, y el segundo solo acepta exactamente un
- *      nivel pendiente. Es la causa raíz de la ambigüedad, y ninguna migración
- *      puede resolverla.
+ *   2. RESUELTO por construcción. Decía que el contrato multinivel estaba
+ *      desajustado porque `applyExperienceAward` podía subir varios niveles de
+ *      una concesión sin tocar hitDiceTotal, mientras applyLevelUp solo acepta
+ *      un nivel pendiente. Ese productor ya no existe: el único premio de XP
+ *      vivo es `combat-pipeline.ts`, que escribe `xp: { increment }` y **nunca
+ *      `level`**, así que el desajuste no puede volver a producirse. Las filas
+ *      ya ambiguas en la base siguen siéndolo — eso es lo que diagnostica
+ *      `scripts/diagnose-model-e-transition.ts`.
  */
 
 /** Modelos que el historial no crea en absoluto. Deuda separada, no de progresión. */
