@@ -6,6 +6,8 @@ import type {
   SingleTargetConsequence,
 } from "@/lib/events/game-events";
 import { abilityModifier, roll } from "@/lib/rules/dice";
+import { seededFloat } from "@/lib/rules/generators";
+import { grantLoot } from "@/lib/rules/loot-service";
 import {
   advanceTurn,
   computeConsequences,
@@ -623,6 +625,55 @@ export async function finalizeEncounterTurn(
               where: { id: encounterCampaign.campaign.characterId },
               data: { xp: { increment: combatAward } },
             });
+          }
+        }
+
+        // Loot, on the same certified victory that pays XP.
+        //
+        // The victory prompt has always told the narrator that "Loot, XP, and
+        // state changes are resolved by the backend action pipeline". XP was;
+        // loot was not, and nothing else granted it either — buying was the
+        // only way to gain an item or gold. An instruction about a fact that
+        // never arrives is an invitation to invent one.
+        //
+        // `tensionScore` rather than an explicit gold/items figure: that is
+        // the service's deterministic branch, seeded on the encounter id, so
+        // the same encounter always yields the same loot. Passing numbers
+        // here would be deciding mechanics at the call site.
+        //
+        // The score itself is derived, not read: `Encounter` has no
+        // `tensionScore` column — the field on the memory-context type is
+        // never populated by any query. `seededFloat(id + ":tension")` is the
+        // repository's one live convention for this exact gap (generator.ts,
+        // the treasure branch), and keeps the same encounter paying the same
+        // loot on any replay.
+        //
+        // `grantLoot` has no idempotency guard of its own and does not need
+        // one here: this sits inside `claim.count === 1`, and the conditional
+        // claim above is what makes the whole reward path once-only.
+        //
+        // A loot failure must not undo a resolved encounter. The claim has
+        // already committed the transition, and an unpaid reward is a
+        // recoverable state where an un-resolvable encounter is not.
+        // A lookup of its own rather than widening the XP path's: that one's
+        // exact select shape is pinned by a test asserting the recipient comes
+        // from persisted state, and it sits behind `combatAward > 0` while
+        // loot is owed on any certified victory.
+        const lootEncounter = await tx.encounter.findUnique({
+          where: { id: encounterId },
+          select: { campaignId: true },
+        });
+
+        if (lootEncounter?.campaignId) {
+          try {
+            await grantLoot({
+              campaignId: lootEncounter.campaignId,
+              encounterId,
+              tensionScore: seededFloat(`${encounterId}:tension`),
+              tx: tx as unknown as Parameters<typeof grantLoot>[0]["tx"],
+            });
+          } catch {
+            // Swallowed deliberately — see above.
           }
         }
       }
