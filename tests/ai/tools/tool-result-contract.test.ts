@@ -46,7 +46,6 @@ const services = vi.hoisted(() => ({
   moveCampaignToNode: vi.fn(),
   resolveTravelWatch: vi.fn(),
   generateMundaneLoot: vi.fn(),
-  searchMemories: vi.fn(),
   srdFindUnique: vi.fn(),
   srdFindMany: vi.fn(),
 }));
@@ -101,7 +100,6 @@ vi.mock("@/lib/rules/generators", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/generators")>()),
   generateMundaneLoot: services.generateMundaneLoot,
 }));
-vi.mock("@/lib/memory/search", () => ({ searchMemories: services.searchMemories }));
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     srdSpell: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
@@ -130,7 +128,7 @@ function buildCatalogue(): Record<string, { execute: (...args: unknown[]) => unk
     ...buildSocialTools(CAMPAIGN_ID),
     ...buildExplorationTools(CAMPAIGN_ID),
     executeTravelWatch: buildWildernessTool(CAMPAIGN_ID),
-    ...buildWorldTools(CAMPAIGN_ID),
+    ...buildWorldTools(),
     ...buildSrdTools(),
   } as never;
 }
@@ -160,7 +158,6 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   executeExplorationTurn: { action: "search", turnsToAdvance: 1 },
   executeTravelWatch: { action: "travel", direction: "north", pace: "normal" },
   getMundaneLoot: { entityId: "entity-1" },
-  recallLore: { query: "the sunken vault" },
   getSpellInfo: { query: "fireball" },
   getItemInfo: { query: "cloak of protection" },
   getEquipmentInfo: { query: "longsword" },
@@ -216,7 +213,6 @@ function primeSuccess(): void {
   });
   services.resolveTravelWatch.mockResolvedValue({ watch: "Dawn", discovered: true });
   services.generateMundaneLoot.mockReturnValue("a bent copper coin");
-  services.searchMemories.mockResolvedValue("The vault flooded two winters ago.");
   services.srdFindUnique.mockResolvedValue({
     id: "fireball",
     name: "Fireball",
@@ -300,10 +296,10 @@ beforeEach(() => {
 });
 
 describe("narrator tool catalogue", () => {
-  it("contains exactly the 18 known tools", () => {
+  it("contains exactly the 17 known tools", () => {
     const catalogue = Object.keys(buildCatalogue());
 
-    expect(catalogue).toHaveLength(18);
+    expect(catalogue).toHaveLength(17);
     expect(catalogue.sort()).toEqual([...CATALOGUE_NAMES].sort());
   });
 });

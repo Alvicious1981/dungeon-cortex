@@ -28,10 +28,10 @@ describe("narrator tool policy", () => {
     expect(getActiveNarratorToolNames()).toHaveLength(4);
   });
 
-  it("keeps recallLore and getRumors out of the active set", () => {
-    const active = [...getActiveNarratorToolNames()];
-    expect(active).not.toContain("recallLore");
-    expect(active).not.toContain("getRumors");
+  it("keeps getRumors out of the active set", () => {
+    // `recallLore` used to be asserted here too. It was deleted, and an
+    // assertion that a non-existent name is absent cannot fail.
+    expect([...getActiveNarratorToolNames()]).not.toContain("getRumors");
   });
 
   it("contains no state-mutating tool", () => {
@@ -47,11 +47,10 @@ describe("narrator tool policy", () => {
       "moveToNode",
       "executeExplorationTurn",
       "executeTravelWatch",
-      "recallLore",
         ];
 
     // The model-visible surface contains only the four listed tools.
-    expect(stateMutatingTools).toHaveLength(12);
+    expect(stateMutatingTools).toHaveLength(11);
     for (const toolName of stateMutatingTools) {
       expect([...getActiveNarratorToolNames()]).not.toContain(toolName);
     }
