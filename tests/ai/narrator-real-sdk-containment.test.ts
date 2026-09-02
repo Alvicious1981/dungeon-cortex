@@ -12,7 +12,6 @@ import { MockLanguageModelV3 } from "ai/test";
 const services = vi.hoisted(() => ({
   getCampaignCharacterIdForTrade: vi.fn(),
   resolveTradeTransaction: vi.fn(),
-  equipCharacterItem: vi.fn(),
   resolveSocialCheck: vi.fn(),
   resolveRumors: vi.fn(),
 }));
@@ -20,10 +19,6 @@ const services = vi.hoisted(() => ({
 vi.mock("@/lib/rules/trade-service", () => ({
   getCampaignCharacterIdForTrade: services.getCampaignCharacterIdForTrade,
   resolveTradeTransaction: services.resolveTradeTransaction,
-}));
-
-vi.mock("@/lib/rules/equipment-service", () => ({
-  equipCharacterItem: services.equipCharacterItem,
 }));
 
 vi.mock("@/lib/rules/social-service", () => ({
@@ -99,7 +94,6 @@ describe("narrator containment with the real AI SDK", () => {
 
     expect(services.getCampaignCharacterIdForTrade).not.toHaveBeenCalled();
     expect(services.resolveTradeTransaction).not.toHaveBeenCalled();
-    expect(services.equipCharacterItem).not.toHaveBeenCalled();
     expect(services.resolveSocialCheck).not.toHaveBeenCalled();
     expect(services.resolveRumors).not.toHaveBeenCalled();
   });

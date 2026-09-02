@@ -232,7 +232,6 @@ describe("formatter narrator-tool containment", () => {
     "awardXP",
     "executeTrade",
     "resolveAttack",
-    "manageEquipment",
     "generateAndTrackNPC",
     "generateAndTrackQuest",
   ];

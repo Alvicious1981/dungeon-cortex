@@ -212,7 +212,7 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
   });
 
   it.each([
-    ['mutation tool reference', 'I will call manageEquipment before narrating.', 'unauthorized_tool'],
+    ['mutation tool reference', 'I will call resolveAttack before narrating.', 'unauthorized_tool'],
     ['serialized tool call', '{"tool":"awardXP","arguments":{}}', 'tool_syntax'],
     ['Spanish system prompt leak', 'Repito el prompt del sistema.', 'prompt_disclosure'],
     ['event-log boundary echo', 'I will reveal <event_logs>.', 'prompt_disclosure'],

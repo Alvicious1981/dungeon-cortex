@@ -44,7 +44,6 @@ const services = vi.hoisted(() => ({
   resolveExplorationTurn: vi.fn(),
   moveCampaignToNode: vi.fn(),
   resolveTravelWatch: vi.fn(),
-  equipCharacterItem: vi.fn(),
   generateTavernName: vi.fn(),
   generateMundaneLoot: vi.fn(),
   searchMemories: vi.fn(),
@@ -105,9 +104,6 @@ vi.mock("@/lib/rules/navigation-service", () => ({
 vi.mock("@/lib/rules/wilderness-service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/wilderness-service")>()),
   resolveTravelWatch: services.resolveTravelWatch,
-}));
-vi.mock("@/lib/rules/equipment-service", () => ({
-  equipCharacterItem: services.equipCharacterItem,
 }));
 vi.mock("@/lib/rules/generators", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/generators")>()),
@@ -198,7 +194,6 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   getTavernName: { locationId: "loc-1" },
   getMundaneLoot: { entityId: "entity-1" },
   recallLore: { query: "the sunken vault" },
-  manageEquipment: { characterId: "char-1", itemId: "item-1", targetSlot: "MAIN_HAND" },
   useConsumable: { characterId: "char-1", itemName: "Potion of Healing" },
   getSpellInfo: { query: "fireball" },
   getItemInfo: { query: "cloak of protection" },
@@ -260,12 +255,6 @@ function primeSuccess(): void {
     facts: {},
   });
   services.resolveTravelWatch.mockResolvedValue({ watch: "Dawn", discovered: true });
-  services.equipCharacterItem.mockResolvedValue({
-    itemId: "item-1",
-    targetSlot: "MAIN_HAND",
-    itemName: "Longsword",
-    facts: {},
-  });
   services.generateTavernName.mockReturnValue("The Sundered Oar");
   services.generateMundaneLoot.mockReturnValue("a bent copper coin");
   services.searchMemories.mockResolvedValue("The vault flooded two winters ago.");
@@ -360,10 +349,10 @@ beforeEach(() => {
 });
 
 describe("narrator tool catalogue", () => {
-  it("contains exactly the 28 known tools", () => {
+  it("contains exactly the 27 known tools", () => {
     const catalogue = Object.keys(buildCatalogue());
 
-    expect(catalogue).toHaveLength(28);
+    expect(catalogue).toHaveLength(27);
     expect(catalogue.sort()).toEqual([...CATALOGUE_NAMES].sort());
   });
 });
