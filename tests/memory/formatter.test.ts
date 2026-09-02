@@ -1,7 +1,7 @@
 /**
  * tests/memory/formatter.test.ts
  *
- * Focused tests for prompt structure, victory guidance, and relevance clipping.
+ * Focused tests for prompt structure, NPC context, and relevance clipping.
  */
 
 import { describe, it, expect } from "vitest";
@@ -43,14 +43,18 @@ const baseContext: CampaignContext = {
   currentExploration: null,
 };
 
-const resolvedEncounter: CampaignContext["activeEncounter"] = {
-  id: "enc-resolved-01",
+/**
+ * Was `resolvedEncounter`, carrying status/tensionScore/reason for a victory
+ * branch the formatter no longer has — nothing ever populated those fields and
+ * a resolved encounter reaches the formatter as `null`. Kept as an ordinary
+ * active encounter so the containment guard below still covers a real combat
+ * prompt rather than a second copy of the no-encounter one.
+ */
+const combatEncounter: CampaignContext["activeEncounter"] = {
+  id: "enc-active-01",
   round: 4,
   currentTurnIndex: 0,
   totalDamageDealt: 0,
-  status: "resolved",
-  tensionScore: 0.73,
-  reason: "all_enemies_dead",
   combatants: [
     {
       id: "cbt-player",
@@ -123,18 +127,27 @@ describe("formatSystemPrompt — core prompt contract", () => {
   });
 });
 
-describe("formatSystemPrompt — victory trigger section", () => {
-  it("injects VICTORY guidance without unavailable narrator tools", () => {
-    const prompt = formatSystemPrompt({
+describe("formatSystemPrompt — no victory section", () => {
+  /**
+   * The formatter used to emit a "⚔️ VICTORY" block for an encounter whose
+   * status was "resolved". Production could never produce that input:
+   * `buildCampaignContext` queries `status: "active"`, and the pipeline flips
+   * the row before narration runs, so a won encounter arrives as `null`.
+   * This pins the absence so the branch is not reintroduced without also
+   * making it reachable.
+   */
+  it("emits no victory block, for an active encounter or for none", () => {
+    const withCombat = formatSystemPrompt({
       ...baseContext,
-      activeEncounter: resolvedEncounter,
+      activeEncounter: combatEncounter,
     });
+    const withoutCombat = formatSystemPrompt(baseContext);
 
-    expect(prompt).toContain("VICTORY");
-    expect(prompt).toContain("backend action pipeline");
-    expect(prompt).not.toContain("generateLoot");
-    expect(prompt).not.toContain("awardXP");
-    expect(prompt).toContain("0.73");
+    for (const prompt of [withCombat, withoutCombat]) {
+      expect(prompt).not.toContain("VICTORY");
+      expect(prompt).not.toContain("Tension Score");
+    }
+    expect(withoutCombat).toContain("No active encounter.");
   });
 });
 
@@ -234,7 +247,7 @@ describe("formatter narrator-tool containment", () => {
   it("does not instruct the narrator to call an unavailable tool", () => {
     const prompts = [
       formatSystemPrompt(baseContext),
-      formatSystemPrompt({ ...baseContext, activeEncounter: resolvedEncounter }),
+      formatSystemPrompt({ ...baseContext, activeEncounter: combatEncounter }),
       formatNPCContext({
         name: "Stranger",
         disposition: null,
