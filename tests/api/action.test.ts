@@ -409,6 +409,65 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       }
     });
 
+    /**
+     * `actorArmorPenalty` is optional on `CombatActionPayload` with a `false`
+     * default, so dropping it from either call site type-checks and leaves
+     * every other test green — the wizard simply stops being penalised. The
+     * rule itself is covered four times over (armor-proficiency,
+     * armor-obtainable, armor-penalty-wiring, and the payload-to-disadvantage
+     * pair in combat-pipeline.test.ts); what nothing covered until now is that
+     * THIS route puts it on the payload.
+     *
+     * The two contexts differ in one field, `class`. Same armour, same weapon,
+     * same stats, same target — so a difference in what the rule receives can
+     * only come from the wiring under test.
+     */
+    const HEAVY_ARMOUR = {
+      id: "a1",
+      name: "Chain Mail",
+      type: "armor",
+      equippedSlot: "ARMOR",
+      properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+    };
+
+    const inHeavyArmour = (characterClass: string) => {
+      const base = contextWith([hero, hostile]);
+      return {
+        ...base,
+        character: {
+          ...base.character,
+          class: characterClass,
+          inventory: [...base.character.inventory, HEAVY_ARMOUR],
+        },
+      };
+    };
+
+    const penaltyReachingTheRule = (): boolean => {
+      const call = (computeConsequences as any).mock.calls.at(-1);
+      if (!call) throw new Error("computeConsequences was never called");
+      return call[0].attackerArmorPenalty;
+    };
+
+    it("carries the armour penalty to the rule for a wizard in heavy armour", async () => {
+      (buildCampaignContext as any).mockResolvedValue(inHeavyArmour("wizard"));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      expect(penaltyReachingTheRule()).toBe(true);
+    });
+
+    it("carries no penalty for a fighter in the same heavy armour", async () => {
+      (buildCampaignContext as any).mockResolvedValue(inHeavyArmour("fighter"));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      expect(penaltyReachingTheRule()).toBe(false);
+    });
+
     it("rejects a targetIds selection naming more than one creature", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, { ...hostile, id: "t3" }]));
 
@@ -491,6 +550,55 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     });
     expect(streamNarrative).not.toHaveBeenCalled();
     expect(prisma.combatant.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The macro "Attack" path is a SECOND producer of `actorArmorPenalty`, on a
+   * different gate from the free-text one above. Both were unasserted; a single
+   * test would have left whichever it did not exercise free to drop the field.
+   */
+  it("carries the armour penalty on the macro Attack path too", async () => {
+    const target = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
+    const player = { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
+    const combatants = [player, target];
+
+    const mockContext = {
+      character: {
+        name: "Hero",
+        // A wizard in chain mail: no armour proficiency, so the penalty applies.
+        class: "wizard",
+        stats: { STR: 10 },
+        inventory: [
+          {
+            id: "a1",
+            name: "Chain Mail",
+            type: "armor",
+            equippedSlot: "ARMOR",
+            properties: { baseAC: 16, armorClass: "heavy", addDexModifier: false },
+          },
+        ],
+      },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: { id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0, combatants },
+    };
+
+    (buildCampaignContext as any).mockResolvedValue(mockContext);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(200);
+    const call = (computeConsequences as any).mock.calls.at(-1);
+    expect(call?.[0].attackerArmorPenalty).toBe(true);
   });
 
   it("handles multi-target Attack via targetIds", async () => {
