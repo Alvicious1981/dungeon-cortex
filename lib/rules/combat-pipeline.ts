@@ -108,7 +108,9 @@ export interface CombatActionPayload {
   // Item data
   itemId?: string;
   itemName?: string;
-  itemQuantity?: number;
+  // No `itemQuantity`: the remaining charges are read inside the
+  // transaction, so a caller-supplied figure could only disagree with the
+  // row that actually decides the write.
   healingDice?: string;
   healingBonus?: number;
 
@@ -170,6 +172,10 @@ export async function executeCombatAction(
   const consequenceDetails: CombatConsequences[] = [];
   const systemLogs: string[] = [];
   let totalDamageDealt = 0;
+  // Whether a consumable charge was actually spent this action. Healing is
+  // gated on it: granting HP for a potion the transaction never consumed
+  // would let one charge heal twice.
+  let itemConsumed = false;
 
   const {
     actionType,
@@ -208,14 +214,29 @@ export async function executeCombatAction(
         },
       });
     }
-  } else if (actionType === "use_item" && payload.itemId && payload.itemQuantity !== undefined) {
-    if (payload.itemQuantity <= 1) {
-      await tx.inventoryItem.delete({ where: { id: payload.itemId } });
-    } else {
-      await tx.inventoryItem.update({
-        where: { id: payload.itemId },
-        data: { quantity: payload.itemQuantity - 1 },
-      });
+  } else if (actionType === "use_item" && payload.itemId) {
+    // Read inside the transaction rather than trusting a quantity the caller
+    // read before it opened. In the action route that read happens in
+    // `buildCampaignContext`, before `prisma.$transaction`, so the row it saw
+    // can already be spent by the time this write lands.
+    const row = await tx.inventoryItem.findUnique({
+      where: { id: payload.itemId },
+      select: { quantity: true },
+    });
+    const remaining = row?.quantity ?? 0;
+
+    if (remaining >= 1) {
+      itemConsumed = true;
+      if (remaining === 1) {
+        // `deleteMany`, not `delete`: a row already gone must be a no-op, not
+        // a P2025 that rolls back an otherwise valid turn.
+        await tx.inventoryItem.deleteMany({ where: { id: payload.itemId } });
+      } else {
+        await tx.inventoryItem.update({
+          where: { id: payload.itemId },
+          data: { quantity: remaining - 1 },
+        });
+      }
     }
   }
 
@@ -281,7 +302,7 @@ export async function executeCombatAction(
   }
 
   // USE ITEM HEALING
-  if (actionType === "use_item" && payload.healingDice) {
+  if (actionType === "use_item" && payload.healingDice && itemConsumed) {
     const healed = roll(payload.healingDice).total + (payload.healingBonus ?? 0);
     if (playerCharacterId) {
       const character = await tx.character.findUnique({ where: { id: playerCharacterId } });

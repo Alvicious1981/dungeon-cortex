@@ -25,7 +25,15 @@ vi.mock("@/lib/db/prisma", () => ({
     gameLog: { create: vi.fn(), count: vi.fn(() => 1), findMany: vi.fn() },
     encounter: { update: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
     combatant: { findMany: vi.fn(), update: vi.fn() },
-    inventoryItem: { delete: vi.fn(), update: vi.fn() },
+    inventoryItem: {
+      // `findUnique` because the pipeline reads the remaining charges
+      // inside the transaction instead of trusting the quantity the
+      // route read from `buildCampaignContext` before it opened.
+      findUnique: vi.fn(),
+      deleteMany: vi.fn(),
+      delete: vi.fn(),
+      update: vi.fn(),
+    },
     character: { findUnique: vi.fn(), update: vi.fn() },
     // The route resolves a weapon's category through `getEquipmentInfo`, which
     // reads `srdItem`. Without this delegate the call threw a TypeError that
@@ -569,6 +577,9 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       targetName: "Antitoxin",
     });
     (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    // Same single charge the inventory above declares — the transaction must
+    // see the row the context saw for this case to be the ordinary one.
+    (prisma.inventoryItem.findUnique as any).mockResolvedValue({ quantity: 1 });
 
     const req = new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
       method: "POST",
@@ -577,7 +588,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
     const stream = await res.text();
 
-    expect(prisma.inventoryItem.delete).toHaveBeenCalledWith({
+    expect(prisma.inventoryItem.deleteMany).toHaveBeenCalledWith({
       where: { id: "item-1" },
     });
     expect(prisma.encounter.update).toHaveBeenCalledWith({

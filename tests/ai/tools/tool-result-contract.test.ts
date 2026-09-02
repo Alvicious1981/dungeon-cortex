@@ -45,7 +45,6 @@ const services = vi.hoisted(() => ({
   generateTavernName: vi.fn(),
   generateMundaneLoot: vi.fn(),
   searchMemories: vi.fn(),
-  useConsumableItem: vi.fn(),
   srdFindUnique: vi.fn(),
   srdFindMany: vi.fn(),
 }));
@@ -105,9 +104,6 @@ vi.mock("@/lib/rules/generators", async (importOriginal) => ({
   generateMundaneLoot: services.generateMundaneLoot,
 }));
 vi.mock("@/lib/memory/search", () => ({ searchMemories: services.searchMemories }));
-vi.mock("@/lib/rules/consumable-service", () => ({
-  useConsumableItem: services.useConsumableItem,
-}));
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     srdSpell: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
@@ -226,13 +222,6 @@ function primeSuccess(): void {
   services.generateTavernName.mockReturnValue("The Sundered Oar");
   services.generateMundaneLoot.mockReturnValue("a bent copper coin");
   services.searchMemories.mockResolvedValue("The vault flooded two winters ago.");
-  services.useConsumableItem.mockResolvedValue({
-    itemName: "Potion of Healing",
-    hpRestored: 7,
-    currentHp: 21,
-    maxHp: 32,
-    facts: {},
-  });
   services.srdFindUnique.mockResolvedValue({
     id: "fireball",
     name: "Fireball",
