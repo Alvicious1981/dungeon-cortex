@@ -9,7 +9,7 @@
  */
 
 import { Prisma } from "@prisma/client";
-import { seededFloat, pickSeeded } from "@/lib/rules/generators";
+import { seededFloat, pickSeeded, generateMundaneLoot } from "@/lib/rules/generators";
 import { filterMonsters } from "@/lib/rules/srd";
 import { generateLootPayload } from "@/lib/rules/loot";
 
@@ -59,6 +59,23 @@ export async function generateNodeContent(
       "Shadows dance in the corners of this largely featureless stone hall.",
       "The walls are lined with empty, dust-covered alcoves."
     ]);
+
+    // A forgotten corner sometimes holds one curious object — the case
+    // MUNDANE_LOOT was written for and, until now, the only way to reach it
+    // was an AI tool that left the narrator boundary in #97.
+    //
+    // It goes in `description` because that is the only node field the
+    // narrator receives: `formatter.ts` prints `currentNode.description`, and
+    // `featureData` is not on `ContextExploration` at all. Recording it there
+    // instead would produce a value nothing reads.
+    //
+    // Its own salt, so the object a room holds is uncorrelated with which
+    // atmospheric line it drew. The 0.35 is a flavour frequency, chosen like
+    // the branch weights above and mechanically inert: this is a string for
+    // the narrator, not an item, and nothing is added to any inventory.
+    if (seededFloat(seed + ":oddity") < 0.35) {
+      description = `${description} Also here: ${generateMundaneLoot(seed + ":oddity")}.`;
+    }
   } else if (roll < 0.8) {
     // 20% chance: NPC / Monster Presence
     feature = "npc";
