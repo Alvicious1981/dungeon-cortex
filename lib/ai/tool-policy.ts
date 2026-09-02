@@ -51,7 +51,6 @@ export const UNAVAILABLE_NARRATOR_TOOL_NAMES = Object.freeze([
   "generateMerchant",
   "executeTrade",
   "getMundaneLoot",
-  "recallLore",
   "executeTravelWatch",
 ] as const);
 

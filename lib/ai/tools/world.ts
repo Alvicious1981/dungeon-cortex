@@ -1,26 +1,32 @@
 /**
  * lib/ai/tools/world.ts
  *
- * Vercel AI SDK tools: tavern names, mundane loot, and lore recall.
+ * Vercel AI SDK tool: mundane loot.
  *
- * Architecture contract ("Code is Law"):
- *   The backend equipment service is the authority for gear state changes.
- *   The AI tool requests the action and returns resolved facts for narration.
+ * Two siblings are gone. `getTavernName` was deleted in #113 as a rival to
+ * `generateLocationName`, which already names taverns and persists the result.
+ * `recallLore` was deleted here: it searched semantic memory on demand, but
+ * `buildCampaignContext` already puts the relevant memories in the narrator's
+ * context every turn, so the tool could only re-fetch what had arrived.
+ *
+ * (This header claimed "tavern names" for one PR after that name was deleted —
+ * the symbol grep found the code and missed the prose.)
  */
 
 import { tool } from "ai";
-import { z } from "zod";
 import { runTool } from "@/lib/ai/tool-result";
 import {
   generateMundaneLoot,
   GetMundaneLootInputSchema,
 } from "@/lib/rules/generators";
-import { searchMemories } from "@/lib/memory/search";
 
 /**
- * Builds the world-flavour Vercel AI SDK tools bound to a specific campaign.
+ * Builds the world-flavour Vercel AI SDK tools.
+ *
+ * No campaign argument: `recallLore` was the only tool here that needed one,
+ * and a parameter nothing reads is the defect this series exists to close.
  */
-export function buildWorldTools(campaignId: string) {
+export function buildWorldTools() {
   return {
     getMundaneLoot: tool({
       description:
@@ -28,18 +34,6 @@ export function buildWorldTools(campaignId: string) {
       inputSchema: GetMundaneLootInputSchema,
       execute: async ({ entityId }) => {
         return runTool(() => ({ loot: generateMundaneLoot(entityId) }));
-      },
-    }),
-    recallLore: tool({
-      description:
-        "Search the campaign's semantic memory for lore, past events, or specific details. Use this when the player references something you don't have in your current context.",
-      inputSchema: z.object({
-        query: z.string().min(1).max(200),
-      }).strict(),
-      execute: async ({ query }) => {
-        return runTool(async () => ({
-          memories: await searchMemories(campaignId, query),
-        }));
       },
     }),
   };
