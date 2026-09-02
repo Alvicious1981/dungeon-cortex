@@ -1,9 +1,13 @@
 /**
  * tests/ai/tools/tool-result-contract.test.ts
  *
- * SEC-AI-001 PR2 — every one of the 28 narrator tools must satisfy the common
+ * SEC-AI-001 PR2 — every tool in the catalogue below must satisfy the common
  * result contract on both success and failure, and must never leak an
  * exception message, stack, detail, query or any other internal information.
+ *
+ * The count is asserted, not stated: this header used to claim "28 narrator
+ * tools" while the catalogue held 19, so the figure now lives only in the
+ * assertion that can fail.
  *
  * @vitest-environment node
  */
@@ -41,7 +45,6 @@ const services = vi.hoisted(() => ({
   resolveExplorationTurn: vi.fn(),
   moveCampaignToNode: vi.fn(),
   resolveTravelWatch: vi.fn(),
-  generateTavernName: vi.fn(),
   generateMundaneLoot: vi.fn(),
   searchMemories: vi.fn(),
   srdFindUnique: vi.fn(),
@@ -96,7 +99,6 @@ vi.mock("@/lib/rules/wilderness-service", async (importOriginal) => ({
 }));
 vi.mock("@/lib/rules/generators", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/generators")>()),
-  generateTavernName: services.generateTavernName,
   generateMundaneLoot: services.generateMundaneLoot,
 }));
 vi.mock("@/lib/memory/search", () => ({ searchMemories: services.searchMemories }));
@@ -119,7 +121,6 @@ import {
   MonsterInfoOutputSchema,
   NpcDetailsOutputSchema,
   SpellInfoOutputSchema,
-  TavernNameOutputSchema,
 } from "@/lib/ai/read-only-projections";
 
 const CAMPAIGN_ID = "campaign-contract-001";
@@ -158,7 +159,6 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   moveToNode: { targetNodeIndex: 2 },
   executeExplorationTurn: { action: "search", turnsToAdvance: 1 },
   executeTravelWatch: { action: "travel", direction: "north", pace: "normal" },
-  getTavernName: { locationId: "loc-1" },
   getMundaneLoot: { entityId: "entity-1" },
   recallLore: { query: "the sunken vault" },
   getSpellInfo: { query: "fireball" },
@@ -215,7 +215,6 @@ function primeSuccess(): void {
     facts: {},
   });
   services.resolveTravelWatch.mockResolvedValue({ watch: "Dawn", discovered: true });
-  services.generateTavernName.mockReturnValue("The Sundered Oar");
   services.generateMundaneLoot.mockReturnValue("a bent copper coin");
   services.searchMemories.mockResolvedValue("The vault flooded two winters ago.");
   services.srdFindUnique.mockResolvedValue({
@@ -270,7 +269,6 @@ function primeFailure(): void {
       name === "generateNPC" ||
       name === "initialAttitudeFor" ||
       name === "buildMerchantPayload" ||
-      name === "generateTavernName" ||
       name === "generateMundaneLoot"
     ) {
       mock.mockImplementation(boom);
@@ -302,10 +300,10 @@ beforeEach(() => {
 });
 
 describe("narrator tool catalogue", () => {
-  it("contains exactly the 19 known tools", () => {
+  it("contains exactly the 18 known tools", () => {
     const catalogue = Object.keys(buildCatalogue());
 
-    expect(catalogue).toHaveLength(19);
+    expect(catalogue).toHaveLength(18);
     expect(catalogue.sort()).toEqual([...CATALOGUE_NAMES].sort());
   });
 });
@@ -488,7 +486,6 @@ describe("socialCheck error classification", () => {
 describe("active read-only tool projections", () => {
   const ACTIVE_PROJECTIONS = [
     ["getNPCDetails", NpcDetailsOutputSchema],
-    ["getTavernName", TavernNameOutputSchema],
     ["getSpellInfo", SpellInfoOutputSchema],
     ["getEquipmentInfo", EquipmentInfoOutputSchema],
     ["getMonsterInfo", MonsterInfoOutputSchema],

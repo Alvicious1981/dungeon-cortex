@@ -33,10 +33,6 @@ export const NpcDetailsOutputSchema = z.object({
   traits: NpcTraitsSchema,
 }).strict();
 
-export const TavernNameOutputSchema = z.object({
-  tavernName: z.string().min(1).max(200),
-}).strict();
-
 export const SpellInfoOutputSchema = z.object({
   name: z.string(),
   concentration: z.boolean(),
@@ -125,10 +121,6 @@ export function projectNpcDetails(npc: NPCStatblock) {
     abilityScores: npc.abilityScores,
     traits: npc.traits,
   });
-}
-
-export function projectTavernName(tavernName: string) {
-  return TavernNameOutputSchema.parse({ tavernName });
 }
 
 export function projectSpellInfo(spell: SpellEffect) {

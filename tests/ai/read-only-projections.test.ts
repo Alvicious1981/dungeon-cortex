@@ -7,7 +7,6 @@ import {
   MonsterInfoOutputSchema,
   NpcDetailsOutputSchema,
   SpellInfoOutputSchema,
-  TavernNameOutputSchema,
   projectItemInfo,
 } from "@/lib/ai/read-only-projections";
 
@@ -18,7 +17,6 @@ const VALID_OUTPUTS = [
     abilityScores: { STR: 13, DEX: 12, CON: 12, INT: 10, WIS: 11, CHA: 10 },
     traits: { personality: "stern", ideal: "duty", bond: "watch", flaw: "pride" },
   }],
-  [TavernNameOutputSchema, { tavernName: "The Sundered Oar" }],
   [SpellInfoOutputSchema, {
     name: "Fireball", concentration: false, ritual: false, dice: null, damageType: "fire",
     hasDamage: true, hasSavingThrow: true, saveAbility: "DEX", type: "damage",
