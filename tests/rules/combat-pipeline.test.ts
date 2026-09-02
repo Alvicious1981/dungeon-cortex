@@ -17,7 +17,7 @@
  *      CONCENTRATION_BROKEN, HEALING_RECEIVED.
  */
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
   executeCombatAction,
   finalizeEncounterTurn,
@@ -28,6 +28,7 @@ import type {
   PipelineCombatant,
   PipelineEncounterState,
 } from "@/lib/rules/combat-pipeline";
+import { seededFloat } from "@/lib/rules/generators";
 import type { Prisma } from "@prisma/client";
 import type { SingleTargetConsequence } from "@/lib/events/game-events";
 import {
@@ -36,6 +37,22 @@ import {
   buildMockTx,
   buildPlayer,
 } from "./combat-pipeline-fixtures";
+
+/**
+ * `grantLoot` is mocked so these assertions cover what the pipeline *asks
+ * for*, not what the loot table produces. The service's own behaviour —
+ * deterministic generation from the encounter seed, the atomic gold
+ * increment — is covered in tests/rules/loot-service-contract.test.ts.
+ */
+const grantLootMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/rules/loot-service", () => ({
+  grantLoot: grantLootMock,
+  LootServiceError: class extends Error {
+    constructor(public readonly code: string, message: string) {
+      super(message);
+    }
+  },
+}));
 
 // ---------------------------------------------------------------------------
 // Test utilities
@@ -1164,6 +1181,120 @@ describe("finalizeEncounterTurn", () => {
         where: { id: "char-1" },
         data: { xp: { increment: 15 } },
       });
+    });
+  });
+
+  describe("loot award", () => {
+    beforeEach(() => {
+      grantLootMock.mockReset();
+      grantLootMock.mockResolvedValue({ ok: true, gold: 12, items: [], facts: {} });
+    });
+
+    /**
+     * The victory prompt has always told the narrator that "Loot, XP, and
+     * state changes are resolved by the backend action pipeline". XP was; loot
+     * was not, and nothing else granted it either — the only way to gain an
+     * item or gold in the game was to buy it. An instruction about a fact that
+     * never arrives is an invitation to invent one.
+     */
+    it("grants loot on a certified victory, on the same claim that grants XP", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+      ]);
+
+      await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(grantLootMock).toHaveBeenCalledTimes(1);
+      // tensionScore, not an explicit gold/items figure: that is the service's
+      // deterministic branch, seeded on the encounter id. Passing numbers here
+      // would be inventing mechanics at the call site.
+      expect(grantLootMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          campaignId: "camp-1",
+          encounterId: "enc-1",
+          // Pinned to the derivation, not merely "some number": `Encounter`
+          // has no tensionScore column, so the same encounter must keep
+          // paying the same loot on any replay.
+          tensionScore: seededFloat("enc-1:tension"),
+          tx,
+        }),
+      );
+      const call = grantLootMock.mock.calls[0]![0] as Record<string, unknown>;
+      expect(call.gold).toBeUndefined();
+      expect(call.items).toBeUndefined();
+    });
+
+    it("never grants loot when the player is dead, the way XP is withheld", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 0 },
+        { id: "enemy-1", isPlayer: false, hp: 12, xpValue: 50 },
+      ]);
+
+      await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(grantLootMock).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The service has no idempotency guard of its own. It does not need one
+     * here: it is called inside `claim.count === 1`, and the conditional
+     * `updateMany` claim is what makes the whole reward path once-only. A
+     * second transaction matches zero rows and never reaches this code.
+     */
+    it("does not pay twice when a second transaction loses the claim", async () => {
+      const secondTx = buildMockTx();
+      (secondTx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+      ]);
+      (secondTx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+
+      await finalizeEncounterTurn({
+        tx: secondTx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      expect(grantLootMock).not.toHaveBeenCalled();
+    });
+
+    it("resolves the encounter even when the loot grant fails", async () => {
+      const tx = buildMockTx();
+      (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "player-1", isPlayer: true, hp: 15 },
+        { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+      ]);
+      grantLootMock.mockRejectedValueOnce(new Error("loot table unavailable"));
+
+      const result = await finalizeEncounterTurn({
+        tx,
+        encounterId: "enc-1",
+        currentTurnIndex: 0,
+        round: 1,
+        collectEvents: false,
+      });
+
+      // Both halves, or the test proves nothing: without the call the queued
+      // rejection never fires and "survives a loot failure" is vacuous.
+      expect(grantLootMock).toHaveBeenCalledTimes(1);
+      expect(result.encounterResolved).toBe(true);
     });
   });
 

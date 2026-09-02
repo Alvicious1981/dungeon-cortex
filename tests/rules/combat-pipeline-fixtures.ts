@@ -37,7 +37,16 @@ export function buildMockTx(opts: { characterHp?: number; characterMaxHp?: numbe
     encounter: {
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findUnique: vi.fn().mockResolvedValue({ campaign: { characterId: "char-1" } }),
+      // Select-aware on purpose. Prisma returns only the fields the `select`
+      // asked for; a mock that returns a fixed superset lets a call site read
+      // a field its own query never requested and still go green.
+      findUnique: vi.fn().mockImplementation((args?: { select?: Record<string, unknown> }) => {
+        const select = args?.select ?? {};
+        const row: Record<string, unknown> = {};
+        if (select.campaignId) row.campaignId = "camp-1";
+        if (select.campaign) row.campaign = { characterId: "char-1" };
+        return Promise.resolve(row);
+      }),
     },
     inventoryItem: {
       delete: vi.fn().mockResolvedValue({}),
