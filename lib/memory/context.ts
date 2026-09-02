@@ -66,16 +66,12 @@ export interface ContextEncounter {
   combatants: ContextCombatant[];
   /** Total damage dealt to enemies. */
   totalDamageDealt: number;
-  /** Encounter lifecycle status. "active" | "resolved" | "fled". */
-  status?: string;
-  /**
-   * Final Tension Score [0..1] at encounter end.
-   * Populated when the encounter transitions to "resolved".
-   * Used by the formatter to inject the Victory trigger section.
-   */
-  tensionScore?: number | null;
-  /** Resolution reason — "all_enemies_dead" | "fled" | etc. Populated on resolution. */
-  reason?: string;
+  // No `status`, `tensionScore` or `reason` here. All three were declared as
+  // "populated on resolution" and none ever was: the query below filters on
+  // `status: "active"` and selects none of them, and neither `tensionScore`
+  // nor `reason` is a column on `Encounter` at all. They only ever fed a
+  // victory branch in the formatter that a resolved encounter could not reach,
+  // because it arrives here as `null`.
 }
 
 export interface ContextCombatant {

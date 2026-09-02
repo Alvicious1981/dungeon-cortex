@@ -151,19 +151,12 @@ function formatEncounter(encounter: CampaignContext["activeEncounter"]): string 
     return "## Combat\nNo active encounter.";
   }
 
-  // Loot and progression are backend-resolved before this narrator is called.
-  if (encounter.status === "resolved" && encounter.reason === "all_enemies_dead") {
-    const tensionDisplay =
-      encounter.tensionScore != null ? encounter.tensionScore.toFixed(2) : "unknown";
-    return [
-      "## ⚔️ VICTORY — Encounter Resolved",
-      `All enemies have been defeated. Tension Score at encounter end: **${tensionDisplay}**`,
-      "",
-      "Loot, XP, and state changes are resolved by the backend action pipeline.",
-      "Narrate only the resolved facts present in the game state or backend facts.",
-    ].join("\n");
-  }
-
+  // No victory branch here, deliberately. `buildCampaignContext` queries
+  // `where: { status: "active" }`, and `finalizeEncounterTurn` flips the row to
+  // "resolved" before narration runs, so a resolved encounter arrives as `null`
+  // and never reaches this function. The narrator learns of a victory through
+  // the live channel instead: ENEMY_DEFEATED events become facts in
+  // `combat-fact-adapter.ts` and enter the prompt from there.
   const lines: string[] = [];
   lines.push("## Combat");
   lines.push(`**Round:** ${encounter.round}`);
