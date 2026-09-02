@@ -1,17 +1,18 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const aiToolFiles = [
-  "combat.ts",
-  "exploration.ts",
-  "inventory.ts",
-  "progression.ts",
-  "social.ts",
-  "srd-lookup.ts",
-  "wilderness.ts",
-  "world.ts",
-];
+/**
+ * Read from the directory rather than a hand-written list.
+ *
+ * The list used to be literal, which meant a tool file added later was not
+ * covered until someone remembered to add it here — and a tool file deleted
+ * broke the guard for a reason that had nothing to do with what it guards.
+ * Reading the directory makes it cover the surface as it actually is.
+ */
+const aiToolFiles = readdirSync(join(process.cwd(), "lib", "ai", "tools"))
+  .filter((file) => file.endsWith(".ts"))
+  .sort();
 
 describe("AI layer state-mutation boundary", () => {
   for (const file of aiToolFiles) {

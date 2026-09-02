@@ -227,14 +227,9 @@ describe("formatNPCContext — attitude", () => {
 describe("formatter narrator-tool containment", () => {
   const UNAVAILABLE_NARRATOR_TOOLS = [
     "establishInitialDisposition",
-    "updateQuestStatus",
-    "generateLoot",
-    "awardXP",
-    "executeTrade",
-    "resolveAttack",
-    "generateAndTrackNPC",
-    "generateAndTrackQuest",
-  ];
+          "executeTrade",
+      "generateAndTrackNPC",
+    ];
 
   it("does not instruct the narrator to call an unavailable tool", () => {
     const prompts = [

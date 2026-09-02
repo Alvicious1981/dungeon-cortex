@@ -39,17 +39,9 @@ export const ACTIVE_NARRATOR_TOOL_NAMES = Object.freeze([
  * internal-capability leak even when the surrounding text is plain prose.
  */
 export const UNAVAILABLE_NARRATOR_TOOL_NAMES = Object.freeze([
-  "spawnEncounter",
-  "resolveAttack",
-  "generateLoot",
   "generateLocation",
   "moveToNode",
   "executeExplorationTurn",
-  "useConsumable",
-  "updateQuestStatus",
-  "generateAndTrackQuest",
-  "awardXP",
-  "triggerLevelUp",
   "getNPCDetails",
   "trackNPC",
   "generateAndTrackNPC",

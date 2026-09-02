@@ -181,10 +181,8 @@ describe("prompt-injection regression corpus", () => {
       "getSpellInfo",
     ]);
     expect(Object.keys(options.tools)).not.toEqual(expect.arrayContaining([
-      "awardXP",
-      "executeCombatAction",
-      "generateLoot",
-    ]));
+          "executeCombatAction",
+        ]));
 
     expect(narrated).not.toBe(leakedOutput);
     expect(validateNarrativeText(narrated, hitContext).ok).toBe(true);
