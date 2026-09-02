@@ -55,12 +55,11 @@ describe("narrator tool policy", () => {
       "executeExplorationTurn",
       "executeTravelWatch",
       "recallLore",
-      "manageEquipment",
       "useConsumable",
     ];
 
     // The model-visible surface contains only the four listed tools.
-    expect(stateMutatingTools).toHaveLength(21);
+    expect(stateMutatingTools).toHaveLength(20);
     for (const toolName of stateMutatingTools) {
       expect([...getActiveNarratorToolNames()]).not.toContain(toolName);
     }

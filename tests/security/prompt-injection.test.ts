@@ -183,7 +183,7 @@ describe("prompt-injection regression corpus", () => {
     expect(Object.keys(options.tools)).not.toEqual(expect.arrayContaining([
       "awardXP",
       "executeCombatAction",
-      "manageEquipment",
+      "generateLoot",
     ]));
 
     expect(narrated).not.toBe(leakedOutput);
@@ -191,7 +191,7 @@ describe("prompt-injection regression corpus", () => {
   });
 
   it("validates and replaces unsafe model output when resolved facts are absent", async () => {
-    const unsafeOutput = '<tool_call>{"tool":"manageEquipment"}</tool_call>';
+    const unsafeOutput = '<tool_call>{"tool":"generateLoot"}</tool_call>';
     mocks.streamText.mockReturnValue({
       textStream: (async function* () { yield unsafeOutput; })(),
       text: Promise.resolve(unsafeOutput),

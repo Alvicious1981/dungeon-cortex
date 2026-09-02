@@ -1,7 +1,7 @@
 /**
  * lib/ai/tools/world.ts
  *
- * Vercel AI SDK tool: manageEquipment
+ * Vercel AI SDK tools: tavern names, mundane loot, and lore recall.
  *
  * Architecture contract ("Code is Law"):
  *   The backend equipment service is the authority for gear state changes.
@@ -12,8 +12,6 @@ import { tool } from "ai";
 import { z } from "zod";
 import { runTool } from "@/lib/ai/tool-result";
 import { projectTavernName } from "@/lib/ai/read-only-projections";
-import { ManageEquipmentInputSchema } from "@/lib/rules/inventory";
-import { equipCharacterItem } from "@/lib/rules/equipment-service";
 import {
   generateTavernName,
   generateMundaneLoot,
@@ -23,7 +21,7 @@ import {
 import { searchMemories } from "@/lib/memory/search";
 
 /**
- * Builds the manageEquipment Vercel AI SDK tool bound to a specific campaign.
+ * Builds the world-flavour Vercel AI SDK tools bound to a specific campaign.
  */
 export function buildWorldTools(campaignId: string) {
   return {
@@ -53,31 +51,6 @@ export function buildWorldTools(campaignId: string) {
         return runTool(async () => ({
           memories: await searchMemories(campaignId, query),
         }));
-      },
-    }),
-    manageEquipment: tool({
-      description:
-        "Equip an item from the character's inventory into a specific gear slot. " +
-        "Enforces slot exclusivity — the prior occupant of the slot is automatically unequipped. " +
-        "Call this when the player explicitly equips, wields, dons, or switches a piece of gear. " +
-        "NEVER narrate an item as equipped without calling this tool first.",
-      inputSchema: ManageEquipmentInputSchema,
-      execute: async ({ characterId, itemId, targetSlot }) => {
-        return runTool(async () => {
-          const result = await equipCharacterItem({
-            campaignId,
-            characterId,
-            itemId,
-            targetSlot,
-          });
-
-          return {
-            itemId: result.itemId,
-            targetSlot: result.targetSlot,
-            itemName: result.itemName,
-            facts: result.facts,
-          };
-        });
       },
     }),
   };
