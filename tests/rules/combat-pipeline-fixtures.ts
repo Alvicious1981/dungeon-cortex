@@ -18,8 +18,19 @@ import type { Prisma } from "@prisma/client";
 
 /** Build a minimal mock Prisma.TransactionClient with vi.fn() on every method
  *  used by the pipeline. Override characterHp / characterMaxHp to test healing. */
-export function buildMockTx(opts: { characterHp?: number; characterMaxHp?: number } = {}) {
-  const { characterHp = 20, characterMaxHp = 20 } = opts;
+export function buildMockTx(
+  opts: {
+    characterHp?: number;
+    characterMaxHp?: number;
+    /**
+     * Quantity the transaction sees for the consumable. `null` means the row
+     * is gone — the case the caller's pre-transaction snapshot cannot know
+     * about.
+     */
+    itemQuantity?: number | null;
+  } = {}
+) {
+  const { characterHp = 20, characterMaxHp = 20, itemQuantity = 3 } = opts;
   return {
     character: {
       update: vi.fn().mockResolvedValue({}),
@@ -49,6 +60,10 @@ export function buildMockTx(opts: { characterHp?: number; characterMaxHp?: numbe
       }),
     },
     inventoryItem: {
+      findUnique: vi
+        .fn()
+        .mockResolvedValue(itemQuantity === null ? null : { quantity: itemQuantity }),
+      deleteMany: vi.fn().mockResolvedValue({ count: itemQuantity === null ? 0 : 1 }),
       delete: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
     },

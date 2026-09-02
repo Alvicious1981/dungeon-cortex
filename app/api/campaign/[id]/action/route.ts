@@ -962,7 +962,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           targetCombatants: [],
           itemId: foundItem.id,
           itemName: foundItem.name,
-          itemQuantity: foundItem.quantity,
+
           healingDice: consumableProps?.healingDice,
           healingBonus: consumableProps?.healingBonus,
           playerCharacterId: context.character.id,

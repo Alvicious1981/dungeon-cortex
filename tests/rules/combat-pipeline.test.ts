@@ -439,7 +439,6 @@ describe("executeCombatAction", () => {
         targetCombatants: [],
         itemId: "item-1",
         itemName: "Healing Potion",
-        itemQuantity: 3,
         healingDice: "1d4",
         healingBonus: 2,
         playerCharacterId: "char-1",
@@ -451,11 +450,11 @@ describe("executeCombatAction", () => {
         where: { id: "item-1" },
         data: { quantity: 2 },
       });
-      expect(tx.inventoryItem.delete).not.toHaveBeenCalled();
+      expect(tx.inventoryItem.deleteMany).not.toHaveBeenCalled();
     });
 
     it("deletes the item record when quantity is 1 (last charge consumed)", async () => {
-      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20, itemQuantity: 1 });
       mockRandom([0.5]);
 
       const payload: CombatActionPayload = {
@@ -467,7 +466,6 @@ describe("executeCombatAction", () => {
         targetCombatants: [],
         itemId: "item-1",
         itemName: "Healing Potion",
-        itemQuantity: 1,
         healingDice: "1d4",
         healingBonus: 2,
         playerCharacterId: "char-1",
@@ -475,7 +473,9 @@ describe("executeCombatAction", () => {
 
       await executeCombatAction(payload, tx);
 
-      expect(tx.inventoryItem.delete).toHaveBeenCalledWith({ where: { id: "item-1" } });
+      // `deleteMany`, not `delete`: a row already gone must be a no-op here,
+      // not a P2025 that rolls back an otherwise valid turn.
+      expect(tx.inventoryItem.deleteMany).toHaveBeenCalledWith({ where: { id: "item-1" } });
       expect(tx.inventoryItem.update).not.toHaveBeenCalled();
     });
   });
@@ -532,7 +532,6 @@ describe("executeCombatAction", () => {
         targetCombatants: [],
         itemId: "item-2",
         itemName: "Healing Potion",
-        itemQuantity: 1,
         healingDice: "1d4",
         healingBonus: 2,
         playerCharacterId: "char-1",
@@ -549,6 +548,78 @@ describe("executeCombatAction", () => {
 
       const healingEvent = outcome.events.find((e) => e.type === "HEALING_RECEIVED");
       expect(healingEvent).toBeDefined();
+    });
+
+    /**
+     * The caller reads the inventory before the transaction opens — in the
+     * action route, `buildCampaignContext` runs first and the row it saw may
+     * be stale by the time the write lands. The quantity that decides the
+     * write must therefore be read here, inside the transaction, not carried
+     * in on the payload. This is the edge that `consumable-service` had and
+     * the live path did not.
+     */
+    it("takes the remaining quantity from the transaction, not from the caller", async () => {
+      // The transaction sees the last charge. A caller holding a stale
+      // snapshot of 5 would decrement to 4 and leave a phantom potion.
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20, itemQuantity: 1 });
+      mockRandom([0.5]);
+
+      await executeCombatAction(
+        {
+          actionType: "use_item",
+          encounter: buildEncounter([buildPlayer()]),
+          actorId: "player-1",
+          actorName: "Aldric",
+          actorConditions: [],
+          targetCombatants: [],
+          itemId: "item-1",
+          itemName: "Healing Potion",
+          healingDice: "1d4",
+          healingBonus: 2,
+          playerCharacterId: "char-1",
+        },
+        tx
+      );
+
+      expect(tx.inventoryItem.deleteMany).toHaveBeenCalledWith({ where: { id: "item-1" } });
+      expect(tx.inventoryItem.update).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Healing without consuming is worse than refusing: a potion drunk twice
+     * would heal twice. If the row is gone from the transaction's view, the
+     * charge was already spent and nothing may be granted for it.
+     */
+    it("heals nothing when the item is already gone from the transaction's view", async () => {
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20, itemQuantity: null });
+      mockRandom([0.5]);
+
+      const outcome = await executeCombatAction(
+        {
+          actionType: "use_item",
+          encounter: buildEncounter([buildPlayer()]),
+          actorId: "player-1",
+          actorName: "Aldric",
+          actorConditions: [],
+          targetCombatants: [],
+          itemId: "item-1",
+          itemName: "Healing Potion",
+          healingDice: "1d4",
+          healingBonus: 2,
+          playerCharacterId: "char-1",
+          collectEvents: true,
+        },
+        tx
+      );
+
+      expect(tx.inventoryItem.update).not.toHaveBeenCalled();
+      expect(tx.inventoryItem.deleteMany).not.toHaveBeenCalled();
+
+      const hpUpdateCall = (tx.character.update as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0].data?.hp !== undefined
+      );
+      expect(hpUpdateCall).toBeUndefined();
+      expect(outcome.events.some((e) => e.type === "HEALING_RECEIVED")).toBe(false);
     });
   });
 
