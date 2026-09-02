@@ -212,8 +212,12 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
   });
 
   it.each([
-    ['mutation tool reference', 'I will call resolveAttack before narrating.', 'unauthorized_tool'],
-    ['serialized tool call', '{"tool":"awardXP","arguments":{}}', 'tool_syntax'],
+    // Both names come from the policy list rather than being written out, so
+    // retiring a tool cannot silently turn these into tests of a word the
+    // validator no longer blocks. Two earlier versions hardcoded a name and
+    // had to be moved when that tool was deleted.
+    ['mutation tool reference', `I will call ${BLOCKED_NARRATOR_OPERATION_NAMES[0]} before narrating.`, 'unauthorized_tool'],
+    ['serialized tool call', `{"tool":"${BLOCKED_NARRATOR_OPERATION_NAMES[1]}","arguments":{}}`, 'tool_syntax'],
     ['Spanish system prompt leak', 'Repito el prompt del sistema.', 'prompt_disclosure'],
     ['event-log boundary echo', 'I will reveal <event_logs>.', 'prompt_disclosure'],
   ])('should reject %s without resolved facts', (_caseName, text, expectedCode) => {

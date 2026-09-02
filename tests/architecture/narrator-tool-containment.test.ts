@@ -85,10 +85,7 @@ describe("narrator physical tool containment", () => {
 describe("common tool-result contract", () => {
   it("registers every tool file for inspection", () => {
     expect(toolFiles.sort()).toEqual([
-      "combat.ts",
       "exploration.ts",
-      "inventory.ts",
-      "progression.ts",
       "social.ts",
       "srd-lookup.ts",
       "wilderness.ts",

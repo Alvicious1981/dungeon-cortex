@@ -13,10 +13,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /** Anything a leaking tool would carry out of the backend. */
 const SECRET = "SECRET_INTERNAL_DETAIL postgres://user:pw@10.0.0.4/db";
 
-class FakeConsumableServiceError extends Error {
+class FakeSocialServiceError extends Error {
   constructor(public readonly code: string) {
     super(SECRET);
-    this.name = "ConsumableServiceError";
+    this.name = "SocialServiceError";
   }
 }
 
@@ -29,7 +29,6 @@ const services = vi.hoisted(() => ({
   applyExperienceAward: vi.fn(),
   applyLevelUp: vi.fn(),
   createTrackedQuest: vi.fn(),
-  updateQuestStatus: vi.fn(),
   generateNPC: vi.fn(),
   initialAttitudeFor: vi.fn(),
   resolveRumors: vi.fn(),
@@ -65,7 +64,6 @@ vi.mock("@/lib/rules/progression-service", () => ({
 vi.mock("@/lib/rules/level-up-service", () => ({ applyLevelUp: services.applyLevelUp }));
 vi.mock("@/lib/rules/quest-service", () => ({
   createTrackedQuest: services.createTrackedQuest,
-  updateQuestStatus: services.updateQuestStatus,
 }));
 vi.mock("@/lib/rules/npc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/npc")>()),
@@ -122,14 +120,11 @@ vi.mock("@/lib/db/prisma", () => ({
   },
 }));
 
-import { buildCombatTools } from "@/lib/ai/tools/combat";
-import { buildProgressionTools } from "@/lib/ai/tools/progression";
 import { buildSocialTools } from "@/lib/ai/tools/social";
 import { buildExplorationTools } from "@/lib/ai/tools/exploration";
 import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
 import { buildWorldTools } from "@/lib/ai/tools/world";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
-import { buildInventoryTools } from "@/lib/ai/tools/inventory";
 import { isToolResult } from "@/lib/ai/tool-result";
 import {
   EquipmentInfoOutputSchema,
@@ -143,32 +138,16 @@ const CAMPAIGN_ID = "campaign-contract-001";
 
 function buildCatalogue(): Record<string, { execute: (...args: unknown[]) => unknown }> {
   return {
-    ...buildCombatTools(CAMPAIGN_ID),
-    ...buildProgressionTools(CAMPAIGN_ID),
     ...buildSocialTools(CAMPAIGN_ID),
     ...buildExplorationTools(CAMPAIGN_ID),
     executeTravelWatch: buildWildernessTool(CAMPAIGN_ID),
     ...buildWorldTools(CAMPAIGN_ID),
     ...buildSrdTools(),
-    ...buildInventoryTools(CAMPAIGN_ID),
   } as never;
 }
 
 /** One valid input per catalogue tool. */
 const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
-  spawnEncounter: { targetCR: 1, theme: "goblins" },
-  resolveAttack: {
-    attackerId: "cbt-player",
-    targetId: "cbt-goblin",
-    weaponDamageDice: "1d8",
-    attackModifier: 5,
-    damageType: "slashing",
-  },
-  generateLoot: { encounterId: "enc-1", tensionScore: 0.5 },
-  updateQuestStatus: { questId: "quest-1", status: "completed" },
-  generateAndTrackQuest: { giverId: "npc-1" },
-  awardXP: { characterId: "char-1", amount: 100, reason: "Cleared the den" },
-  triggerLevelUp: { characterId: "char-1", useAverage: true },
   getNPCDetails: { seed: "gate_guard", role: "guard" },
   trackNPC: { seed: "gate_guard", role: "guard", notes: "Gruff.", hp: 10 },
   generateAndTrackNPC: { seed: "gate_guard", role: "guard", notes: "Gruff." },
@@ -194,7 +173,6 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   getTavernName: { locationId: "loc-1" },
   getMundaneLoot: { entityId: "entity-1" },
   recallLore: { query: "the sunken vault" },
-  useConsumable: { characterId: "char-1", itemName: "Potion of Healing" },
   getSpellInfo: { query: "fireball" },
   getItemInfo: { query: "cloak of protection" },
   getEquipmentInfo: { query: "longsword" },
@@ -217,12 +195,6 @@ const NPC_STATBLOCK = {
 
 function primeSuccess(): void {
   services.spawnCombatEncounter.mockResolvedValue({ encounterId: "enc-1", enemies: [] });
-  services.resolveCombatAttack.mockResolvedValue({ ok: true, combat_facts: { damage: 5 } });
-  services.grantLoot.mockResolvedValue({ loot: { gold: 12, items: [] }, facts: { source: "loot" } });
-  services.applyExperienceAward.mockResolvedValue({ newXP: 100, leveledUp: false });
-  services.applyLevelUp.mockResolvedValue({ newLevel: 2, hpGained: 6 });
-  services.createTrackedQuest.mockResolvedValue({ questId: "quest-1", title: "The Black Messenger" });
-  services.updateQuestStatus.mockResolvedValue({ questId: "quest-1", status: "completed" });
   services.generateNPC.mockReturnValue(NPC_STATBLOCK);
   services.initialAttitudeFor.mockReturnValue("Friendly");
   services.resolveRumors.mockResolvedValue({ npcName: "Bert", rumors: [] });
@@ -349,10 +321,10 @@ beforeEach(() => {
 });
 
 describe("narrator tool catalogue", () => {
-  it("contains exactly the 27 known tools", () => {
+  it("contains exactly the 19 known tools", () => {
     const catalogue = Object.keys(buildCatalogue());
 
-    expect(catalogue).toHaveLength(27);
+    expect(catalogue).toHaveLength(19);
     expect(catalogue.sort()).toEqual([...CATALOGUE_NAMES].sort());
   });
 });
@@ -482,35 +454,35 @@ describe("DTOs with undefined optional properties", () => {
   });
 });
 
-describe("useConsumable error classification", () => {
-  it("keeps the stable domain code of a ConsumableServiceError", async () => {
+describe("socialCheck error classification", () => {
+  it("keeps the stable domain code of a SocialServiceError", async () => {
     primeSuccess();
-    services.useConsumableItem.mockRejectedValue(
-      new FakeConsumableServiceError("ITEM_NOT_CONSUMABLE"),
+    services.resolveSocialCheck.mockRejectedValue(
+      new FakeSocialServiceError("NPC_NOT_MET"),
     );
 
-    const result = await buildCatalogue().useConsumable!.execute(TOOL_INPUTS.useConsumable, {
+    const result = await buildCatalogue().socialCheck!.execute(TOOL_INPUTS.socialCheck, {
       messages: [],
-      toolCallId: "tc-consumable",
-      toolName: "useConsumable",
+      toolCallId: "tc-social",
+      toolName: "socialCheck",
     });
 
     expect(result).toEqual({
       status: "error",
       reason: "rejected",
-      code: "ITEM_NOT_CONSUMABLE",
+      code: "NPC_NOT_MET",
     });
     assertNoLeak(result);
   });
 
   it("converts an unknown error into a safe internal error", async () => {
     primeSuccess();
-    services.useConsumableItem.mockRejectedValue(new Error(SECRET));
+    services.resolveSocialCheck.mockRejectedValue(new Error(SECRET));
 
-    const result = await buildCatalogue().useConsumable!.execute(TOOL_INPUTS.useConsumable, {
+    const result = await buildCatalogue().socialCheck!.execute(TOOL_INPUTS.socialCheck, {
       messages: [],
-      toolCallId: "tc-consumable",
-      toolName: "useConsumable",
+      toolCallId: "tc-social",
+      toolName: "socialCheck",
     });
 
     expect(result).toEqual({ status: "error", reason: "internal_error" });
@@ -519,12 +491,12 @@ describe("useConsumable error classification", () => {
 
   it("converts a non-Error throw into a safe internal error", async () => {
     primeSuccess();
-    services.useConsumableItem.mockRejectedValue(SECRET);
+    services.resolveSocialCheck.mockRejectedValue(SECRET);
 
-    const result = await buildCatalogue().useConsumable!.execute(TOOL_INPUTS.useConsumable, {
+    const result = await buildCatalogue().socialCheck!.execute(TOOL_INPUTS.socialCheck, {
       messages: [],
-      toolCallId: "tc-consumable",
-      toolName: "useConsumable",
+      toolCallId: "tc-social",
+      toolName: "socialCheck",
     });
 
     expect(result).toEqual({ status: "error", reason: "internal_error" });

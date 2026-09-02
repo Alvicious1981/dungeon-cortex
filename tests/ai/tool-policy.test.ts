@@ -36,14 +36,7 @@ describe("narrator tool policy", () => {
 
   it("contains no state-mutating tool", () => {
     const stateMutatingTools = [
-      "spawnEncounter",
-      "resolveAttack",
-      "generateLoot",
-      "updateQuestStatus",
-      "generateAndTrackQuest",
-      "awardXP",
-      "triggerLevelUp",
-      "trackNPC",
+                                  "trackNPC",
       "generateAndTrackNPC",
       "establishInitialDisposition",
       "socialCheck",
@@ -55,11 +48,10 @@ describe("narrator tool policy", () => {
       "executeExplorationTurn",
       "executeTravelWatch",
       "recallLore",
-      "useConsumable",
-    ];
+        ];
 
     // The model-visible surface contains only the four listed tools.
-    expect(stateMutatingTools).toHaveLength(20);
+    expect(stateMutatingTools).toHaveLength(12);
     for (const toolName of stateMutatingTools) {
       expect([...getActiveNarratorToolNames()]).not.toContain(toolName);
     }
