@@ -11,11 +11,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { runTool } from "@/lib/ai/tool-result";
-import { projectTavernName } from "@/lib/ai/read-only-projections";
 import {
-  generateTavernName,
   generateMundaneLoot,
-  GetTavernNameInputSchema,
   GetMundaneLootInputSchema,
 } from "@/lib/rules/generators";
 import { searchMemories } from "@/lib/memory/search";
@@ -25,14 +22,6 @@ import { searchMemories } from "@/lib/memory/search";
  */
 export function buildWorldTools(campaignId: string) {
   return {
-    getTavernName: tool({
-      description:
-        "Generate a deterministic reference tavern name for a location already identified and authorized by backend context. This result does not persist or establish a tavern.",
-      inputSchema: GetTavernNameInputSchema,
-      execute: async ({ locationId }) => {
-        return runTool(() => projectTavernName(generateTavernName(locationId)));
-      },
-    }),
     getMundaneLoot: tool({
       description:
         "Get the deterministic mundane loot found on an entity or in a container.",

@@ -50,7 +50,6 @@ export const UNAVAILABLE_NARRATOR_TOOL_NAMES = Object.freeze([
   "getRumors",
   "generateMerchant",
   "executeTrade",
-  "getTavernName",
   "getMundaneLoot",
   "recallLore",
   "executeTravelWatch",

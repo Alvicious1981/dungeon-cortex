@@ -59,34 +59,6 @@ export function seededFloat(seed: string, salt = 0): number {
 // d100 tables
 // ---------------------------------------------------------------------------
 
-/** Atmospheric adjectives for tavern names. */
-export const TAVERN_ADJECTIVES: readonly string[] = [
-  "Rusty",
-  "Wandering",
-  "Broken",
-  "Gilded",
-  "Forsaken",
-  "Howling",
-  "Blind",
-  "Crimson",
-  "Iron",
-  "Hollow",
-] as const;
-
-/** Evocative nouns for tavern names. */
-export const TAVERN_NOUNS: readonly string[] = [
-  "Flagon",
-  "Specter",
-  "Anvil",
-  "Lantern",
-  "Boar",
-  "Gallows",
-  "Crow",
-  "Cauldron",
-  "Dagger",
-  "Pilgrim",
-] as const;
-
 /** Mundane loot found on defeated enemies or in forgotten corners. */
 export const MUNDANE_LOOT: readonly string[] = [
   "A flattened gold piece, as if struck by a giant's boot",
@@ -142,22 +114,6 @@ export function pickSeeded<T>(seed: string, array: readonly T[]): T {
 // ---------------------------------------------------------------------------
 
 /**
- * Generates a tavern name from a location ID.
- *
- * Uses two independent salts so the adjective and noun picks are
- * uncorrelated — i.e. different salts are used to generate each word,
- * preventing the same relative position from always co-occurring.
- *
- * @example
- * generateTavernName("loc_iron_quarter") // "The Hollow Dagger"
- */
-export function generateTavernName(locationId: string): string {
-  const adjective = pickSeeded(locationId + ":adj", TAVERN_ADJECTIVES);
-  const noun      = pickSeeded(locationId + ":noun", TAVERN_NOUNS);
-  return `The ${adjective} ${noun}`;
-}
-
-/**
  * Returns a single mundane loot item description.
  *
  * Two signatures are supported:
@@ -185,12 +141,6 @@ export function generateMundaneLoot(seedOrEntityId: number | string): string {
 // ---------------------------------------------------------------------------
 // Tool Input Schemas (Single Source of Truth)
 // ---------------------------------------------------------------------------
-
-export const GetTavernNameInputSchema = z.object({
-  locationId: z.string().min(1).max(100),
-}).strict();
-
-export type GetTavernNameInput = z.infer<typeof GetTavernNameInputSchema>;
 
 export const GetMundaneLootInputSchema = z.object({
   entityId: z.string().min(1).max(100),
