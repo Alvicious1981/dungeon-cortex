@@ -107,23 +107,47 @@ const KNOWN_OUTSTANDING_DRIFT: Record<string, string[]> = {};
  *
  * ESTADO: 20260807090000_guard_character_hit_dice_contract ya está implementada.
  * Es guard-only: detecta y aborta ante estados incompatibles o ambiguos, pero NO
- * repara nada. Cierra la vía por la que el daño podía pasar inadvertido; no
- * cierra la deuda.
+ * repara nada — la reparación no vive en una migración, vive en
+ * `pnpm repair:hit-dice` (ver motivo 1 abajo). La guarda cierra la vía por la
+ * que el daño podía pasar inadvertido.
  *
  * NOTA 2026-09-02: la cabecera de abajo decía que "SEC-AI-001 PR3 (que activa
- * applyLevelUp) SIGUE BLOQUEADO". Ya no es cierto por dos vías comprobadas:
+ * applyLevelUp) SIGUE BLOQUEADO". No lo está, por tres vías comprobadas:
  * `applyLevelUp` está **activo en producción** (`app/api/campaign/[id]/
- * level-up/route.ts:106`), y la Issue #66 se cerró como *completada* el
- * 2026-08-30 registrando PR3 como sustituida, no aplazada. De los dos motivos
- * siguientes, el segundo describe un contrato que ya no existe; el primero
- * sigue abierto.
+ * level-up/route.ts:106`); la Issue #66 se cerró como *completada* el
+ * 2026-08-30 registrando PR3 como sustituida, no aplazada; y **ninguno de los
+ * dos motivos de abajo sigue vivo**.
  *
- * SEC-AI-001 PR3 se daba por bloqueado por dos motivos:
+ * Una primera versión de esta nota, escrita el mismo día, dijo que el motivo 1
+ * seguía abierto. También era falso: no se había mirado si las herramientas
+ * existían, solo si el motivo 2 lo hacía.
  *
- *   1. No existe la herramienta TypeScript de diagnóstico y reparación. La
- *      guarda aborta, pero nadie repara: un hitDiceTotal incorrecto sigue
- *      haciendo que applyLevelUp rechace la subida con INVALID_LEVEL_UP_STATE
- *      de forma permanente para ese personaje.
+ * SEC-AI-001 PR3 se daba por bloqueado por dos motivos, hoy ambos cerrados:
+ *
+ *   1. FALSO DESDE QUE SE ESCRIBIÓ. Decía que no existe la herramienta de
+ *      diagnóstico y reparación, y que un hitDiceTotal incorrecto condena al
+ *      personaje a INVALID_LEVEL_UP_STATE permanente. Existen las dos, con
+ *      contrato de tests propio cada una:
+ *
+ *        - Diagnóstico: `pnpm diagnose:model-e`
+ *          (scripts/diagnose-model-e-transition.ts). Read-only POR
+ *          CONSTRUCCIÓN, no por convención: su superficie de BD inyectable
+ *          expone solo `character.findMany` — sin update, $executeRaw ni
+ *          $transaction — y rechaza --apply/--write/--repair/--force con un
+ *          error. Clasifica vía `classifyModelETransition`.
+ *
+ *        - Reparación: `pnpm repair:hit-dice`
+ *          (scripts/repair-character-hit-dice.ts). Dry-run por defecto; escribe
+ *          solo con --apply. Relee y reclasifica todo su ámbito dentro de UNA
+ *          `$transaction`, y si alguna fila sale AMBIGUOUS o
+ *          INVALID_PROGRESSION commitea con cero escrituras. Su patch es
+ *          `{ hitDiceTotal?, hitDiceRemaining? }` — exactamente el campo que
+ *          este motivo daba por irreparable.
+ *
+ *      Cómo sobrevivió la afirmación: ambos scripts y este comentario entraron
+ *      en el MISMO commit, `5c96a0c` (PR #73, 2026-08-16), un squash titulado
+ *      "integrate master before pr3". El motivo sería cierto en su rama; el
+ *      squash lo juntó con las herramientas que negaba.
  *
  *   2. RESUELTO por construcción. Decía que el contrato multinivel estaba
  *      desajustado porque `applyExperienceAward` podía subir varios niveles de
@@ -556,5 +580,50 @@ describe("scripts/check-progression-migration-safety.sh — parametrización", (
     expect(commentLines.join("\n")).toContain("docker exec -i <CONTENEDOR>");
     // …y ese ejemplo nunca aparece en el código ejecutable.
     expect(code).not.toContain("<CONTENEDOR>");
+  });
+});
+
+/**
+ * La cabecera de este archivo afirmó durante tres semanas que la herramienta de
+ * diagnóstico y reparación "no existe", mientras ambos scripts vivían en el
+ * repositorio desde el mismo commit que escribió la afirmación. Un comentario
+ * no puede fallar; estas comprobaciones sí.
+ *
+ * No prueban lo que los scripts hacen — eso es cosa de sus contratos
+ * (`diagnose-model-e-transition-contract.test.ts`,
+ * `repair-character-hit-dice-contract.test.ts`). Prueban que siguen ahí y
+ * siguen siendo invocables, que es lo que la nota da por cierto.
+ */
+describe("herramientas de diagnóstico y reparación de progresión", () => {
+  const PACKAGE_JSON = JSON.parse(
+    readFileSync(join(ROOT, "package.json"), "utf8")
+  ) as { scripts?: Record<string, string> };
+
+  const TOOLS: ReadonlyArray<{ npmScript: string; file: string }> = [
+    { npmScript: "diagnose:model-e", file: "scripts/diagnose-model-e-transition.ts" },
+    { npmScript: "repair:hit-dice", file: "scripts/repair-character-hit-dice.ts" },
+  ];
+
+  for (const { npmScript, file } of TOOLS) {
+    it(`${npmScript} existe y apunta a ${file}`, () => {
+      expect(existsSync(join(ROOT, file))).toBe(true);
+      expect(PACKAGE_JSON.scripts?.[npmScript]).toContain(file);
+    });
+  }
+
+  /**
+   * El diagnóstico es read-only por construcción, no por convención: rechaza
+   * las banderas de escritura en vez de ignorarlas. Si alguien le añadiera un
+   * `--apply`, la nota de arriba dejaría de describirlo.
+   */
+  it("el diagnóstico rechaza las banderas de escritura", () => {
+    const source = readFileSync(
+      join(ROOT, "scripts", "diagnose-model-e-transition.ts"),
+      "utf8"
+    );
+    for (const flag of ["--apply", "--write", "--repair", "--force"]) {
+      expect(source).toContain(flag);
+    }
+    expect(source).toContain("read-only");
   });
 });
