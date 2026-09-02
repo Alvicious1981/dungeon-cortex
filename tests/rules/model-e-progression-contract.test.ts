@@ -5,6 +5,17 @@
  * of it by any number of levels; `applyLevelUp` closes that gap one level at a
  * time, moving `level` and `hitDiceTotal` together in a single conditional
  * write.
+ *
+ * This file covers the ASCENT half only. The award half is enforced where it
+ * actually happens, in three live places:
+ *   - the arithmetic (thresholds, backlog, level-20 cap) in
+ *     `tests/rules/progression.test.ts`, against the pure `computeXPAward`;
+ *   - the persistence — an atomic `xp: { increment }` and nothing else in
+ *     `data`, so `level` cannot move — in `tests/rules/combat-pipeline.test.ts`,
+ *     which asserts the exact call shape;
+ *   - the pending-ascension report in
+ *     `tests/actions/backend-presentation-resolution.test.ts`, against
+ *     `detectPendingLevelUp`, the producer the action route actually streams.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { xpForLevel } from "@/lib/rules/progression";
@@ -135,16 +146,9 @@ function createTx(
 
 type AnyFn = (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
-async function loadServices(): Promise<{
-  applyExperienceAward: AnyFn;
-  applyLevelUp: AnyFn;
-}> {
-  const progression = await import("../../lib/rules/progression-service");
+async function loadServices(): Promise<{ applyLevelUp: AnyFn }> {
   const levelUp = await import("../../lib/rules/level-up-service");
-  return {
-    applyExperienceAward: progression.applyExperienceAward as unknown as AnyFn,
-    applyLevelUp: levelUp.applyLevelUp as unknown as AnyFn,
-  };
+  return { applyLevelUp: levelUp.applyLevelUp as unknown as AnyFn };
 }
 
 function row(rows: CharacterFixture[], id = "character-1"): CharacterFixture {
@@ -152,146 +156,6 @@ function row(rows: CharacterFixture[], id = "character-1"): CharacterFixture {
   if (!found) throw new Error(`Missing character ${id}`);
   return found;
 }
-
-describe("Model E — applyExperienceAward", () => {
-  let applyExperienceAward: AnyFn;
-
-  beforeEach(async () => {
-    ({ applyExperienceAward } = await loadServices());
-  });
-
-  it("1. XP below the next threshold leaves level untouched", async () => {
-    const { rows, tx } = createTx([character({ xp: 0, level: 1 })]);
-    const result = await applyExperienceAward({
-      campaignId: "campaign-1",
-      characterId: "character-1",
-      xpAmount: 100,
-      tx,
-    });
-
-    expect(row(rows).xp).toBe(100);
-    expect(row(rows).level).toBe(1);
-    expect(result.targetLevel).toBe(1);
-    expect(result.pendingLevels).toBe(0);
-  });
-
-  it("2. crossing exactly one threshold changes XP but never level", async () => {
-    const { rows, tx } = createTx([character({ xp: 0, level: 1 })]);
-    const result = await applyExperienceAward({
-      campaignId: "campaign-1",
-      characterId: "character-1",
-      xpAmount: xpForLevel(2),
-      tx,
-    });
-
-    expect(row(rows).xp).toBe(xpForLevel(2));
-    expect(row(rows).level).toBe(1);
-    expect(row(rows).hitDiceTotal).toBe(1);
-    expect(result.targetLevel).toBe(2);
-    expect(result.pendingLevels).toBe(1);
-  });
-
-  it("3. a 1 -> 5 award leaves xp 6500, level 1, total 1, pendingLevels 4", async () => {
-    const { rows, tx } = createTx([character({ xp: 0, level: 1 })]);
-    const result = await applyExperienceAward({
-      campaignId: "campaign-1",
-      characterId: "character-1",
-      xpAmount: xpForLevel(5),
-      tx,
-    });
-
-    expect(row(rows).xp).toBe(6500);
-    expect(row(rows).level).toBe(1);
-    expect(row(rows).hitDiceTotal).toBe(1);
-    expect(row(rows).maxHp).toBe(12);
-    expect(result.targetLevel).toBe(5);
-    expect(result.pendingLevels).toBe(4);
-  });
-
-  it("4. XP is never lost across successive awards", async () => {
-    const { rows, tx } = createTx([character({ xp: 0, level: 1 })]);
-    for (const amount of [500, 500, 900]) {
-      await applyExperienceAward({
-        campaignId: "campaign-1",
-        characterId: "character-1",
-        xpAmount: amount,
-        tx,
-      });
-    }
-    expect(row(rows).xp).toBe(1900);
-  });
-
-  it("Caso A: an award that does not cross a new threshold still reports the existing pending ascension", async () => {
-    // level 2 applied, XP already supports target 5 -> 3 pending. A further
-    // +50 XP (nowhere near the level-6 threshold) must not erase that signal:
-    // levelUpAvailable is derived from level vs targetLevel, not from whether
-    // *this* award crossed anything.
-    const { rows, tx } = createTx([
-      character({ xp: xpForLevel(5), level: 2, hitDiceTotal: 2, hitDiceRemaining: 2 }),
-    ]);
-    const result = await applyExperienceAward({
-      campaignId: "campaign-1",
-      characterId: "character-1",
-      xpAmount: 50,
-      tx,
-    });
-
-    expect(row(rows).level).toBe(2);
-    expect(result.targetLevel).toBe(5);
-    expect(result.pendingLevels).toBe(3);
-    expect(result.levelUpAvailable).toMatchObject({
-      characterId: "character-1",
-      fromLevel: 2,
-      toLevel: 3,
-      pendingLevels: 3,
-    });
-  });
-
-  it("Caso B: an award that raises targetLevel further still only ever offers the single next level", async () => {
-    // level 2 applied, XP previously supported target 5. An award that pushes
-    // targetLevel to 6 must not jump the character straight there: level
-    // stays 2, all XP is kept, and the only offer is fromLevel 2 -> toLevel 3.
-    const { rows, tx } = createTx([
-      character({ xp: xpForLevel(5), level: 2, hitDiceTotal: 2, hitDiceRemaining: 2 }),
-    ]);
-    const xpAmount = xpForLevel(6) - xpForLevel(5);
-
-    const result = await applyExperienceAward({
-      campaignId: "campaign-1",
-      characterId: "character-1",
-      xpAmount,
-      tx,
-    });
-
-    expect(row(rows).xp).toBe(xpForLevel(6));
-    expect(row(rows).level).toBe(2);
-    expect(result.targetLevel).toBe(6);
-    expect(result.pendingLevels).toBe(4);
-    expect(result.levelUpAvailable).toMatchObject({
-      characterId: "character-1",
-      fromLevel: 2,
-      toLevel: 3,
-      pendingLevels: 4,
-    });
-  });
-
-  it("5. XP accumulates past level 20 without exceeding the level cap", async () => {
-    const { rows, tx } = createTx([
-      character({ xp: xpForLevel(20), level: 20, hitDiceTotal: 20, hitDiceRemaining: 20 }),
-    ]);
-    const result = await applyExperienceAward({
-      campaignId: "campaign-1",
-      characterId: "character-1",
-      xpAmount: 50_000,
-      tx,
-    });
-
-    expect(row(rows).xp).toBe(xpForLevel(20) + 50_000);
-    expect(row(rows).level).toBe(20);
-    expect(result.targetLevel).toBe(20);
-    expect(result.pendingLevels).toBe(0);
-  });
-});
 
 describe("Model E — applyLevelUp", () => {
   let applyLevelUp: AnyFn;

@@ -16,10 +16,16 @@
  * ─── Why the convertible set is so small ────────────────────────────────────
  * Under the OLD contract every authorized backend sequence leaves
  * `targetLevel === level`: character creation writes `level: 1` with `xp` at
- * its default 0; applyExperienceAward writes `level = getLevelFromXP(newXP)`
- * whenever it crosses a threshold and refuses to run at all when it finds
+ * its default 0; the XP award of the day wrote `level = getLevelFromXP(newXP)`
+ * whenever it crossed a threshold and refused to run at all when it found
  * `getLevelFromXP(xp) > level`; applyLevelUp never writes `level`; the
  * migrations never write `xp` or `level`.
+ *
+ * That award was `applyExperienceAward`, deleted once it had no caller. This
+ * paragraph is about rows already in the database, so its provenance argument
+ * stands — but no live code writes `level` on an XP award any more: the only
+ * award is `combat-pipeline.ts`, an atomic `xp: { increment }` and nothing
+ * else.
  *
  * applyLevelUp writes `hitDiceTotal = level` and `maxHp` in the SAME
  * statement, so `maxHp` always corresponds to `hitDiceTotal`, never to

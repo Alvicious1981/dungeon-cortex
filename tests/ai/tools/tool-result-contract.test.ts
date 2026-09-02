@@ -25,7 +25,6 @@ class FakeSocialServiceError extends Error {
 const services = vi.hoisted(() => ({
   spawnCombatEncounter: vi.fn(),
   grantLoot: vi.fn(),
-  applyExperienceAward: vi.fn(),
   applyLevelUp: vi.fn(),
   createTrackedQuest: vi.fn(),
   generateNPC: vi.fn(),
@@ -53,9 +52,6 @@ vi.mock("@/lib/rules/encounter-service", () => ({
   spawnCombatEncounter: services.spawnCombatEncounter,
 }));
 vi.mock("@/lib/rules/loot-service", () => ({ grantLoot: services.grantLoot }));
-vi.mock("@/lib/rules/progression-service", () => ({
-  applyExperienceAward: services.applyExperienceAward,
-}));
 vi.mock("@/lib/rules/level-up-service", () => ({ applyLevelUp: services.applyLevelUp }));
 vi.mock("@/lib/rules/quest-service", () => ({
   createTrackedQuest: services.createTrackedQuest,
