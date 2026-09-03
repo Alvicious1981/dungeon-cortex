@@ -184,7 +184,13 @@ describe("una acción de exploración se resuelve con dados, no con prosa", () =
   it.each([
     "I explore",
     "I scout ahead",
-    "I travel to the north",
+    // "I travel to the north" is deliberately absent here: Task 2 gave
+    // "travel to <destination>" its own gate, so this phrasing is no longer
+    // ambiguous — it is a well-formed journey to a destination named "north"
+    // that the travel gate itself rejects (see tests/api/travel-route.test.ts),
+    // not a clarification request. "viajo al norte" stays: the travel branch
+    // only recognizes "viajar/viajo a|hacia", not "al" (a+el), so it still has
+    // no dedicated mechanic and must still fail closed.
     "viajo al norte",
   ])("%s se rechaza en vez de narrarse sin resolver", async (action) => {
     const { res } = await post(action);

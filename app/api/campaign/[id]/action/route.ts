@@ -40,6 +40,7 @@ import {
   type CharacterState,
 } from "@/lib/rules/exploration";
 import { moveToNode } from "@/lib/rules/navigation";
+import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
@@ -1182,6 +1183,105 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         gameEvents.push({
           type: "REST_COMPLETED",
           payload: eventPayload,
+        });
+      });
+    }
+
+    // ── Gate: travel ────────────────────────────────────────────────────────────
+    if (intent.actionType === "travel" && intent.destination) {
+      const originId = context.currentExploration?.location?.id ?? null;
+      if (!originId) {
+        return NextResponse.json(
+          { error: "You are nowhere to travel from yet." },
+          { status: 400 }
+        );
+      }
+
+      const destination = await prisma.location.findFirst({
+        where: {
+          campaignId,
+          name: { equals: intent.destination, mode: "insensitive" },
+        },
+        select: { id: true, name: true, seed: true },
+      });
+
+      if (!destination) {
+        const known = await prisma.location.findMany({
+          where: { campaignId },
+          select: { name: true },
+        });
+        return NextResponse.json(
+          {
+            error:
+              `You know no place called "${intent.destination}". ` +
+              `Known: ${known.map((l) => l.name).join(", ") || "nowhere yet"}.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (destination.id === originId) {
+        return NextResponse.json(
+          { error: `You are already at ${destination.name}.` },
+          { status: 400 }
+        );
+      }
+
+      const entryNode = await prisma.locationNode.findFirst({
+        where: { locationId: destination.id },
+        orderBy: { index: "asc" },
+        select: { id: true },
+      });
+      if (!entryNode) {
+        return NextResponse.json(
+          { error: `${destination.name} has no way in.` },
+          { status: 409 }
+        );
+      }
+
+      const origin = await prisma.location.findUnique({
+        where: { id: originId },
+        select: { name: true, seed: true },
+      });
+
+      // Every figure is resolved here, before anything is written or narrated.
+      const stats = (context.character.stats ?? {}) as Partial<Record<string, number>>;
+      const journey = resolveJourney({
+        distanceMiles: travelDistanceMiles(origin?.seed ?? originId, destination.seed),
+        forceMarch: intent.forceMarch === true,
+        conModifier: abilityModifier(stats.CON ?? 10),
+        currentExhaustion: context.character.exhaustionLevel,
+      });
+
+      const logLine = journey.forcedHours > 0
+        ? `Travel: ${origin?.name ?? "Unknown"} → ${destination.name}, ` +
+          `${journey.distanceMiles} mi forced march, ${journey.hours} h. ` +
+          `Forced march: ${journey.forcedHours} h, ` +
+          `DC ${journey.saves.map((s) => s.dc).join("/")} → ` +
+          `${journey.saves.filter((s) => !s.success).length} failed, ` +
+          `exhaustion ${context.character.exhaustionLevel} → ` +
+          `${context.character.exhaustionLevel + journey.exhaustionGained}.`
+        : `Travel: ${origin?.name ?? "Unknown"} → ${destination.name}, ` +
+          `${journey.distanceMiles} mi at normal pace, ${journey.days} day(s).`;
+
+      await prisma.$transaction(async (tx) => {
+        if (journey.exhaustionGained > 0) {
+          await tx.character.update({
+            where: { id: context.character.id },
+            data: {
+              exhaustionLevel:
+                context.character.exhaustionLevel + journey.exhaustionGained,
+            },
+          });
+        }
+
+        await tx.campaign.update({
+          where: { id: campaignId },
+          data: { currentLocationId: destination.id, currentNodeId: entryNode.id },
+        });
+
+        await tx.gameLog.create({
+          data: { campaignId, role: "system", content: logLine },
         });
       });
     }
