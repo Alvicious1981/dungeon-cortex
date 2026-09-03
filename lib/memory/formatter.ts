@@ -13,12 +13,12 @@
  * This module is pure: it performs no I/O and never mutates anything.
  */
 
-import type { CampaignContext, ContextExploration } from "@/lib/memory/context";
+import type { CampaignContext, ContextActiveNPC, ContextExploration } from "@/lib/memory/context";
 import type { MerchantPayload } from "@/lib/rules/trade";
 import { isSpellSlots } from "@/lib/rules/magic";
 import { xpForLevel, getLevelFromXP, MAX_LEVEL, HIT_DIE_MAP } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
-import { type NPCPersonality, type NpcAttitude } from "@/lib/rules/social";
+import { type NpcAttitude } from "@/lib/rules/social";
 import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
@@ -434,12 +434,8 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
 // ---------------------------------------------------------------------------
 
 /** Shape passed to formatNPCContext — mirrors the social fields on the NPC model. */
-export interface ActiveNPC {
-  name: string;
-  disposition: number | null;
-  personalityTags: NPCPersonality | null;
-  hasMetPlayer: boolean;
-}
+/** Kept as an alias so existing importers do not move; the shape is canonical. */
+export type ActiveNPC = ContextActiveNPC;
 
 const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
   Hostile:     "🔴",
@@ -551,9 +547,18 @@ function formatWildernessHUD(ctx: WildernessHUDContext): string {
 // ---------------------------------------------------------------------------
 
 /** Full input shape accepted by the canonical-state and system-prompt formatters. */
+/**
+ * `gold` and `activeNPC` used to live here as optional extensions and nothing
+ * ever supplied them, so party gold read 0 GP at every balance and the NPC
+ * section never rendered. Both are now canonical fields on `CampaignContext`,
+ * produced by `buildCampaignContext`, which is what both call sites pass.
+ *
+ * The two HUDs remain optional and remain unsupplied. `wildernessHUD` is
+ * expected to be: that subsystem is off by a recorded decision.
+ * `explorationHUD` is not explained by anything — it is the same defect, still
+ * open.
+ */
 export type FormatterContext = CampaignContext & {
-  gold?: number;
-  activeNPC?: ActiveNPC;
   explorationHUD?: ExplorationHUDContext;
   wildernessHUD?: WildernessHUDContext;
 };
@@ -577,7 +582,7 @@ export function formatCanonicalState(context: FormatterContext): string {
   const shouldShowNPCContext = Boolean(context.activeNPC) && !context.activeEncounter;
 
   const questSection = formatQuests(context.quests);
-  const partyGold = context.gold ?? 0;
+  const partyGold = context.gold;
   const explorationSection = formatExploration(context.currentExploration, partyGold);
 
   const sections = [
