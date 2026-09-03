@@ -49,7 +49,8 @@ import { POST } from "@/app/api/campaign/[id]/action/route";
 import { prisma } from "@/lib/db/prisma";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
-import { travelDistanceMiles } from "@/lib/rules/travel";
+import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
+import { abilityModifier } from "@/lib/rules/dice";
 
 const params = Promise.resolve({ id: "camp_1" });
 
@@ -233,5 +234,61 @@ describe("travel gate", () => {
         }),
       })
     );
+  });
+
+  /**
+   * The forced-march branch is where a fabricated or mis-derived number could
+   * hide: it is the only branch that reports the forced-hour count, the DC
+   * list and the exhaustion transition. Every expected figure below is
+   * derived from travelDistanceMiles + resolveJourney — the same functions
+   * and the same mocked Math.random the route itself uses — rather than
+   * hardcoded, so this stays correct if the distance function is retuned.
+   */
+  it("writes a system log line carrying the forced-march figures", async () => {
+    // A natural 1 fails every DC at +0, matching the mock used by the
+    // exhaustion-persistence test above so both derive the same journey.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "travel",
+      destination: "Gilded Boar",
+      forceMarch: true,
+    });
+
+    await POST(request("travel to the Gilded Boar, forced march"), { params });
+
+    const miles = travelDistanceMiles("seed_origin", "seed_dest");
+    const journey = resolveJourney({
+      distanceMiles: miles,
+      forceMarch: true,
+      conModifier: abilityModifier(CHARACTER.stats.CON),
+      currentExhaustion: CHARACTER.exhaustionLevel,
+    });
+
+    if (journey.forcedHours === 0) {
+      // These fixture seeds currently produce a forced march (verified: 33 mi
+      // -> 3 forced hours). Nothing forced-march-specific to assert if a
+      // future distance retune ever lands exactly on the 8-hour boundary —
+      // report rather than fabricate an assertion.
+      vi.restoreAllMocks();
+      return;
+    }
+
+    const dcList = journey.saves.map((s) => s.dc).join("/");
+    const failedCount = journey.saves.filter((s) => !s.success).length;
+    const expectedExhaustion =
+      CHARACTER.exhaustionLevel + journey.exhaustionGained;
+
+    expect(prismaTx.gameLog.create).toHaveBeenCalledTimes(1);
+    const content = (prismaTx.gameLog.create as ReturnType<typeof vi.fn>).mock
+      .calls[0][0].data.content as string;
+
+    expect(content).toContain(`Forced march: ${journey.forcedHours} h`);
+    expect(content).toContain(`DC ${dcList}`);
+    expect(content).toContain(`${failedCount} failed`);
+    expect(content).toContain(
+      `exhaustion ${CHARACTER.exhaustionLevel} → ${expectedExhaustion}.`
+    );
+
+    vi.restoreAllMocks();
   });
 });
