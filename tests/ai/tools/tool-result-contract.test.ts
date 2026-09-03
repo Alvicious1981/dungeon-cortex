@@ -17,13 +17,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /** Anything a leaking tool would carry out of the backend. */
 const SECRET = "SECRET_INTERNAL_DETAIL postgres://user:pw@10.0.0.4/db";
 
-class FakeSocialServiceError extends Error {
-  constructor(public readonly code: string) {
-    super(SECRET);
-    this.name = "SocialServiceError";
-  }
-}
-
 // ─── Service mocks ────────────────────────────────────────────────────────────
 
 const services = vi.hoisted(() => ({
@@ -31,16 +24,6 @@ const services = vi.hoisted(() => ({
   grantLoot: vi.fn(),
   applyLevelUp: vi.fn(),
   createTrackedQuest: vi.fn(),
-  generateNPC: vi.fn(),
-  initialAttitudeFor: vi.fn(),
-  resolveRumors: vi.fn(),
-  resolveSocialCheck: vi.fn(),
-  buildMerchantPayload: vi.fn(),
-  getCampaignCharacterIdForTrade: vi.fn(),
-  resolveTradeTransaction: vi.fn(),
-  establishInitialNpcDisposition: vi.fn(),
-  trackNpcState: vi.fn(),
-  upsertGeneratedNpc: vi.fn(),
   generateExplorationLocation: vi.fn(),
   resolveExplorationTurn: vi.fn(),
   moveCampaignToNode: vi.fn(),
@@ -56,31 +39,6 @@ vi.mock("@/lib/rules/loot-service", () => ({ grantLoot: services.grantLoot }));
 vi.mock("@/lib/rules/level-up-service", () => ({ applyLevelUp: services.applyLevelUp }));
 vi.mock("@/lib/rules/quest-service", () => ({
   createTrackedQuest: services.createTrackedQuest,
-}));
-vi.mock("@/lib/rules/npc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/rules/npc")>()),
-  generateNPC: services.generateNPC,
-}));
-vi.mock("@/lib/rules/social-logic", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/rules/social-logic")>()),
-  initialAttitudeFor: services.initialAttitudeFor,
-}));
-vi.mock("@/lib/rules/social-service", () => ({
-  resolveRumors: services.resolveRumors,
-  resolveSocialCheck: services.resolveSocialCheck,
-}));
-vi.mock("@/lib/rules/trade", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/rules/trade")>()),
-  buildMerchantPayload: services.buildMerchantPayload,
-}));
-vi.mock("@/lib/rules/trade-service", () => ({
-  getCampaignCharacterIdForTrade: services.getCampaignCharacterIdForTrade,
-  resolveTradeTransaction: services.resolveTradeTransaction,
-}));
-vi.mock("@/lib/rules/npc-service", () => ({
-  establishInitialNpcDisposition: services.establishInitialNpcDisposition,
-  trackNpcState: services.trackNpcState,
-  upsertGeneratedNpc: services.upsertGeneratedNpc,
 }));
 vi.mock("@/lib/rules/exploration-service", () => ({
   generateExplorationLocation: services.generateExplorationLocation,
@@ -103,7 +61,6 @@ vi.mock("@/lib/db/prisma", () => ({
   },
 }));
 
-import { buildSocialTools } from "@/lib/ai/tools/social";
 import { buildExplorationTools } from "@/lib/ai/tools/exploration";
 import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
@@ -119,7 +76,6 @@ const CAMPAIGN_ID = "campaign-contract-001";
 
 function buildCatalogue(): Record<string, { execute: (...args: unknown[]) => unknown }> {
   return {
-    ...buildSocialTools(CAMPAIGN_ID),
     ...buildExplorationTools(CAMPAIGN_ID),
     executeTravelWatch: buildWildernessTool(CAMPAIGN_ID),
     ...buildSrdTools(),
@@ -128,24 +84,6 @@ function buildCatalogue(): Record<string, { execute: (...args: unknown[]) => unk
 
 /** One valid input per catalogue tool. */
 const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
-  getNPCDetails: { seed: "gate_guard", role: "guard" },
-  trackNPC: { seed: "gate_guard", role: "guard", notes: "Gruff.", hp: 10 },
-  generateAndTrackNPC: { seed: "gate_guard", role: "guard", notes: "Gruff." },
-  establishInitialDisposition: { npcSeed: "gate_guard", npcRole: "guard" },
-  socialCheck: {
-    npcSeed: "gate_guard",
-    approach: "persuade",
-    intent: "Ask for directions.",
-  },
-  getRumors: { npcSeed: "gate_guard" },
-  generateMerchant: { archetype: "general", npcSeed: "merchant_1" },
-  executeTrade: {
-    action: "buy",
-    itemIndex: 0,
-    quantity: 1,
-    npcSeed: "merchant_1",
-    archetype: "general",
-  },
   generateLocation: { locationType: "dungeon", seed: "seed-1", parentLocationId: null },
   moveToNode: { targetNodeIndex: 2 },
   executeExplorationTurn: { action: "search", turnsToAdvance: 1 },
@@ -172,28 +110,6 @@ const NPC_STATBLOCK = {
 
 function primeSuccess(): void {
   services.spawnCombatEncounter.mockResolvedValue({ encounterId: "enc-1", enemies: [] });
-  services.generateNPC.mockReturnValue(NPC_STATBLOCK);
-  services.initialAttitudeFor.mockReturnValue("Friendly");
-  services.resolveRumors.mockResolvedValue({ npcName: "Bert", rumors: [] });
-  services.resolveSocialCheck.mockResolvedValue({ dispositionBefore: 4, dispositionAfter: 6 });
-  services.buildMerchantPayload.mockReturnValue({
-    inventory: [{ name: "Rope", type: "gear", properties: {}, buyPriceGP: 1 }],
-    sellModifier: 0.5,
-  });
-  services.getCampaignCharacterIdForTrade.mockResolvedValue("char-1");
-  services.resolveTradeTransaction.mockResolvedValue({ goldAfter: 40, itemName: "Rope" });
-  services.establishInitialNpcDisposition.mockResolvedValue(undefined);
-  services.trackNpcState.mockResolvedValue({ seed: "gate_guard", name: "Aldric Fenwick" });
-  services.upsertGeneratedNpc.mockResolvedValue({
-    ok: true,
-    seed: "gate_guard",
-    name: "Aldric Fenwick",
-    race: "human",
-    profession: "soldier",
-    alignment: "lawful neutral",
-    traits: NPC_STATBLOCK.traits,
-    facts: {},
-  });
   services.generateExplorationLocation.mockResolvedValue({ locationId: "loc-1", nodes: [] });
   services.resolveExplorationTurn.mockResolvedValue({ turnsAdvanced: 1, warnings: [] });
   services.moveCampaignToNode.mockResolvedValue({
@@ -286,10 +202,10 @@ beforeEach(() => {
 });
 
 describe("narrator tool catalogue", () => {
-  it("contains exactly the 16 known tools", () => {
+  it("contains exactly the 8 known tools", () => {
     const catalogue = Object.keys(buildCatalogue());
 
-    expect(catalogue).toHaveLength(16);
+    expect(catalogue).toHaveLength(8);
     expect(catalogue.sort()).toEqual([...CATALOGUE_NAMES].sort());
   });
 });
@@ -419,59 +335,8 @@ describe("DTOs with undefined optional properties", () => {
   });
 });
 
-describe("socialCheck error classification", () => {
-  it("keeps the stable domain code of a SocialServiceError", async () => {
-    primeSuccess();
-    services.resolveSocialCheck.mockRejectedValue(
-      new FakeSocialServiceError("NPC_NOT_MET"),
-    );
-
-    const result = await buildCatalogue().socialCheck!.execute(TOOL_INPUTS.socialCheck, {
-      messages: [],
-      toolCallId: "tc-social",
-      toolName: "socialCheck",
-    });
-
-    expect(result).toEqual({
-      status: "error",
-      reason: "rejected",
-      code: "NPC_NOT_MET",
-    });
-    assertNoLeak(result);
-  });
-
-  it("converts an unknown error into a safe internal error", async () => {
-    primeSuccess();
-    services.resolveSocialCheck.mockRejectedValue(new Error(SECRET));
-
-    const result = await buildCatalogue().socialCheck!.execute(TOOL_INPUTS.socialCheck, {
-      messages: [],
-      toolCallId: "tc-social",
-      toolName: "socialCheck",
-    });
-
-    expect(result).toEqual({ status: "error", reason: "internal_error" });
-    assertNoLeak(result);
-  });
-
-  it("converts a non-Error throw into a safe internal error", async () => {
-    primeSuccess();
-    services.resolveSocialCheck.mockRejectedValue(SECRET);
-
-    const result = await buildCatalogue().socialCheck!.execute(TOOL_INPUTS.socialCheck, {
-      messages: [],
-      toolCallId: "tc-social",
-      toolName: "socialCheck",
-    });
-
-    expect(result).toEqual({ status: "error", reason: "internal_error" });
-    assertNoLeak(result);
-  });
-});
-
 describe("active read-only tool projections", () => {
   const ACTIVE_PROJECTIONS = [
-    ["getNPCDetails", NpcDetailsOutputSchema],
     ["getSpellInfo", SpellInfoOutputSchema],
     ["getEquipmentInfo", EquipmentInfoOutputSchema],
     ["getMonsterInfo", MonsterInfoOutputSchema],
