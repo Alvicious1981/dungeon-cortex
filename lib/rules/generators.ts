@@ -11,8 +11,6 @@
  *
  * This module is pure: no I/O, no side effects, no external dependencies.
  */
-import { z } from "zod";
-
 // ---------------------------------------------------------------------------
 // PRNG — cyrb53 (string → float in [0, 1))
 // ---------------------------------------------------------------------------
@@ -120,8 +118,10 @@ export function pickSeeded<T>(seed: string, array: readonly T[]): T {
  *   - `generateMundaneLoot(seed: number)` — resolves a d100 roll via
  *     mulberry32 against the MUNDANE_LOOT table. The numeric seed maps
  *     deterministically: same seed always returns the same item.
- *   - `generateMundaneLoot(entityId: string)` — legacy string-key variant
- *     used by the narrator pipeline (cyrb53-based).
+ *   - `generateMundaneLoot(entityId: string)` — string-key variant
+ *     (cyrb53-based). This is the live one: `generateNodeContent` calls it
+ *     with a node id. It said "used by the narrator pipeline" until that
+ *     pipeline's tool was deleted.
  *
  * @example
  * generateMundaneLoot(42)          // "A compass needle that points toward…"
@@ -142,8 +142,7 @@ export function generateMundaneLoot(seedOrEntityId: number | string): string {
 // Tool Input Schemas (Single Source of Truth)
 // ---------------------------------------------------------------------------
 
-export const GetMundaneLootInputSchema = z.object({
-  entityId: z.string().min(1).max(100),
-}).strict();
-
-export type GetMundaneLootInput = z.infer<typeof GetMundaneLootInputSchema>;
+// No `GetMundaneLootInputSchema` here any more: it validated the input of an
+// AI tool, and since #112 `generateMundaneLoot` is called by
+// `generateNodeContent` with a node id the backend already owns. There is no
+// untrusted caller left to validate.

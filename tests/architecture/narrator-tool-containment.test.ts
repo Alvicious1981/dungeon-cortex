@@ -89,7 +89,6 @@ describe("common tool-result contract", () => {
       "social.ts",
       "srd-lookup.ts",
       "wilderness.ts",
-      "world.ts",
     ]);
   });
 

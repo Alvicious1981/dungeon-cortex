@@ -45,7 +45,6 @@ const services = vi.hoisted(() => ({
   resolveExplorationTurn: vi.fn(),
   moveCampaignToNode: vi.fn(),
   resolveTravelWatch: vi.fn(),
-  generateMundaneLoot: vi.fn(),
   srdFindUnique: vi.fn(),
   srdFindMany: vi.fn(),
 }));
@@ -96,10 +95,6 @@ vi.mock("@/lib/rules/wilderness-service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/rules/wilderness-service")>()),
   resolveTravelWatch: services.resolveTravelWatch,
 }));
-vi.mock("@/lib/rules/generators", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/rules/generators")>()),
-  generateMundaneLoot: services.generateMundaneLoot,
-}));
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     srdSpell: { findUnique: services.srdFindUnique, findMany: services.srdFindMany },
@@ -111,7 +106,6 @@ vi.mock("@/lib/db/prisma", () => ({
 import { buildSocialTools } from "@/lib/ai/tools/social";
 import { buildExplorationTools } from "@/lib/ai/tools/exploration";
 import { buildWildernessTool } from "@/lib/ai/tools/wilderness";
-import { buildWorldTools } from "@/lib/ai/tools/world";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
 import { isToolResult } from "@/lib/ai/tool-result";
 import {
@@ -128,7 +122,6 @@ function buildCatalogue(): Record<string, { execute: (...args: unknown[]) => unk
     ...buildSocialTools(CAMPAIGN_ID),
     ...buildExplorationTools(CAMPAIGN_ID),
     executeTravelWatch: buildWildernessTool(CAMPAIGN_ID),
-    ...buildWorldTools(),
     ...buildSrdTools(),
   } as never;
 }
@@ -157,7 +150,6 @@ const TOOL_INPUTS: Record<string, Record<string, unknown>> = {
   moveToNode: { targetNodeIndex: 2 },
   executeExplorationTurn: { action: "search", turnsToAdvance: 1 },
   executeTravelWatch: { action: "travel", direction: "north", pace: "normal" },
-  getMundaneLoot: { entityId: "entity-1" },
   getSpellInfo: { query: "fireball" },
   getItemInfo: { query: "cloak of protection" },
   getEquipmentInfo: { query: "longsword" },
@@ -212,7 +204,6 @@ function primeSuccess(): void {
     facts: {},
   });
   services.resolveTravelWatch.mockResolvedValue({ watch: "Dawn", discovered: true });
-  services.generateMundaneLoot.mockReturnValue("a bent copper coin");
   services.srdFindUnique.mockResolvedValue({
     id: "fireball",
     name: "Fireball",
@@ -264,8 +255,7 @@ function primeFailure(): void {
     if (
       name === "generateNPC" ||
       name === "initialAttitudeFor" ||
-      name === "buildMerchantPayload" ||
-      name === "generateMundaneLoot"
+      name === "buildMerchantPayload"
     ) {
       mock.mockImplementation(boom);
     } else {
@@ -296,10 +286,10 @@ beforeEach(() => {
 });
 
 describe("narrator tool catalogue", () => {
-  it("contains exactly the 17 known tools", () => {
+  it("contains exactly the 16 known tools", () => {
     const catalogue = Object.keys(buildCatalogue());
 
-    expect(catalogue).toHaveLength(17);
+    expect(catalogue).toHaveLength(16);
     expect(catalogue.sort()).toEqual([...CATALOGUE_NAMES].sort());
   });
 });
