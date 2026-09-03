@@ -68,6 +68,8 @@ const baseContext: CampaignContext = {
   relevantMemories: [],
   quests: [],
   currentExploration: null,
+  gold: 0,
+  activeNPC: null,
 };
 
 const hitContext: CombatNarrativeContext = {

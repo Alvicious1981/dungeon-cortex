@@ -16,6 +16,7 @@
 import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@prisma/client";
 import { searchMemories } from "@/lib/memory/search";
+import type { NPCPersonality } from "@/lib/rules/social";
 
 // ---------------------------------------------------------------------------
 // Return types
@@ -146,6 +147,20 @@ export interface ContextExploration {
   allEdges: ContextExplorationEdge[];
 }
 
+/**
+ * The NPC the party is currently facing, resolved from persisted state.
+ *
+ * Lives here rather than in the formatter because the formatter already
+ * imports from this module; defining it there and importing it back would
+ * invert the dependency.
+ */
+export interface ContextActiveNPC {
+  name: string;
+  disposition: number | null;
+  personalityTags: NPCPersonality | null;
+  hasMetPlayer: boolean;
+}
+
 export interface CampaignContext {
   character: ContextCharacter;
   /** The current active encounter, or null if no combat is in progress. */
@@ -162,6 +177,52 @@ export interface CampaignContext {
   quests: ContextQuest[];
   /** Active exploration location and navigation state, or null if not exploring. */
   currentExploration: ContextExploration | null;
+  /**
+   * The party's gold. Was an optional field on `FormatterContext` that nothing
+   * ever supplied, so the narrator was told "Party Gold: 0 GP" at every
+   * balance.
+   */
+  gold: number;
+  /**
+   * The NPC in scope, or null. Derived from the current node's `npcSeed` — the
+   * backend's own signal for "there is someone here" — never from the client
+   * or the model. Was also an unsupplied optional, so the narrator's whole NPC
+   * section, secret disclosure included, never rendered.
+   */
+  activeNPC: ContextActiveNPC | null;
+}
+
+/**
+ * Resolves the NPC the party is facing from the node they are standing in.
+ *
+ * `npcSeed` is the backend's own marker for "there is someone here" — the
+ * formatter already prints it — so it is the signal that decides scope. No
+ * client input and no model output reaches this.
+ */
+async function fetchActiveNPC(
+  campaignId: string,
+  exploration: ContextExploration | null
+): Promise<ContextActiveNPC | null> {
+  const seed = exploration?.currentNode?.npcSeed;
+  if (!seed) return null;
+
+  const npc = await prisma.nPC.findUnique({
+    where: { campaignId_seed: { campaignId, seed } },
+    select: {
+      name: true,
+      disposition: true,
+      personalityTags: true,
+      hasMetPlayer: true,
+    },
+  });
+  if (!npc) return null;
+
+  return {
+    name: npc.name,
+    disposition: npc.disposition,
+    personalityTags: (npc.personalityTags as NPCPersonality | null) ?? null,
+    hasMetPlayer: npc.hasMetPlayer,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +342,7 @@ export async function buildCampaignContext(
     prisma.campaign.findUnique({
       where: { id: campaignId },
       select: {
+        gold: true,
         character: {
           select: {
             id: true,
@@ -386,8 +448,18 @@ export async function buildCampaignContext(
     throw new Error(`Campaign not found: ${campaignId}`);
   }
 
+  // Sequential, not part of the Promise.all above: the NPC in scope is decided
+  // by the node the exploration query just resolved, so it cannot be fetched
+  // before that answer exists. Failures are swallowed like exploration's, so a
+  // missing NPC never blocks the action pipeline.
+  const activeNPC = await fetchActiveNPC(campaignId, currentExploration ?? null).catch(
+    () => null
+  );
+
   return {
     character: campaign.character,
+    gold: campaign.gold,
+    activeNPC,
     activeEncounter: activeEncounter ?? null,
     // Reverse so logs are oldest-first (natural reading order for AI context)
     recentLogs: recentLogsDesc.reverse(),

@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import type { Prisma } from "@prisma/client";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
-import { initialAttitudeFor, INITIAL_DISPOSITION } from "@/lib/rules/social-logic";
+import {
+  initialAttitudeFor,
+  INITIAL_DISPOSITION,
+  generateNPCPersonality,
+} from "@/lib/rules/social-logic";
 import type { NPCRole } from "@/lib/rules/npc";
 
 interface RouteContext {
@@ -83,7 +88,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     const attitude = initialAttitudeFor(npc.seed, npc.role as NPCRole);
     await prisma.nPC.update({
       where: { id: npc.id },
-      data: { disposition: INITIAL_DISPOSITION[attitude], hasMetPlayer: true },
+      data: {
+        disposition: INITIAL_DISPOSITION[attitude],
+        hasMetPlayer: true,
+        personalityTags: generateNPCPersonality(
+          npc.seed
+        ) as unknown as Prisma.InputJsonValue,
+        // The only producer of `personalityTags` in the game. The column has
+        // always existed and `formatNPCContext` has always read it — the
+        // secret it discloses at disposition 8 hangs off this field — but the
+        // one writer was an AI tool removed from the narrator boundary in #97,
+        // so in production it was never anything but null. Seeded on the NPC's
+        // own seed, so the same character is always the same person.
+      },
     });
   }
 
