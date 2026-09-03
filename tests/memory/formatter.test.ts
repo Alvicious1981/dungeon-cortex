@@ -9,6 +9,7 @@ import {
   formatSystemPrompt,
   formatNPCContext,
   formatSurvivalHUD,
+  formatIronLaws,
   type ActiveNPC,
   type ExplorationHUDContext,
   type WildernessHUDContext,
@@ -525,5 +526,26 @@ describe("formatSystemPrompt — enemy damage and condition constraints", () => 
     expect(prompt).not.toContain("Immune:");
     expect(prompt).not.toContain("Resist:");
     expect(prompt).not.toContain("Vulnerable:");
+  });
+});
+
+describe("formatIronLaws — no wilderness watches", () => {
+  /**
+   * The Iron Laws reach the model every turn. This line described the hexcrawl
+   * subsystem that the 2026-09-03 decision rejected; under SRD travel a day is
+   * eight hours of marching, not six watches, so leaving it would state a rule
+   * the engine does not implement.
+   */
+  it("states no watch structure", () => {
+    const laws = formatIronLaws();
+    expect(laws).not.toContain("watches");
+    expect(laws).not.toContain("Wilderness day structure");
+  });
+
+  /** The control: the rest of the Iron Laws must survive. */
+  it("keeps the laws that still hold", () => {
+    const laws = formatIronLaws();
+    expect(laws).toContain("Code is Law / State is Truth");
+    expect(laws).toContain("Tooling Protocol");
   });
 });

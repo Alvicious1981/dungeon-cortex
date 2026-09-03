@@ -21,7 +21,6 @@ import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NpcAttitude } from "@/lib/rules/social";
 import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
-import { WATCHES_PER_DAY } from "@/lib/rules/wilderness";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,7 +81,6 @@ export function formatIronLaws(): string {
     "Never invent AC, HP, damage, or feature text.",
     "",
     "**Continuity:** Keep narration tightly grounded in current state, recent events, and scene context.",
-    `Wilderness day structure is fixed at ${WATCHES_PER_DAY} watches.`,
   ].join("\n");
 }
 
