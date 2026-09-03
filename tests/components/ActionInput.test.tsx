@@ -73,11 +73,13 @@ describe("ActionInput shared SSE transport", () => {
     });
 
     await waitFor(() => expect(actionEndListener).toHaveBeenCalledTimes(1));
+    // The body now also carries the correlation id (DC-AUD-002), which is
+    // generated per submission and so cannot be written literally here.
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/campaign/campaign-1/action",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ action: "Attack", targetIds: ["enemy-1"] }),
+        body: JSON.stringify({ action: "Attack", targetIds: ["enemy-1"], requestId }),
       })
     );
     const broadcast = gameEventListener.mock.calls[0]?.[0] as CustomEvent<{
@@ -125,8 +127,9 @@ describe("ActionInput shared SSE transport", () => {
 
     fireEvent.click(getByRole("checkbox", { name: "Goblin Alpha10/10" }));
     fireEvent.click(getByRole("checkbox", { name: "Goblin Beta10/10" }));
+    let requestId = "";
     act(() => {
-      requestDungeonAction({ action: "Attack" });
+      requestId = requestDungeonAction({ action: "Attack" });
     });
 
     await waitFor(() => expect(actionEndListener).toHaveBeenCalledOnce());
@@ -137,6 +140,7 @@ describe("ActionInput shared SSE transport", () => {
         body: JSON.stringify({
           action: "Attack",
           targetIds: ["enemy-1", "enemy-2"],
+          requestId,
         }),
       })
     );
@@ -178,5 +182,105 @@ describe("ActionInput shared SSE transport", () => {
       action: "Cast Magic Missile",
       targetIds: ["enemy-1", "enemy-2"],
     });
+  });
+});
+
+/**
+ * DC-AUD-002 — request id transport.
+ *
+ * `requestId` already exists on `DungeonActionRequestDetail` and correlates the
+ * start/end/error events locally, but it never left the browser: `executeAction`
+ * posted `detail.request` alone, so the server had no way to tell one submission
+ * from a repeat of it. This suite pins the wire contract that DC-AUD-003 will
+ * need — the identifier crossing the network, unchanged, exactly once.
+ *
+ * Transport only. Nothing here asserts deduplication, and none should be added
+ * until idempotency is actually implemented.
+ */
+describe("ActionInput request id transport (DC-AUD-002)", () => {
+  const okStream = () =>
+    new Response(`data: ${JSON.stringify({ t: "done" })}\n\n`, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+  /** The parsed JSON body of the one fetch the component issued. */
+  const sentBody = (fetchMock: ReturnType<typeof vi.spyOn>): Record<string, unknown> =>
+    JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+
+  it("sends the exact client-generated requestId in the HTTP body", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okStream());
+    const actionEndListener = vi.fn();
+    window.addEventListener(DUNGEON_ACTION_END, actionEndListener);
+    render(<ActionInput campaignId="campaign-1" />);
+
+    act(() => {
+      requestDungeonAction(
+        { action: "Attack", targetIds: ["enemy-1"] },
+        "dungeon-action-test-123"
+      );
+    });
+
+    await waitFor(() => expect(actionEndListener).toHaveBeenCalledOnce());
+    expect(sentBody(fetchMock)).toEqual({
+      requestId: "dungeon-action-test-123",
+      action: "Attack",
+      targetIds: ["enemy-1"],
+    });
+
+    window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
+  });
+
+  it("transports targetX and targetY unchanged alongside the requestId", async () => {
+    // The tactical-grid fields travel on the same body. A change to how that
+    // body is built must not drop the coordinates that decide where a move or
+    // an area spell lands.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okStream());
+    const actionEndListener = vi.fn();
+    window.addEventListener(DUNGEON_ACTION_END, actionEndListener);
+    render(<ActionInput campaignId="campaign-1" />);
+
+    act(() => {
+      requestDungeonAction(
+        { action: "Move", targetX: 4, targetY: 7 },
+        "dungeon-action-test-456"
+      );
+    });
+
+    await waitFor(() => expect(actionEndListener).toHaveBeenCalledOnce());
+    expect(sentBody(fetchMock)).toEqual({
+      requestId: "dungeon-action-test-456",
+      action: "Move",
+      targetX: 4,
+      targetY: 7,
+    });
+
+    window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
+  });
+
+  it("generates exactly one identifier for a typed submission, and sends that one", async () => {
+    // The submit path mints its own id rather than receiving one. The id on the
+    // wire must be the same one the local events carry: a second id generated
+    // inside executeAction would look identical in the UI while making the
+    // server unable to recognise the retry of a submission it already saw.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okStream());
+    const endListener = vi.fn();
+    window.addEventListener(DUNGEON_ACTION_END, endListener);
+    const { getByRole, getByLabelText } = render(<ActionInput campaignId="campaign-1" />);
+
+    fireEvent.change(getByLabelText("Tu acción"), { target: { value: "I open the door" } });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+
+    await waitFor(() => expect(endListener).toHaveBeenCalledOnce());
+
+    const ended = endListener.mock.calls[0]?.[0] as CustomEvent<DungeonActionRequestDetail>;
+    const wireId = sentBody(fetchMock).requestId;
+
+    expect(typeof wireId).toBe("string");
+    expect(wireId).not.toBe("");
+    expect(wireId).toBe(ended.detail.requestId);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    window.removeEventListener(DUNGEON_ACTION_END, endListener);
   });
 });

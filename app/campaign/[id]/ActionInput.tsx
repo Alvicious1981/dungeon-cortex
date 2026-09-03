@@ -28,6 +28,7 @@ import {
   dispatchDungeonActionEnd,
   dispatchDungeonActionError,
   dispatchDungeonActionStart,
+  type DungeonActionRequestBody,
   type DungeonActionRequestDetail,
 } from "@/lib/events/action-transport";
 
@@ -89,6 +90,13 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
     const pendingAction = detail.request.action.trim();
     const request = { ...detail.request, action: pendingAction };
 
+    // The correlation id the local start/end/error events carry is the same id
+    // the server receives. Written after the spread so it is `detail.requestId`
+    // and not something a caller smuggled onto the request, and never minted
+    // here: a second id would look identical in the UI while leaving the
+    // backend unable to recognise a repeat of this submission.
+    const body: DungeonActionRequestBody = { ...request, requestId: detail.requestId };
+
     submittingRef.current = true;
     setError(null);
     setSubmitting(true);
@@ -100,7 +108,7 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
       const res = await fetch(`/api/campaign/${campaignId}/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
