@@ -171,14 +171,36 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
   }
 
-  // Step 1: Persist the player's action to the GameLog
-  await prisma.gameLog.create({
-    data: {
-      campaignId,
-      role: "user",
-      content: trimmedAction,
-    },
-  });
+  // Step 1: The player's action becomes canonical history only once the request
+  // is committed to proceeding.
+  //
+  // This used to be written unconditionally, right here, before any of the
+  // resolution gates below had run. Every mechanical refusal after this point
+  // returns 4xx without unwinding it, so a rejected action — "Attack" with no
+  // encounter, a target outside the fight, a spell with no slot left — stayed
+  // in the log as something the player had done. `buildCampaignContext` reads
+  // these rows back and `lib/ai/narrator.ts` hands them to the model as
+  // `recentDialogue`, so a refused action became narratable fiction on every
+  // later turn: the AI gaining, by omission, an outcome the rules engine had
+  // explicitly denied.
+  //
+  // Each gate calls this at its own point of no return — after its last 4xx,
+  // before its first write — so the player's line still precedes the system
+  // lines that answer it. Idempotent because only one gate resolves per
+  // request but the trailing call below covers whatever matched no gate; a
+  // second call is a no-op, not a duplicate row.
+  let playerActionLogged = false;
+  const persistPlayerAction = async (): Promise<void> => {
+    if (playerActionLogged) return;
+    playerActionLogged = true;
+    await prisma.gameLog.create({
+      data: {
+        campaignId,
+        role: "user",
+        content: trimmedAction,
+      },
+    });
+  };
 
   // Step 2: Detect and resolve /roll commands (non-streaming, quick response)
   const ROLL_PREFIX = "/roll ";
@@ -197,6 +219,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     } catch {
       rollContent = `⚠️ Invalid dice notation: "${notation}". Use format like 1d20+5 or 2d6.`;
     }
+
+    // /roll is not a mechanical gate and has no rejection path: bad notation is
+    // answered with a system line and 202, not a 4xx. The command is therefore
+    // always canonical, and is written before the result that answers it.
+    await persistPlayerAction();
 
     await prisma.gameLog.create({
       data: {
@@ -233,6 +260,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     if (trimmedAction === "End Turn") {
+      await persistPlayerAction();
+
       await prisma.$transaction(async (tx) => {
         const finalizeOutcome = await finalizeEncounterTurn({
           tx: tx as Prisma.TransactionClient,
@@ -292,6 +321,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const categoryLog = foundWeapon
         ? unresolvedCategoryLog({ weaponName: foundWeapon.name, attack })
         : null;
+
+      // Point of no return for the macro attack: targets are resolved and every
+      // refusal above has been passed, so the action is canonical from here.
+      await persistPlayerAction();
+
       if (categoryLog) {
         await prisma.gameLog.create({
           data: { campaignId, role: "system", content: categoryLog },
@@ -429,6 +463,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       }
 
       // ── State mutation ─────────────────────────────────────────────────────
+      // Distance and collision have both cleared, so the move is legal and the
+      // action is canonical.
+      await persistPlayerAction();
+
       await prisma.combatant.update({
         where: { id: playerCombatant.id },
         data: { x: targetX, y: targetY },
@@ -564,6 +602,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           skillProficiencies: parseSkillProficiencies(charData.skillProficiencies),
         }
       );
+
+      // The check has resolved; the action is canonical. Written before the
+      // line below so the transcript reads as the attempt and then its result,
+      // not a die rolled for nothing.
+      await persistPlayerAction();
 
       // The log line states where the DC came from and how the die was rolled,
       // so the player can audit the number instead of being handed a bare "DC
@@ -870,8 +913,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         targets = requestedTargets;
       }
 
-      // The cast is going ahead: now, and only now, declare an unenforceable
-      // range in the log.
+      // The cast is going ahead: now, and only now, is the action canonical and
+      // an unenforceable range worth declaring in the log.
+      await persistPlayerAction();
+
       if (unenforcedRangeLog) {
         await prisma.gameLog.create({
           data: { campaignId, role: "system", content: unenforcedRangeLog },
@@ -946,6 +991,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
+      // Ownership is proven, so the action is canonical.
+      await persistPlayerAction();
+
       await prisma.$transaction(async (tx) => {
         const itemOutcome = await executeCombatAction({
           actionType: "use_item",
@@ -997,6 +1045,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       }
 
       const { slot: targetSlot } = slotFor(foundItem);
+
+      // Ownership is proven, so the action is canonical.
+      await persistPlayerAction();
 
       await prisma.$transaction(async (tx) => {
         await tx.inventoryItem.updateMany({
@@ -1083,6 +1134,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         weaponName: foundWeapon.name,
         attack,
       });
+
+      // Exactly one living hostile target and a weapon to swing: the attack is
+      // canonical from here.
+      await persistPlayerAction();
+
       if (categoryLog) {
         await prisma.gameLog.create({
           data: { campaignId, role: "system", content: categoryLog },
@@ -1141,7 +1197,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     // ── Gate: rest ──────────────────────────────────────────────────────────────
     if (intent.actionType === "rest") {
       const charData = context.character;
-      
+
+      // A rest has no refusal path: the gate resolves whatever state it finds.
+      await persistPlayerAction();
+
       await prisma.$transaction(async (tx) => {
         const charState: CharacterState = {
           hp: charData.hp,
@@ -1293,6 +1352,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         : `Travel: ${origin.name} → ${destination.name}, ` +
           `${journey.distanceMiles} mi at normal pace, ${dayCount}.`;
 
+      // Origin, destination, entry node and journey are all resolved, and the
+      // gate has no refusal left. Written before the transaction so the
+      // player's line precedes the travel line it writes, and so the
+      // transaction's own boundary is unchanged.
+      await persistPlayerAction();
+
       await prisma.$transaction(async (tx) => {
         if (journey.exhaustionGained > 0) {
           await tx.character.update({
@@ -1332,6 +1397,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
+      // `moveToNode` writes nothing on any of its failure paths, so a refused
+      // move leaves neither state nor history — and the success it just
+      // reported is what makes the action canonical.
+      await persistPlayerAction();
+
       gameEvents.push({
         type: "PLAYER_MOVE",
         payload: { 
@@ -1343,8 +1413,14 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   // ── State is now safely mutated. ─────────────────────────────────────────────
-  // Every gate above either committed its transaction or returned a 4xx, so this
-  // is the only safe point to check for a pending level-up: earlier would risk a
+  // Every gate above either committed its transaction or returned a 4xx. A
+  // request that reaches here is going to be narrated, so its action is
+  // canonical whether or not any gate claimed it: ordinary narrative input
+  // ("I look around the room") matches none, and this is the only place it can
+  // be recorded. A no-op for anything a gate already logged.
+  await persistPlayerAction();
+
+  // This is also the only safe point to check for a pending level-up: earlier would risk a
   // later gate rejecting the request after the player was already shown an
   // outcome, and reusing the pre-gate `context.character` snapshot would be an
   // accidental equivalence a future gate could silently break.

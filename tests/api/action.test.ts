@@ -1062,3 +1062,226 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
     });
   });
 });
+
+/**
+ * DC-AUD-001 — canonical GameLog integrity.
+ *
+ * `GameLog` is campaign history: `buildCampaignContext` reads the recent rows
+ * back and `lib/ai/narrator.ts` hands them to the model as `recentDialogue`.
+ * An action the rules engine refused therefore does not merely sit unused in a
+ * table — it becomes dialogue the narrator treats as something the player
+ * actually did, on every subsequent turn.
+ *
+ * The invariant: an HTTP 4xx mechanical rejection leaves no `role: "user"` row,
+ * and an accepted action leaves exactly one.
+ */
+describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-001)", () => {
+  const campaignId = "camp_123";
+  const mockUser = { id: "user_123" };
+  const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
+
+  /** Every canonical player row the route wrote during this request. */
+  const userLogWrites = (): unknown[] =>
+    (prisma.gameLog.create as any).mock.calls.filter(
+      ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
+    );
+
+  const hostile = {
+    id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10,
+    conditions: "[]", ...NO_MODIFIERS, isPlayer: false,
+  };
+  const hero = {
+    id: "p1", name: "Hero", hp: 20, maxHp: 20,
+    conditions: "[]", ...NO_MODIFIERS, isPlayer: true,
+  };
+
+  const contextWith = (activeEncounter: unknown) => ({
+    character: {
+      id: "char-1",
+      name: "Hero",
+      class: "fighter",
+      level: 1,
+      stats: { STR: 14 },
+      skillProficiencies: [],
+      exhaustionLevel: 0,
+      inventory: [
+        { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
+      ],
+    },
+    relevantMemories: [],
+    recentLogs: [],
+    quests: [],
+    currentExploration: null,
+    activeEncounter,
+  });
+
+  const post = (body: Record<string, unknown>) =>
+    POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+    (prisma.srdItem.findMany as any).mockResolvedValue([
+      {
+        id: "longsword",
+        name: "Longsword",
+        data: {
+          weapon_category: "Martial",
+          weapon_range: "Melee",
+          damage: { damage_dice: "1d8", damage_type: { name: "Slashing" } },
+          properties: [],
+        },
+      },
+    ]);
+  });
+
+  it("1. `Attack` with no active encounter is refused and logs nothing", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+
+    const res = await post({ action: "Attack" });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "No active encounter." });
+    expect(userLogWrites()).toHaveLength(0);
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("2. an invalid combat target is refused and logs nothing", async () => {
+    (buildCampaignContext as any).mockResolvedValue(
+      contextWith({
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0,
+        combatants: [hero, hostile],
+      })
+    );
+
+    // A combatant id that is not in this encounter: membership is checked
+    // before anything is rolled, so the request never reaches resolution.
+    const res = await post({ action: "Attack", targetIds: ["not-in-this-fight"] });
+
+    expect(res.status).toBe(400);
+    expect(userLogWrites()).toHaveLength(0);
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("3. an accepted mechanical action is logged exactly once, before narration", async () => {
+    const combatants = [hero, hostile];
+    (buildCampaignContext as any).mockResolvedValue(
+      contextWith({
+        id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0, combatants,
+      })
+    );
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await post({ action: "Attack", targetIds: ["t1"] });
+
+    expect(res.status).toBe(200);
+    expect(userLogWrites()).toHaveLength(1);
+    expect(prisma.gameLog.create).toHaveBeenCalledWith({
+      data: { campaignId, role: "user", content: "Attack" },
+    });
+
+    // History order: the player's line is written before the narrator is even
+    // asked for prose, so it can never land after its own assistant reply.
+    const firstUserWrite = (prisma.gameLog.create as any).mock.calls.findIndex(
+      ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
+    );
+    const firstAssistantWrite = (prisma.gameLog.create as any).mock.calls.findIndex(
+      ([args]: [{ data: { role: string } }]) => args?.data?.role === "assistant"
+    );
+    expect(firstUserWrite).toBeGreaterThanOrEqual(0);
+    expect(firstAssistantWrite).toBeGreaterThan(firstUserWrite);
+  });
+
+  it("4. /roll still persists the player's command and its result", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+
+    const res = await post({ action: "/roll 1d20+5" });
+
+    expect(res.status).toBe(202);
+    expect(userLogWrites()).toHaveLength(1);
+    expect(prisma.gameLog.create).toHaveBeenCalledWith({
+      data: { campaignId, role: "user", content: "/roll 1d20+5" },
+    });
+    expect(prisma.gameLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: "system",
+          content: expect.stringContaining("🎲 Roll"),
+        }),
+      })
+    );
+
+    // The command is written before its own result, not after it.
+    const calls = (prisma.gameLog.create as any).mock.calls;
+    const userIdx = calls.findIndex(([a]: [{ data: { role: string } }]) => a?.data?.role === "user");
+    const systemIdx = calls.findIndex(([a]: [{ data: { role: string } }]) => a?.data?.role === "system");
+    expect(userIdx).toBeLessThan(systemIdx);
+  });
+
+  it("5. a general narrative action is logged exactly once and reaches narration", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+    (parseIntent as any).mockResolvedValue({ actionType: "general" });
+
+    const res = await post({ action: "I look around the room" });
+
+    expect(res.status).toBe(200);
+    expect(userLogWrites()).toHaveLength(1);
+    expect(prisma.gameLog.create).toHaveBeenCalledWith({
+      data: { campaignId, role: "user", content: "I look around the room" },
+    });
+    expect(streamNarrative).toHaveBeenCalled();
+  });
+
+  it("6. an ability check writes the player's line before the resolved roll", async () => {
+    // The ability-check gate writes a system row of its own. Whatever moves the
+    // player's row must keep it ahead of the mechanical line that answers it,
+    // or the transcript reads as a die rolled for nothing.
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+    (parseIntent as any).mockResolvedValue({ actionType: "ability_check", skill: "Athletics" });
+
+    const res = await post({ action: "I shove the door open" });
+
+    expect(res.status).toBe(200);
+    expect(userLogWrites()).toHaveLength(1);
+
+    const calls = (prisma.gameLog.create as any).mock.calls;
+    const userIdx = calls.findIndex(([a]: [{ data: { role: string } }]) => a?.data?.role === "user");
+    const checkIdx = calls.findIndex(
+      ([a]: [{ data: { role: string; content: string } }]) =>
+        a?.data?.role === "system" && a.data.content.includes("Athletics check")
+    );
+    expect(checkIdx).toBeGreaterThan(-1);
+    expect(userIdx).toBeLessThan(checkIdx);
+  });
+
+  it("7. an unclassifiable mechanical action is refused and logs nothing", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+    (parseIntent as any).mockResolvedValue({ actionType: "mechanical_ambiguous" });
+
+    const res = await post({ action: "I do the thing to the guy" });
+
+    expect(res.status).toBe(400);
+    expect(userLogWrites()).toHaveLength(0);
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("8. an item the character does not own is refused and logs nothing", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+    (parseIntent as any).mockResolvedValue({ actionType: "use_item", targetName: "Elixir of Fictional Health" });
+
+    const res = await post({ action: "I drink the elixir" });
+
+    expect(res.status).toBe(400);
+    expect(userLogWrites()).toHaveLength(0);
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+});
