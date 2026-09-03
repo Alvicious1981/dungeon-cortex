@@ -57,6 +57,7 @@ export const IntentSchema = z.object({
     "equip",
     "rest",
     "move",
+    "travel",
     "ability_check",
     "mechanical_ambiguous",
     "general",
@@ -117,6 +118,14 @@ export const IntentSchema = z.object({
    * Only present when actionType is "move".
    */
   destination: z.string().optional(),
+
+  /**
+   * Whether the player chose to push through instead of camping.
+   * Only meaningful when actionType is "travel". A forced march covers the
+   * journey in one day and pays SRD Constitution saves for every hour past the
+   * eighth; absent or false means the ordinary eight-hour days.
+   */
+  forceMarch: z.boolean().optional(),
 });
 
 export type BaseIntent = z.infer<typeof IntentSchema>;
@@ -240,6 +249,23 @@ export async function parseIntent(
       restType: /\b(?:long\s+rest|descanso\s+largo)\b/i.test(input)
         ? "long"
         : "short",
+    };
+  } else if (
+    /^(?:i\s+)?(?:travel|journey)\s+to\b/i.test(input) ||
+    /^(?:viajar|viajo)\s+(?:a|hacia)\b/i.test(input)
+  ) {
+    // Its own verbs, deliberately not sharing "go to" with the move branch:
+    // movement inside a location and a journey between them are different
+    // gates, and one wrong guess sends the party days away.
+    intent = {
+      actionType: "travel",
+      destination: prefixedValue(
+        /^(?:i\s+)?(?:travel|journey)\s+to\s+(.+?)(?:\s*,\s*(?:forced\s+march|pushing\s+on|without\s+rest))?$|^(?:viajar|viajo)\s+(?:a|hacia)\s+(.+?)(?:\s*,\s*(?:marcha\s+forzada|sin\s+descanso))?$/i
+      ),
+      forceMarch:
+        /\b(?:forced\s+march|pushing\s+on|without\s+rest|marcha\s+forzada|sin\s+descanso)\b/i.test(
+          input
+        ),
     };
   } else if (
     /^(?:i\s+)?(?:move|go|walk)\s+to\b/i.test(input) ||

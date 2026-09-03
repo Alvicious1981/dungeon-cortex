@@ -168,7 +168,9 @@ describe("deterministic intent parser", () => {
     "I explore",
     "explorar",
     "I scout ahead",
-    "I travel to the north",
+    // "viajo al norte" stays here deliberately: the travel branch below only
+    // recognizes "viajar/viajo a|hacia", not "al" (a+el), so this input still
+    // has no dedicated mechanic and must still fail closed.
     "viajo al norte",
   ])("refuses %s rather than narrating an unresolved action", async (input) => {
     await expect(parseIntent(input, "ignored")).resolves.toEqual({
@@ -179,9 +181,12 @@ describe("deterministic intent parser", () => {
   it("no longer emits a classification that no gate consumes", async () => {
     // Guarded structurally in tests/architecture/intent-gate-exhaustiveness.test.ts;
     // asserted here too so the schema change itself is deliberate.
+    //
+    // "travel" is no longer in that category: Task 2 gave it its own gate in
+    // app/api/campaign/[id]/action/route.ts, and IntentSchema is expected to
+    // emit it now — see the "parseIntent — travel" suite below.
     const options = IntentSchema.shape.actionType.options as readonly string[];
     expect(options).not.toContain("explore");
-    expect(options).not.toContain("travel");
   });
 
   it("reaches cantrips, which the slot-level bound used to make unrepresentable", async () => {
@@ -208,5 +213,45 @@ describe("deterministic intent parser", () => {
     ).resolves.toEqual({
       actionType: "mechanical_ambiguous",
     });
+  });
+});
+
+describe("parseIntent — travel", () => {
+  it("classifies an English journey and extracts the destination", async () => {
+    const intent = await parseIntent("travel to the Gilded Boar", "");
+    expect(intent.actionType).toBe("travel");
+    expect(intent.destination).toBe("Gilded Boar");
+    expect(intent.forceMarch).toBe(false);
+  });
+
+  it("classifies a Spanish journey", async () => {
+    const intent = await parseIntent("viajar a la Cripta Sable", "");
+    expect(intent.actionType).toBe("travel");
+    expect(intent.destination).toBe("Cripta Sable");
+  });
+
+  it("reads a forced march as a choice, not a destination", async () => {
+    const intent = await parseIntent("travel to the Gilded Boar, forced march", "");
+    expect(intent.actionType).toBe("travel");
+    expect(intent.destination).toBe("Gilded Boar");
+    expect(intent.forceMarch).toBe(true);
+  });
+
+  /**
+   * "go to" is movement inside a location and must keep reaching the `move`
+   * gate. Travel needs its own verb, or every room change becomes a journey.
+   */
+  it("leaves in-location movement alone", async () => {
+    const intent = await parseIntent("go to the Common Room", "");
+    expect(intent.actionType).toBe("move");
+  });
+
+  /**
+   * Fail closed: a phrasing this parser cannot classify must go back for
+   * clarification, never be guessed into a destination.
+   */
+  it("refuses to guess a destination it cannot read", async () => {
+    const intent = await parseIntent("travel", "");
+    expect(intent.actionType).toBe("mechanical_ambiguous");
   });
 });
