@@ -42,14 +42,6 @@ export const UNAVAILABLE_NARRATOR_TOOL_NAMES = Object.freeze([
   "generateLocation",
   "moveToNode",
   "executeExplorationTurn",
-  "getNPCDetails",
-  "trackNPC",
-  "generateAndTrackNPC",
-  "establishInitialDisposition",
-  "socialCheck",
-  "getRumors",
-  "generateMerchant",
-  "executeTrade",
   "executeTravelWatch",
 ] as const);
 

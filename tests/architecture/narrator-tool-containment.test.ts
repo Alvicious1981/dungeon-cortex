@@ -86,7 +86,6 @@ describe("common tool-result contract", () => {
   it("registers every tool file for inspection", () => {
     expect(toolFiles.sort()).toEqual([
       "exploration.ts",
-      "social.ts",
       "srd-lookup.ts",
       "wilderness.ts",
     ]);
