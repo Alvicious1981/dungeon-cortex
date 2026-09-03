@@ -155,6 +155,15 @@ describe("formatSystemPrompt — no victory section", () => {
 
 const metNPC: ActiveNPC = {
   name: "Greta the Ironmonger",
+  race: "dwarf",
+  profession: "blacksmith",
+  alignment: "lawful neutral",
+  traits: {
+    personality: "Speaks in short, hammered sentences.",
+    ideal: "A debt paid is a debt forgotten.",
+    bond: "The forge her father built.",
+    flaw: "Will not admit when a piece is beyond saving.",
+  },
   disposition: 5,
   personalityTags: {
     motivation: "To accumulate enough wealth to buy land and retire.",
@@ -176,12 +185,58 @@ describe("formatNPCContext", () => {
   it("marks unmet NPCs without requesting an unavailable tool", () => {
     const output = formatNPCContext({
       name: "Stranger",
+      race: null,
+      profession: null,
+      alignment: null,
+      traits: null,
       disposition: null,
       personalityTags: null,
       hasMetPlayer: false,
     });
     expect(output).toContain("Not yet met");
     expect(output).not.toContain("establishInitialDisposition");
+  });
+});
+
+describe("formatNPCContext — persisted identity", () => {
+  /**
+   * `generateNPC` has always derived these and `NPC` has always had columns for
+   * them, but no live path wrote them and no live path read them. The narrator
+   * was left with a name and a disposition, and had to invent the person.
+   */
+  it("hands the narrator who the NPC is, not just how they feel", () => {
+    const output = formatNPCContext(metNPC);
+
+    expect(output).toContain("dwarf");
+    expect(output).toContain("blacksmith");
+    expect(output).toContain("lawful neutral");
+  });
+
+  it("gives all four trait pillars, which are the roleplay hooks", () => {
+    const output = formatNPCContext(metNPC);
+
+    expect(output).toContain("hammered sentences");
+    expect(output).toContain("debt paid");
+    expect(output).toContain("forge her father built");
+    expect(output).toContain("beyond saving");
+  });
+
+  /**
+   * The control: an NPC whose identity was never persisted must not produce
+   * empty labels in the prompt. Absent is not the same as blank.
+   */
+  it("omits the identity line entirely when nothing was persisted", () => {
+    const output = formatNPCContext({
+      ...metNPC,
+      race: null,
+      profession: null,
+      alignment: null,
+      traits: null,
+    });
+
+    expect(output).not.toContain("Identity");
+    expect(output).not.toContain("Personality:");
+    expect(output).toContain("Greta the Ironmonger");
   });
 });
 
@@ -252,6 +307,10 @@ describe("formatter narrator-tool containment", () => {
       formatSystemPrompt({ ...baseContext, activeEncounter: combatEncounter }),
       formatNPCContext({
         name: "Stranger",
+        race: null,
+        profession: null,
+        alignment: null,
+        traits: null,
         disposition: null,
         personalityTags: null,
         hasMetPlayer: false,
