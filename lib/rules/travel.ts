@@ -1,8 +1,10 @@
 /**
  * lib/rules/travel.ts
  *
- * SRD 2014 overland travel. Pure: no I/O, no Prisma, deterministic for the
- * same inputs.
+ * SRD 2014 overland travel. Pure: no I/O, no Prisma. `travelDistanceMiles` is
+ * deterministic for the same inputs; `resolveJourney` is too when
+ * `forceMarch` is false, but a forced march delegates to `resolveSavingThrow`,
+ * which rolls — see §4.4 of the design doc.
  *
  * The canonical decision this implements — SRD travel, explicitly not a
  * hexcrawl — is recorded in

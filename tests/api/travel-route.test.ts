@@ -49,6 +49,7 @@ import { POST } from "@/app/api/campaign/[id]/action/route";
 import { prisma } from "@/lib/db/prisma";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
+import { streamNarrative } from "@/lib/ai/narrator";
 import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
 import { abilityModifier } from "@/lib/rules/dice";
 
@@ -104,7 +105,7 @@ function primeContext(): void {
     currentLocationId: "loc_origin",
   });
   (prisma.location.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
-    id: "loc_origin",
+    name: "The Sable Crypt",
     seed: "seed_origin",
   });
   (prisma.location.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -170,16 +171,19 @@ describe("travel gate", () => {
     const miles = travelDistanceMiles("seed_origin", "seed_dest");
     const forcedHours = Math.max(0, Math.ceil(miles / 3) - 8);
 
+    // These fixture seeds are relied on to produce a forced march. If a
+    // future distance retune ever lands this at or under the 8-hour
+    // threshold, this must fail loudly rather than degrade to a trivial
+    // "update not called" assertion that a broken exhaustionGained wiring
+    // could pass by accident.
+    expect(forcedHours).toBeGreaterThan(0);
+
     await POST(request("travel to the Gilded Boar, forced march"), { params });
 
-    if (forcedHours === 0) {
-      expect(prismaTx.character.update).not.toHaveBeenCalled();
-    } else {
-      expect(prismaTx.character.update).toHaveBeenCalledWith({
-        where: { id: "char_1" },
-        data: { exhaustionLevel: Math.min(6, forcedHours) },
-      });
-    }
+    expect(prismaTx.character.update).toHaveBeenCalledWith({
+      where: { id: "char_1" },
+      data: { exhaustionLevel: Math.min(6, forcedHours) },
+    });
     vi.restoreAllMocks();
   });
 
@@ -234,6 +238,16 @@ describe("travel gate", () => {
         }),
       })
     );
+    // The origin half of the line comes from the mocked location.findUnique
+    // row, not a fallback — assert its name actually reaches the log rather
+    // than letting a mismatched mock shape hide behind "Unknown".
+    expect(prismaTx.gameLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          content: expect.stringContaining("The Sable Crypt →"),
+        }),
+      })
+    );
   });
 
   /**
@@ -264,14 +278,11 @@ describe("travel gate", () => {
       currentExhaustion: CHARACTER.exhaustionLevel,
     });
 
-    if (journey.forcedHours === 0) {
-      // These fixture seeds currently produce a forced march (verified: 33 mi
-      // -> 3 forced hours). Nothing forced-march-specific to assert if a
-      // future distance retune ever lands exactly on the 8-hour boundary —
-      // report rather than fabricate an assertion.
-      vi.restoreAllMocks();
-      return;
-    }
+    // These fixture seeds are relied on to produce a forced march (verified:
+    // 33 mi -> 3 forced hours). A future distance retune that lands this at
+    // or under the 8-hour boundary must turn this test red, not silently
+    // skip the only assertions that cover the forced-march log format.
+    expect(journey.forcedHours).toBeGreaterThan(0);
 
     const dcList = journey.saves.map((s) => s.dc).join("/");
     const failedCount = journey.saves.filter((s) => !s.success).length;
@@ -290,5 +301,72 @@ describe("travel gate", () => {
     );
 
     vi.restoreAllMocks();
+  });
+
+  /**
+   * `parseIntent` classifies a bare "travel to" as actionType "travel" with
+   * no destination extracted. Nothing else in the gate fires on that shape,
+   * so without an explicit refusal the request falls through to the
+   * narrator, which would describe a journey the backend never resolved —
+   * a direct violation of "backend code owns mechanical truth".
+   */
+  it("refuses a travel intent with no destination, before the narrator runs", async () => {
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "travel",
+      forceMarch: false,
+    });
+
+    const res = await POST(request("travel to"), { params });
+
+    expect(res.status).toBe(400);
+    expect(prismaTx.campaign.update).not.toHaveBeenCalled();
+    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Encounter is campaign-scoped with no location column, and
+   * buildCampaignContext selects it by { campaignId, status: "active" }
+   * alone. Travelling while one is active would leave it running at a place
+   * the party no longer occupies, handing the narrator a new location and a
+   * stale initiative order on the next turn.
+   */
+  it("refuses travel while an encounter is active", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue({
+      character: CHARACTER,
+      activeEncounter: {
+        id: "enc_1",
+        round: 1,
+        currentTurnIndex: 0,
+        combatants: [],
+        totalDamageDealt: 0,
+      },
+      recentLogs: [],
+      relevantMemories: [],
+      quests: [],
+      currentExploration: {
+        location: { id: "loc_origin", name: "The Sable Crypt", type: "dungeon", description: "" },
+        currentNode: null,
+        adjacentNodes: [],
+        visitedNodeIndices: [],
+        allNodes: [],
+        allEdges: [],
+      },
+      gold: 0,
+      activeNPC: null,
+    });
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "travel",
+      destination: "Gilded Boar",
+      forceMarch: false,
+    });
+
+    const res = await POST(request("travel to the Gilded Boar"), { params });
+
+    expect(res.status).toBe(409);
+    expect(prismaTx.campaign.update).not.toHaveBeenCalled();
+    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
   });
 });

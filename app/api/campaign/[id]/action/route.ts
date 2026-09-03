@@ -1188,7 +1188,24 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     // ── Gate: travel ────────────────────────────────────────────────────────────
-    if (intent.actionType === "travel" && intent.destination) {
+    if (intent.actionType === "travel") {
+      if (!intent.destination) {
+        return NextResponse.json(
+          { error: "A destination is required for backend resolution." },
+          { status: 400 }
+        );
+      }
+
+      // Travelling days away would leave a live encounter's initiative order
+      // running at a place the party no longer occupies. Refuse rather than
+      // hand the narrator a new location and a stale fight on the next turn.
+      if (context.activeEncounter) {
+        return NextResponse.json(
+          { error: "You cannot march away from a fight that is still happening." },
+          { status: 409 }
+        );
+      }
+
       const originId = context.currentExploration?.location?.id ?? null;
       if (!originId) {
         return NextResponse.json(
@@ -1244,25 +1261,37 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         select: { name: true, seed: true },
       });
 
+      // fetchExplorationContext already proved originId's row exists, so this
+      // is a data-consistency guard, not an expected path — but if the row
+      // vanished between then and now, refuse rather than let a missing seed
+      // silently fall back to the id and change the distance on the return leg.
+      if (!origin) {
+        return NextResponse.json(
+          { error: "Your current location could not be resolved." },
+          { status: 409 }
+        );
+      }
+
       // Every figure is resolved here, before anything is written or narrated.
       const stats = (context.character.stats ?? {}) as Partial<Record<string, number>>;
       const journey = resolveJourney({
-        distanceMiles: travelDistanceMiles(origin?.seed ?? originId, destination.seed),
+        distanceMiles: travelDistanceMiles(origin.seed, destination.seed),
         forceMarch: intent.forceMarch === true,
         conModifier: abilityModifier(stats.CON ?? 10),
         currentExhaustion: context.character.exhaustionLevel,
       });
 
+      const dayCount = journey.days === 1 ? "1 day" : `${journey.days} days`;
       const logLine = journey.forcedHours > 0
-        ? `Travel: ${origin?.name ?? "Unknown"} → ${destination.name}, ` +
+        ? `Travel: ${origin.name} → ${destination.name}, ` +
           `${journey.distanceMiles} mi forced march, ${journey.hours} h. ` +
           `Forced march: ${journey.forcedHours} h, ` +
           `DC ${journey.saves.map((s) => s.dc).join("/")} → ` +
           `${journey.saves.filter((s) => !s.success).length} failed, ` +
           `exhaustion ${context.character.exhaustionLevel} → ` +
           `${context.character.exhaustionLevel + journey.exhaustionGained}.`
-        : `Travel: ${origin?.name ?? "Unknown"} → ${destination.name}, ` +
-          `${journey.distanceMiles} mi at normal pace, ${journey.days} day(s).`;
+        : `Travel: ${origin.name} → ${destination.name}, ` +
+          `${journey.distanceMiles} mi at normal pace, ${dayCount}.`;
 
       await prisma.$transaction(async (tx) => {
         if (journey.exhaustionGained > 0) {
