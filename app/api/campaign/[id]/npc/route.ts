@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import type { Prisma } from "@prisma/client";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { generateNPC } from "@/lib/rules/npc";
 import type { NPCRole } from "@/lib/rules/npc";
@@ -99,6 +100,20 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       hp: hpOverride ?? statblock.hp,
       ac: statblock.ac,
       notes: notes ?? "",
+      // Identity, derived from the seed like everything else here. The
+      // statblock has always produced these and the schema has always had
+      // columns for them; this route dropped them, so the only writer was a
+      // service no live path called. They belong in `create` alone: a caller
+      // reporting damage must not be able to rewrite who someone is.
+      //
+      // `abilityScores` is deliberately absent. Nothing reads it — no rule
+      // consults an NPC's abilities, and the narrator must not be handed raw
+      // scores it could roll against — so persisting it would open the same
+      // gap this closes.
+      race: statblock.race,
+      profession: statblock.profession,
+      alignment: statblock.alignment,
+      traits: statblock.traits as unknown as Prisma.InputJsonValue,
     },
     update: {
       ...(notes !== undefined && { notes }),

@@ -44,6 +44,13 @@ const CHARACTER = {
   inventory: [],
 };
 
+const TRAITS = {
+  personality: "Speaks in short, hammered sentences.",
+  ideal: "A debt paid is a debt forgotten.",
+  bond: "The forge her father built.",
+  flaw: "Will not admit when a piece is beyond saving.",
+};
+
 const PERSONALITY = {
   motivation: "To buy back the family forge.",
   secret: "They sold the deed to pay a debt.",
@@ -120,6 +127,10 @@ describe("buildCampaignContext — active NPC", () => {
     });
     prismaMock.nPC.findUnique.mockResolvedValue({
       name: "Greta",
+      race: "dwarf",
+      profession: "blacksmith",
+      alignment: "lawful neutral",
+      traits: TRAITS,
       disposition: 8,
       personalityTags: PERSONALITY,
       hasMetPlayer: true,
@@ -134,6 +145,11 @@ describe("buildCampaignContext — active NPC", () => {
     );
     expect(context.activeNPC).toEqual({
       name: "Greta",
+      // Identity, persisted by the NPC route since the two ends were joined.
+      race: "dwarf",
+      profession: "blacksmith",
+      alignment: "lawful neutral",
+      traits: TRAITS,
       disposition: 8,
       // The field the whole secret-disclosure path hangs off. Asserting it
       // survives the trip is the point: it was null in production for the
