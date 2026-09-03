@@ -484,6 +484,22 @@ export function formatNPCContext(npc: ActiveNPC): string {
     `**Disposition:** ${icon} ${attitude} (${npc.disposition ?? 0})`,
   ];
 
+  // Who they are, when the row carries it. Guarded rather than defaulted: a
+  // row created before this was persisted has none, and "Identity: — —" would
+  // hand the narrator a blank to fill in, which is the invention this whole
+  // section exists to prevent.
+  const identity = [npc.race, npc.profession, npc.alignment].filter(Boolean);
+  if (identity.length > 0) {
+    lines.push(`**Identity:** ${identity.join(", ")}`);
+  }
+
+  if (npc.traits) {
+    lines.push(`**Personality:** ${npc.traits.personality}`);
+    lines.push(`**Ideal:** ${npc.traits.ideal}`);
+    lines.push(`**Bond:** ${npc.traits.bond}`);
+    lines.push(`**Flaw:** ${npc.traits.flaw}`);
+  }
+
   if (tags) {
     lines.push(`**Motivation:** ${tags.motivation}`);
     lines.push(`**Distinctive Trait:** ${tags.distinctiveTrait}`);

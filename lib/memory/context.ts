@@ -17,6 +17,7 @@ import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@prisma/client";
 import { searchMemories } from "@/lib/memory/search";
 import type { NPCPersonality } from "@/lib/rules/social";
+import type { NPCTraits } from "@/lib/rules/npc";
 
 // ---------------------------------------------------------------------------
 // Return types
@@ -156,6 +157,15 @@ export interface ContextExploration {
  */
 export interface ContextActiveNPC {
   name: string;
+  /**
+   * Who this person is, derived from the seed at creation. Nullable because
+   * rows created before the NPC route persisted identity have none, and an
+   * absent field must read as absent rather than blank.
+   */
+  race: string | null;
+  profession: string | null;
+  alignment: string | null;
+  traits: NPCTraits | null;
   disposition: number | null;
   personalityTags: NPCPersonality | null;
   hasMetPlayer: boolean;
@@ -210,6 +220,10 @@ async function fetchActiveNPC(
     where: { campaignId_seed: { campaignId, seed } },
     select: {
       name: true,
+      race: true,
+      profession: true,
+      alignment: true,
+      traits: true,
       disposition: true,
       personalityTags: true,
       hasMetPlayer: true,
@@ -219,6 +233,10 @@ async function fetchActiveNPC(
 
   return {
     name: npc.name,
+    race: npc.race,
+    profession: npc.profession,
+    alignment: npc.alignment,
+    traits: (npc.traits as NPCTraits | null) ?? null,
     disposition: npc.disposition,
     personalityTags: (npc.personalityTags as NPCPersonality | null) ?? null,
     hasMetPlayer: npc.hasMetPlayer,
