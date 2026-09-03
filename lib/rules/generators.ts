@@ -11,8 +11,6 @@
  *
  * This module is pure: no I/O, no side effects, no external dependencies.
  */
-import { z } from "zod";
-
 // ---------------------------------------------------------------------------
 // PRNG — cyrb53 (string → float in [0, 1))
 // ---------------------------------------------------------------------------
