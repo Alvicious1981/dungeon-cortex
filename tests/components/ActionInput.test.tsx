@@ -506,6 +506,38 @@ describe("ActionInput retry identity (DC-AUD-003)", () => {
     expect(third.action).toBe("I look around");
   });
 
+  it("12. a duplicate stream dispatches every replayed event, in order", async () => {
+    // DC-AUD-004. No client change was needed: the frame loop already handles
+    // `evt` generically, so replayed events reach the same
+    // `dungeon-game-event` listeners — audio, FX, HUD sync — that a first
+    // execution feeds. This pins that, so a future change to the loop cannot
+    // silently drop a replay.
+    const replayed = [
+      { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
+      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", targets: [] } },
+    ];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      sse(
+        { t: "duplicate", requestId: "R1" },
+        { t: "evt", e: replayed[0] },
+        { t: "evt", e: replayed[1] },
+        { t: "done" }
+      )
+    );
+    const received: unknown[] = [];
+    const listener = (event: Event) =>
+      received.push((event as CustomEvent<{ event: unknown }>).detail.event);
+    window.addEventListener("dungeon-game-event", listener);
+    render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+
+    expect(received).toEqual(replayed);
+    expect(refreshMock).toHaveBeenCalled();
+
+    window.removeEventListener("dungeon-game-event", listener);
+  });
+
   it("9. a genuinely new action is sent under a different id", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

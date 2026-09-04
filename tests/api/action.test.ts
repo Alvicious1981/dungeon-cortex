@@ -1697,6 +1697,83 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     expect(streamNarrative).not.toHaveBeenCalled();
   });
 
+  it("A. a completed streaming retry replays the stored events between duplicate and done", async () => {
+    // DC-AUD-004. Without this the replayed turn arrives silent: the client
+    // sees no damage, no turn advance and hears nothing, reconciling only via
+    // its ordinary refresh.
+    const stored = [
+      { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
+      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", targets: [] } },
+      { type: "ROUND_ADVANCE", payload: { nextTurnIndex: 0, nextRound: 2 } },
+    ];
+    receiptAlreadyExists({ status: ActionRequestStatus.COMPLETED, replayEvents: stored });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+    const parsed = await frames(res);
+
+    expect(res.status).toBe(200);
+    // Exact order: the duplicate marker first, then every stored event in the
+    // order it was emitted, then the terminator the client refreshes on.
+    expect(parsed.map((f) => f.t)).toEqual(["duplicate", "evt", "evt", "evt", "done"]);
+    expect(parsed.slice(1, 4).map((f) => f.e)).toEqual(stored);
+
+    // Still a replay: no mechanics, no narrator, no history.
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("B. a receipt written before replayEvents existed still answers duplicate then done", async () => {
+    receiptAlreadyExists({ status: ActionRequestStatus.COMPLETED, replayEvents: null });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+    const parsed = await frames(res);
+
+    expect(parsed.map((f) => f.t)).toEqual(["duplicate", "done"]);
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("C. /roll still replays its stored JSON and never treats replayEvents as a body", async () => {
+    // The `responseStatus !== null` discriminator is unchanged: a JSON
+    // completion replays its body, and events play no part in it.
+    receiptAlreadyExists({
+      status: ActionRequestStatus.COMPLETED,
+      requestHash: fingerprintActionRequest({ action: "/roll 1d20" }),
+      responseStatus: 202,
+      responseBody: { ok: true },
+      replayEvents: [{ type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } }],
+    });
+
+    const res = await post({ requestId: REQUEST_ID, action: "/roll 1d20" });
+
+    expect(res.status).toBe(202);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+  });
+
+  it("D. a successful action stores the events it emitted", async () => {
+    const combatants = [hero, hostile];
+    (buildCampaignContext as any).mockResolvedValue(
+      contextWith({ id: "enc_1", currentTurnIndex: 0, round: 1, totalDamageDealt: 0, combatants })
+    );
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await post({ requestId: REQUEST_ID, action: "End Turn" });
+
+    expect(res.status).toBe(200);
+    const completion = (prisma.actionRequestReceipt.updateMany as any).mock.calls.find(
+      ([args]: [{ data: { status: string } }]) =>
+        args?.data?.status === ActionRequestStatus.COMPLETED
+    );
+    expect(completion).toBeDefined();
+    // End Turn emits exactly one deterministic advancement event.
+    expect(completion![0].data.replayEvents).toEqual([
+      expect.objectContaining({ type: expect.stringMatching(/^(TURN|ROUND)_ADVANCE$/) }),
+    ]);
+  });
+
   it("10. an encounter action completes its receipt exactly once", async () => {
     const combatants = [hero, hostile];
     (buildCampaignContext as any).mockResolvedValue(
