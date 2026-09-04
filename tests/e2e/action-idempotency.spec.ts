@@ -149,6 +149,44 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
       where: { campaignId: created.campaignId, role: "user", content: "End Turn" },
     });
     expect(playerLines).toBe(1);
+
+    // ── DC-AUD-004: the duplicate replays the original events ───────────────
+    // `End Turn` emits exactly one deterministic advancement event — no dice,
+    // no damage — so both what was stored and what is replayed are exact.
+    const receipt = await prisma.actionRequestReceipt.findFirstOrThrow({
+      where: { requestId },
+      select: { status: true, replayEvents: true },
+    });
+    expect(receipt.status).toBe("COMPLETED");
+    const storedEvents = receipt.replayEvents as Array<{ type: string }>;
+    expect(Array.isArray(storedEvents)).toBe(true);
+    expect(storedEvents).toHaveLength(1);
+    expect(storedEvents[0]!.type).toMatch(/^(TURN|ROUND)_ADVANCE$/);
+
+    // A third request, sequential this time: the receipt is settled, so this
+    // is unambiguously the duplicate path rather than either side of a race.
+    const duplicate = await post(request);
+    expect(duplicate.status()).toBe(200);
+
+    const frames = (await duplicate.text())
+      .split(/\n\n/)
+      .filter((chunk) => chunk.startsWith("data: "))
+      .map((chunk) => JSON.parse(chunk.slice(6)) as { t: string; e?: unknown });
+
+    expect(frames.map((f) => f.t)).toEqual(["duplicate", "evt", "done"]);
+    expect(frames[1]!.e).toEqual(storedEvents[0]);
+
+    // And the replay changed nothing: still one advancement, one player row.
+    const afterReplay = await prisma.encounter.findUniqueOrThrow({
+      where: { id: encounterId },
+    });
+    expect(afterReplay.currentTurnIndex).toBe(expected.nextTurnIndex);
+    expect(afterReplay.round).toBe(expected.nextRound);
+    expect(
+      await prisma.gameLog.count({
+        where: { campaignId: created.campaignId, role: "user", content: "End Turn" },
+      })
+    ).toBe(1);
   } finally {
     // This spec is the first E2E journey to open an encounter, and the shared
     // cleanup helper only knows about game logs, campaigns, characters and

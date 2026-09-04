@@ -330,15 +330,31 @@ async function resolveAction(
           status: acquisition.responseStatus,
         });
 
-      case "completed_stream":
+      case "completed_stream": {
         // The mechanics of this submission are already committed. Answer in
-        // the transport shape the client expects — a terminal duplicate frame
-        // and `done` — so its ordinary `router.refresh()` reconciles state.
-        // No narration, and no replay of the original event frames.
+        // the transport shape the client expects, so its ordinary
+        // `router.refresh()` reconciles state.
+        //
+        // The duplicate marker comes first, then the deterministic events the
+        // original execution emitted, in the order it emitted them, then the
+        // terminator. Same `evt` frame as a normal response — there is no
+        // second format — so every existing consumer handles them unchanged.
+        //
+        // Still no narration, and no `level_up_available`: that one is derived
+        // from current character state, and replaying a stale snapshot would
+        // be less truthful than letting the refreshed XP bar show it.
+        //
+        // `events` is empty for any receipt written before this column existed
+        // or whose snapshot was dropped for size, which degrades to exactly
+        // the silent duplicate this replaced.
+        const replayed = acquisition.events;
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
               controller.enqueue(sseFrame({ t: "duplicate", requestId }));
+              for (const ev of replayed) {
+                controller.enqueue(sseFrame({ t: "evt", e: ev }));
+              }
               controller.enqueue(sseFrame({ t: "done" }));
               controller.close();
             },
@@ -352,6 +368,7 @@ async function resolveAction(
             },
           }
         );
+      }
     }
   }
 
@@ -1637,7 +1654,9 @@ async function resolveAction(
   // narration as though the receipt had settled would leave a PROCESSING row
   // no retry could ever distinguish from a live request.
   if (receiptRef.id) {
-    await completeActionReceipt(receiptRef.id);
+    // The events are handed over for replay, not for resolution: storing them
+    // is best-effort inside the helper and cannot fail this transition.
+    await completeActionReceipt(receiptRef.id, gameEvents);
   }
 
   // This is also the only safe point to check for a pending level-up: earlier would risk a

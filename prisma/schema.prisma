@@ -246,6 +246,12 @@ model ActionRequestReceipt {
   /// JSON rather than a terminal duplicate SSE frame. Server-created only.
   responseStatus Int?
   responseBody   Json?
+  /// Snapshot of the deterministic `GameEvent`s the first execution emitted, so
+  /// a duplicate can replay what actually happened instead of arriving silent.
+  /// Presentation enrichment only, never a mechanical guarantee: it is written
+  /// best-effort and is null for anything too large to store, anything that
+  /// failed to serialise, and every receipt written before this column existed.
+  replayEvents   Json?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 

@@ -13,7 +13,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionRequestStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import type { GameEvent } from "@/lib/events/game-events";
 import {
+  ACTION_REPLAY_EVENTS_MAX_BYTES,
   ActionReceiptSettlementError,
   classifyExistingReceipt,
   completeActionReceipt,
@@ -197,13 +199,14 @@ describe("classifyExistingReceipt", () => {
 
   it("asks for a duplicate frame when the original was a stream", () => {
     // No stored status is precisely what marks the ordinary SSE action; the
-    // absence is the discriminator, so no extra column is needed.
+    // absence is the discriminator, and DC-AUD-004 left it untouched — it only
+    // added the events the duplicate replays alongside the frame.
     const verdict = classifyExistingReceipt(
       { ...base, status: ActionRequestStatus.COMPLETED },
       expected
     );
 
-    expect(verdict).toEqual({ outcome: "completed_stream" });
+    expect(verdict).toEqual({ outcome: "completed_stream", events: [] });
   });
 
   it("replays a stored mechanical refusal", () => {
@@ -272,5 +275,149 @@ describe("terminal settlement", () => {
     await expect(rejectActionReceipt("receipt_1", 400, { error: "late" })).rejects.toBeInstanceOf(
       ActionReceiptSettlementError
     );
+  });
+});
+
+/**
+ * DC-AUD-004 — replaying the original event frames on a duplicate.
+ *
+ * A duplicate answers `duplicate` + `done` today, so a replayed turn arrives
+ * silent: no damage numbers, no turn advance, no audio — the client reconciles
+ * only through its ordinary refresh. Storing the authoritative events the first
+ * execution emitted lets the replay show what actually happened.
+ *
+ * This is presentation enrichment, never a mechanical guarantee. Everything
+ * here must degrade to the current silent duplicate rather than put the
+ * PROCESSING → COMPLETED transition at risk.
+ */
+describe("replayEvents snapshot", () => {
+  const turnAdvance: GameEvent = {
+    type: "TURN_ADVANCE",
+    payload: { nextTurnIndex: 1, nextRound: 1 },
+  } as GameEvent;
+  const roundAdvance: GameEvent = {
+    type: "ROUND_ADVANCE",
+    payload: { nextTurnIndex: 0, nextRound: 2 },
+  } as GameEvent;
+
+  const updateManyMock = () =>
+    prisma.actionRequestReceipt.updateMany as never as ReturnType<typeof vi.fn>;
+
+  /** The `data` the terminal write actually sent. */
+  const settledData = (): Record<string, unknown> =>
+    updateManyMock().mock.calls[0]![0].data;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateManyMock().mockResolvedValue({ count: 1 });
+  });
+
+  it("1. stores the events in the order they were emitted", async () => {
+    await completeActionReceipt("receipt_1", [turnAdvance, roundAdvance]);
+
+    expect(settledData().status).toBe(ActionRequestStatus.COMPLETED);
+    expect(settledData().replayEvents).toEqual([turnAdvance, roundAdvance]);
+  });
+
+  it("1b. stores a snapshot, not a reference the caller can still mutate", async () => {
+    // The route hands over its live `gameEvents` array and then keeps reading
+    // it to build the original stream. What the receipt keeps must be what was
+    // true at completion time.
+    const live: GameEvent[] = [turnAdvance];
+    await completeActionReceipt("receipt_1", live);
+    live.push(roundAdvance);
+
+    expect(settledData().replayEvents).toEqual([turnAdvance]);
+  });
+
+  it("2. the classifier hands the stored events back for a streaming replay", () => {
+    const verdict = classifyExistingReceipt(
+      {
+        campaignId: "camp_1",
+        requestHash: "hash_a",
+        status: ActionRequestStatus.COMPLETED,
+        responseStatus: null,
+        responseBody: null,
+        replayEvents: [turnAdvance, roundAdvance],
+      },
+      { campaignId: "camp_1", requestHash: "hash_a" }
+    );
+
+    expect(verdict).toEqual({
+      outcome: "completed_stream",
+      events: [turnAdvance, roundAdvance],
+    });
+  });
+
+  it("3. a receipt written before this column still replays, silently", () => {
+    // Backwards compatibility with every receipt DC-AUD-003 already wrote.
+    for (const stored of [null, undefined, "not-an-array", 42, {}]) {
+      const verdict = classifyExistingReceipt(
+        {
+          campaignId: "camp_1",
+          requestHash: "hash_a",
+          status: ActionRequestStatus.COMPLETED,
+          responseStatus: null,
+          responseBody: null,
+          replayEvents: stored,
+        },
+        { campaignId: "camp_1", requestHash: "hash_a" }
+      );
+
+      expect(verdict).toEqual({ outcome: "completed_stream", events: [] });
+    }
+  });
+
+  it("4. a payload inside the size limit is stored", async () => {
+    const modest = Array.from({ length: 20 }, () => turnAdvance);
+
+    await completeActionReceipt("receipt_1", modest);
+
+    expect(settledData().replayEvents).toEqual(modest);
+  });
+
+  it("5. an oversized payload degrades to no events and still completes", async () => {
+    // An area spell against a crowded encounter can produce a very large
+    // consequence payload. Presentation must never bloat the receipt table.
+    const fat = [
+      {
+        type: "COMBAT_CONSEQUENCE",
+        payload: { attackerName: "x".repeat(ACTION_REPLAY_EVENTS_MAX_BYTES + 1_000), targets: [] },
+      } as unknown as GameEvent,
+    ];
+
+    await completeActionReceipt("receipt_1", fat);
+
+    expect(settledData().status).toBe(ActionRequestStatus.COMPLETED);
+    expect(settledData().replayEvents).toBeUndefined();
+  });
+
+  it("6. a payload that cannot be serialised degrades instead of failing the turn", async () => {
+    // A circular structure throws inside JSON.stringify. The mechanical
+    // transition must not be collateral damage of a presentation nicety.
+    const circular: Record<string, unknown> = { type: "TURN_ADVANCE" };
+    circular.self = circular;
+
+    await completeActionReceipt("receipt_1", [circular as unknown as GameEvent]);
+
+    expect(settledData().status).toBe(ActionRequestStatus.COMPLETED);
+    expect(settledData().replayEvents).toBeUndefined();
+  });
+
+  it("7. a genuine failure of the terminal transition still fails closed", async () => {
+    // Only the enrichment is best-effort. If no PROCESSING row was settled,
+    // that is still a protocol violation and must surface.
+    updateManyMock().mockResolvedValue({ count: 0 });
+
+    await expect(completeActionReceipt("receipt_1", [turnAdvance])).rejects.toBeInstanceOf(
+      ActionReceiptSettlementError
+    );
+  });
+
+  it("8. completing with no events at all is still valid", async () => {
+    await completeActionReceipt("receipt_1");
+
+    expect(settledData().status).toBe(ActionRequestStatus.COMPLETED);
+    expect(settledData().replayEvents).toBeUndefined();
   });
 });

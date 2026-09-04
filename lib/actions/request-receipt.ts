@@ -30,6 +30,18 @@
 import { createHash } from "node:crypto";
 import { Prisma, ActionRequestStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import type { GameEvent } from "@/lib/events/game-events";
+
+/**
+ * Ceiling on a stored replay snapshot, in bytes of serialised JSON.
+ *
+ * An area spell against a crowded encounter can produce a large
+ * `COMBAT_CONSEQUENCE`, and this table sits on the hottest write path in the
+ * app. Presentation must not be allowed to bloat it, so an oversized snapshot
+ * is simply not kept — the duplicate then replays silently, exactly as it did
+ * before this column existed.
+ */
+export const ACTION_REPLAY_EVENTS_MAX_BYTES = 64 * 1024;
 
 /** The mechanically relevant fields of a submitted action. */
 export interface ActionRequestFingerprintInput {
@@ -99,8 +111,11 @@ export type ActionReceiptAcquisition =
   | { outcome: "in_flight" }
   /** The id already denotes a different campaign or a different payload. */
   | { outcome: "reused" }
-  /** Settled as a stream; replay a terminal duplicate frame. */
-  | { outcome: "completed_stream" }
+  /**
+   * Settled as a stream. Replay a terminal duplicate frame, preceded by the
+   * events the original execution emitted — empty when none were stored.
+   */
+  | { outcome: "completed_stream"; events: GameEvent[] }
   /** Settled with a stored JSON response (`/roll`); replay it verbatim. */
   | { outcome: "completed_replay"; responseStatus: number; responseBody: unknown }
   /** Settled as a mechanical refusal; replay it verbatim. */
@@ -113,6 +128,7 @@ export interface ExistingActionReceipt {
   status: ActionRequestStatus;
   responseStatus: number | null;
   responseBody: unknown;
+  replayEvents?: unknown;
 }
 
 /**
@@ -158,7 +174,16 @@ export function classifyExistingReceipt(
           responseStatus: existing.responseStatus,
           responseBody: existing.responseBody,
         }
-      : { outcome: "completed_stream" };
+      // Anything that is not an array means "no events to replay": a receipt
+      // written before this column existed, one whose snapshot was dropped for
+      // size, or a row someone edited by hand. All of them degrade to the
+      // silent duplicate rather than failing a retry.
+      : {
+          outcome: "completed_stream",
+          events: Array.isArray(existing.replayEvents)
+            ? (existing.replayEvents as GameEvent[])
+            : [],
+        };
   }
 
   return { outcome: "in_flight" };
@@ -236,6 +261,7 @@ export async function acquireActionReceipt(input: {
         status: true,
         responseStatus: true,
         responseBody: true,
+        replayEvents: true,
       },
     });
 
@@ -296,8 +322,45 @@ export class ActionReceiptSettlementError extends Error {
  * duplicate frame, not a replayed body. Narration is deliberately absent —
  * see the invariant at the top of this file.
  */
-export async function completeActionReceipt(receiptId: string): Promise<void> {
-  await settle(receiptId, { status: ActionRequestStatus.COMPLETED });
+export async function completeActionReceipt(
+  receiptId: string,
+  events?: readonly GameEvent[]
+): Promise<void> {
+  await settle(receiptId, {
+    status: ActionRequestStatus.COMPLETED,
+    // Omitted rather than written as null when there is nothing to keep: the
+    // column defaults to NULL, so leaving it out avoids Prisma's JsonNull /
+    // DbNull distinction entirely and keeps the write minimal.
+    ...(prepareReplayEvents(events) ?? {}),
+  });
+}
+
+/**
+ * Turns the emitted events into something storable, or into nothing at all.
+ *
+ * Best-effort by construction. Every failure mode here — oversized, circular,
+ * unserialisable — degrades to "no snapshot" and lets the turn complete. The
+ * mechanical transition is what matters; the replay is a nicety, and a nicety
+ * must never be able to strand a receipt in PROCESSING.
+ *
+ * The value is serialised and re-parsed rather than passed through, so what
+ * the receipt keeps is a snapshot: the route hands over its live `gameEvents`
+ * array and goes on reading it to build the original stream.
+ */
+function prepareReplayEvents(
+  events?: readonly GameEvent[]
+): { replayEvents: Prisma.InputJsonValue } | null {
+  if (!events || events.length === 0) return null;
+
+  try {
+    const serialised = JSON.stringify(events);
+    if (typeof serialised !== "string") return null;
+    if (Buffer.byteLength(serialised, "utf8") > ACTION_REPLAY_EVENTS_MAX_BYTES) return null;
+
+    return { replayEvents: JSON.parse(serialised) as Prisma.InputJsonValue };
+  } catch {
+    return null;
+  }
 }
 
 /**
