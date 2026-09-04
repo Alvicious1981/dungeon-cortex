@@ -65,15 +65,19 @@ import {
 import type {
   GameEvent, ActionStreamFrame
 } from "@/lib/events/game-events";
+import {
+  ACTION_REQUEST_ID_MAX_CHARS,
+  type DungeonActionRequestBody,
+} from "@/lib/events/action-transport";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 
-interface ActionBody {
-  action: string;
-  targetIds?: string[];
-  targetX?: number;
-  targetY?: number;
-}
+/**
+ * The request body, declared once in `lib/events/action-transport.ts` and
+ * shared with the client that builds it. A type-only import, so nothing from
+ * that browser-facing module reaches this route at runtime.
+ */
+type ActionBody = DungeonActionRequestBody;
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -144,6 +148,47 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       { error: `action must be at most ${NARRATOR_DATA_LIMITS.playerActionChars} characters.` },
       { status: 400 }
     );
+  }
+
+  // ── requestId (DC-AUD-002: transport only) ───────────────────────────────────
+  // The correlation id the client generated for this submission. Parsed and
+  // bounded here so the value later work can rely on is well-formed at the
+  // point it enters the system; nothing reads it yet. Deduplication, response
+  // replay and persistence are DC-AUD-003 and are deliberately absent.
+  //
+  // Optional, because callers predating this contract must keep working — but
+  // a present-and-malformed id is a client bug, not a legacy caller, and is
+  // refused rather than silently ignored. Checked beside the other cheap body
+  // validation, before authentication touches anything.
+  const { requestId: rawRequestId } = body;
+
+  if (rawRequestId !== undefined) {
+    if (typeof rawRequestId !== "string") {
+      return NextResponse.json(
+        { error: "requestId must be a string when present." },
+        { status: 400 }
+      );
+    }
+
+    // Trimmed the way `action` is, so the same submission cannot arrive under
+    // two spellings once DC-AUD-003 keys on it. The normalised value is
+    // deliberately not bound to an outer name: there is nothing in this task
+    // that may read it, and an unused binding would only invite one.
+    const trimmedRequestId = rawRequestId.trim();
+
+    if (!trimmedRequestId) {
+      return NextResponse.json(
+        { error: "requestId must not be empty when present." },
+        { status: 400 }
+      );
+    }
+
+    if (trimmedRequestId.length > ACTION_REQUEST_ID_MAX_CHARS) {
+      return NextResponse.json(
+        { error: `requestId must be at most ${ACTION_REQUEST_ID_MAX_CHARS} characters.` },
+        { status: 400 }
+      );
+    }
   }
 
   let user;

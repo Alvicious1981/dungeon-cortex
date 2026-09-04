@@ -8,6 +8,7 @@ import { computeConsequences } from "@/lib/rules/combat";
 import { parseIntent } from "@/lib/ai/intent";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
+import { ACTION_REQUEST_ID_MAX_CHARS } from "@/lib/events/action-transport";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -1282,6 +1283,105 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
 
     expect(res.status).toBe(400);
     expect(userLogWrites()).toHaveLength(0);
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DC-AUD-002 — request id transport, server half.
+ *
+ * The route must accept the identifier the client now sends and resolve the
+ * action exactly as before. Transport only: `requestId` is parsed and
+ * validated, never used to deduplicate, and never persisted. Persistent
+ * idempotency is DC-AUD-003.
+ */
+describe("Action Route - requestId transport (DC-AUD-002)", () => {
+  const campaignId = "camp_123";
+  const mockUser = { id: "user_123" };
+  const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
+
+  const context = {
+    character: {
+      id: "char-1",
+      name: "Hero",
+      class: "fighter",
+      level: 1,
+      stats: { STR: 14 },
+      skillProficiencies: [],
+      exhaustionLevel: 0,
+      inventory: [],
+    },
+    relevantMemories: [],
+    recentLogs: [],
+    quests: [],
+    currentExploration: null,
+    activeEncounter: null,
+  };
+
+  const post = (body: Record<string, unknown>) =>
+    POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    (buildCampaignContext as any).mockResolvedValue(context);
+    (parseIntent as any).mockResolvedValue({ actionType: "general" });
+  });
+
+  it("accepts a body carrying requestId and resolves the action unchanged", async () => {
+    const res = await post({
+      requestId: "dungeon-action-test-123",
+      action: "I look around the room",
+    });
+
+    expect(res.status).toBe(200);
+    expect(streamNarrative).toHaveBeenCalled();
+    // The identifier is transport metadata: it must not leak into the action
+    // the narrator is handed, nor into canonical history.
+    expect((streamNarrative as any).mock.calls.at(-1)?.[1]).toBe("I look around the room");
+    expect(prisma.gameLog.create).toHaveBeenCalledWith({
+      data: { campaignId, role: "user", content: "I look around the room" },
+    });
+  });
+
+  it("still accepts a legacy body with no requestId", async () => {
+    const res = await post({ action: "I look around the room" });
+
+    expect(res.status).toBe(200);
+    expect(streamNarrative).toHaveBeenCalled();
+  });
+
+  it("refuses a requestId that is present but not a string", async () => {
+    const res = await post({ requestId: 42, action: "I look around the room" });
+
+    expect(res.status).toBe(400);
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty requestId rather than treating it as absent", async () => {
+    // A blank identifier is a client bug, not a legacy caller. Accepting it
+    // would hand DC-AUD-003 a key that collides with every other blank one.
+    const res = await post({ requestId: "   ", action: "I look around the room" });
+
+    expect(res.status).toBe(400);
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("refuses an oversized requestId", async () => {
+    const res = await post({
+      requestId: "x".repeat(ACTION_REQUEST_ID_MAX_CHARS + 1),
+      action: "I look around the room",
+    });
+
+    expect(res.status).toBe(400);
     expect(streamNarrative).not.toHaveBeenCalled();
   });
 });
