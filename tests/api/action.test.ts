@@ -9,6 +9,8 @@ import { parseIntent } from "@/lib/ai/intent";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
 import { ACTION_REQUEST_ID_MAX_CHARS } from "@/lib/events/action-transport";
+import { Prisma, ActionRequestStatus } from "@prisma/client";
+import { fingerprintActionRequest } from "@/lib/actions/request-receipt";
 
 // Mock after for Next.js 15
 vi.mock("next/server", async (importActual) => {
@@ -36,6 +38,14 @@ vi.mock("@/lib/db/prisma", () => ({
       update: vi.fn(),
     },
     character: { findUnique: vi.fn(), update: vi.fn() },
+    // DC-AUD-003. `create` is the acquisition itself — a unique-constraint
+    // insert, not a read — so simulating a duplicate means rejecting it with a
+    // real P2002 rather than returning a row from a find.
+    actionRequestReceipt: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      updateMany: vi.fn(),
+    },
     // The route resolves a weapon's category through `getEquipmentInfo`, which
     // reads `srdItem`. Without this delegate the call threw a TypeError that
     // `resolveWeaponProfile`'s `.catch` swallowed, so every attack in this file
@@ -1333,6 +1343,11 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
     (buildCampaignContext as any).mockResolvedValue(context);
     (parseIntent as any).mockResolvedValue({ actionType: "general" });
+    // Since DC-AUD-003 a keyed request acquires a receipt before any gate runs.
+    // These cases are about the transport contract, not idempotency, so the
+    // acquisition simply succeeds and the action proceeds as it always did.
+    (prisma.actionRequestReceipt.create as any).mockResolvedValue({ id: "receipt_transport" });
+    (prisma.actionRequestReceipt.updateMany as any).mockResolvedValue({ count: 1 });
   });
 
   it("accepts a body carrying requestId and resolves the action unchanged", async () => {
@@ -1383,5 +1398,319 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
 
     expect(res.status).toBe(400);
     expect(streamNarrative).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * DC-AUD-003 — persistent action idempotency.
+ *
+ * PR #121 carried the client's `requestId` to the server and stopped there.
+ * These tests pin what giving it meaning must and must not do: a retry after a
+ * lost connection is recognised, never executed twice; an id never comes to
+ * mean two different actions; and PR #120's canonical-history invariant is
+ * preserved through the replay path as well as the first attempt.
+ *
+ * Only Prisma is mocked here — the real receipt helper and the real route both
+ * run — so these prove OUR logic given a working unique constraint. That the
+ * constraint exists and serialises concurrent inserts is a database property
+ * this lane cannot observe (`$transaction` is a passthrough that never rolls
+ * back); it is proven in tests/e2e/action-idempotency.spec.ts.
+ */
+describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
+  const campaignId = "camp_123";
+  const mockUser = { id: "user_123" };
+  const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
+  const REQUEST_ID = "dungeon-action-test-idem";
+
+  const NO_MODS = {
+    damageImmunities: [] as string[],
+    damageResistances: [] as string[],
+    damageVulnerabilities: [] as string[],
+    conditionImmunities: [] as string[],
+  };
+  const hostile = {
+    id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10,
+    conditions: "[]", ...NO_MODS, isPlayer: false,
+  };
+  const hero = {
+    id: "p1", name: "Hero", hp: 20, maxHp: 20,
+    conditions: "[]", ...NO_MODS, isPlayer: true,
+  };
+
+  const contextWith = (activeEncounter: unknown) => ({
+    character: {
+      id: "char-1", name: "Hero", class: "fighter", level: 1,
+      stats: { STR: 14 }, skillProficiencies: [], exhaustionLevel: 0,
+      inventory: [
+        { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
+      ],
+    },
+    relevantMemories: [],
+    recentLogs: [],
+    quests: [],
+    currentExploration: null,
+    activeEncounter,
+  });
+
+  const post = (body: Record<string, unknown>) =>
+    POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+  /** A genuine Prisma unique violation, shaped the way the driver reports one. */
+  const uniqueViolation = (target: unknown) =>
+    new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "6.19.2",
+      meta: { target },
+    });
+
+  /** Rows the route wrote to canonical player history. */
+  const userLogWrites = () =>
+    (prisma.gameLog.create as any).mock.calls.filter(
+      ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
+    );
+
+  /** Makes the acquisition collide, handing back the receipt that already exists. */
+  const receiptAlreadyExists = (row: Record<string, unknown>) => {
+    (prisma.actionRequestReceipt.create as any).mockRejectedValue(
+      uniqueViolation(["actorUserId", "requestId"])
+    );
+    (prisma.actionRequestReceipt.findUnique as any).mockResolvedValue({
+      campaignId,
+      requestHash: fingerprintActionRequest({ action: "I look around the room" }),
+      responseStatus: null,
+      responseBody: null,
+      ...row,
+    });
+  };
+
+  const frames = async (res: Response) =>
+    (await res.text())
+      .split("\n\n")
+      .filter((chunk) => chunk.startsWith("data: "))
+      .map((chunk) => JSON.parse(chunk.slice(6)));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+    (prisma.srdItem.findMany as any).mockResolvedValue([]);
+    (prisma.actionRequestReceipt.create as any).mockResolvedValue({ id: "receipt_1" });
+    (prisma.actionRequestReceipt.updateMany as any).mockResolvedValue({ count: 1 });
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+    (parseIntent as any).mockResolvedValue({ actionType: "general" });
+  });
+
+  it("1. acquires a receipt for a keyed action and completes it before narration", async () => {
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+
+    expect(res.status).toBe(200);
+    expect(prisma.actionRequestReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actorUserId: mockUser.id,
+          campaignId,
+          requestId: REQUEST_ID,
+          requestHash: fingerprintActionRequest({ action: "I look around the room" }),
+          status: ActionRequestStatus.PROCESSING,
+        }),
+      })
+    );
+    expect(prisma.actionRequestReceipt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "receipt_1", status: ActionRequestStatus.PROCESSING },
+        data: expect.objectContaining({ status: ActionRequestStatus.COMPLETED }),
+      })
+    );
+    expect(streamNarrative).toHaveBeenCalled();
+  });
+
+  it("2. a completed retry re-executes no mechanics and writes no history", async () => {
+    receiptAlreadyExists({ status: ActionRequestStatus.COMPLETED });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+
+    expect(res.status).toBe(200);
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("3. the same id with a different payload is refused as reuse", async () => {
+    receiptAlreadyExists({
+      status: ActionRequestStatus.COMPLETED,
+      requestHash: fingerprintActionRequest({ action: "a completely different action" }),
+    });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "REQUEST_ID_REUSED" });
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    // The receipt that already owns this id belongs to another action; the
+    // wrapper must leave it exactly as it found it.
+    expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("3b. an id belonging to another campaign is refused as reuse", async () => {
+    receiptAlreadyExists({
+      status: ActionRequestStatus.COMPLETED,
+      campaignId: "some_other_campaign",
+    });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "REQUEST_ID_REUSED" });
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("4. an unsettled receipt is refused as in-flight and executes nothing", async () => {
+    receiptAlreadyExists({ status: ActionRequestStatus.PROCESSING });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "ACTION_IN_FLIGHT" });
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    // Load-bearing: this request never owned the submission, so it must not
+    // publish a receipt id. If it did, the outer 4xx wrapper would flip the
+    // OTHER request's live PROCESSING receipt to REJECTED — destroying the
+    // record of a turn that may well be committing right now.
+    expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("5. a mechanical refusal is recorded, and its retry replays without touching history", async () => {
+    // First attempt: "Attack" outside combat is refused, and the refusal is
+    // stored so the id means the same thing next time.
+    const refusal = await post({ requestId: REQUEST_ID, action: "Attack" });
+
+    expect(refusal.status).toBe(400);
+    expect(prisma.actionRequestReceipt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "receipt_1", status: ActionRequestStatus.PROCESSING },
+        data: expect.objectContaining({
+          status: ActionRequestStatus.REJECTED,
+          responseStatus: 400,
+        }),
+      })
+    );
+    expect(userLogWrites()).toHaveLength(0);
+
+    // The retry: replayed verbatim, and PR #120's invariant still holds.
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    (buildCampaignContext as any).mockResolvedValue(contextWith(null));
+    receiptAlreadyExists({
+      status: ActionRequestStatus.REJECTED,
+      requestHash: fingerprintActionRequest({ action: "Attack" }),
+      responseStatus: 400,
+      responseBody: { error: "No active encounter." },
+    });
+
+    const replayed = await post({ requestId: REQUEST_ID, action: "Attack" });
+
+    expect(replayed.status).toBe(400);
+    await expect(replayed.json()).resolves.toEqual({ error: "No active encounter." });
+    expect(userLogWrites()).toHaveLength(0);
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+    // A replayed 4xx is still a 4xx, so the wrapper sees it — but with no
+    // receipt id published it cannot re-settle the stored REJECTED row.
+    expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("6. a legacy request without a requestId creates no receipt at all", async () => {
+    const res = await post({ action: "I look around the room" });
+
+    expect(res.status).toBe(200);
+    expect(prisma.actionRequestReceipt.create).not.toHaveBeenCalled();
+    expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
+    expect(streamNarrative).toHaveBeenCalled();
+  });
+
+  it("7. /roll stores its 202 and a retry replays it instead of rolling again", async () => {
+    const rolled = await post({ requestId: REQUEST_ID, action: "/roll 1d20" });
+
+    expect(rolled.status).toBe(202);
+    expect(prisma.actionRequestReceipt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: ActionRequestStatus.COMPLETED,
+          responseStatus: 202,
+          responseBody: { ok: true },
+        }),
+      })
+    );
+
+    vi.clearAllMocks();
+    (getAuthUser as any).mockResolvedValue(mockUser);
+    (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    receiptAlreadyExists({
+      status: ActionRequestStatus.COMPLETED,
+      requestHash: fingerprintActionRequest({ action: "/roll 1d20" }),
+      responseStatus: 202,
+      responseBody: { ok: true },
+    });
+
+    const replayed = await post({ requestId: REQUEST_ID, action: "/roll 1d20" });
+
+    expect(replayed.status).toBe(202);
+    await expect(replayed.json()).resolves.toEqual({ ok: true });
+    // Neither the player's command nor a second roll result is written again.
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+  });
+
+  it("8. a completed streaming retry answers with a duplicate frame and no narrator call", async () => {
+    receiptAlreadyExists({ status: ActionRequestStatus.COMPLETED });
+
+    const res = await post({ requestId: REQUEST_ID, action: "I look around the room" });
+    const parsed = await frames(res);
+
+    expect(res.status).toBe(200);
+    expect(parsed.map((f) => f.t)).toEqual(["duplicate", "done"]);
+    expect(parsed[0]).toMatchObject({ requestId: REQUEST_ID });
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("9. an unrelated unique violation is never read as an idempotency hit", async () => {
+    // A P2002 raised by some other constraint must not make the route replay
+    // an unrelated receipt. It surfaces as a failure instead.
+    (prisma.actionRequestReceipt.create as any).mockRejectedValue(
+      uniqueViolation(["some_other_unique_column"])
+    );
+
+    await expect(post({ requestId: REQUEST_ID, action: "I look around the room" })).rejects.toThrow();
+    expect(prisma.actionRequestReceipt.findUnique).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("10. an encounter action completes its receipt exactly once", async () => {
+    const combatants = [hero, hostile];
+    (buildCampaignContext as any).mockResolvedValue(
+      contextWith({ id: "enc_1", currentTurnIndex: 0, round: 1, totalDamageDealt: 0, combatants })
+    );
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await post({ requestId: REQUEST_ID, action: "End Turn" });
+
+    expect(res.status).toBe(200);
+    const completions = (prisma.actionRequestReceipt.updateMany as any).mock.calls.filter(
+      ([args]: [{ data: { status: string } }]) =>
+        args?.data?.status === ActionRequestStatus.COMPLETED
+    );
+    expect(completions).toHaveLength(1);
   });
 });

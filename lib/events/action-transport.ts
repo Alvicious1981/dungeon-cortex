@@ -56,11 +56,48 @@ export interface DungeonTargetSelectionDetail {
   targetIds: string[];
 }
 
-let requestSequence = 0;
+/**
+ * Random half of an action's correlation id.
+ *
+ * This used to be `Date.now()` plus a module-scoped counter. That is adequate
+ * for correlating events inside one page, and inadequate now that the id is a
+ * persistent idempotency key scoped to the whole user (DC-AUD-003): the
+ * counter resets on reload, so two tabs — or one tab before and after a
+ * refresh — can mint the same id in the same millisecond. A collision would
+ * not duplicate mechanics (the payload fingerprint differs, so the server
+ * refuses with 409), but it would refuse a perfectly legal action, which is
+ * its own defect.
+ *
+ * Three tiers, strongest first. The middle one matters: dropping straight from
+ * `randomUUID` to `Math.random()` would throw away real entropy in any
+ * environment that has Web Crypto without `randomUUID` — an older browser, or
+ * a non-secure context.
+ */
+function randomToken(): string {
+  const webCrypto = globalThis.crypto;
 
+  if (typeof webCrypto?.randomUUID === "function") {
+    return webCrypto.randomUUID();
+  }
+
+  if (typeof webCrypto?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    webCrypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  // Last resort, for a runtime with no Web Crypto at all. Not cryptographically
+  // strong; present only so such an environment still produces a usable id.
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * One id per submitted action. The `dungeon-action-` prefix is kept for
+ * readability in logs; every tier's output stays well inside
+ * `ACTION_REQUEST_ID_MAX_CHARS` and inside the character set the server accepts.
+ */
 export function createDungeonActionRequestId(): string {
-  requestSequence += 1;
-  return `dungeon-action-${Date.now()}-${requestSequence}`;
+  return `dungeon-action-${randomToken()}`;
 }
 
 export function requestDungeonAction(
