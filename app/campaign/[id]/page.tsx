@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
+import StoryLog from "./StoryLog";
 import MacroDeck from "@/components/combat/MacroDeck";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
 import GameEventHandler from "@/components/combat/GameEventHandler";
@@ -176,7 +177,15 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           },
         },
       },
-      logs: { orderBy: { createdAt: "desc" }, take: INITIAL_LOG_LIMIT },
+      // Total order (createdAt DESC, id DESC) — a plain createdAt DESC can
+      // tie, and DC-AUD-006's history pages cut the same total order, so
+      // the initial window and every later page must agree on it or a tie
+      // at the boundary could skip or duplicate a row. `take` asks for one
+      // extra row (sentinel) so `initialHasMore` below needs no count().
+      logs: {
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: INITIAL_LOG_LIMIT + 1,
+      },
       encounters: {
         where: { status: "active" },
         include: {
@@ -282,9 +291,22 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   }
 
   const { character } = campaign;
+  // The sentinel (see `include.logs` above) means a >50-log campaign fetches
+  // 51 rows; drop the extra row here — it exists only to answer hasMore
+  // without a count(). Never render it, never send it to the client.
+  const initialHasMore = campaign.logs.length > INITIAL_LOG_LIMIT;
+  const recentLogs = campaign.logs.slice(0, INITIAL_LOG_LIMIT);
   // Fetched newest-first (see `include.logs` above); reversed here, for
-  // presentation only, back to the chronological order the Bitácora reads in.
-  const logs = [...campaign.logs].reverse();
+  // presentation only, back to the chronological order the Bitácora reads
+  // in. `createdAt` is normalized to an ISO string before crossing into the
+  // StoryLog Client Component — a Date object does not survive that
+  // boundary.
+  const logs = [...recentLogs].reverse().map((log) => ({
+    id: log.id,
+    role: log.role,
+    content: log.content,
+    createdAt: log.createdAt.toISOString(),
+  }));
   const activeEncounter = campaign.encounters[0] ?? null;
   // Resolved here rather than inside the view-model: the sheet must show the
   // same profile the attack sites resolve, and a legacy weapon row carries no
@@ -832,83 +854,11 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               </div>
             </section>
 
-            <section aria-label="Bitácora de aventura" id="chronicle" className="dc-panel dc-panel--narrative scroll-mt-20 rounded-sm p-4 sm:p-5">
-              <p
-                className="mb-3 text-[10px] uppercase tracking-[0.3em]"
-                style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
-              >
-                Bitácora
-              </p>
-
-              {logs.length === 0 ? (
-                <div
-                  className="rounded-lg p-10 text-center"
-                  style={{
-                    background: "rgba(12,12,22,0.6)",
-                    border: "1px dashed rgba(100,70,14,0.3)",
-                  }}
-                >
-                  <p
-                    className="text-sm"
-                    style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50", lineHeight: "1.75" }}
-                  >
-                    Aún no hay entradas. Describe qué intenta hacer tu personaje para comenzar.
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-3" role="list">
-                  {logs.map((log) => {
-                    const isDM = log.role === "assistant";
-                    const isPlayer = log.role === "user";
-                    return (
-                      <li
-                        key={log.id}
-                        className="rounded-lg px-4 py-3"
-                        style={
-                          isDM
-                            ? {
-                                background: "rgba(12,12,22,0.92)",
-                                border: "1px solid rgba(100,70,14,0.25)",
-                                color: "#C8BEA0",
-                              }
-                            : isPlayer
-                            ? {
-                                background: "rgba(25,16,3,0.7)",
-                                border: "1px solid rgba(228,168,50,0.22)",
-                                color: "#E8C84A",
-                              }
-                            : {
-                                background: "rgba(8,8,18,0.6)",
-                                border: "1px solid rgba(99,102,241,0.15)",
-                                color: "#7872A8",
-                              }
-                        }
-                      >
-                        <span
-                          className="mb-1.5 block text-[9px] font-semibold uppercase tracking-[0.2em]"
-                          style={{
-                            fontFamily: "var(--font-cinzel)",
-                            color: isDM ? "#C49A2A" : isPlayer ? "#F59E0B" : "#5B56A0",
-                          }}
-                        >
-                          {isDM ? "Director de Mazmorras" : isPlayer ? "Tú" : "Sistema"}
-                        </span>
-                        <p
-                          className="text-sm leading-relaxed"
-                          style={{
-                            fontFamily: isDM ? "var(--font-crimson)" : "inherit",
-                            fontSize: isDM ? "0.9375rem" : "0.875rem",
-                            lineHeight: isDM ? "1.75" : "1.6",
-                          }}
-                        >
-                          {log.content}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
+            <StoryLog
+              campaignId={campaign.id}
+              initialLogs={logs}
+              initialHasMore={initialHasMore}
+            />
 
             <section id="commands" aria-label="Acciones disponibles" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-lg border border-[var(--dc-border-strong)] bg-[var(--dc-canvas-soft)]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
               <MacroDeck inCombat={!!activeEncounter} />
