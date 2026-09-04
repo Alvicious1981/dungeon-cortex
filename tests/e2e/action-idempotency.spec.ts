@@ -150,7 +150,33 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
     });
     expect(playerLines).toBe(1);
   } finally {
+    // This spec is the first E2E journey to open an encounter, and the shared
+    // cleanup helper only knows about game logs, campaigns, characters and
+    // inventory. `Encounter_campaignId_fkey` and `Combatant_encounterId_fkey`
+    // are both RESTRICT, so the campaign cannot be deleted while its encounter
+    // and combatants exist — CI caught exactly that.
+    //
+    // Torn down here rather than by widening the shared helper: this journey
+    // created the extra state, so it owns removing it. Combatants first, then
+    // the encounter, whose Zones cascade with it.
+    if (created.campaignId) {
+      const encounters = await prisma.encounter.findMany({
+        where: { campaignId: created.campaignId },
+        select: { id: true },
+      });
+      const encounterIds = encounters.map((e) => e.id);
+
+      if (encounterIds.length > 0) {
+        await prisma.combatant.deleteMany({
+          where: { encounterId: { in: encounterIds } },
+        });
+        await prisma.encounter.deleteMany({ where: { id: { in: encounterIds } } });
+      }
+    }
+
     await prisma.$disconnect();
+    // Receipts need no explicit removal: their FK to Campaign is CASCADE, so
+    // the helper's campaign delete takes them with it.
     await cleanupE2ERecords(created);
   }
 });
