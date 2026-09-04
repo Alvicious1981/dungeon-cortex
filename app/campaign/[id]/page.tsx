@@ -39,6 +39,10 @@ interface CampaignPageProps {
 
 type SpellSlotData = Record<string, { total: number; used: number }>;
 
+/** Initial Bitácora render is capped to the most recent entries (DC-AUD-005);
+ *  older GameLog rows stay persisted and untouched, just outside this load. */
+const INITIAL_LOG_LIMIT = 50;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -172,7 +176,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           },
         },
       },
-      logs: { orderBy: { createdAt: "asc" } },
+      logs: { orderBy: { createdAt: "desc" }, take: INITIAL_LOG_LIMIT },
       encounters: {
         where: { status: "active" },
         include: {
@@ -277,7 +281,10 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     }
   }
 
-  const { character, logs } = campaign;
+  const { character } = campaign;
+  // Fetched newest-first (see `include.logs` above); reversed here, for
+  // presentation only, back to the chronological order the Bitácora reads in.
+  const logs = [...campaign.logs].reverse();
   const activeEncounter = campaign.encounters[0] ?? null;
   // Resolved here rather than inside the view-model: the sheet must show the
   // same profile the attack sites resolve, and a legacy weapon row carries no
