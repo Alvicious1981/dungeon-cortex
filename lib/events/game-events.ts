@@ -149,4 +149,12 @@ export type ActionStreamFrame =
   | { t: "txt"; d: string }
   | { t: "level_up"; payload: LevelUpResolvedPayload }
   | { t: "merchant"; payload: MerchantPayload }
+  /**
+   * This submission was already resolved; its mechanics are committed and were
+   * NOT run again (DC-AUD-003). Purely additive: it never appears in a normal
+   * response, so the ordering of every existing frame is untouched. Carries no
+   * narration and replays no `evt` frames — the client's ordinary refresh on
+   * `done` is what reconciles canonical state.
+   */
+  | { t: "duplicate"; requestId: string }
   | { t: "done" };

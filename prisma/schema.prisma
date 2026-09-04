@@ -40,6 +40,15 @@ enum CharacterProposalValidationStatus {
   REJECTED
 }
 
+/// Lifecycle of one submitted player action, keyed by the client's requestId.
+/// PROCESSING is also what an interrupted request leaves behind, so it means
+/// "outcome unknown", not "certainly still running".
+enum ActionRequestStatus {
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
 model Zone {
   id          String @id @default(cuid())
   encounterId String
@@ -200,12 +209,53 @@ model Campaign {
   memories        MemoryEntry[]
   quests          Quest[]
   npcs            NPC[]
+  actionReceipts  ActionRequestReceipt[]
   locations       Location[]    @relation("CampaignLocations")
   currentLocation Location?     @relation("CampaignCurrentLocation", fields: [currentLocationId, id], references: [id, campaignId], onDelete: Restrict, onUpdate: Cascade)
   currentNode     LocationNode? @relation("CampaignCurrentNode", fields: [currentNodeId, currentLocationId], references: [id, locationId], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([userId], map: "Campaign_userId_idx")
   @@index([characterId], map: "Campaign_characterId_idx")
+}
+
+/// Persistent receipt for one submitted player action. Infrastructure, not
+/// history: it exists so a retry after a lost connection is recognised instead
+/// of re-executed. The unique key is what makes acquisition atomic — the
+/// database decides which concurrent request owns a submission, not the app.
+///
+/// INVARIANT: `COMPLETED` means the authoritative action/mechanical outcome
+/// finished. It says NOTHING about whether narration was delivered or
+/// persisted. Narration is best-effort and always has been; a completed
+/// receipt whose narration never arrived is a correct, mechanically-settled
+/// turn that happens to be silent.
+///
+/// `actorUserId` is a plain String with no relation, matching the existing
+/// idempotency precedent on CharacterChangeAudit / CharacterChangeProposal.
+model ActionRequestReceipt {
+  id             String              @id @default(cuid())
+  actorUserId    String
+  campaignId     String
+  /// The identifier the client generated for this submission (DC-AUD-002).
+  requestId      String
+  /// SHA-256 over the canonical, mechanically-relevant request fields. Binds
+  /// the id to one payload, so an id can never mean two different actions.
+  requestHash    String
+  status         ActionRequestStatus @default(PROCESSING)
+  /// Set only for outcomes that were NOT a stream: `/roll`'s 202 and every
+  /// mechanical 4xx. Their presence is what tells a replay to return stored
+  /// JSON rather than a terminal duplicate SSE frame. Server-created only.
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  /// Cascade because receipts are ephemeral infrastructure, not history. This
+  /// is also required rather than merely tidy: the E2E cleanup helper deletes
+  /// campaigns, and a Restrict FK would block that once receipts exist.
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([actorUserId, requestId])
+  @@index([campaignId, createdAt])
 }
 
 model GameLog {

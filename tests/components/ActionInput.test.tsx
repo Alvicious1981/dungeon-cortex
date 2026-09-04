@@ -284,3 +284,245 @@ describe("ActionInput request id transport (DC-AUD-002)", () => {
     window.removeEventListener(DUNGEON_ACTION_END, endListener);
   });
 });
+
+/**
+ * DC-AUD-003 — client retry identity.
+ *
+ * A persistent idempotency key on the server is inert if the client mints a new
+ * one whenever the player retries. These tests pin the half that makes the
+ * protocol usable: the exact submission survives transport uncertainty, and an
+ * explicit retry resends the SAME requestId — including across repeated
+ * ACTION_IN_FLIGHT answers, which is precisely when discarding it would be
+ * worst, because the player's only remaining move would mint a fresh id and
+ * bypass the protection the original one carries.
+ */
+describe("ActionInput retry identity (DC-AUD-003)", () => {
+  const sse = (...streamFrames: unknown[]) =>
+    new Response(
+      streamFrames.map((f) => `data: ${JSON.stringify(f)}`).join("\n\n") + "\n\n",
+      { status: 200, headers: { "Content-Type": "text/event-stream" } }
+    );
+
+  const jsonError = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const sentBodies = (fetchMock: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] =>
+    (fetchMock.mock.calls as unknown as [unknown, RequestInit][]).map(([, init]) =>
+      JSON.parse(init.body as string)
+    );
+
+  const sentIds = (fetchMock: ReturnType<typeof vi.spyOn>): unknown[] =>
+    sentBodies(fetchMock).map((body) => body.requestId);
+
+  /** Drives one externally requested action and waits for it to settle. */
+  const submitExternal = async (
+    request: Record<string, unknown>,
+    requestId: string
+  ): Promise<void> => {
+    const ended = vi.fn();
+    window.addEventListener(DUNGEON_ACTION_END, ended);
+    act(() => {
+      requestDungeonAction(request as never, requestId);
+    });
+    await waitFor(() => expect(ended).toHaveBeenCalled());
+    window.removeEventListener(DUNGEON_ACTION_END, ended);
+  };
+
+  it("1. a transport failure retains the exact submission", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    const { getByRole } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+
+    // The affordance existing at all IS the retention: it renders only while a
+    // retryable detail is held.
+    expect(getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+    expect(sentIds(fetchMock)).toEqual(["R1"]);
+  });
+
+  it("2 & 5. the retry resends the same id and identical targeting data", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    const { getByRole } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal(
+      { action: "Move", targetIds: ["enemy-1"], targetX: 4, targetY: 7 },
+      "R1"
+    );
+    fireEvent.click(getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const [first, second] = sentBodies(fetchMock);
+    expect(second).toEqual(first);
+    expect(second).toMatchObject({
+      requestId: "R1",
+      action: "Move",
+      targetIds: ["enemy-1"],
+      targetX: 4,
+      targetY: 7,
+    });
+  });
+
+  it("3 & 4. repeated ACTION_IN_FLIGHT keeps the same id available to check again", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("offline"))
+      // A fresh Response per call: a body is single-use, so reusing one
+      // instance would make the second read fail and silently look like a
+      // response that carried no `code` at all.
+      .mockImplementation(async () =>
+        jsonError(409, { error: "Aun sin confirmar.", code: "ACTION_IN_FLIGHT" })
+      );
+    const { getByRole } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+
+    fireEvent.click(getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    // Still retained, now offering the in-flight wording.
+    const recheck = await waitFor(() => getByRole("button", { name: "Comprobar de nuevo" }));
+    fireEvent.click(recheck);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    expect(sentIds(fetchMock)).toEqual(["R1", "R1", "R1"]);
+    expect(getByRole("button", { name: "Comprobar de nuevo" })).toBeInTheDocument();
+  });
+
+  it("6. a duplicate that resolves clears the retry state", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(async () => sse({ t: "duplicate", requestId: "R1" }, { t: "done" }));
+    const { getByRole, queryByRole } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+    fireEvent.click(getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    await waitFor(() => {
+      expect(queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+      expect(queryByRole("button", { name: "Comprobar de nuevo" })).not.toBeInTheDocument();
+    });
+    expect(refreshMock).toHaveBeenCalled();
+  });
+
+  it("7. REQUEST_ID_REUSED is terminal and offers no retry", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(async () =>
+        jsonError(409, {
+          error: "Ese identificador ya corresponde a otra accion.",
+          code: "REQUEST_ID_REUSED",
+        })
+      );
+    const { getByRole, queryByRole } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+    fireEvent.click(getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    await waitFor(() => {
+      expect(queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+      expect(queryByRole("button", { name: "Comprobar de nuevo" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("8. an ordinary mechanical 4xx never offers a transport retry", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonError(400, { error: "No active encounter." })
+    );
+    const { queryByRole, findByRole } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack" }, "R1");
+
+    expect(await findByRole("alert")).toHaveTextContent("No active encounter.");
+    expect(queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+    expect(queryByRole("button", { name: "Comprobar de nuevo" })).not.toBeInTheDocument();
+  });
+
+  it("10. a newer submission never causes a stale one to be resent", async () => {
+    // State isolation, asserted at the level where it is actually observable.
+    //
+    // The clear on `done` is guarded by requestId, so R2 finishing does not
+    // wipe the retained R1 from state. But the recovery panel lives inside the
+    // streaming bubble, and ANY terminal outcome hides that bubble — so once
+    // R2 settles, the retained R1 is no longer reachable from the UI either.
+    //
+    // What matters, and what this pins: the component never silently resends a
+    // stale submission on its own. No automatic retry, ever.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(async () => sse({ t: "done" }));
+    const { getByRole, getByLabelText, queryByRole } = render(
+      <ActionInput campaignId="campaign-1" />
+    );
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+    expect(getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+
+    fireEvent.change(getByLabelText("Tu acción"), { target: { value: "I look around" } });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    // Exactly two requests: R1 once, the new action once. R1 was not replayed
+    // as a side effect of the new submission resolving.
+    await waitFor(() =>
+      expect(queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument()
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sentIds(fetchMock)[0]).toBe("R1");
+    expect(sentIds(fetchMock)[1]).not.toBe("R1");
+  });
+
+  it("11. the retry button never mislabels one submission as another", async () => {
+    // If a second submission also ends uncertain, the retry slot describes THAT
+    // one — and resends exactly it. The button must never claim to retry R1
+    // while sending R2, or vice versa.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("offline"));
+    const { getByRole, getByLabelText } = render(<ActionInput campaignId="campaign-1" />);
+
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
+    fireEvent.change(getByLabelText("Tu acción"), { target: { value: "I look around" } });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const secondId = sentIds(fetchMock)[1];
+    expect(secondId).not.toBe("R1");
+
+    fireEvent.click(await waitFor(() => getByRole("button", { name: "Reintentar" })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    // Resends the submission the slot actually holds — the newer one — not a
+    // stale R1 dressed up as it.
+    const third = sentBodies(fetchMock)[2];
+    expect(third.requestId).toBe(secondId);
+    expect(third.action).toBe("I look around");
+  });
+
+  it("9. a genuinely new action is sent under a different id", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => sse({ t: "done" }));
+    const { getByRole, getByLabelText } = render(<ActionInput campaignId="campaign-1" />);
+
+    fireEvent.change(getByLabelText("Tu acción"), { target: { value: "I open the door" } });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(getByLabelText("Tu acción"), { target: { value: "I close the door" } });
+    fireEvent.click(getByRole("button", { name: "Actuar" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const [first, second] = sentIds(fetchMock);
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+});

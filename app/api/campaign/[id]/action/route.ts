@@ -69,6 +69,13 @@ import {
   ACTION_REQUEST_ID_MAX_CHARS,
   type DungeonActionRequestBody,
 } from "@/lib/events/action-transport";
+import {
+  acquireActionReceipt,
+  completeActionReceipt,
+  completeActionReceiptWithResponse,
+  fingerprintActionRequest,
+  rejectActionReceipt,
+} from "@/lib/actions/request-receipt";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 
@@ -126,7 +133,52 @@ async function writeSystemLogs(
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 
-export async function POST(req: NextRequest, { params }: RouteContext) {
+/**
+ * Carries the acquired receipt id back out to the wrapper below.
+ *
+ * A mutable reference rather than a return value because `resolveAction`
+ * returns a `Response` through roughly thirty-four separate `return`
+ * statements; threading a second value through every one of them would mean
+ * editing all of them, which is exactly the refactor this design avoids.
+ */
+interface ReceiptRef {
+  id?: string;
+}
+
+/**
+ * Settles a mechanical refusal (DC-AUD-003).
+ *
+ * This wrapper exists for one job: recording that an acquired request ended in
+ * a 4xx, without touching any of the route's ~34 refusal `return` sites. The
+ * two success paths — `/roll` and the ordinary action — settle themselves
+ * *inside* `resolveAction`, because their receipts must be marked before the
+ * response is built, and a wrapper by definition runs after that.
+ *
+ * A throw propagates untouched, leaving the receipt `PROCESSING`. That is
+ * deliberate: an interrupted request cannot be distinguished from a live one,
+ * and refusing an uncertain retry is safe where re-running one is not.
+ */
+export async function POST(req: NextRequest, ctx: RouteContext): Promise<Response> {
+  const receiptRef: ReceiptRef = {};
+  const res = await resolveAction(req, ctx, receiptRef);
+
+  // A pre-acquisition failure (bad body, auth, ownership, inactive campaign)
+  // holds no receipt id, so it settles nothing — exactly as before.
+  if (receiptRef.id && res.status >= 400 && res.status < 500) {
+    // Only JSON is cloned; the SSE stream is never read here. `clone()` keeps
+    // the original body intact for the client.
+    const body = await res.clone().json().catch(() => null);
+    await rejectActionReceipt(receiptRef.id, res.status, body ?? { error: "Refused." });
+  }
+
+  return res;
+}
+
+async function resolveAction(
+  req: NextRequest,
+  { params }: RouteContext,
+  receiptRef: ReceiptRef
+): Promise<Response> {
   const { id: campaignId } = await params;
 
   let body: ActionBody;
@@ -150,17 +202,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     );
   }
 
-  // ── requestId (DC-AUD-002: transport only) ───────────────────────────────────
-  // The correlation id the client generated for this submission. Parsed and
-  // bounded here so the value later work can rely on is well-formed at the
-  // point it enters the system; nothing reads it yet. Deduplication, response
-  // replay and persistence are DC-AUD-003 and are deliberately absent.
+  // ── requestId ────────────────────────────────────────────────────────────────
+  // The correlation id the client generated for this submission. Validation is
+  // unchanged from DC-AUD-002; what changed is that the normalised value is now
+  // bound and keyed on — it is the idempotency key acquired further below.
   //
   // Optional, because callers predating this contract must keep working — but
   // a present-and-malformed id is a client bug, not a legacy caller, and is
   // refused rather than silently ignored. Checked beside the other cheap body
   // validation, before authentication touches anything.
   const { requestId: rawRequestId } = body;
+  let requestId: string | undefined;
 
   if (rawRequestId !== undefined) {
     if (typeof rawRequestId !== "string") {
@@ -171,9 +223,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
 
     // Trimmed the way `action` is, so the same submission cannot arrive under
-    // two spellings once DC-AUD-003 keys on it. The normalised value is
-    // deliberately not bound to an outer name: there is nothing in this task
-    // that may read it, and an unused binding would only invite one.
+    // two spellings and be treated as two.
     const trimmedRequestId = rawRequestId.trim();
 
     if (!trimmedRequestId) {
@@ -189,6 +239,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         { status: 400 }
       );
     }
+
+    requestId = trimmedRequestId;
   }
 
   let user;
@@ -214,6 +266,93 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
   if (campaign.status !== "active") {
     return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
+  }
+
+  // ── Idempotency acquisition (DC-AUD-003) ─────────────────────────────────────
+  // Placed after ownership and campaign state, so an unauthenticated or
+  // unauthorised caller can never create a row, and before everything else, so
+  // a duplicate is stopped before it can write history or spend a slot.
+  //
+  // A request with no `requestId` skips this entirely and behaves exactly as it
+  // did before — legacy callers keep working, at the cost of no protection.
+  if (requestId) {
+    const acquisition = await acquireActionReceipt({
+      actorUserId: user.id,
+      campaignId,
+      requestId,
+      requestHash: fingerprintActionRequest({
+        action: trimmedAction,
+        targetIds: body.targetIds,
+        targetX: body.targetX,
+        targetY: body.targetY,
+      }),
+    });
+
+    switch (acquisition.outcome) {
+      case "acquired":
+        // This request owns the submission. Publish the id so the wrapper can
+        // settle a refusal, and fall through into ordinary resolution.
+        receiptRef.id = acquisition.receiptId;
+        break;
+
+      case "in_flight":
+        // Deliberately worded as uncertainty rather than "still running": a
+        // receipt left behind by an interrupted request is indistinguishable
+        // from a live one, and claiming otherwise would be a lie the player
+        // cannot check. Nothing is executed either way.
+        return NextResponse.json(
+          {
+            error:
+              "Esta acción ya se envió y su resultado aún no se ha confirmado. " +
+              "Sincroniza el estado antes de volver a intentarlo.",
+            code: "ACTION_IN_FLIGHT",
+          },
+          { status: 409 }
+        );
+
+      case "reused":
+        return NextResponse.json(
+          {
+            error:
+              "Ese identificador de petición ya corresponde a otra acción. " +
+              "Vuelve a declarar la acción para enviarla de nuevo.",
+            code: "REQUEST_ID_REUSED",
+          },
+          { status: 409 }
+        );
+
+      case "rejected":
+      case "completed_replay":
+        // Replayed verbatim: the stored body IS the original outcome, so the
+        // refusal or the roll result is neither re-evaluated nor re-rolled,
+        // and nothing is written.
+        return NextResponse.json(acquisition.responseBody, {
+          status: acquisition.responseStatus,
+        });
+
+      case "completed_stream":
+        // The mechanics of this submission are already committed. Answer in
+        // the transport shape the client expects — a terminal duplicate frame
+        // and `done` — so its ordinary `router.refresh()` reconciles state.
+        // No narration, and no replay of the original event frames.
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(sseFrame({ t: "duplicate", requestId }));
+              controller.enqueue(sseFrame({ t: "done" }));
+              controller.close();
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "text/event-stream; charset=utf-8",
+              "Cache-Control": "no-cache, no-transform",
+              "X-Accel-Buffering": "no",
+            },
+          }
+        );
+    }
   }
 
   // Step 1: The player's action becomes canonical history only once the request
@@ -278,7 +417,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       },
     });
 
-    return NextResponse.json({ ok: true }, { status: 202 });
+    // `/roll` returns early and never reaches the convergence point where the
+    // ordinary action settles its receipt, so it settles its own — storing the
+    // exact body a duplicate must receive instead of rolling a second time.
+    //
+    // Not wrapped in a try/catch: if the receipt cannot be recorded, this must
+    // not answer 202 as though durable idempotency existed. The failure
+    // propagates and the receipt stays PROCESSING, which a retry refuses.
+    const rollResponseBody = { ok: true };
+    if (receiptRef.id) {
+      await completeActionReceiptWithResponse(receiptRef.id, 202, rollResponseBody);
+    }
+
+    return NextResponse.json(rollResponseBody, { status: 202 });
   }
 
   // ── "Code is Law" resolution gates ──────────────────────────────────────────
@@ -1464,6 +1615,30 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // ("I look around the room") matches none, and this is the only place it can
   // be recorded. A no-op for anything a gate already logged.
   await persistPlayerAction();
+
+  // ── The submission is mechanically settled (DC-AUD-003) ──────────────────────
+  // Every gate has committed or returned, and the player's line is written. A
+  // retry from here on must be told "already done" rather than re-executed.
+  //
+  // Deliberately BEFORE the level-up read, `streamNarrative` and the SSE
+  // response: everything past this point is narration, and narration is not
+  // mechanical truth. Marking after it would hold the receipt PROCESSING for
+  // the whole model latency — precisely the window in which a player whose
+  // connection dropped retries — so a legitimate retry would meet a 409 during
+  // the exact interval this feature exists to serve.
+  //
+  // The consequence, accepted: COMPLETED means the mechanical outcome
+  // finished, not that narration was delivered or persisted. A crash in
+  // narration leaves a turn that is mechanically correct and narratively
+  // silent, which is strictly better than one resolved twice.
+  //
+  // Unlike the level-up detection below — wrapped so a presentation failure
+  // cannot fail a valid turn — a failure here propagates. Continuing into
+  // narration as though the receipt had settled would leave a PROCESSING row
+  // no retry could ever distinguish from a live request.
+  if (receiptRef.id) {
+    await completeActionReceipt(receiptRef.id);
+  }
 
   // This is also the only safe point to check for a pending level-up: earlier would risk a
   // later gate rejecting the request after the player was already shown an

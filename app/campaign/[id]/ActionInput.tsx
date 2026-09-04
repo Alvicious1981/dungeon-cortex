@@ -54,6 +54,21 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
    *  string = partial or complete optimistic narrative text           */
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  /**
+   * The submission whose outcome is still uncertain, kept verbatim so an
+   * explicit retry resends the *same* `requestId` (DC-AUD-003). Without this
+   * the server's idempotency key is inert: re-typing the action mints a new id
+   * and the backend has no way to recognise the repeat.
+   *
+   * Cleared only on a terminal outcome — never on entry to `executeAction`.
+   * Clearing on entry would discard it the moment a retry came back
+   * ACTION_IN_FLIGHT, leaving the player nothing to retry with but a fresh id.
+   */
+  const [retryable, setRetryable] = useState<{
+    detail: DungeonActionRequestDetail;
+    /** "retry" after a transport failure; "recheck" while the server says in-flight. */
+    mode: "retry" | "recheck";
+  } | null>(null);
   const aliveHostileTargets = useMemo(
     () => selectableTargets.filter((target) => !target.isPlayer && target.hp > 0),
     [selectableTargets]
@@ -115,6 +130,26 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
         const data = await res.json().catch(() => ({}) as Record<string, unknown>);
         const errorMessage =
           (data as { error?: string }).error ?? `Error ${res.status}`;
+        const code = (data as { code?: string }).code;
+
+        if (code === "ACTION_IN_FLIGHT") {
+          // The server owns this submission and cannot yet say how it ended.
+          // Keep the exact detail so "Comprobar de nuevo" asks about the SAME
+          // id — repeatedly, if need be. Surfaced through `streamError` so it
+          // reuses the recovery panel, which already offers a state refresh.
+          setRetryable({ detail, mode: "recheck" });
+          setStreamError(errorMessage);
+          dispatchDungeonActionError({ ...detail, request, error: errorMessage });
+          return;
+        }
+
+        // Everything else is terminal for this id: a mechanical refusal is a
+        // decision, not an unknown, and REQUEST_ID_REUSED means the id can
+        // never be sent again. Neither may enter the transport-retry path.
+        // Guarded by id so a later submission cannot clear a different one.
+        setRetryable((current) =>
+          current && current.detail.requestId === detail.requestId ? null : current
+        );
         setError(errorMessage);
         setStreamingText(null);
         dispatchDungeonActionError({ ...detail, request, error: errorMessage });
@@ -185,11 +220,21 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
         }
       }
 
+      // The stream ran to `done`. That covers both an ordinary turn and a
+      // duplicate — either way this submission is settled, so nothing is left
+      // to retry and the refresh below reconciles canonical state.
+      setRetryable((current) =>
+        current && current.detail.requestId === detail.requestId ? null : current
+      );
       setStreamingText(null);
       router.refresh();
     } catch {
       const errorMessage =
         "Se perdió la conexión con el Director de Mazmorras. Actualiza o vuelve a intentar la acción.";
+      // Transport failure: the outcome is unknown, so keep the exact detail —
+      // same id, same action, same targets — for an explicit retry. Never
+      // automatic; the player decides.
+      setRetryable({ detail, mode: "retry" });
       setStreamError(errorMessage);
       dispatchDungeonActionError({ ...detail, request, error: errorMessage });
     } finally {
@@ -300,18 +345,38 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
               {streamError && (
                 <div className="mt-3 rounded border border-red-900/50 bg-red-950/20 p-3">
                   <p className="text-sm text-red-400 mb-2">{streamError}</p>
-                  <button 
-                    onClick={() => {
-                      setStreamError(null);
-                      setStreamingText(null);
-                      router.refresh();
-                    }}
-                    type="button"
-                    className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider"
-                    style={{ fontFamily: "var(--font-cinzel), serif" }}
-                  >
-                    Descartar y sincronizar
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    {/*
+                      Resends the retained detail unchanged, so the server sees
+                      the SAME requestId and can recognise the repeat instead of
+                      resolving it a second time. Explicit, never automatic.
+                    */}
+                    {retryable && (
+                      <button
+                        onClick={() => {
+                          void executeAction(retryable.detail);
+                        }}
+                        type="button"
+                        disabled={submitting}
+                        className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider disabled:opacity-50"
+                        style={{ fontFamily: "var(--font-cinzel), serif" }}
+                      >
+                        {retryable.mode === "recheck" ? "Comprobar de nuevo" : "Reintentar"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setStreamError(null);
+                        setStreamingText(null);
+                        router.refresh();
+                      }}
+                      type="button"
+                      className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider"
+                      style={{ fontFamily: "var(--font-cinzel), serif" }}
+                    >
+                      Descartar y sincronizar
+                    </button>
+                  </div>
                 </div>
               )}
             </>
