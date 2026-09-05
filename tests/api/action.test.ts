@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { POST } from "@/app/api/campaign/[id]/action/route";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/session";
@@ -1097,6 +1097,25 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
     );
 
+  /**
+   * DC-AUD-007. The route builds its pre-gate context from the campaign id
+   * alone. The second argument is what turns on semantic memory recall — an
+   * embeddings request plus a pgvector scan — whose result nothing in this
+   * route reads. `parseIntent` is guarded by its own one-parameter signature;
+   * this trigger is not, because `buildCampaignContext(id, playerInput?)` still
+   * accepts the argument, so the regression would compile and lint clean.
+   *
+   * Arity, not value: an explicit `undefined` is the same defect. One call per
+   * request — `streamNarrative` is mocked, so the narrator's own build never
+   * runs here.
+   */
+  const expectContextBuiltFromCampaignIdAlone = () => {
+    const calls = (buildCampaignContext as unknown as Mock).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(1);
+    expect(calls[0][0]).toBe(campaignId);
+  };
+
   const hostile = {
     id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10,
     conditions: "[]", ...NO_MODIFIERS, isPlayer: false,
@@ -1210,6 +1229,11 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
     );
     expect(firstUserWrite).toBeGreaterThanOrEqual(0);
     expect(firstAssistantWrite).toBeGreaterThan(firstUserWrite);
+
+    // Macro path: this one never reaches `parseIntent`, yet the context build
+    // sits above the fast-path gate, so it used to pay for a recall it could
+    // not have consumed.
+    expectContextBuiltFromCampaignIdAlone();
   });
 
   it("4. /roll still persists the player's command and its result", async () => {
@@ -1250,6 +1274,10 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       data: { campaignId, role: "user", content: "I look around the room" },
     });
     expect(streamNarrative).toHaveBeenCalled();
+
+    // Free-text path: `trimmedAction` is in scope here and reaches
+    // `parseIntent`, but must not reach the context builder.
+    expectContextBuiltFromCampaignIdAlone();
   });
 
   it("6. an ability check writes the player's line before the resolved roll", async () => {
