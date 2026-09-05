@@ -18,7 +18,7 @@ describe("deterministic intent parser", () => {
     ["use the Potion of Healing", "use_item", "Potion of Healing"],
     ["equip the longsword", "equip", "longsword"],
   ])("classifies %s without model output", async (input, actionType, targetName) => {
-    await expect(parseIntent(input, "ignored prompt")).resolves.toMatchObject({
+    await expect(parseIntent(input)).resolves.toMatchObject({
       actionType,
       targetName,
     });
@@ -31,7 +31,7 @@ describe("deterministic intent parser", () => {
   ])("strips the article from a spell target in %s", async (input, targetName) => {
     // Callers match by substring against combatant names, so "the goblin" would
     // never be found inside "Goblin".
-    await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
+    await expect(parseIntent(input)).resolves.toMatchObject({
       actionType: "cast_spell",
       targetName,
     });
@@ -40,7 +40,7 @@ describe("deterministic intent parser", () => {
   it("extracts an SRD spell, slot level, and target", async () => {
     getSpellInfo.mockResolvedValue({ name: "Fireball", level: 3 });
     await expect(
-      parseIntent("cast Fireball at level 3 on goblin", "ignored")
+      parseIntent("cast Fireball at level 3 on goblin")
     ).resolves.toMatchObject({
       actionType: "cast_spell",
       spellName: "Fireball",
@@ -51,11 +51,11 @@ describe("deterministic intent parser", () => {
   });
 
   it("keeps non-mechanical roleplay as general narration", async () => {
-    await expect(parseIntent("I greet the innkeeper", "ignored")).resolves.toEqual({
+    await expect(parseIntent("I greet the innkeeper")).resolves.toEqual({
       actionType: "general",
     });
     await expect(
-      parseIntent("I tell the innkeeper I am ready", "ignored")
+      parseIntent("I tell the innkeeper I am ready")
     ).resolves.toEqual({
       actionType: "general",
     });
@@ -81,7 +81,7 @@ describe("deterministic intent parser", () => {
     async (input, skill, band) => {
       // toMatchObject, not toEqual: these phrasings also name a creature, and
       // the extracted targetName varies per case. It is pinned separately below.
-      await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
+      await expect(parseIntent(input)).resolves.toMatchObject({
         actionType: "ability_check",
         skill,
         band,
@@ -93,7 +93,7 @@ describe("deterministic intent parser", () => {
     // Strict: nothing beyond the three fields may appear when the player named
     // no creature. A stray targetName here would send the gate contesting
     // against something nobody mentioned.
-    await expect(parseIntent("I hide", "ignored")).resolves.toEqual({
+    await expect(parseIntent("I hide")).resolves.toEqual({
       actionType: "ability_check",
       skill: "Stealth",
       band: "medium",
@@ -112,7 +112,7 @@ describe("deterministic intent parser", () => {
   ])("names the creature in %s as %s", async (input, targetName) => {
     // Contests that resist with one creature need to know which. Without this
     // the backend contested against whoever else was standing there.
-    await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
+    await expect(parseIntent(input)).resolves.toMatchObject({
       actionType: "ability_check",
       targetName,
     });
@@ -122,7 +122,7 @@ describe("deterministic intent parser", () => {
     // The point of keying difficulty to the verb: Athletics used to be a single
     // value, so hauling a portcullis and hopping a fence were equally hard.
     const bandFor = async (input: string) =>
-      (await parseIntent(input, "ignored")).band;
+      (await parseIntent(input)).band;
 
     expect(await bandFor("I climb the wall")).toBe("easy");
     expect(await bandFor("I push the cart")).toBe("medium");
@@ -131,7 +131,7 @@ describe("deterministic intent parser", () => {
 
   it("never lets an improvised check shadow a dedicated mechanic", async () => {
     // "attack" has its own gate and must keep it.
-    await expect(parseIntent("attack the goblin", "ignored")).resolves.toMatchObject({
+    await expect(parseIntent("attack the goblin")).resolves.toMatchObject({
       actionType: "attack",
     });
   });
@@ -153,7 +153,7 @@ describe("deterministic intent parser", () => {
   ])(
     "adjudicates %s with a real skill check instead of narrating it",
     async (input, skill, band) => {
-      await expect(parseIntent(input, "ignored")).resolves.toMatchObject({
+      await expect(parseIntent(input)).resolves.toMatchObject({
         actionType: "ability_check",
         skill,
         band,
@@ -173,7 +173,7 @@ describe("deterministic intent parser", () => {
     // has no dedicated mechanic and must still fail closed.
     "viajo al norte",
   ])("refuses %s rather than narrating an unresolved action", async (input) => {
-    await expect(parseIntent(input, "ignored")).resolves.toEqual({
+    await expect(parseIntent(input)).resolves.toEqual({
       actionType: "mechanical_ambiguous",
     });
   });
@@ -192,7 +192,7 @@ describe("deterministic intent parser", () => {
   it("reaches cantrips, which the slot-level bound used to make unrepresentable", async () => {
     getSpellInfo.mockResolvedValue({ name: "Fire Bolt", level: 0 });
     await expect(
-      parseIntent("cast Fire Bolt at level 0 on goblin", "ignored")
+      parseIntent("cast Fire Bolt at level 0 on goblin")
     ).resolves.toMatchObject({
       actionType: "cast_spell",
       spellName: "Fire Bolt",
@@ -204,12 +204,12 @@ describe("deterministic intent parser", () => {
     // Clarification is now the last resort, not the default: it applies only to
     // input that matches no dedicated mechanic and no improvised skill either.
     await expect(
-      parseIntent("I poison the goblin", "ignored")
+      parseIntent("I poison the goblin")
     ).resolves.toEqual({
       actionType: "mechanical_ambiguous",
     });
     await expect(
-      parseIntent("I sabotage the mechanism somehow", "ignored")
+      parseIntent("I sabotage the mechanism somehow")
     ).resolves.toEqual({
       actionType: "mechanical_ambiguous",
     });
@@ -218,20 +218,20 @@ describe("deterministic intent parser", () => {
 
 describe("parseIntent — travel", () => {
   it("classifies an English journey and extracts the destination", async () => {
-    const intent = await parseIntent("travel to the Gilded Boar", "");
+    const intent = await parseIntent("travel to the Gilded Boar");
     expect(intent.actionType).toBe("travel");
     expect(intent.destination).toBe("Gilded Boar");
     expect(intent.forceMarch).toBe(false);
   });
 
   it("classifies a Spanish journey", async () => {
-    const intent = await parseIntent("viajar a la Cripta Sable", "");
+    const intent = await parseIntent("viajar a la Cripta Sable");
     expect(intent.actionType).toBe("travel");
     expect(intent.destination).toBe("Cripta Sable");
   });
 
   it("reads a forced march as a choice, not a destination", async () => {
-    const intent = await parseIntent("travel to the Gilded Boar, forced march", "");
+    const intent = await parseIntent("travel to the Gilded Boar, forced march");
     expect(intent.actionType).toBe("travel");
     expect(intent.destination).toBe("Gilded Boar");
     expect(intent.forceMarch).toBe(true);
@@ -242,7 +242,7 @@ describe("parseIntent — travel", () => {
    * gate. Travel needs its own verb, or every room change becomes a journey.
    */
   it("leaves in-location movement alone", async () => {
-    const intent = await parseIntent("go to the Common Room", "");
+    const intent = await parseIntent("go to the Common Room");
     expect(intent.actionType).toBe("move");
   });
 
@@ -251,7 +251,7 @@ describe("parseIntent — travel", () => {
    * clarification, never be guessed into a destination.
    */
   it("refuses to guess a destination it cannot read", async () => {
-    const intent = await parseIntent("travel", "");
+    const intent = await parseIntent("travel");
     expect(intent.actionType).toBe("mechanical_ambiguous");
   });
 });

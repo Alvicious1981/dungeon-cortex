@@ -4,7 +4,6 @@ import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { roll } from "@/lib/rules/dice";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
-import { formatSystemPrompt } from "@/lib/memory/formatter";
 import { parseIntent } from "@/lib/ai/intent";
 import { NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
 import { summarizeAndStore } from "@/lib/memory/consolidator";
@@ -456,12 +455,12 @@ async function resolveAction(
 
   const gameEvents: GameEvent[] = [];
 
-  // Milestone D+G: Build context with semantic memory recall for this action.
-  // Passing trimmedAction causes buildCampaignContext to query the vector DB
-  // for the top-2 relevant MemoryEntry rows and attach them as relevantMemories.
-  // formatSystemPrompt will inject them under "## Long-Term Memory" if any exist.
-  const context = await buildCampaignContext(campaignId, trimmedAction);
-  const systemContext = formatSystemPrompt(context);
+  // Mechanical state for the gates below: character, encounter, inventory,
+  // quests, exploration. Deliberately built WITHOUT the action text — that
+  // second argument is what turns on semantic memory recall (an embedding API
+  // call plus a pgvector scan), and nothing here reads `relevantMemories`.
+  // The narrator does its own context build after the mutations land.
+  const context = await buildCampaignContext(campaignId);
 
   // ── Macro Action Detector (Strategic Gate) ──────────────────────────────────
   // Authoritative "fast-path" for UI-triggered buttons (CombatHUD).
@@ -704,7 +703,7 @@ async function resolveAction(
     // Deterministic intent classification for natural-language actions. No
     // model call: parseIntent resolves by pattern and fails closed, so the same
     // input always reaches the same gate.
-    const intent = await parseIntent(trimmedAction, systemContext);
+    const intent = await parseIntent(trimmedAction);
 
     // ── Gate: improvised action → ability check ─────────────────────────────────
     // The SRD's universal fallback. The action has no dedicated rule, so the

@@ -142,16 +142,10 @@ export interface Intent extends BaseIntent {
 /**
  * Parses a player's free-text action into a structured Intent.
  *
- * @param playerInput   - Raw text the player typed (e.g. "I cast Fireball at level 3 on the orc").
- * @param systemContext - Formatted game-state context from formatSystemPrompt —
- *                        gives the model awareness of active encounter, inventory, etc.
- * @returns             A validated Intent object ready for rules-engine gating.
+ * @param playerInput - Raw text the player typed (e.g. "I cast Fireball at level 3 on the orc").
+ * @returns           A validated Intent object ready for rules-engine gating.
  */
-export async function parseIntent(
-  playerInput: string,
-  systemContext: string
-): Promise<Intent> {
-  void systemContext;
+export async function parseIntent(playerInput: string): Promise<Intent> {
   const input = playerInput.trim().replace(/\s+/g, " ");
   const lower = input.toLocaleLowerCase("en");
 
