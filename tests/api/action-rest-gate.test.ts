@@ -6,11 +6,12 @@
  * POST /api/campaign/[id]/rest route uses.
  *
  * This file began as characterisation: it pinned a second, parallel rest
- * implementation (`applyShortRest` / `applyLongRest`) that disagreed with the
- * canonical service on six points, catalogued in #130. Five of those are gone
- * with the delegation, so the assertions that recorded them are replaced by
- * assertions that the rule now applies. Each says which divergence it closes,
- * so the diff against the previous revision reads as the intended change.
+ * implementation (`applyShortRest` / `applyLongRest`, since deleted) that
+ * disagreed with the canonical service on six points, catalogued in #130. Five
+ * of those are gone with the delegation, so the assertions that recorded them
+ * are replaced by assertions that the rule now applies. Each says which
+ * divergence it closes, so the diff against the previous revision reads as the
+ * intended change.
  *
  * `lib/rules/rest-service.ts` is deliberately NOT mocked: it is the thing under
  * test. `Math.random` is pinned where an exact number is needed, because the

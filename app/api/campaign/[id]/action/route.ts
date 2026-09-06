@@ -1407,8 +1407,8 @@ async function resolveAction(
     // dedicated POST /api/campaign/[id]/rest route already uses and which
     // `tests/architecture/rest-route-no-direct-prisma.test.ts` obliges that
     // route to use. This gate used to run a second, parallel implementation
-    // (`applyShortRest` / `applyLongRest`) that disagreed with it on five
-    // points — see #130. One domain now answers both paths.
+    // (`applyShortRest` / `applyLongRest`, since deleted) that disagreed with
+    // it on five points — see #130. One domain now answers both paths.
     //
     // What the service does that this gate did not: refuse mid-combat, read
     // `stats.CON` under the key the character actually carries, normalise the

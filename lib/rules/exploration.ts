@@ -436,32 +436,6 @@ export interface EncounterCheckResult {
   loudAction: boolean;
 }
 
-export interface CharacterState {
-  hp: number;
-  maxHp: number;
-  level: number;
-  class: string;
-  stats: Record<string, number>;
-  spellSlots: Record<string, { current: number; max: number }> | null;
-  hitDiceTotal: number;
-  hitDiceRemaining: number;
-  exhaustionLevel: number;
-}
-
-export interface ShortRestResult {
-  next: CharacterState;
-  hpRecovered: number;
-  hitDiceSpent: number;
-}
-
-export interface LongRestResult {
-  next: CharacterState;
-  hpRecovered: number;
-  hitDiceRecovered: number;
-  exhaustionReduced: number;
-  spellSlotsRecovered: boolean;
-}
-
 // ---------------------------------------------------------------------------
 // Pure logic — Re-exported from exploration-logic.ts
 // ---------------------------------------------------------------------------
@@ -477,7 +451,5 @@ export {
   checkRandomEncounter,
   consumeResources,
   applyRest,
-  applyShortRest,
-  applyLongRest,
   initialPartyInventory,
 } from "./exploration-logic";
