@@ -264,17 +264,69 @@ async function assertNoActiveEncounter(
 
 function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecord) {
   const hitDice = currentHitDice(character);
-  const hitDiceToSpend = input.hitDiceToSpend ?? 1;
+  const hpBefore = Math.max(0, Math.min(character.maxHp, character.hp));
+
+  // Two different requests arrive here, and only one of them can be invalid.
+  //
+  // An explicit `hitDiceToSpend` is a caller naming a number: asking for more
+  // dice than exist is an error, and stays one.
+  //
+  // No `hitDiceToSpend` is a player who typed "short rest" and named nothing.
+  // The SRD calls a short rest "a period of downtime" and says a character
+  // *can* spend Hit Dice at the end of it — taking the rest is not conditional
+  // on having any, and spending is a choice made per die. So an implicit rest
+  // spends one die when there is one to spend and it would do something, and
+  // otherwise resolves having recovered nothing.
+  //
+  // Both edges used to be wrong in the same direction, against the player. No
+  // dice left threw INVALID_HIT_DICE, so the rest was refused outright — and
+  // a 4xx writes no canonical player row, so the narrator never learned the
+  // party had rested at all. At full health it spent a die to heal zero,
+  // silently destroying a resource only a long rest returns, half at a time.
+  const explicit = input.hitDiceToSpend !== undefined;
 
   if (
-    !Number.isInteger(hitDiceToSpend) ||
-    hitDiceToSpend < 1 ||
-    hitDiceToSpend > hitDice.remaining
+    explicit &&
+    (!Number.isInteger(input.hitDiceToSpend) ||
+      input.hitDiceToSpend! < 1 ||
+      input.hitDiceToSpend! > hitDice.remaining)
   ) {
     throw new RestServiceError(
       "INVALID_HIT_DICE",
       "hitDiceToSpend must be an integer within available Hit Dice."
     );
+  }
+
+  const hitDiceToSpend = explicit
+    ? input.hitDiceToSpend!
+    : hitDice.remaining > 0 && hpBefore < character.maxHp
+      ? 1
+      : 0;
+
+  if (hitDiceToSpend === 0) {
+    // Nothing was rolled, so nothing is reported as rolled. `Math.max(1, …)`
+    // below would otherwise grant a free hit point for a die never spent.
+    return {
+      data: {
+        hp: hpBefore,
+        hitDiceRemaining: hitDice.remaining,
+      },
+      details: {
+        hpBefore,
+        hpAfter: hpBefore,
+        hpRecovered: 0,
+        hitDiceSpent: 0,
+        hitDiceRecovered: 0,
+        hitDiceRemainingBefore: hitDice.remaining,
+        hitDiceRemainingAfter: hitDice.remaining,
+        exhaustionReduced: 0,
+        slotsRestored: false,
+        hitDie: null,
+        rolled: null,
+        conMod: null,
+        healing: undefined,
+      },
+    };
   }
 
   const stats = statsRecord(character.stats);
@@ -283,7 +335,6 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
   const diceExpression = `${hitDiceToSpend}d${hitDieSize}`;
   const rolled = (input.roll ?? defaultRoll)(diceExpression).total;
   const healing = Math.max(1, rolled + conMod * hitDiceToSpend);
-  const hpBefore = Math.max(0, Math.min(character.maxHp, character.hp));
   const hpAfter = Math.min(character.maxHp, hpBefore + healing);
 
   return {

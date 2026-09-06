@@ -34,16 +34,22 @@
  *    decides, and a sentence naming both rests is refused upstream by
  *    `parseIntent` instead of being guessed — see tests/ai/intent.test.ts.
  *
- * ── new consequences, pinned deliberately ───────────────────────────────────
+ * ── two edges the delegation surfaced, since fixed ──────────────────────────
  *
- * Adopting the canonical service changed two edge cases that the old gate
- * handled differently. Neither is a bug in the service — the dedicated rest
- * route has behaved this way all along — but both are new on this path:
+ * Adopting the canonical service initially changed two edge cases, and both
+ * were pinned here as accepted consequences. Reviewing them against the SRD
+ * showed both were defects — in `rest-service`, so the dedicated rest route
+ * had them too — and they were fixed there rather than kept:
  *
- *   - With no Hit Dice left, a short rest is now REFUSED (`INVALID_HIT_DICE`,
- *     400) rather than resolving to a no-op 200.
- *   - At full health a short rest still spends a die, healing nothing. The old
- *     gate checked `hp < maxHp` before spending; the service does not.
+ *   - With no Hit Dice left, a short rest was refused (`INVALID_HIT_DICE`,
+ *     400). The rest is legal; it simply recovers nothing. Refusing it also
+ *     cost the narrator the event, since a 4xx writes no canonical row.
+ *   - At full health it spent a die and healed nothing, destroying a resource
+ *     only a long rest returns.
+ *
+ * An explicit `hitDiceToSpend` beyond what the character has is still an
+ * error. Asking for a die count that does not exist is a bad request; a rest
+ * that cannot use a die is not.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -378,24 +384,33 @@ describe("rest gate: a long rest restores the day", () => {
   });
 });
 
-describe("rest gate: consequences of adopting the canonical service", () => {
-  it("refuses a short rest with no Hit Dice left, where it used to no-op", async () => {
-    // The old gate answered 200 with nothing recovered. The service treats a
-    // request it cannot satisfy as invalid. Pinned because it is a behaviour
-    // change on this path, not an accident.
+describe("rest gate: a rest that cannot use a Hit Die is still a rest", () => {
+  // Both cases below were pinned as accepted consequences when this gate began
+  // delegating, then reviewed against the SRD and fixed in the service. The
+  // rule text settles them: a short rest is "a period of downtime", and a
+  // character *can* spend Hit Dice at the end of one — taking the rest is not
+  // conditional on having any, and spending is a choice made per die.
+
+  it("resolves with no Hit Dice left, rather than refusing", async () => {
+    // It used to answer 400 INVALID_HIT_DICE. That refused a legal rest, and
+    // because a 4xx writes no canonical player row, the narrator never learned
+    // the party had rested at all.
     givenCharacter({ hp: 5, hitDiceRemaining: 0 });
 
     const res = await post("short rest");
 
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({ code: "INVALID_HIT_DICE" });
-    expect(userLogWrites()).toHaveLength(0);
+    expect(res.status).toBe(200);
+    expect(await restPayload(res)).toMatchObject({
+      type: "SHORT_REST",
+      hpRecovered: 0,
+      hitDiceSpent: 0,
+    });
+    expect(userLogWrites()).toHaveLength(1);
   });
 
-  it("still spends a die at full health, healing nothing", async () => {
-    // The old gate checked `hp < maxHp` before spending; the service does not,
-    // and the dedicated rest route has always behaved this way. Recorded so
-    // the asymmetry is visible rather than discovered in play.
+  it("spends no Hit Die at full health", async () => {
+    // It used to spend one and heal nothing — a 200 that silently destroyed a
+    // resource only a long rest returns, half the total at a time.
     vi.spyOn(Math, "random").mockReturnValue(MAX_ROLL);
     givenCharacter({ hp: 30, maxHp: 30, hitDiceRemaining: 3 });
 
@@ -403,8 +418,8 @@ describe("rest gate: consequences of adopting the canonical service", () => {
 
     const payload = await restPayload(res);
     expect(payload.hpRecovered).toBe(0);
-    expect(payload.hitDiceSpent).toBe(1);
-    expect(characterUpdate().data.hitDiceRemaining).toBe(2);
+    expect(payload.hitDiceSpent).toBe(0);
+    expect(characterUpdate().data.hitDiceRemaining).toBe(3);
   });
 });
 
