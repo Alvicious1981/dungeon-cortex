@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
-import { roll } from "@/lib/rules/dice";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
@@ -67,10 +66,13 @@ import {
 import {
   acquireActionReceipt,
   completeActionReceipt,
-  completeActionReceiptWithResponse,
   fingerprintActionRequest,
   rejectActionReceipt,
 } from "@/lib/actions/request-receipt";
+import {
+  ROLL_COMMAND_PREFIX,
+  resolveRollCommand,
+} from "@/lib/actions/roll-command";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 
@@ -399,49 +401,23 @@ async function resolveAction(
   };
 
   // Step 2: Detect and resolve /roll commands (non-streaming, quick response)
-  const ROLL_PREFIX = "/roll ";
-  if (trimmedAction.toLowerCase().startsWith(ROLL_PREFIX)) {
-    const notation = trimmedAction.slice(ROLL_PREFIX.length).trim();
-
-    let rollContent: string;
-    try {
-      const result = roll(notation);
-      const diceList = result.dice.map((d) => d.result).join(", ");
-      const modifierPart = result.modifier !== 0
-        ? ` ${result.modifier > 0 ? "+" : ""}${result.modifier}`
-        : "";
-      rollContent =
-        `🎲 Roll ${result.notation}: [${diceList}]${modifierPart} = **${result.total}**`;
-    } catch {
-      rollContent = `⚠️ Invalid dice notation: "${notation}". Use format like 1d20+5 or 2d6.`;
-    }
-
-    // /roll is not a mechanical gate and has no rejection path: bad notation is
-    // answered with a system line and 202, not a 4xx. The command is therefore
-    // always canonical, and is written before the result that answers it.
-    await persistPlayerAction();
-
-    await prisma.gameLog.create({
-      data: {
-        campaignId,
-        role: "system",
-        content: rollContent,
-      },
+  //
+  // The detection stays here — this is the route's decision about which
+  // submission it is answering — while the resolution lives in
+  // `lib/actions/roll-command.ts` (DC-AUD-008). The prefix is imported rather
+  // than re-declared so the test above and the `slice` inside the handler
+  // cannot disagree about it.
+  //
+  // `persistPlayerAction` is handed over rather than duplicated: the "written
+  // at most once" guarantee it carries is shared with every gate below, so it
+  // must keep exactly one owner.
+  if (trimmedAction.toLowerCase().startsWith(ROLL_COMMAND_PREFIX)) {
+    return resolveRollCommand({
+      campaignId,
+      trimmedAction,
+      receiptId: receiptRef.id,
+      persistPlayerAction,
     });
-
-    // `/roll` returns early and never reaches the convergence point where the
-    // ordinary action settles its receipt, so it settles its own — storing the
-    // exact body a duplicate must receive instead of rolling a second time.
-    //
-    // Not wrapped in a try/catch: if the receipt cannot be recorded, this must
-    // not answer 202 as though durable idempotency existed. The failure
-    // propagates and the receipt stays PROCESSING, which a retry refuses.
-    const rollResponseBody = { ok: true };
-    if (receiptRef.id) {
-      await completeActionReceiptWithResponse(receiptRef.id, 202, rollResponseBody);
-    }
-
-    return NextResponse.json(rollResponseBody, { status: 202 });
   }
 
   // ── "Code is Law" resolution gates ──────────────────────────────────────────
