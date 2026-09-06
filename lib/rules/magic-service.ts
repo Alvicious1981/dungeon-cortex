@@ -77,6 +77,18 @@ interface MagicDb {
       data: { spellSlots: Prisma.InputJsonValue };
       select?: Record<string, boolean>;
     }): Promise<MagicCharacterRecord>;
+    /**
+     * Production Prisma exposes updateMany. Keeping it optional preserves old
+     * injected test doubles while allowing real database callers to use the
+     * compare-and-set path below.
+     */
+    updateMany?(args: {
+      where: {
+        id: string;
+        spellSlots: { equals: Prisma.InputJsonValue };
+      };
+      data: { spellSlots: Prisma.InputJsonValue };
+    }): Promise<{ count: number }>;
   };
   srdSpell?: {
     findUnique(args: {
@@ -306,6 +318,78 @@ function buildFacts(
   };
 }
 
+async function persistSlotConsumption(
+  db: MagicDb,
+  character: MagicCharacterRecord,
+  slotLevel: number
+): Promise<{ before: SpellSlots; after: SpellSlots }> {
+  assertValidSlots(character.spellSlots);
+  let currentSlots = character.spellSlots;
+
+  while (true) {
+    if (!hasAvailableSlot(currentSlots, slotLevel)) {
+      throw new MagicServiceError(
+        "NO_SPELL_SLOT_AVAILABLE",
+        `No available spell slots remaining at level ${slotLevel}.`
+      );
+    }
+
+    const updatedSlots = consumeSlot(currentSlots, slotLevel);
+
+    // Legacy injected test doubles predate updateMany. Real Prisma callers must
+    // take the compare-and-set path below; the fallback keeps those old isolated
+    // contract fixtures usable without pretending they provide concurrency safety.
+    if (!db.character.updateMany) {
+      const updatedCharacter = await db.character.update({
+        where: { id: character.id },
+        data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
+        select: { spellSlots: true },
+      });
+      const persisted = isSpellSlots(updatedCharacter.spellSlots)
+        ? updatedCharacter.spellSlots
+        : updatedSlots;
+      return { before: currentSlots, after: persisted };
+    }
+
+    // Compare-and-set: the JSON value that authorised the consumption is part
+    // of the write predicate. Under PostgreSQL READ COMMITTED, a competing
+    // writer that changes spellSlots makes this predicate stop matching after
+    // its row lock is released, so a stale snapshot can never overwrite it.
+    const applied = await db.character.updateMany({
+      where: {
+        id: character.id,
+        spellSlots: {
+          equals: currentSlots as unknown as Prisma.InputJsonValue,
+        },
+      },
+      data: {
+        spellSlots: updatedSlots as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    if (applied.count === 1) {
+      return { before: currentSlots, after: updatedSlots };
+    }
+
+    // Another transaction changed spellSlots after our read. Refresh and retry
+    // against that committed state rather than writing the stale absolute value.
+    const refreshed = await db.character.findUnique({
+      where: { id: character.id },
+      select: { id: true, spellSlots: true },
+    });
+
+    if (!refreshed) {
+      throw new MagicServiceError(
+        "CHARACTER_NOT_FOUND",
+        `Character not found: ${character.id}`
+      );
+    }
+
+    assertValidSlots(refreshed.spellSlots);
+    currentSlots = refreshed.spellSlots;
+  }
+}
+
 async function castSpellInTransaction(
   db: MagicDb,
   input: CastSpellInput
@@ -341,34 +425,16 @@ async function castSpellInTransaction(
     );
   }
 
-  assertValidSlots(character.spellSlots);
-
-  if (!hasAvailableSlot(character.spellSlots, slotLevel)) {
-    throw new MagicServiceError(
-      "NO_SPELL_SLOT_AVAILABLE",
-      `No available spell slots remaining at level ${slotLevel}.`
-    );
-  }
-
-  const updatedSlots = consumeSlot(character.spellSlots, slotLevel);
-  const updatedCharacter = await db.character.update({
-    where: { id: character.id },
-    data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
-    select: { spellSlots: true },
-  });
-
-  const spellSlotsAfter = isSpellSlots(updatedCharacter.spellSlots)
-    ? updatedCharacter.spellSlots
-    : updatedSlots;
+  const consumed = await persistSlotConsumption(db, character, slotLevel);
 
   return {
     ok: true,
-    spellSlots: spellSlotsAfter,
+    spellSlots: consumed.after,
     facts: buildFacts(input, character.id, {
       slotLevel,
       slotConsumed: true,
-      spellSlotsBefore: character.spellSlots,
-      spellSlotsAfter,
+      spellSlotsBefore: consumed.before,
+      spellSlotsAfter: consumed.after,
     }),
   };
 }
