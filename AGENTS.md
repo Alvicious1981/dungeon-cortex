@@ -306,23 +306,47 @@ mismatch survives a green suite.
   modules have not been touched.
   **Not blocked, but not a one-file delete either.** The import graph was
   verified across `app/`, `lib/`, `components/`, `scripts/`, `workflows/` and
-  `evals/` on 2026-08-31, and it is worse than two dead wrappers: **four
-  backend services are now reachable only through them.**
+  `evals/` on 2026-08-31, and it was worse than two dead wrappers: **four
+  backend services were then reachable only through them.**
+
+  **Three of those four rows are gone as of 2026-09-06. One remains.**
 
   | Service | Dead entry points | Live parallel path |
   | --- | --- | --- |
-  | `lib/rules/trade-service.ts` | `resolveTradeTransaction`, `getCampaignCharacterIdForTrade` | `app/actions/trade.ts` → its own `prisma.$transaction`, from `components/trade/TradeOverlayController.tsx` |
   | `lib/rules/npc-service.ts` | `trackNpcState`, `upsertGeneratedNpc`, `establishInitialNpcDisposition`, `trackMerchantState` | `app/api/campaign/[id]/npc/route.ts` → its own `prisma.nPC.upsert` |
-  | `lib/rules/equipment-service.ts` | `equipCharacterItem` | the `equip` gate in `app/api/campaign/[id]/action/route.ts:987` |
-  | `lib/rules/social-service.ts` | `resolveSocialCheck`, `resolveRumors` | **none — there is no social route at all** |
+
+  What happened to the other three, each verified against the tree and the
+  history on 2026-09-06 rather than assumed:
+
+  - **`lib/rules/equipment-service.ts` was deleted** in `5096b3d`, "delete
+    equipment-service and the AI tool that was its only caller" (#103). Its
+    row claimed `equipCharacterItem` was shadowed by the `equip` gate in the
+    action route. That was true when written; the resolution was to remove the
+    service, leaving the gate as the single implementation.
+  - **`lib/rules/trade-service.ts` was deleted** in `c51b5ad`, "delete the
+    social tool builder and the trade service it tethered" (#117).
+  - **`lib/rules/social-service.ts` has a live caller and is no longer
+    dormant.** `resolveSocialCheck` is imported by
+    `app/api/campaign/[id]/social/route.ts` and `resolveRumors` by
+    `app/api/campaign/[id]/social/rumors/route.ts`. Its row said "none — there
+    is no social route at all", which stopped being true when those routes
+    landed (#99–#104).
+
+  **This table sent a reader looking for `equipCharacterItem` on 2026-09-06,
+  five PRs after it was deleted.** That is the failure mode this whole section
+  exists to warn about, committed by the warning itself: a claim about
+  behaviour that was true when written and never re-checked. Before acting on
+  any row here, confirm the file still exists and grep for its importers. The
+  row is a lead, not a fact.
 
   The equipment row named `app/api/campaign/[id]/inventory/route.ts` until
   2026-08-31. That route is `GET` only and equips nothing; the real live path
-  is the action route's `equip` gate. A row in this table is a claim about
+  was the action route's `equip` gate. A row in this table is a claim about
   behaviour, and that one was written from a directory listing.
 
-  All three comparisons are now done, and **they do not share a verdict** —
-  which is the point. Reading each pair was the only way to find that out.
+  All three comparisons were done, and **they did not share a verdict** —
+  which is the point. Reading each pair was the only way to find that out, and
+  it is why two of them ended in a deletion and one in a route.
 
   **Trade was compared line by line on 2026-08-31. Neither copy is whole, and
   an earlier version of this note guessed the wrong way about which is.** It
@@ -344,31 +368,46 @@ mismatch survives a green suite.
     still gets through. **The defect is worth remembering even though it is
     closed:** it sat on the live path the whole time the review attention was
     on the dead one.
-  - **`lib/rules/social-service.ts` has the same defect, found 2026-09-01.**
-    Its character lookup selects `campaignId`, and `Character` has no such
-    scalar — only the `campaigns Campaign[]` relation — so real Prisma throws
-    `Unknown field campaignId` on the first call. Worse, lines 237 and 246
-    read that field to check ownership, so **the character ownership guard has
-    never checked anything.** Same cause as trade's: `resolveDb` casts Prisma
-    through a hand-written interface, and the contract test injects a fake
-    `tx` that returns whatever it is asked for. Repairing it is scoped into
-    `docs/superpowers/specs/2026-09-01-social-actions-reachable-design.md`,
-    which gives the module its first production caller. **Two modules with the
-    same phantom field is a pattern, not a coincidence — assume the other
-    service wrappers have it too until each is read against `schema.prisma`.**
-  - `lib/rules/trade-service.ts` **does not match the schema.** `InventoryItem`
-    has no `campaignId` column and `Character` has no `campaignId` field, yet
-    the service passes `campaignId` to `inventoryItem.create` (real Prisma
-    would throw `Unknown argument` on the first purchase) and asserts against
-    `item.campaignId` and `character.campaignId`, which are always `undefined`
-    against real rows — so half of each ownership check is a no-op. It stays
-    green because `resolveDb` casts `prisma as unknown as TradeDb` and its
-    contract test injects a fake `tx`. Mocked shape, never checked against the
-    table: the exact pair of defects this file warns about.
+  - **`lib/rules/social-service.ts` had the same defect, found 2026-09-01 and
+    since fixed.** Its character lookup selected `campaignId`, and `Character`
+    has no such scalar — only the `campaigns Campaign[]` relation — so real
+    Prisma would throw `Unknown field campaignId` on the first call. Worse, two
+    lines read that field to check ownership, so **the character ownership
+    guard checked nothing.** Same cause as trade's: `resolveDb` casts Prisma
+    through a hand-written interface, and the contract test injects a fake `tx`
+    that returns whatever it is asked for.
 
-  So the live path holds the auth check, the working schema, the prose log the
-  narrator consumes and now the input validation too, leaving `trade-service.ts`
-  with nothing the live path lacks and one thing it gets wrong.
+    Repaired when the module got its production caller (#99–#104). Verified
+    2026-09-06: the lookup now selects `{ id, stats, level, skillProficiencies }`
+    and `assertCharacterOwnership` compares `campaign.characterId !==
+    characterId`, a real field against a real field. The guard also carries an
+    honest comment about how narrow it is — the production route omits
+    `characterId`, so the comparison is satisfied by construction and the real
+    protection is the route's own `campaign.userId` gate.
+
+    **Keep the lesson even though the instance is closed:** two modules with
+    the same phantom field was a pattern, not a coincidence. Assume any
+    service wrapper that casts Prisma through a hand-written interface has it
+    too until that interface is read against `schema.prisma`. A green contract
+    test proves nothing here, because the fake `tx` answers whatever it is
+    asked.
+  - `lib/rules/trade-service.ts` **did not match the schema**, and was deleted
+    in `c51b5ad` (#117). `InventoryItem` has no `campaignId` column and
+    `Character` has no `campaignId` field, yet the service passed `campaignId`
+    to `inventoryItem.create` (real Prisma would throw `Unknown argument` on
+    the first purchase) and asserted against `item.campaignId` and
+    `character.campaignId`, which are always `undefined` against real rows — so
+    half of each ownership check was a no-op. It stayed green because
+    `resolveDb` cast `prisma as unknown as TradeDb` and its contract test
+    injected a fake `tx`. Mocked shape, never checked against the table: the
+    exact pair of defects this file warns about, and the reason the module went
+    rather than being wired up.
+
+  So the live path held the auth check, the working schema, the prose log the
+  narrator consumes and the input validation too, leaving `trade-service.ts`
+  with nothing the live path lacked and one thing it got wrong. That is what
+  settled the verdict for trade — and why the verdict has to be reached by
+  reading both copies, not by assuming the service-shaped one is the good one.
 
   **It still cannot be deleted on its own, and an earlier version of this
   paragraph said otherwise.** That version listed only what production code
@@ -397,15 +436,18 @@ mismatch survives a green suite.
   production import graph and calling a module deletable is how this paragraph
   was wrong twice.
 
-  **`equipment-service` — the live path wins outright.** The `equip` gate runs
-  inside `prisma.$transaction` while `equipCharacterItem` fires its updates
-  through `Promise.all`, so a half-applied equip is possible in the dead one
-  and not in the live one. The gate also *derives* the slot with `slotFor`,
-  where the service accepts a `targetSlot` from its caller and validates it —
-  deriving is the stronger of the two, since no illegal value can be supplied
-  at all. The service carries the same phantom `campaignId` on `InventoryItem`
-  as trade (line 154), on a branch real Prisma never reaches. It holds nothing
-  the gate lacks.
+  **`equipment-service` — the live path won outright, and the service was
+  deleted in `5096b3d` (#103).** Kept here because the comparison is what
+  produced the verdict, and the same reasoning applies to the next pair.
+
+  The `equip` gate runs inside `prisma.$transaction` while
+  `equipCharacterItem` fired its updates through `Promise.all`, so a
+  half-applied equip was possible in the dead one and not in the live one. The
+  gate also *derives* the slot with `slotFor`, where the service accepted a
+  `targetSlot` from its caller and validated it — deriving is the stronger of
+  the two, since no illegal value can be supplied at all. The service carried
+  the same phantom `campaignId` on `InventoryItem` as trade, on a branch real
+  Prisma never reached. It held nothing the gate lacked, so it went.
 
   **`npc-service` — not a duplicate, and the only one of the three worth
   keeping on its merits.** The route derives its statblock from `generateNPC`
