@@ -58,8 +58,38 @@
  *    gate in this same route refuses to march away from a live fight — so
  *    both the sibling service and the sibling gate disagree with this one.
  *
+ * 5. A short rest spends EVERY available Hit Die, automatically. The SRD makes
+ *    each die a separate choice — you roll one, see the result, and decide
+ *    whether to spend another — and `resolveRest` honours that by defaulting an
+ *    unspecified request to a single die (`input.hitDiceToSpend ?? 1`).
+ *    `applyShortRest` instead loops until the character is full or the dice are
+ *    gone, so one "short rest" can burn a resource that only a long rest
+ *    returns, half of it at a time. The player is never asked.
+ *
+ * 6. A short rest does not roll. `applyShortRest` uses a fixed average —
+ *    `Math.floor(hitDieSize / 2) + 1` — where the SRD rolls each spent die, and
+ *    where `resolveRest` calls an injected-or-default roller. Its own comment
+ *    calls this an "automated heuristic", so it was a deliberate choice at some
+ *    point; it is still a divergence, and it is why every figure in this file
+ *    is a constant rather than a pinned roll.
+ *
+ * 7. The long-rest phrase check overrides the classifier even when the wording
+ *    NEGATES it. `isLongRest` is `restType === "long" || action.includes("long
+ *    rest")`, so "not a long rest, just a short rest" — which the classifier
+ *    reads correctly as short — grants a full long rest: hit points, Hit Dice,
+ *    exhaustion and every slot. An earlier version of this file described that
+ *    OR only as a rescue for a misclassified rest. It is also the reverse, and
+ *    the reverse is the more dangerous direction.
+ *
  * None is fixed here. Each changes what a character recovers, or when they may
  * recover it, on a live save — a rules decision, not a coverage one. See #130.
+ *
+ * A note on what these tests are for, since it has come up in review: their
+ * assertions record what the route does TODAY, not what the SRD requires. That
+ * is the point. Asserting the correct rule instead would leave this PR red and
+ * would fix nothing; pinning the current behaviour is what makes a later fix
+ * show up as an intended, reviewable change rather than a silent one. Every
+ * assertion that encodes a divergence says so at the assertion.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
@@ -214,8 +244,11 @@ describe("rest gate: which rest the route resolves", () => {
   });
 
   it("resolves a long rest when the words are in the action, whatever the classifier said", async () => {
-    // The gate ORs the two, so the phrase wins even against restType "short".
-    // Pinned because it is the branch that rescues a misclassified rest.
+    // DIVERGENCE 7, the benign half. The gate ORs the two, so the phrase wins
+    // even against restType "short". Read charitably this rescues a rest the
+    // classifier got wrong — but see the next test for the same branch firing
+    // when the wording negates the phrase, which is the same mechanism doing
+    // harm.
     (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
       actionType: "rest",
       restType: "short",
@@ -226,12 +259,55 @@ describe("rest gate: which rest the route resolves", () => {
 
     expect((await restPayload(res)).type).toBe("LONG_REST");
   });
+
+  it("grants a long rest for wording that explicitly refuses one", async () => {
+    // DIVERGENCE 7, the harmful half. `includes("long rest")` is blind to the
+    // "not a" in front of it, so a player who says the opposite of what the
+    // substring matches gets the opposite of what they asked for — and the
+    // classifier, which read the sentence correctly as a short rest, is
+    // overruled by a substring scan.
+    //
+    // The cost is not symmetric with the benign case. Being handed a long rest
+    // you did not take restores every spell slot and steps exhaustion down; it
+    // is the direction that hands out resources, not the one that withholds
+    // them.
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "rest",
+      restType: "short",
+    });
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith({
+        hp: 4,
+        maxHp: 30,
+        exhaustionLevel: 2,
+        spellSlots: { "1": { current: 0, max: 4 } },
+      })
+    );
+
+    const res = await post("not a long rest, just a short rest");
+
+    const payload = await restPayload(res);
+    expect(payload.type).toBe("LONG_REST");
+    // And the whole long-rest recovery lands on the back of that substring.
+    expect(characterUpdate().data.hp).toBe(30);
+    expect(characterUpdate().data.exhaustionLevel).toBe(1);
+    expect(characterUpdate().data.spellSlots).toEqual({
+      "1": { current: 4, max: 4 },
+    });
+  });
 });
 
 describe("rest gate: a short rest spends hit dice to heal", () => {
-  it("spends dice until healed and reports both figures", async () => {
-    // 10/30 hp, 3 hit dice. Each die restores 5, so all three are spent and
-    // 15 points come back — still short of full.
+  it("spends every available die automatically, and reports both figures", async () => {
+    // DIVERGENCES 5 and 6, recorded together because the numbers below are
+    // products of both. 10/30 hp with 3 Hit Dice: the gate spends all three
+    // without asking and restores a fixed 5 per die, so 15 points come back
+    // and the character is left with no dice and still short of full.
+    //
+    // Under the SRD the player would roll one die, see the result, and choose
+    // whether to spend another; `resolveRest` defaults to one. This assertion
+    // is a record of the gate's behaviour, not an endorsement of it — it is
+    // exactly the shape a fix would have to change.
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
       contextWith({ hp: 10, maxHp: 30, hitDiceRemaining: 3, hitDiceTotal: 3 })
     );
