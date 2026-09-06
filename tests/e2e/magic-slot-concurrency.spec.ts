@@ -83,6 +83,8 @@ test("@smoke concurrent spell casts consume two slots without a lost update", as
           },
           update: (args: unknown) =>
             realTx.character.update(args as Prisma.CharacterUpdateArgs),
+          updateMany: (args: unknown) =>
+            realTx.character.updateMany(args as Prisma.CharacterUpdateManyArgs),
         },
       } as unknown as MagicTx;
 
