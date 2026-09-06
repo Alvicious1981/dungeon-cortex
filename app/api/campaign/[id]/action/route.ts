@@ -32,11 +32,7 @@ import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
 } from "@/lib/rules/conditions";
-import {
-  applyShortRest,
-  applyLongRest,
-  type CharacterState,
-} from "@/lib/rules/exploration";
+import { resolveRest, RestServiceError } from "@/lib/rules/rest-service";
 import { moveToNode } from "@/lib/rules/navigation";
 import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
@@ -1383,54 +1379,84 @@ async function resolveAction(
     }
 
     // ── Gate: rest ──────────────────────────────────────────────────────────────
+    // Delegated to `resolveRest`, the canonical rest domain, which the
+    // dedicated POST /api/campaign/[id]/rest route already uses and which
+    // `tests/architecture/rest-route-no-direct-prisma.test.ts` obliges that
+    // route to use. This gate used to run a second, parallel implementation
+    // (`applyShortRest` / `applyLongRest`, since deleted) that disagreed with
+    // it on five points — see #130. One domain now answers both paths.
+    //
+    // What the service does that this gate did not: refuse mid-combat, read
+    // `stats.CON` under the key the character actually carries, normalise the
+    // class before the Hit Die lookup, roll each spent die instead of taking a
+    // fixed average, and spend one die rather than every one the character has.
     if (intent.actionType === "rest") {
-      const charData = context.character;
+      // The classifier is the authority on which rest this is.
+      //
+      // This used to be OR'd with `trimmedAction.includes("long rest")`, on the
+      // reading that the phrase could rescue a rest the classifier had got
+      // wrong. It could not: every branch in `parseIntent` that returns
+      // `actionType: "rest"` also sets `restType`, so there was never a gap for
+      // the phrase to fill — only a present value for it to override. What it
+      // did instead was grant a long rest to any sentence containing those two
+      // words, negation included (divergence 7 in #130).
+      const isLongRest = intent.restType === "long";
 
-      // A rest has no refusal path: the gate resolves whatever state it finds.
+      // The service both resolves and persists, reading the authoritative
+      // character row itself rather than trusting the pre-gate snapshot. Run
+      // inside the route's transaction so recovery and persistence stay one
+      // unit, as they were before.
+      let rest: Awaited<ReturnType<typeof resolveRest>>;
+      try {
+        rest = await prisma.$transaction(async (tx) =>
+          resolveRest({
+            campaignId,
+            characterId: context.character.id,
+            restType: isLongRest ? "long" : "short",
+            tx: tx as unknown as Parameters<typeof resolveRest>[0]["tx"],
+          })
+        );
+      } catch (error) {
+        if (error instanceof RestServiceError) {
+          // A rest now HAS refusal paths, so `persistPlayerAction` moved below
+          // this point: a refused rest must leave no canonical player row
+          // (DC-AUD-001). Status mapping mirrors the dedicated rest route.
+          const status =
+            error.code === "CAMPAIGN_NOT_FOUND" || error.code === "CHARACTER_NOT_FOUND"
+              ? 404
+              : error.code === "INVALID_REST_TYPE" || error.code === "INVALID_HIT_DICE"
+                ? 400
+                : 409;
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status }
+          );
+        }
+        throw error;
+      }
+
+      // Resolved and committed, so the action is canonical.
       await persistPlayerAction();
 
-      await prisma.$transaction(async (tx) => {
-        const charState: CharacterState = {
-          hp: charData.hp,
-          maxHp: charData.maxHp,
-          level: charData.level,
-          class: charData.class,
-          stats: charData.stats as Record<string, number>,
-          spellSlots: charData.spellSlots as Record<string, { current: number; max: number }> | null,
-          hitDiceTotal: charData.hitDiceTotal,
-          hitDiceRemaining: charData.hitDiceRemaining,
-          exhaustionLevel: charData.exhaustionLevel,
-        };
-
-        const isLongRest = intent.restType === "long" || trimmedAction.toLowerCase().includes("long rest");
-        
-        let nextChar: CharacterState;
-        let eventPayload: Record<string, unknown>;
-
-        if (isLongRest) {
-          const result = applyLongRest(charState);
-          nextChar = result.next;
-          eventPayload = { type: "LONG_REST", hpRecovered: result.hpRecovered, hitDiceRecovered: result.hitDiceRecovered, exhaustionReduced: result.exhaustionReduced, spellSlotsRecovered: result.spellSlotsRecovered };
-        } else {
-          const result = applyShortRest(charState);
-          nextChar = result.next;
-          eventPayload = { type: "SHORT_REST", hpRecovered: result.hpRecovered, hitDiceSpent: result.hitDiceSpent };
-        }
-
-        await tx.character.update({
-          where: { id: charData.id },
-          data: {
-            hp: nextChar.hp,
-            hitDiceRemaining: nextChar.hitDiceRemaining,
-            exhaustionLevel: nextChar.exhaustionLevel,
-            spellSlots: nextChar.spellSlots ? (nextChar.spellSlots as Prisma.InputJsonValue) : Prisma.JsonNull,
-          },
-        });
-
-        gameEvents.push({
-          type: "REST_COMPLETED",
-          payload: eventPayload,
-        });
+      // The event keeps the keys it always had; nothing downstream has to
+      // change. `facts` carries more (the die rolled, the Constitution
+      // modifier), which is left for a consumer that wants it.
+      const facts = rest.facts;
+      gameEvents.push({
+        type: "REST_COMPLETED",
+        payload: isLongRest
+          ? {
+              type: "LONG_REST",
+              hpRecovered: facts.hpRecovered,
+              hitDiceRecovered: facts.hitDiceRecovered,
+              exhaustionReduced: facts.exhaustionReduced,
+              spellSlotsRecovered: facts.slotsRestored,
+            }
+          : {
+              type: "SHORT_REST",
+              hpRecovered: facts.hpRecovered,
+              hitDiceSpent: facts.hitDiceSpent,
+            },
       });
     }
 
