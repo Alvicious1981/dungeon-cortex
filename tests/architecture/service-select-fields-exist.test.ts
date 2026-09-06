@@ -1,29 +1,19 @@
 /**
  * tests/architecture/service-select-fields-exist.test.ts
  *
- * `rest-service.ts` must not ask Prisma for a `Character` field the schema
- * does not have.
+ * Known simple Character selects in rule services must only name fields that
+ * exist on the real Prisma Character model.
  *
- * The contract tests cannot catch this. The service reaches Prisma through a
- * hand-written interface and `resolveDb` casts `prisma as unknown as RestDb`,
- * so TypeScript checks the select against the wrapper's own shape and never
- * against the database. Its tests then inject a fake `tx` that answers
- * whatever it is asked. A select naming a column that does not exist is green
- * in every test and a 500 on the first real request.
+ * Hand-written DB interfaces can hide schema drift: TypeScript validates the
+ * service wrapper, while injected unit-test doubles answer fields Prisma would
+ * reject at runtime. That previously allowed both rest-service and
+ * magic-service to carry `campaignId`, even though Character has no such field.
  *
- * That is what happened: the select carried `campaignId`, which `Character`
- * does not have — only a `campaigns Campaign[]` relation — so
- * `POST /api/campaign/[id]/rest` and the action route's rest gate both threw
- * `Unknown field campaignId` against real Prisma, with 45 tests passing. It
- * was found by taking a rest in a running game, not by the suite.
- *
- * Scope, deliberately: this checks one call site in one file. A general guard
- * over every `select` in every service wrapper is the right shape and is worth
- * building — a first attempt found a second, dormant instance in
- * `navigation-service.ts:268` — but attributing a nested relation select to
- * the right model needs a real parser, and a guard that mis-attributes fails
- * on correct code, which is worse than not having one. Left as follow-up
- * rather than shipped half-working.
+ * Scope is deliberately narrow. These two call sites have flat Character
+ * selects that this lightweight guard can attribute safely. A repository-wide
+ * guard still needs a real parser before it can reason about nested relation
+ * selects without false positives; navigation-service remains separate
+ * follow-up work.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -47,26 +37,32 @@ function fieldsOf(model: string): Set<string> {
   return fields;
 }
 
-describe("rest-service selects only Character fields the schema has", () => {
-  it("names no field Character lacks", () => {
-    const source = readFileSync(
-      join(process.cwd(), "lib", "rules", "rest-service.ts"),
-      "utf8"
-    );
+function assertCharacterSelectUsesKnownFields(fileName: string): void {
+  const source = readFileSync(
+    join(process.cwd(), "lib", "rules", fileName),
+    "utf8"
+  );
 
-    const call = source.match(
-      /db\.character\.findUnique\(\{[\s\S]*?select:\s*\{([\s\S]*?)\},/
-    );
-    expect(call, "the character lookup this guards has moved or been renamed")
-      .not.toBeNull();
+  const call = source.match(
+    /db\.character\.findUnique\(\{[\s\S]*?select:\s*\{([\s\S]*?)\},/
+  );
+  expect(call, `${fileName} character lookup has moved or been renamed`).not.toBeNull();
 
-    const selected = [...call![1]!.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*true/g)].map(
-      (field) => field[1]!
-    );
-    // Guards the guard: an empty list would pass the assertion below forever.
-    expect(selected.length).toBeGreaterThan(3);
+  const selected = [...call![1]!.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*true/g)].map(
+    (field) => field[1]!
+  );
+  // Guards the guard: an empty list would pass the schema assertion forever.
+  expect(selected.length).toBeGreaterThan(3);
 
-    const known = fieldsOf("Character");
-    expect(selected.filter((field) => !known.has(field))).toEqual([]);
-  });
-});
+  const known = fieldsOf("Character");
+  expect(selected.filter((field) => !known.has(field))).toEqual([]);
+}
+
+describe.each(["rest-service.ts", "magic-service.ts"])(
+  "%s selects only Character fields the schema has",
+  (fileName) => {
+    it("names no field Character lacks", () => {
+      assertCharacterSelectUsesKnownFields(fileName);
+    });
+  }
+);
