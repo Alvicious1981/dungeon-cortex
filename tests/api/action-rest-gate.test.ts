@@ -1,101 +1,58 @@
 /**
  * tests/api/action-rest-gate.test.ts
  *
- * The `rest` gate of `/api/campaign/[id]/action` (route.ts, "Gate: rest").
+ * The `rest` gate of `/api/campaign/[id]/action`, now delegating to
+ * `resolveRest` (lib/rules/rest-service.ts) — the same domain the dedicated
+ * POST /api/campaign/[id]/rest route uses.
  *
- * Why this file exists: the gate resolves a whole rest — hit dice spent, hit
- * points recovered, hit dice regained, exhaustion stepped down and spell slots
- * restored — and then persists all of it, and until now **one** assertion in
- * the entire suite touched it: `action-intent-contract.test.ts:731` checks that
- * a frame of type `REST_COMPLETED` comes back. Nothing checked the payload,
- * nothing checked the character update, and neither long rest nor spell-slot
- * restoration was exercised through the route at all.
+ * This file began as characterisation: it pinned a second, parallel rest
+ * implementation (`applyShortRest` / `applyLongRest`) that disagreed with the
+ * canonical service on six points, catalogued in #130. Five of those are gone
+ * with the delegation, so the assertions that recorded them are replaced by
+ * assertions that the rule now applies. Each says which divergence it closes,
+ * so the diff against the previous revision reads as the intended change.
  *
- * These are characterisation tests: they pin the behaviour the route has
- * today. Two of them pin a divergence rather than a rule — see
- * "known divergences" below. They are marked, so that a future fix reads as an
- * intended change and not as a regression.
+ * `lib/rules/rest-service.ts` is deliberately NOT mocked: it is the thing under
+ * test. `Math.random` is pinned where an exact number is needed, because the
+ * service now genuinely rolls.
  *
- * `lib/rules/exploration-logic.ts` is deliberately NOT mocked. The rest maths
- * is what is under test; fixtures would leave this file asserting against its
- * own arithmetic.
+ * ── closed by the delegation ────────────────────────────────────────────────
  *
- * ── known divergences, pinned deliberately ──────────────────────────────────
+ * 1. Constitution is applied — `stats.CON`, the key the character carries.
+ * 2. The Hit Die comes from the character's class, case-normalised.
+ * 4. A rest during an active encounter is refused, not resolved.
+ * 5. One Hit Die is spent per command, not every one the character owns.
+ * 6. Each spent die is rolled instead of averaged.
  *
- * 1. `applyShortRest` reads `character.stats.constitution`, but the character's
- *    stats are `{ STR, DEX, CON, ... }` (lib/memory/context.ts:36; the travel
- *    gate reads `stats.CON`). The lookup is always undefined, so the
- *    Constitution modifier never reaches short-rest healing.
+ * (3 was the inflated `hpRecovered` — a short rest reaching full health
+ * reporting the whole die roll instead of the points granted. The delegation
+ * closes it too, by construction rather than by patch: the service reports
+ * `hpAfter - hpBefore`, so the figure cannot exceed what was restored.)
  *
- * 2. `HIT_DICE_BY_CLASS` (exploration-logic.ts:474) is keyed "Fighter",
- *    "Wizard"…, while `character.class` holds the SRD index slug — lowercase,
- *    stored verbatim by app/api/character/route.ts:81 — and the project's own
- *    canonical `HIT_DIE_MAP` (lib/rules/progression.ts:158) is keyed lowercase
- *    too. The lookup misses and falls back to `|| 8`, so every class recovers
- *    on a d8: a fighter and a wizard short-rest identically.
+ * ── still open ──────────────────────────────────────────────────────────────
  *
- * 3. A short rest that reaches full health reports the whole die roll rather
- *    than the points it actually granted. `applyShortRest` clamps `hp` with
- *    `Math.min` inside the loop and then adds the unclamped `healing` to
- *    `hpRecovered`; its own "Ensure we didn't overheal" correction tests
- *    `next.hp > next.maxHp`, which that clamp has already made impossible, so
- *    it never runs. Persistence is right; the announced figure is not.
+ * 7. The long-rest phrase check still overrides the classifier, negation
+ *    included: "not a long rest, just a short rest" grants a long rest. That
+ *    lives in the route, not the rest domain, so unifying did not touch it. It
+ *    is still pinned below, and still open in #130.
  *
- *    Where that figure goes, precisely: `REST_COMPLETED` is mapped to
- *    `undefined` by `adaptCombatEventsToNarrativeContext`
- *    (lib/narrative/combat-fact-adapter.ts), so it is NOT a narrative fact and
- *    the narrator never sees it. It is streamed to the browser as an `evt`
- *    frame, which `ActionInput` re-dispatches as a generic
- *    `dungeon-game-event`, and no component reads it. So the wrong number
- *    currently reaches no consumer at all — a false fact leaving the backend
- *    with nowhere to land, not a lie told to the player today.
+ * ── new consequences, pinned deliberately ───────────────────────────────────
  *
- * 4. A rest is not refused during an active encounter. The gate never consults
- *    `context.activeEncounter`, so a long rest typed mid-combat restores hit
- *    points, Hit Dice, exhaustion and every spell slot while the initiative
- *    order is still running. The canonical `resolveRest` refuses exactly this
- *    with `ACTIVE_ENCOUNTER` (lib/rules/rest-service.ts), and the `travel`
- *    gate in this same route refuses to march away from a live fight — so
- *    both the sibling service and the sibling gate disagree with this one.
+ * Adopting the canonical service changed two edge cases that the old gate
+ * handled differently. Neither is a bug in the service — the dedicated rest
+ * route has behaved this way all along — but both are new on this path:
  *
- * 5. A short rest spends EVERY available Hit Die, automatically. The SRD makes
- *    each die a separate choice — you roll one, see the result, and decide
- *    whether to spend another — and `resolveRest` honours that by defaulting an
- *    unspecified request to a single die (`input.hitDiceToSpend ?? 1`).
- *    `applyShortRest` instead loops until the character is full or the dice are
- *    gone, so one "short rest" can burn a resource that only a long rest
- *    returns, half of it at a time. The player is never asked.
- *
- * 6. A short rest does not roll. `applyShortRest` uses a fixed average —
- *    `Math.floor(hitDieSize / 2) + 1` — where the SRD rolls each spent die, and
- *    where `resolveRest` calls an injected-or-default roller. Its own comment
- *    calls this an "automated heuristic", so it was a deliberate choice at some
- *    point; it is still a divergence, and it is why every figure in this file
- *    is a constant rather than a pinned roll.
- *
- * 7. The long-rest phrase check overrides the classifier even when the wording
- *    NEGATES it. `isLongRest` is `restType === "long" || action.includes("long
- *    rest")`, so "not a long rest, just a short rest" — which the classifier
- *    reads correctly as short — grants a full long rest: hit points, Hit Dice,
- *    exhaustion and every slot. An earlier version of this file described that
- *    OR only as a rescue for a misclassified rest. It is also the reverse, and
- *    the reverse is the more dangerous direction.
- *
- * None is fixed here. Each changes what a character recovers, or when they may
- * recover it, on a live save — a rules decision, not a coverage one. See #130.
- *
- * A note on what these tests are for, since it has come up in review: their
- * assertions record what the route does TODAY, not what the SRD requires. That
- * is the point. Asserting the correct rule instead would leave this PR red and
- * would fix nothing; pinning the current behaviour is what makes a later fix
- * show up as an intended, reviewable change rather than a silent one. Every
- * assertion that encodes a divergence says so at the assertion.
+ *   - With no Hit Dice left, a short rest is now REFUSED (`INVALID_HIT_DICE`,
+ *     400) rather than resolving to a no-op 200.
+ *   - At full health a short rest still spends a die, healing nothing. The old
+ *     gate checked `hp < maxHp` before spending; the service does not.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Prisma } from "@prisma/client";
 
 const prismaTx = vi.hoisted(() => ({
-  character: { update: vi.fn() },
+  campaign: { findUnique: vi.fn() },
+  character: { findUnique: vi.fn(), update: vi.fn() },
+  encounter: { findFirst: vi.fn() },
 }));
 
 vi.mock("next/server", async (importActual) => {
@@ -141,7 +98,6 @@ const campaignId = "camp_1";
 interface CharOverrides {
   hp?: number;
   maxHp?: number;
-  level?: number;
   class?: string;
   stats?: Record<string, number>;
   spellSlots?: Record<string, { current: number; max: number }> | null;
@@ -150,19 +106,35 @@ interface CharOverrides {
   exhaustionLevel?: number;
 }
 
-const contextWith = (o: CharOverrides = {}) => ({
+/** The authoritative row the service reads inside the transaction. */
+const characterRow = (o: CharOverrides = {}) => ({
+  id: "char_1",
+  campaignId,
+  hp: o.hp ?? 10,
+  maxHp: o.maxHp ?? 30,
+  level: 3,
+  class: o.class ?? "fighter",
+  stats: o.stats ?? { STR: 14, CON: 16 },
+  spellSlots: o.spellSlots ?? null,
+  hitDiceTotal: o.hitDiceTotal ?? 3,
+  hitDiceRemaining: o.hitDiceRemaining ?? 3,
+  exhaustionLevel: o.exhaustionLevel ?? 0,
+});
+
+/** The pre-gate snapshot. Only `character.id` is read by the gate now. */
+const context = () => ({
   character: {
     id: "char_1",
     name: "Hero",
-    class: o.class ?? "fighter",
-    level: o.level ?? 3,
-    hp: o.hp ?? 10,
-    maxHp: o.maxHp ?? 30,
-    stats: o.stats ?? { STR: 14, CON: 16 },
-    spellSlots: o.spellSlots ?? null,
-    hitDiceTotal: o.hitDiceTotal ?? 3,
-    hitDiceRemaining: o.hitDiceRemaining ?? 3,
-    exhaustionLevel: o.exhaustionLevel ?? 0,
+    class: "fighter",
+    level: 3,
+    hp: 10,
+    maxHp: 30,
+    stats: { STR: 14, CON: 16 },
+    spellSlots: null,
+    hitDiceTotal: 3,
+    hitDiceRemaining: 3,
+    exhaustionLevel: 0,
     skillProficiencies: [],
     inventory: [],
   },
@@ -172,6 +144,42 @@ const contextWith = (o: CharOverrides = {}) => ({
   currentExploration: null,
   activeEncounter: null,
 });
+
+function givenCharacter(o: CharOverrides = {}) {
+  const row = characterRow(o);
+  prismaTx.character.findUnique.mockResolvedValue(row);
+
+  // The service computes `hpRecovered` from the row `update` RETURNS, not from
+  // what it sent — so a mock answering `{}` yields NaN, which reaches the
+  // stream as `null`. Echo the written fields back over the row, the way the
+  // database would.
+  prismaTx.character.update.mockImplementation(
+    async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
+      ...row,
+      ...args.data,
+      id: args.where.id,
+    })
+  );
+}
+
+/**
+ * Re-primes every mock this file depends on. Used by `beforeEach` and by the
+ * comparison tests, which run the gate twice and must not carry the first
+ * run's recorded calls into the second.
+ */
+function primeAll() {
+  (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+    id: campaignId,
+    userId: "user_1",
+    status: "active",
+  });
+  (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({ actionType: "rest" });
+  (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(context());
+  prismaTx.campaign.findUnique.mockResolvedValue({ id: campaignId, characterId: "char_1" });
+  prismaTx.encounter.findFirst.mockResolvedValue(null);
+  givenCharacter();
+}
 
 const post = (action: string) =>
   POST(
@@ -198,33 +206,212 @@ async function restPayload(res: Response) {
   return f?.e?.payload;
 }
 
-const characterUpdate = () =>
-  (prismaTx.character.update as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+const characterUpdate = () => prismaTx.character.update.mock.calls[0]?.[0];
+
+/**
+ * One short rest, from a clean slate, at a fixed die roll. Returns the
+ * REST_COMPLETED payload. Lets a test compare two characters without the first
+ * run's state leaking into the second.
+ */
+async function shortRestPayload(o: CharOverrides, random: number) {
+  prismaTx.character.update.mockClear();
+  (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockClear();
+  primeAll();
+  givenCharacter(o);
+  vi.spyOn(Math, "random").mockReturnValue(random);
+  return restPayload(await post("short rest"));
+}
 
 const userLogWrites = () =>
   (prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls.filter(
     (args) => args[0]?.data?.role === "user"
   );
 
-/** Points healed per hit die at the values these fixtures use. */
-const HEAL_PER_DIE = 5; // floor(8 / 2) + 1 + conMod(0) — see divergences 1 and 2
+/** Every die reads its maximum, so class Hit Die sizes are distinguishable. */
+const MAX_ROLL = 0.99;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
-    id: campaignId,
-    userId: "user_1",
-    status: "active",
-  });
-  (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
-  (prismaTx.character.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
-  (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({ actionType: "rest" });
+  vi.restoreAllMocks();
+  primeAll();
 });
 
-describe("rest gate: which rest the route resolves", () => {
-  it("resolves a short rest by default", async () => {
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith());
+describe("rest gate: the rules the delegation restored", () => {
+  it("spends exactly one Hit Die, not every one the character owns", async () => {
+    // DIVERGENCE 5 closed. The SRD makes each die a separate choice, and the
+    // service defaults an unspecified request to one. The old gate looped
+    // until the character was full or the dice were gone.
+    vi.spyOn(Math, "random").mockReturnValue(MAX_ROLL);
+    givenCharacter({ hp: 1, maxHp: 30, hitDiceRemaining: 3 });
 
+    const res = await post("short rest");
+
+    expect(await restPayload(res)).toMatchObject({
+      type: "SHORT_REST",
+      hitDiceSpent: 1,
+    });
+    expect(characterUpdate().data.hitDiceRemaining).toBe(2);
+  });
+
+  it("rolls the Hit Die instead of taking a fixed average", async () => {
+    // DIVERGENCE 6 closed. Two different rolls must produce two different
+    // recoveries; the old gate returned the same number every time.
+    const high = await shortRestPayload({ hp: 1, maxHp: 40 }, MAX_ROLL);
+    const low = await shortRestPayload({ hp: 1, maxHp: 40 }, 0);
+
+    expect(high.hpRecovered).toBeGreaterThan(low.hpRecovered);
+  });
+
+  it("applies the Constitution modifier the character actually has", async () => {
+    // DIVERGENCE 1 closed. `stats.CON` is the key the character carries; the
+    // old path read `stats.constitution` and always got 0.
+    const withCon = await shortRestPayload(
+      { hp: 1, maxHp: 40, stats: { CON: 16 } },
+      MAX_ROLL
+    );
+    const withoutCon = await shortRestPayload(
+      { hp: 1, maxHp: 40, stats: { CON: 10 } },
+      MAX_ROLL
+    );
+
+    // +3 versus +0, on the same maximum roll.
+    expect(withCon.hpRecovered - withoutCon.hpRecovered).toBe(3);
+  });
+
+  it("uses each class's own Hit Die", async () => {
+    // DIVERGENCE 2 closed. The service normalises the stored lowercase slug
+    // before the lookup, so a fighter's d10 and a wizard's d6 differ. The old
+    // table was keyed "Fighter"/"Wizard" and fell back to d8 for everyone.
+    const fighter = await shortRestPayload(
+      { hp: 1, maxHp: 40, class: "fighter", stats: { CON: 10 } },
+      MAX_ROLL
+    );
+    const wizard = await shortRestPayload(
+      { hp: 1, maxHp: 40, class: "wizard", stats: { CON: 10 } },
+      MAX_ROLL
+    );
+
+    expect(fighter.hpRecovered).toBe(10); // d10 at maximum
+    expect(wizard.hpRecovered).toBe(6);   // d6 at maximum
+  });
+
+  it("refuses a rest during an active encounter, and logs nothing", async () => {
+    // DIVERGENCE 4 closed, and DC-AUD-001 with it: the refusal now happens
+    // before the player's line is written, so a refused rest leaves no
+    // canonical history for the narrator to read back.
+    prismaTx.encounter.findFirst.mockResolvedValue({ id: "enc_1" });
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "rest", restType: "long",
+    });
+
+    const res = await post("we take a long rest");
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "ACTIVE_ENCOUNTER" });
+    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+
+  it("reads the authoritative character row inside the transaction", async () => {
+    // The pre-gate snapshot is no longer what the rest is computed from. Two
+    // concurrent rests reading the same stale hit points was a real window
+    // before; the service reads the row itself, within the transaction.
+    vi.spyOn(Math, "random").mockReturnValue(MAX_ROLL);
+    // The snapshot says 10 hp; the row says 25. The recovery must be the row's.
+    givenCharacter({ hp: 25, maxHp: 30, stats: { CON: 10 } });
+
+    const res = await post("short rest");
+
+    expect(prismaTx.character.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "char_1" } })
+    );
+    // 25 + d10(max) capped at 30 → 5 gained, not the 10 the snapshot implies.
+    expect((await restPayload(res)).hpRecovered).toBe(5);
+    expect(characterUpdate().data.hp).toBe(30);
+  });
+});
+
+describe("rest gate: a long rest restores the day", () => {
+  beforeEach(() => {
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "rest", restType: "long",
+    });
+  });
+
+  it("fills hit points, returns dice, steps exhaustion down and refills slots", async () => {
+    givenCharacter({
+      hp: 4,
+      maxHp: 30,
+      hitDiceTotal: 6,
+      hitDiceRemaining: 1,
+      exhaustionLevel: 2,
+      spellSlots: { "1": { current: 0, max: 4 } },
+    });
+
+    const res = await post("long rest");
+
+    expect(await restPayload(res)).toMatchObject({
+      type: "LONG_REST",
+      hpRecovered: 26,
+      exhaustionReduced: 1,
+      spellSlotsRecovered: true,
+    });
+    const data = characterUpdate().data;
+    expect(data.hp).toBe(30);
+    expect(data.exhaustionLevel).toBe(1);
+    expect(data.hitDiceRemaining).toBe(4); // 1 + floor(6 / 2)
+  });
+
+  it("does not drive exhaustion below zero", async () => {
+    givenCharacter({ exhaustionLevel: 0 });
+
+    const res = await post("long rest");
+
+    expect((await restPayload(res)).exhaustionReduced).toBe(0);
+    expect(characterUpdate().data.exhaustionLevel).toBe(0);
+  });
+
+  it("reports no slot recovery for a character with none to recover", async () => {
+    givenCharacter({ spellSlots: null });
+
+    const res = await post("long rest");
+
+    expect((await restPayload(res)).spellSlotsRecovered).toBe(false);
+  });
+});
+
+describe("rest gate: consequences of adopting the canonical service", () => {
+  it("refuses a short rest with no Hit Dice left, where it used to no-op", async () => {
+    // The old gate answered 200 with nothing recovered. The service treats a
+    // request it cannot satisfy as invalid. Pinned because it is a behaviour
+    // change on this path, not an accident.
+    givenCharacter({ hp: 5, hitDiceRemaining: 0 });
+
+    const res = await post("short rest");
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "INVALID_HIT_DICE" });
+    expect(userLogWrites()).toHaveLength(0);
+  });
+
+  it("still spends a die at full health, healing nothing", async () => {
+    // The old gate checked `hp < maxHp` before spending; the service does not,
+    // and the dedicated rest route has always behaved this way. Recorded so
+    // the asymmetry is visible rather than discovered in play.
+    vi.spyOn(Math, "random").mockReturnValue(MAX_ROLL);
+    givenCharacter({ hp: 30, maxHp: 30, hitDiceRemaining: 3 });
+
+    const res = await post("short rest");
+
+    const payload = await restPayload(res);
+    expect(payload.hpRecovered).toBe(0);
+    expect(payload.hitDiceSpent).toBe(1);
+    expect(characterUpdate().data.hitDiceRemaining).toBe(2);
+  });
+});
+
+describe("rest gate: what the route still owns", () => {
+  it("resolves a short rest by default", async () => {
     const res = await post("I take a short rest");
 
     expect(res.status).toBe(200);
@@ -233,378 +420,32 @@ describe("rest gate: which rest the route resolves", () => {
 
   it("resolves a long rest when the classifier says so", async () => {
     (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest",
-      restType: "long",
+      actionType: "rest", restType: "long",
     });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith());
 
     const res = await post("I make camp");
 
     expect((await restPayload(res)).type).toBe("LONG_REST");
   });
 
-  it("resolves a long rest when the words are in the action, whatever the classifier said", async () => {
-    // DIVERGENCE 7, the benign half. The gate ORs the two, so the phrase wins
-    // even against restType "short". Read charitably this rescues a rest the
-    // classifier got wrong — but see the next test for the same branch firing
-    // when the wording negates the phrase, which is the same mechanism doing
-    // harm.
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest",
-      restType: "short",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith());
-
-    const res = await post("We settle in for a LONG REST by the fire");
-
-    expect((await restPayload(res)).type).toBe("LONG_REST");
-  });
-
   it("grants a long rest for wording that explicitly refuses one", async () => {
-    // DIVERGENCE 7, the harmful half. `includes("long rest")` is blind to the
-    // "not a" in front of it, so a player who says the opposite of what the
-    // substring matches gets the opposite of what they asked for — and the
-    // classifier, which read the sentence correctly as a short rest, is
-    // overruled by a substring scan.
-    //
-    // The cost is not symmetric with the benign case. Being handed a long rest
-    // you did not take restores every spell slot and steps exhaustion down; it
-    // is the direction that hands out resources, not the one that withholds
-    // them.
+    // DIVERGENCE 7, still open. `includes("long rest")` is blind to the
+    // "not a" in front of it, so a sentence the classifier read correctly as a
+    // short rest is overruled by a substring scan — and the direction it errs
+    // in is the one that hands out resources. This lives in the route, not the
+    // rest domain, so the delegation did not touch it. See #130.
     (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest",
-      restType: "short",
+      actionType: "rest", restType: "short",
     });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({
-        hp: 4,
-        maxHp: 30,
-        exhaustionLevel: 2,
-        spellSlots: { "1": { current: 0, max: 4 } },
-      })
-    );
+    givenCharacter({ hp: 4, maxHp: 30, exhaustionLevel: 2 });
 
     const res = await post("not a long rest, just a short rest");
 
-    const payload = await restPayload(res);
-    expect(payload.type).toBe("LONG_REST");
-    // And the whole long-rest recovery lands on the back of that substring.
-    expect(characterUpdate().data.hp).toBe(30);
-    expect(characterUpdate().data.exhaustionLevel).toBe(1);
-    expect(characterUpdate().data.spellSlots).toEqual({
-      "1": { current: 4, max: 4 },
-    });
-  });
-});
-
-describe("rest gate: a short rest spends hit dice to heal", () => {
-  it("spends every available die automatically, and reports both figures", async () => {
-    // DIVERGENCES 5 and 6, recorded together because the numbers below are
-    // products of both. 10/30 hp with 3 Hit Dice: the gate spends all three
-    // without asking and restores a fixed 5 per die, so 15 points come back
-    // and the character is left with no dice and still short of full.
-    //
-    // Under the SRD the player would roll one die, see the result, and choose
-    // whether to spend another; `resolveRest` defaults to one. This assertion
-    // is a record of the gate's behaviour, not an endorsement of it — it is
-    // exactly the shape a fix would have to change.
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hp: 10, maxHp: 30, hitDiceRemaining: 3, hitDiceTotal: 3 })
-    );
-
-    const res = await post("short rest");
-
-    expect(await restPayload(res)).toEqual({
-      type: "SHORT_REST",
-      hpRecovered: 3 * HEAL_PER_DIE,
-      hitDiceSpent: 3,
-    });
-    expect(characterUpdate()).toEqual({
-      where: { id: "char_1" },
-      data: {
-        hp: 25,
-        hitDiceRemaining: 0,
-        exhaustionLevel: 0,
-        spellSlots: Prisma.JsonNull,
-      },
-    });
-  });
-
-  it("caps hit points at the maximum, but reports the uncapped roll", async () => {
-    // DIVERGENCE 3. 28/30 with dice to spare: one die is spent and the
-    // character correctly ends at 30, having gained 2 points — but the event
-    // announces 5.
-    //
-    // `applyShortRest` clamps with `Math.min` inside the loop and *then* adds
-    // the full `healing` to `hpRecovered`, so the tally counts points that
-    // were never granted. Its own "Ensure we didn't overheal" correction is
-    // dead code: it tests `next.hp > next.maxHp`, which the clamp above has
-    // already made impossible.
-    //
-    // Persistence is right and only the report is inflated, which is why this
-    // has gone unnoticed. The figure reaches no consumer today either: the
-    // narrative adapter maps REST_COMPLETED to `undefined`, and no component
-    // reads the `evt` frame it is streamed in — see divergence 3 in the file
-    // header. It is a false fact the backend emits, not one the player is
-    // currently shown.
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hp: 28, maxHp: 30, hitDiceRemaining: 3, hitDiceTotal: 3 })
-    );
-
-    const res = await post("short rest");
-
-    const payload = await restPayload(res);
-    expect(payload.hitDiceSpent).toBe(1);
-    expect(payload.hpRecovered).toBe(HEAL_PER_DIE); // 5 reported, 2 actually gained
-    // What is persisted is correct.
-    expect(characterUpdate().data.hp).toBe(30);
-    expect(characterUpdate().data.hitDiceRemaining).toBe(2);
-  });
-
-  it("heals nothing when no hit dice remain", async () => {
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hp: 5, maxHp: 30, hitDiceRemaining: 0, hitDiceTotal: 3 })
-    );
-
-    const res = await post("short rest");
-
-    expect(await restPayload(res)).toEqual({
-      type: "SHORT_REST",
-      hpRecovered: 0,
-      hitDiceSpent: 0,
-    });
-    expect(characterUpdate().data.hp).toBe(5);
-  });
-
-  it("spends nothing when already at full health", async () => {
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hp: 30, maxHp: 30, hitDiceRemaining: 3, hitDiceTotal: 3 })
-    );
-
-    const res = await post("short rest");
-
-    const payload = await restPayload(res);
-    expect(payload.hitDiceSpent).toBe(0);
-    expect(characterUpdate().data.hitDiceRemaining).toBe(3);
-  });
-
-  it("a short rest never touches exhaustion", async () => {
-    // Only a long rest steps exhaustion down, per the SRD.
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ exhaustionLevel: 3 })
-    );
-
-    await post("short rest");
-
-    expect(characterUpdate().data.exhaustionLevel).toBe(3);
-  });
-});
-
-describe("rest gate: known divergences, pinned so a fix is visible", () => {
-  it("recovers the same per die for every class — the hit-die table is missed", async () => {
-    // DIVERGENCE 2. `HIT_DICE_BY_CLASS` is keyed "Fighter"/"Wizard"; the stored
-    // class is the lowercase SRD slug, so the lookup falls back to d8 and a
-    // fighter (d10) recovers exactly what a wizard (d6) does. If this ever
-    // fails, the casing was fixed — that is an intended change, not a break.
-    for (const characterClass of ["fighter", "wizard", "barbarian"]) {
-      vi.clearAllMocks();
-      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
-        id: campaignId, userId: "user_1", status: "active",
-      });
-      (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
-      (prismaTx.character.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
-      (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({ actionType: "rest" });
-      (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-        contextWith({ class: characterClass, hp: 10, maxHp: 30, hitDiceRemaining: 1 })
-      );
-
-      const res = await post("short rest");
-
-      expect(
-        (await restPayload(res)).hpRecovered,
-        `${characterClass} recovered a different amount`
-      ).toBe(HEAL_PER_DIE);
-    }
-  });
-
-  it("rests in the middle of a fight, which the sibling service refuses", async () => {
-    // DIVERGENCE 4. The gate never consults `context.activeEncounter`, so a
-    // long rest typed while initiative is running restores hit points, Hit
-    // Dice, exhaustion and every spell slot — and the fight continues against
-    // a fully refreshed character.
-    //
-    // Two things in this repository disagree with that. `resolveRest` refuses
-    // this exact state with `ACTIVE_ENCOUNTER`
-    // (lib/rules/rest-service.ts), and the `travel` gate a few lines below in
-    // this same route refuses to march away from a live fight for the
-    // symmetric reason. Only the free-form rest path allows it; the UI merely
-    // hides the button, which is not a rule.
-    //
-    // Pinned, not fixed: adding the refusal changes when a live save may rest.
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest",
-      restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue({
-      ...contextWith({ hp: 4, maxHp: 30, exhaustionLevel: 2 }),
-      activeEncounter: {
-        id: "enc_1",
-        round: 3,
-        currentTurnIndex: 0,
-        totalDamageDealt: 12,
-        combatants: [],
-      },
-    });
-
-    const res = await post("we take a long rest");
-
-    // No refusal, and the whole recovery lands.
-    expect(res.status).toBe(200);
     expect((await restPayload(res)).type).toBe("LONG_REST");
     expect(characterUpdate().data.hp).toBe(30);
-    expect(characterUpdate().data.exhaustionLevel).toBe(1);
   });
 
-  it("ignores Constitution because the stat is read under the wrong key", async () => {
-    // DIVERGENCE 1. `applyShortRest` reads `stats.constitution`; the character
-    // carries `CON`. A +3 Constitution changes nothing.
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ stats: { STR: 10, CON: 16 }, hp: 10, maxHp: 30, hitDiceRemaining: 1 })
-    );
-
-    const res = await post("short rest");
-
-    expect((await restPayload(res)).hpRecovered).toBe(HEAL_PER_DIE);
-  });
-});
-
-describe("rest gate: a long rest restores the day", () => {
-  it("fills hit points and reports the gap it closed", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hp: 7, maxHp: 30 })
-    );
-
-    const res = await post("long rest");
-
-    const payload = await restPayload(res);
-    expect(payload.type).toBe("LONG_REST");
-    expect(payload.hpRecovered).toBe(23);
-    expect(characterUpdate().data.hp).toBe(30);
-  });
-
-  it("returns half the hit dice, never past the total", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hitDiceTotal: 6, hitDiceRemaining: 1 })
-    );
-
-    const res = await post("long rest");
-
-    // floor(6 / 2) = 3 recovered, so 1 + 3 = 4 of 6.
-    expect((await restPayload(res)).hitDiceRecovered).toBe(3);
-    expect(characterUpdate().data.hitDiceRemaining).toBe(4);
-  });
-
-  it("caps recovered hit dice at the total when nearly full", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ hitDiceTotal: 6, hitDiceRemaining: 5 })
-    );
-
-    const res = await post("long rest");
-
-    expect(characterUpdate().data.hitDiceRemaining).toBe(6);
-  });
-
-  it("steps exhaustion down by exactly one level", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ exhaustionLevel: 3 })
-    );
-
-    const res = await post("long rest");
-
-    expect((await restPayload(res)).exhaustionReduced).toBe(1);
-    expect(characterUpdate().data.exhaustionLevel).toBe(2);
-  });
-
-  it("does not drive exhaustion below zero", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ exhaustionLevel: 0 })
-    );
-
-    const res = await post("long rest");
-
-    expect((await restPayload(res)).exhaustionReduced).toBe(0);
-    expect(characterUpdate().data.exhaustionLevel).toBe(0);
-  });
-
-  it("refills every spell slot and says it did", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({
-        spellSlots: { "1": { current: 0, max: 4 }, "2": { current: 1, max: 3 } },
-      })
-    );
-
-    const res = await post("long rest");
-
-    expect((await restPayload(res)).spellSlotsRecovered).toBe(true);
-    expect(characterUpdate().data.spellSlots).toEqual({
-      "1": { current: 4, max: 4 },
-      "2": { current: 3, max: 3 },
-    });
-  });
-
-  it("reports no slot recovery when none were spent", async () => {
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ spellSlots: { "1": { current: 4, max: 4 } } })
-    );
-
-    const res = await post("long rest");
-
-    expect((await restPayload(res)).spellSlotsRecovered).toBe(false);
-  });
-
-  it("persists JSON null for a character with no spellcasting", async () => {
-    // Prisma.JsonNull, not JavaScript null: the column is cleared rather than
-    // the write being skipped.
-    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      actionType: "rest", restType: "long",
-    });
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
-      contextWith({ spellSlots: null })
-    );
-
-    await post("long rest");
-
-    expect(characterUpdate().data.spellSlots).toBe(Prisma.JsonNull);
-  });
-});
-
-describe("rest gate: the rest is canonical history", () => {
-  it("writes the player's line exactly once", async () => {
-    // A rest has no refusal path, so the line is written unconditionally —
-    // and still only once, despite the convergence call further down.
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith());
-
+  it("writes the player's line exactly once for a rest that resolves", async () => {
     await post("short rest");
 
     const rows = userLogWrites();
@@ -612,27 +453,7 @@ describe("rest gate: the rest is canonical history", () => {
     expect(rows[0][0].data.content).toBe("short rest");
   });
 
-  it("resolves and persists the rest in a single transaction, writing once", async () => {
-    // What this shows, and only this: one transaction is opened and one
-    // character write happens inside it, so recovery and persistence are not
-    // split across two round trips.
-    //
-    // What it deliberately does NOT claim is atomicity against a concurrent
-    // rest. It cannot: the character snapshot comes from
-    // `buildCampaignContext` (route.ts:463), *before* the transaction opens
-    // and with no row lock, so two rests racing on the same character can both
-    // read the same hit points, both report a full recovery, and both write
-    // the same result — a lost update no count of calls can detect. Proving
-    // that would need the authoritative row to be read or locked inside the
-    // transaction, which this gate does not do; a test asserting it would fail
-    // against the code as it stands, and pretending otherwise here is exactly
-    // the "green test, absent contract" trap.
-    //
-    // Recorded rather than asserted. The idempotency receipt (DC-AUD-003)
-    // narrows the window for a retried submission but does not close it for
-    // two distinct ones.
-    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith());
-
+  it("resolves and persists the rest in a single transaction", async () => {
     await post("short rest");
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
