@@ -309,14 +309,11 @@ mismatch survives a green suite.
   `evals/` on 2026-08-31, and it was worse than two dead wrappers: **four
   backend services were then reachable only through them.**
 
-  **Three of those four rows are gone as of 2026-09-06. One remains.**
+  **All four rows are gone as of 2026-09-06. The table is empty, and that is
+  the finished state, not an omission.**
 
-  | Service | Dead entry points | Live parallel path |
-  | --- | --- | --- |
-  | `lib/rules/npc-service.ts` | `trackNpcState`, `upsertGeneratedNpc`, `establishInitialNpcDisposition`, `trackMerchantState` | `app/api/campaign/[id]/npc/route.ts` → its own `prisma.nPC.upsert` |
-
-  What happened to the other three, each verified against the tree and the
-  history on 2026-09-06 rather than assumed:
+  What happened to each, verified against the tree and the history rather than
+  assumed:
 
   - **`lib/rules/equipment-service.ts` was deleted** in `5096b3d`, "delete
     equipment-service and the AI tool that was its only caller" (#103). Its
@@ -325,6 +322,22 @@ mismatch survives a green suite.
     service, leaving the gate as the single implementation.
   - **`lib/rules/trade-service.ts` was deleted** in `c51b5ad`, "delete the
     social tool builder and the trade service it tethered" (#117).
+  - **`lib/rules/npc-service.ts` was deleted** on 2026-09-06, after a full read
+    of the service against the route. Every capability its row credited it with
+    had acquired a live implementation elsewhere: the npc route writes
+    `race`/`profession`/`alignment`/`traits` since #118, and
+    `app/api/campaign/[id]/social/route.ts` writes `personalityTags`,
+    `hasMetPlayer` and the initial attitude while `social-service` maintains
+    `disposition`. `trackMerchantState` turned out to persist nothing
+    merchant-specific — the `NPC` model has no merchant columns, and
+    `archetype` only ever appeared in the returned facts.
+
+    What tipped it was the safety argument going stale. This entry used to
+    excuse the service's caller-supplied `name`/`maxHp`/`ac` and any-string
+    `role` on the grounds that `trackNPC` and `generateAndTrackNPC` derived the
+    statblock at the call site. Both were deleted in #117, so the mitigation
+    was gone and only the hazard was left — including an ownership check,
+    `if (input.userId && …)`, that no caller could trigger.
   - **`lib/rules/social-service.ts` has a live caller and is no longer
     dormant.** `resolveSocialCheck` is imported by
     `app/api/campaign/[id]/social/route.ts` and `resolveRumors` by
@@ -449,22 +462,40 @@ mismatch survives a green suite.
   the same phantom `campaignId` on `InventoryItem` as trade, on a branch real
   Prisma never reached. It held nothing the gate lacked, so it went.
 
-  **`npc-service` — not a duplicate, and the only one of the three worth
-  keeping on its merits.** The route derives its statblock from `generateNPC`
-  and refuses to trust the body, keeps `name`/`maxHp`/`ac` immutable after
-  creation, whitelists three roles and requires an active campaign. The
-  service does none of that: it takes `name`/`maxHp`/`ac` from its caller's
-  descriptor, lets an update rewrite them, accepts any non-empty `role`, and
-  its ownership check is opt-in — `if (input.userId && campaign?.userId && …)`
-  — which **never fires, because neither caller passes `userId`**. That reads
-  like an AI-supplies-monster-stats breach and **is not one**: both
-  `trackNPC` and `generateAndTrackNPC` call `generateNPC(seed, role)` and hand
-  over the derived statblock. The boundary holds at the call site, not in the
-  service, so the exposure is latent for a future caller rather than live.
-  What makes it worth keeping is the other half: `disposition` (validated to
-  −10..10), `personalityTags`, `traits`, `race`/`profession`/`alignment` and
-  `trackMerchantState` have **no equivalent on the route at all** — it cannot
-  set a disposition. Deleting this one removes capability, not redundancy.
+  **`npc-service` — the verdict reversed between 2026-08-31 and 2026-09-06,
+  and the reversal is the lesson.** This section used to call it "not a
+  duplicate, and the only one of the three worth keeping on its merits". It
+  was deleted on 2026-09-06. Nothing about the module changed; what changed was
+  everything around it.
+
+  The comparison itself still stands and is worth keeping. The route derives
+  its statblock from `generateNPC` and refuses to trust the body, keeps
+  `name`/`maxHp`/`ac` immutable after creation, whitelists three roles and
+  requires an active campaign. The service did none of that: it took
+  `name`/`maxHp`/`ac` from its caller's descriptor, let an update rewrite them
+  through `baseNpcUpdateData`, accepted any non-empty `role`, and its ownership
+  check was opt-in — `if (input.userId && campaign?.userId && …)`.
+
+  **Two things then made the "keep it" half expire.**
+
+  First, the safety argument. This entry excused the caller-supplied statblock
+  because `trackNPC` and `generateAndTrackNPC` derived it via
+  `generateNPC(seed, role)` at the call site — "the boundary holds at the call
+  site, not in the service". #117 deleted both. With no callers at all, there
+  was no call site left to hold the boundary; only the hazard remained.
+
+  Second, the capability argument. `disposition`, `personalityTags`, `traits`,
+  `race`/`profession`/`alignment` and `trackMerchantState` were said to have
+  "no equivalent on the route at all". By 2026-09-06 every one of them did:
+  #118 gave the npc route `race`/`profession`/`alignment`/`traits`, and the
+  social route (#99–#104) writes `personalityTags`, `hasMetPlayer` and the
+  initial attitude while `social-service` maintains `disposition`.
+  `trackMerchantState` never held anything — the `NPC` model has no merchant
+  columns, so `archetype` only ever reached the returned facts.
+
+  **A verdict about two modules is only true on the date it was reached.**
+  Re-derive it before acting on it; this one flipped in six days without
+  either module being touched.
 
   ### What to do with the tool surface
 
@@ -480,10 +511,16 @@ mismatch survives a green suite.
 
   Second, they are the only written record of what the game was meant to do.
   SEC-AI-001 correctly took the AI's hands off the wheel but did not build
-  replacement controls for everything it removed. Today the game can attack,
-  cast, equip, rest, level up and trade through the UI. It **cannot** run a
-  social check, set an NPC disposition, or track a merchant. Deleting the
-  wrappers erases the map of that gap while the gap is still open.
+  replacement controls for everything it removed.
+
+  **That gap has largely closed since this was written.** As of 2026-09-06 the
+  game can attack, cast, equip, rest, level up, trade, travel, run a social
+  check and set an NPC disposition — the last two through
+  `app/api/campaign/[id]/social/route.ts` and its rumors sibling (#99–#104).
+  What remains unbuilt is merchant tracking as a persisted concept, and the
+  `NPC` model has no columns for it, so that is a schema question before it is
+  a route question. Check the gap before citing it; this paragraph named three
+  missing capabilities and two of them now exist.
 
   So this is a product backlog wearing dead code's clothes, and it resolves
   capability by capability, never in bulk:
@@ -492,9 +529,12 @@ mismatch survives a green suite.
     has already rotted.
   - `trade-service` and its guard — delete, once `narrator-tool-containment`
     is confirmed to cover the invariant the trade-specific guard asserts.
-  - `npc-service`, `social-service` — **product decisions.** Does the game
-    want NPC disposition and social checks? Yes means building a route, as
-    trade and equip have. No means deleting tool and service together.
+  - `npc-service` — deleted 2026-09-06. The product decision was answered by
+    building the routes: the npc route took over identity (#118) and the
+    social route took over disposition and first contact (#99–#104), leaving
+    the service with nothing of its own.
+  - `social-service` — **kept, and now live.** The answer here was "yes,
+    build a route", and it was built. It is no longer part of this backlog.
   - combat, exploration, inventory, progression — **four builders whose
     services were never compared.** Do not assume they match any verdict here.
   - wilderness — leave alone; it is blocked by the recorded decision above.
