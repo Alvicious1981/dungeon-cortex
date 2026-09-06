@@ -406,11 +406,13 @@ describe("rest gate: a rest that cannot use a Hit Die is still a rest", () => {
       hitDiceSpent: 0,
     });
     expect(userLogWrites()).toHaveLength(1);
+    expect(prismaTx.character.update).not.toHaveBeenCalled();
   });
 
   it("spends no Hit Die at full health", async () => {
     // It used to spend one and heal nothing — a 200 that silently destroyed a
-    // resource only a long rest returns, half the total at a time.
+    // resource only a long rest returns, half the total at a time. It is now a
+    // true database no-op as well, so it cannot rewrite a stale snapshot.
     vi.spyOn(Math, "random").mockReturnValue(MAX_ROLL);
     givenCharacter({ hp: 30, maxHp: 30, hitDiceRemaining: 3 });
 
@@ -419,7 +421,7 @@ describe("rest gate: a rest that cannot use a Hit Die is still a rest", () => {
     const payload = await restPayload(res);
     expect(payload.hpRecovered).toBe(0);
     expect(payload.hitDiceSpent).toBe(0);
-    expect(characterUpdate().data.hitDiceRemaining).toBe(3);
+    expect(prismaTx.character.update).not.toHaveBeenCalled();
   });
 });
 
