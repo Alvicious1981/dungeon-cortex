@@ -312,11 +312,12 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
   if (hitDiceToSpend === 0) {
     // Nothing was rolled, so nothing is reported as rolled. `Math.max(1, …)`
     // below would otherwise grant a free hit point for a die never spent.
+    //
+    // This must also be a database no-op. Rewriting the hp/Hit Dice values read
+    // above can erase a legitimate concurrent update that commits before this
+    // request resumes (for example, a long rest recovering Hit Dice).
     return {
-      data: {
-        hp: hpBefore,
-        hitDiceRemaining: hitDice.remaining,
-      },
+      data: null,
       details: {
         hpBefore,
         hpAfter: hpBefore,
@@ -471,18 +472,21 @@ async function resolveRestInTransaction(
       ? resolveShortRest(input, character)
       : resolveLongRest(character);
 
-  const updated = await db.character.update({
-    where: { id: character.id },
-    data: resolved.data,
-    select: {
-      id: true,
-      hp: true,
-      maxHp: true,
-      spellSlots: true,
-      hitDiceRemaining: true,
-      exhaustionLevel: true,
-    },
-  });
+  const updated =
+    resolved.data === null
+      ? character
+      : await db.character.update({
+          where: { id: character.id },
+          data: resolved.data,
+          select: {
+            id: true,
+            hp: true,
+            maxHp: true,
+            spellSlots: true,
+            hitDiceRemaining: true,
+            exhaustionLevel: true,
+          },
+        });
 
   return buildResult(input, input.restType, character, updated, resolved.details);
 }
