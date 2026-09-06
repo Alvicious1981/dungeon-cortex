@@ -238,12 +238,27 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
     /\b(?:short|long)\s+rest\b/i.test(input) ||
     /\bdescanso\s+(?:corto|largo)\b/i.test(input)
   ) {
-    intent = {
-      actionType: "rest",
-      restType: /\b(?:long\s+rest|descanso\s+largo)\b/i.test(input)
-        ? "long"
-        : "short",
-    };
+    // Which rest, decided from the phrases actually present rather than from
+    // a single "does 'long rest' appear anywhere" test.
+    //
+    // That older test could not tell an intention from its negation: "not a
+    // long rest, just a short rest" contains the words and classified as LONG,
+    // and the rest gate takes `restType` as authority — so the player was
+    // handed full hit points, every spell slot and a step off exhaustion for
+    // saying the opposite. The error was one-directional, and its direction
+    // was the one that grants resources.
+    //
+    // Naming both rests is genuinely ambiguous, so it fails closed rather than
+    // being guessed. Detecting negation instead — "not", "instead of",
+    // "rather than", "no es un" — is a guessing game this parser has no
+    // business playing, and getting it wrong reintroduces the same defect
+    // through a longer regex.
+    const namesLongRest = /\b(?:long\s+rest|descanso\s+largo)\b/i.test(input);
+    const namesShortRest = /\b(?:short\s+rest|descanso\s+corto)\b/i.test(input);
+
+    intent = namesLongRest && namesShortRest
+      ? { actionType: "mechanical_ambiguous" }
+      : { actionType: "rest", restType: namesLongRest ? "long" : "short" };
   } else if (
     /^(?:i\s+)?(?:travel|journey)\s+to\b/i.test(input) ||
     /^(?:viajar|viajo)\s+(?:a|hacia)\b/i.test(input)

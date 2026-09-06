@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
-import { roll } from "@/lib/rules/dice";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { parseIntent } from "@/lib/ai/intent";
@@ -33,11 +32,7 @@ import {
   evaluateAbilityCheckAdvantage,
   isUnawareOfSurroundings,
 } from "@/lib/rules/conditions";
-import {
-  applyShortRest,
-  applyLongRest,
-  type CharacterState,
-} from "@/lib/rules/exploration";
+import { resolveRest, RestServiceError } from "@/lib/rules/rest-service";
 import { moveToNode } from "@/lib/rules/navigation";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
@@ -70,10 +65,13 @@ import {
 import {
   acquireActionReceipt,
   completeActionReceipt,
-  completeActionReceiptWithResponse,
   fingerprintActionRequest,
   rejectActionReceipt,
 } from "@/lib/actions/request-receipt";
+import {
+  ROLL_COMMAND_PREFIX,
+  resolveRollCommand,
+} from "@/lib/actions/roll-command";
 import { resolveTravelGate } from "@/lib/actions/travel-command";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
@@ -403,49 +401,23 @@ async function resolveAction(
   };
 
   // Step 2: Detect and resolve /roll commands (non-streaming, quick response)
-  const ROLL_PREFIX = "/roll ";
-  if (trimmedAction.toLowerCase().startsWith(ROLL_PREFIX)) {
-    const notation = trimmedAction.slice(ROLL_PREFIX.length).trim();
-
-    let rollContent: string;
-    try {
-      const result = roll(notation);
-      const diceList = result.dice.map((d) => d.result).join(", ");
-      const modifierPart = result.modifier !== 0
-        ? ` ${result.modifier > 0 ? "+" : ""}${result.modifier}`
-        : "";
-      rollContent =
-        `🎲 Roll ${result.notation}: [${diceList}]${modifierPart} = **${result.total}**`;
-    } catch {
-      rollContent = `⚠️ Invalid dice notation: "${notation}". Use format like 1d20+5 or 2d6.`;
-    }
-
-    // /roll is not a mechanical gate and has no rejection path: bad notation is
-    // answered with a system line and 202, not a 4xx. The command is therefore
-    // always canonical, and is written before the result that answers it.
-    await persistPlayerAction();
-
-    await prisma.gameLog.create({
-      data: {
-        campaignId,
-        role: "system",
-        content: rollContent,
-      },
+  //
+  // The detection stays here — this is the route's decision about which
+  // submission it is answering — while the resolution lives in
+  // `lib/actions/roll-command.ts` (DC-AUD-008). The prefix is imported rather
+  // than re-declared so the test above and the `slice` inside the handler
+  // cannot disagree about it.
+  //
+  // `persistPlayerAction` is handed over rather than duplicated: the "written
+  // at most once" guarantee it carries is shared with every gate below, so it
+  // must keep exactly one owner.
+  if (trimmedAction.toLowerCase().startsWith(ROLL_COMMAND_PREFIX)) {
+    return resolveRollCommand({
+      campaignId,
+      trimmedAction,
+      receiptId: receiptRef.id,
+      persistPlayerAction,
     });
-
-    // `/roll` returns early and never reaches the convergence point where the
-    // ordinary action settles its receipt, so it settles its own — storing the
-    // exact body a duplicate must receive instead of rolling a second time.
-    //
-    // Not wrapped in a try/catch: if the receipt cannot be recorded, this must
-    // not answer 202 as though durable idempotency existed. The failure
-    // propagates and the receipt stays PROCESSING, which a retry refuses.
-    const rollResponseBody = { ok: true };
-    if (receiptRef.id) {
-      await completeActionReceiptWithResponse(receiptRef.id, 202, rollResponseBody);
-    }
-
-    return NextResponse.json(rollResponseBody, { status: 202 });
   }
 
   // ── "Code is Law" resolution gates ──────────────────────────────────────────
@@ -1407,54 +1379,84 @@ async function resolveAction(
     }
 
     // ── Gate: rest ──────────────────────────────────────────────────────────────
+    // Delegated to `resolveRest`, the canonical rest domain, which the
+    // dedicated POST /api/campaign/[id]/rest route already uses and which
+    // `tests/architecture/rest-route-no-direct-prisma.test.ts` obliges that
+    // route to use. This gate used to run a second, parallel implementation
+    // (`applyShortRest` / `applyLongRest`, since deleted) that disagreed with
+    // it on five points — see #130. One domain now answers both paths.
+    //
+    // What the service does that this gate did not: refuse mid-combat, read
+    // `stats.CON` under the key the character actually carries, normalise the
+    // class before the Hit Die lookup, roll each spent die instead of taking a
+    // fixed average, and spend one die rather than every one the character has.
     if (intent.actionType === "rest") {
-      const charData = context.character;
+      // The classifier is the authority on which rest this is.
+      //
+      // This used to be OR'd with `trimmedAction.includes("long rest")`, on the
+      // reading that the phrase could rescue a rest the classifier had got
+      // wrong. It could not: every branch in `parseIntent` that returns
+      // `actionType: "rest"` also sets `restType`, so there was never a gap for
+      // the phrase to fill — only a present value for it to override. What it
+      // did instead was grant a long rest to any sentence containing those two
+      // words, negation included (divergence 7 in #130).
+      const isLongRest = intent.restType === "long";
 
-      // A rest has no refusal path: the gate resolves whatever state it finds.
+      // The service both resolves and persists, reading the authoritative
+      // character row itself rather than trusting the pre-gate snapshot. Run
+      // inside the route's transaction so recovery and persistence stay one
+      // unit, as they were before.
+      let rest: Awaited<ReturnType<typeof resolveRest>>;
+      try {
+        rest = await prisma.$transaction(async (tx) =>
+          resolveRest({
+            campaignId,
+            characterId: context.character.id,
+            restType: isLongRest ? "long" : "short",
+            tx: tx as unknown as Parameters<typeof resolveRest>[0]["tx"],
+          })
+        );
+      } catch (error) {
+        if (error instanceof RestServiceError) {
+          // A rest now HAS refusal paths, so `persistPlayerAction` moved below
+          // this point: a refused rest must leave no canonical player row
+          // (DC-AUD-001). Status mapping mirrors the dedicated rest route.
+          const status =
+            error.code === "CAMPAIGN_NOT_FOUND" || error.code === "CHARACTER_NOT_FOUND"
+              ? 404
+              : error.code === "INVALID_REST_TYPE" || error.code === "INVALID_HIT_DICE"
+                ? 400
+                : 409;
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status }
+          );
+        }
+        throw error;
+      }
+
+      // Resolved and committed, so the action is canonical.
       await persistPlayerAction();
 
-      await prisma.$transaction(async (tx) => {
-        const charState: CharacterState = {
-          hp: charData.hp,
-          maxHp: charData.maxHp,
-          level: charData.level,
-          class: charData.class,
-          stats: charData.stats as Record<string, number>,
-          spellSlots: charData.spellSlots as Record<string, { current: number; max: number }> | null,
-          hitDiceTotal: charData.hitDiceTotal,
-          hitDiceRemaining: charData.hitDiceRemaining,
-          exhaustionLevel: charData.exhaustionLevel,
-        };
-
-        const isLongRest = intent.restType === "long" || trimmedAction.toLowerCase().includes("long rest");
-        
-        let nextChar: CharacterState;
-        let eventPayload: Record<string, unknown>;
-
-        if (isLongRest) {
-          const result = applyLongRest(charState);
-          nextChar = result.next;
-          eventPayload = { type: "LONG_REST", hpRecovered: result.hpRecovered, hitDiceRecovered: result.hitDiceRecovered, exhaustionReduced: result.exhaustionReduced, spellSlotsRecovered: result.spellSlotsRecovered };
-        } else {
-          const result = applyShortRest(charState);
-          nextChar = result.next;
-          eventPayload = { type: "SHORT_REST", hpRecovered: result.hpRecovered, hitDiceSpent: result.hitDiceSpent };
-        }
-
-        await tx.character.update({
-          where: { id: charData.id },
-          data: {
-            hp: nextChar.hp,
-            hitDiceRemaining: nextChar.hitDiceRemaining,
-            exhaustionLevel: nextChar.exhaustionLevel,
-            spellSlots: nextChar.spellSlots ? (nextChar.spellSlots as Prisma.InputJsonValue) : Prisma.JsonNull,
-          },
-        });
-
-        gameEvents.push({
-          type: "REST_COMPLETED",
-          payload: eventPayload,
-        });
+      // The event keeps the keys it always had; nothing downstream has to
+      // change. `facts` carries more (the die rolled, the Constitution
+      // modifier), which is left for a consumer that wants it.
+      const facts = rest.facts;
+      gameEvents.push({
+        type: "REST_COMPLETED",
+        payload: isLongRest
+          ? {
+              type: "LONG_REST",
+              hpRecovered: facts.hpRecovered,
+              hitDiceRecovered: facts.hitDiceRecovered,
+              exhaustionReduced: facts.exhaustionReduced,
+              spellSlotsRecovered: facts.slotsRestored,
+            }
+          : {
+              type: "SHORT_REST",
+              hpRecovered: facts.hpRecovered,
+              hitDiceSpent: facts.hitDiceSpent,
+            },
       });
     }
 
