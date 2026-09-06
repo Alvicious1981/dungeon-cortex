@@ -39,12 +39,27 @@
  *    `Math.min` inside the loop and then adds the unclamped `healing` to
  *    `hpRecovered`; its own "Ensure we didn't overheal" correction tests
  *    `next.hp > next.maxHp`, which that clamp has already made impossible, so
- *    it never runs. Persistence is right; the announced figure is not, and it
- *    is the figure the narrator is given.
+ *    it never runs. Persistence is right; the announced figure is not.
  *
- * None is fixed here. Fixing them changes recovered hit points, or what the
- * player is told about them, on a live save — a rules decision, not a
- * coverage one.
+ *    Where that figure goes, precisely: `REST_COMPLETED` is mapped to
+ *    `undefined` by `adaptCombatEventsToNarrativeContext`
+ *    (lib/narrative/combat-fact-adapter.ts), so it is NOT a narrative fact and
+ *    the narrator never sees it. It is streamed to the browser as an `evt`
+ *    frame, which `ActionInput` re-dispatches as a generic
+ *    `dungeon-game-event`, and no component reads it. So the wrong number
+ *    currently reaches no consumer at all — a false fact leaving the backend
+ *    with nowhere to land, not a lie told to the player today.
+ *
+ * 4. A rest is not refused during an active encounter. The gate never consults
+ *    `context.activeEncounter`, so a long rest typed mid-combat restores hit
+ *    points, Hit Dice, exhaustion and every spell slot while the initiative
+ *    order is still running. The canonical `resolveRest` refuses exactly this
+ *    with `ACTIVE_ENCOUNTER` (lib/rules/rest-service.ts), and the `travel`
+ *    gate in this same route refuses to march away from a live fight — so
+ *    both the sibling service and the sibling gate disagree with this one.
+ *
+ * None is fixed here. Each changes what a character recovers, or when they may
+ * recover it, on a live save — a rules decision, not a coverage one. See #130.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
@@ -251,8 +266,11 @@ describe("rest gate: a short rest spends hit dice to heal", () => {
     // already made impossible.
     //
     // Persistence is right and only the report is inflated, which is why this
-    // has gone unnoticed — but the narrator is handed these facts, so the
-    // player is told about healing the rules did not grant.
+    // has gone unnoticed. The figure reaches no consumer today either: the
+    // narrative adapter maps REST_COMPLETED to `undefined`, and no component
+    // reads the `evt` frame it is streamed in — see divergence 3 in the file
+    // header. It is a false fact the backend emits, not one the player is
+    // currently shown.
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
       contextWith({ hp: 28, maxHp: 30, hitDiceRemaining: 3, hitDiceTotal: 3 })
     );
@@ -331,6 +349,44 @@ describe("rest gate: known divergences, pinned so a fix is visible", () => {
         `${characterClass} recovered a different amount`
       ).toBe(HEAL_PER_DIE);
     }
+  });
+
+  it("rests in the middle of a fight, which the sibling service refuses", async () => {
+    // DIVERGENCE 4. The gate never consults `context.activeEncounter`, so a
+    // long rest typed while initiative is running restores hit points, Hit
+    // Dice, exhaustion and every spell slot — and the fight continues against
+    // a fully refreshed character.
+    //
+    // Two things in this repository disagree with that. `resolveRest` refuses
+    // this exact state with `ACTIVE_ENCOUNTER`
+    // (lib/rules/rest-service.ts), and the `travel` gate a few lines below in
+    // this same route refuses to march away from a live fight for the
+    // symmetric reason. Only the free-form rest path allows it; the UI merely
+    // hides the button, which is not a rule.
+    //
+    // Pinned, not fixed: adding the refusal changes when a live save may rest.
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "rest",
+      restType: "long",
+    });
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...contextWith({ hp: 4, maxHp: 30, exhaustionLevel: 2 }),
+      activeEncounter: {
+        id: "enc_1",
+        round: 3,
+        currentTurnIndex: 0,
+        totalDamageDealt: 12,
+        combatants: [],
+      },
+    });
+
+    const res = await post("we take a long rest");
+
+    // No refusal, and the whole recovery lands.
+    expect(res.status).toBe(200);
+    expect((await restPayload(res)).type).toBe("LONG_REST");
+    expect(characterUpdate().data.hp).toBe(30);
+    expect(characterUpdate().data.exhaustionLevel).toBe(1);
   });
 
   it("ignores Constitution because the stat is read under the wrong key", async () => {
@@ -480,9 +536,25 @@ describe("rest gate: the rest is canonical history", () => {
     expect(rows[0][0].data.content).toBe("short rest");
   });
 
-  it("resolves the whole rest inside one transaction", async () => {
-    // Recovery and persistence must not be separable: a crash between them
-    // would credit hit points the character never keeps.
+  it("resolves and persists the rest in a single transaction, writing once", async () => {
+    // What this shows, and only this: one transaction is opened and one
+    // character write happens inside it, so recovery and persistence are not
+    // split across two round trips.
+    //
+    // What it deliberately does NOT claim is atomicity against a concurrent
+    // rest. It cannot: the character snapshot comes from
+    // `buildCampaignContext` (route.ts:463), *before* the transaction opens
+    // and with no row lock, so two rests racing on the same character can both
+    // read the same hit points, both report a full recovery, and both write
+    // the same result — a lost update no count of calls can detect. Proving
+    // that would need the authoritative row to be read or locked inside the
+    // transaction, which this gate does not do; a test asserting it would fail
+    // against the code as it stands, and pretending otherwise here is exactly
+    // the "green test, absent contract" trap.
+    //
+    // Recorded rather than asserted. The idempotency receipt (DC-AUD-003)
+    // narrows the window for a retried submission but does not close it for
+    // two distinct ones.
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith());
 
     await post("short rest");
