@@ -28,9 +28,12 @@ interface RestCampaignRecord {
   characterId?: string | null;
 }
 
+// Deliberately has no `campaignId`. `Character` does not carry one, and
+// declaring it optional here is what let a `select` ask Prisma for it and a
+// guard read it — the first throwing on every call, the second silently
+// always false. Ownership is answered by `Campaign.characterId`.
 interface RestCharacterRecord {
   id: string;
-  campaignId?: string | null;
   hp: number;
   maxHp: number;
   level: number;
@@ -210,9 +213,11 @@ async function resolveCharacter(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
+    // No `campaignId`: `Character` has no such scalar — only the
+    // `campaigns Campaign[]` relation — and selecting it makes real Prisma
+    // throw `Unknown field campaignId`, which is a 500 on every rest.
     select: {
       id: true,
-      campaignId: true,
       hp: true,
       maxHp: true,
       level: true,
@@ -232,10 +237,11 @@ async function resolveCharacter(
     );
   }
 
-  if (
-    (campaign.characterId && campaign.characterId !== character.id) ||
-    (character.campaignId && character.campaignId !== input.campaignId)
-  ) {
+  // The campaign row is the only side that can answer this. The second half of
+  // this condition used to read `character.campaignId`, which is always
+  // `undefined` against a real row, so it never contributed — the guard was
+  // half no-op even before the select above made the query throw.
+  if (campaign.characterId && campaign.characterId !== character.id) {
     throw new RestServiceError(
       "CHARACTER_CAMPAIGN_MISMATCH",
       `Character ${character.id} does not belong to campaign ${input.campaignId}.`
