@@ -28,7 +28,9 @@ vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     campaign: { findUnique: vi.fn() },
     gameLog: { create: vi.fn(), count: vi.fn(() => 1), findMany: vi.fn(() => []) },
-    encounter: { update: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
+    // `findFirst` is what rest-service asks, inside the rest gate's
+    // transaction, to refuse a rest during an active encounter.
+    encounter: { update: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
     combatant: { findMany: vi.fn(() => []), update: vi.fn() },
     inventoryItem: { delete: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     character: { findUnique: vi.fn(), update: vi.fn() },
@@ -143,13 +145,29 @@ function systemLogs(): string[] {
 beforeEach(() => {
   vi.clearAllMocks();
   (getAuthUser as any).mockResolvedValue(mockUser);
+  // `characterId` is read by rest-service when the rest gate delegates to it;
+  // the other three by the route's own auth and ownership checks.
   (prisma.campaign.findUnique as any).mockResolvedValue({
-    id: campaignId, userId: mockUser.id, status: "active",
+    id: campaignId, userId: mockUser.id, status: "active", characterId,
   });
+  // Serves two readers: the level-up presentation check, and rest-service,
+  // which needs the whole rest-relevant row.
   (prisma.character.findUnique as any).mockResolvedValue({
-    id: characterId, class: "wizard", level: 5, xp: 0, maxHp: 20,
-    hitDiceTotal: 5, stats: { CON: 12 },
+    id: characterId, campaignId, class: "wizard", level: 5, xp: 0,
+    hp: 10, maxHp: 20, hitDiceTotal: 5, hitDiceRemaining: 5,
+    exhaustionLevel: 0, spellSlots: null, stats: { CON: 12 },
   });
+  // No fight running, so a rest is not refused.
+  (prisma.encounter.findFirst as any).mockResolvedValue(null);
+  // rest-service derives `hpRecovered` from the row `update` returns, so a
+  // mock answering undefined would yield NaN.
+  (prisma.character.update as any).mockImplementation(
+    async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => ({
+      id: where.id, campaignId, class: "wizard", level: 5, maxHp: 20,
+      hp: 10, hitDiceRemaining: 5, exhaustionLevel: 0, spellSlots: null,
+      ...data,
+    })
+  );
   (prisma.srdSpell.findUnique as any).mockResolvedValue(null);
   (prisma.srdSpell.findMany as any).mockResolvedValue([FIREBALL]);
   // finalizeEncounterTurn claims the active -> resolved transition with an
