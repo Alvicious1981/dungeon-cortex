@@ -39,7 +39,6 @@ import {
   type CharacterState,
 } from "@/lib/rules/exploration";
 import { moveToNode } from "@/lib/rules/navigation";
-import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
@@ -75,6 +74,7 @@ import {
   fingerprintActionRequest,
   rejectActionReceipt,
 } from "@/lib/actions/request-receipt";
+import { resolveTravelGate } from "@/lib/actions/travel-command";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 
@@ -1459,137 +1459,27 @@ async function resolveAction(
     }
 
     // ── Gate: travel ────────────────────────────────────────────────────────────
+    // The dispatch stays here — this file is what the intent-gate guard reads
+    // to prove every classification has somewhere to land — while the journey
+    // itself lives in `lib/actions/travel-command.ts` (DC-AUD-008).
+    //
+    // `null` means the journey resolved and the request goes on to narration;
+    // a Response is one of the gate's six refusals, returned unchanged.
     if (intent.actionType === "travel") {
-      if (!intent.destination) {
-        return NextResponse.json(
-          { error: "A destination is required for backend resolution." },
-          { status: 400 }
-        );
-      }
-
-      // Travelling days away would leave a live encounter's initiative order
-      // running at a place the party no longer occupies. Refuse rather than
-      // hand the narrator a new location and a stale fight on the next turn.
-      if (context.activeEncounter) {
-        return NextResponse.json(
-          { error: "You cannot march away from a fight that is still happening." },
-          { status: 409 }
-        );
-      }
-
-      const originId = context.currentExploration?.location?.id ?? null;
-      if (!originId) {
-        return NextResponse.json(
-          { error: "You are nowhere to travel from yet." },
-          { status: 400 }
-        );
-      }
-
-      const destination = await prisma.location.findFirst({
-        where: {
-          campaignId,
-          name: { equals: intent.destination, mode: "insensitive" },
+      const refusal = await resolveTravelGate({
+        campaignId,
+        destination: intent.destination,
+        forceMarch: intent.forceMarch,
+        hasActiveEncounter: Boolean(context.activeEncounter),
+        originLocationId: context.currentExploration?.location?.id ?? null,
+        character: {
+          id: context.character.id,
+          stats: context.character.stats,
+          exhaustionLevel: context.character.exhaustionLevel,
         },
-        select: { id: true, name: true, seed: true },
+        persistPlayerAction,
       });
-
-      if (!destination) {
-        const known = await prisma.location.findMany({
-          where: { campaignId },
-          select: { name: true },
-        });
-        return NextResponse.json(
-          {
-            error:
-              `You know no place called "${intent.destination}". ` +
-              `Known: ${known.map((l) => l.name).join(", ") || "nowhere yet"}.`,
-          },
-          { status: 400 }
-        );
-      }
-
-      if (destination.id === originId) {
-        return NextResponse.json(
-          { error: `You are already at ${destination.name}.` },
-          { status: 400 }
-        );
-      }
-
-      const entryNode = await prisma.locationNode.findFirst({
-        where: { locationId: destination.id },
-        orderBy: { index: "asc" },
-        select: { id: true },
-      });
-      if (!entryNode) {
-        return NextResponse.json(
-          { error: `${destination.name} has no way in.` },
-          { status: 409 }
-        );
-      }
-
-      const origin = await prisma.location.findUnique({
-        where: { id: originId },
-        select: { name: true, seed: true },
-      });
-
-      // fetchExplorationContext already proved originId's row exists, so this
-      // is a data-consistency guard, not an expected path — but if the row
-      // vanished between then and now, refuse rather than let a missing seed
-      // silently fall back to the id and change the distance on the return leg.
-      if (!origin) {
-        return NextResponse.json(
-          { error: "Your current location could not be resolved." },
-          { status: 409 }
-        );
-      }
-
-      // Every figure is resolved here, before anything is written or narrated.
-      const stats = (context.character.stats ?? {}) as Partial<Record<string, number>>;
-      const journey = resolveJourney({
-        distanceMiles: travelDistanceMiles(origin.seed, destination.seed),
-        forceMarch: intent.forceMarch === true,
-        conModifier: abilityModifier(stats.CON ?? 10),
-        currentExhaustion: context.character.exhaustionLevel,
-      });
-
-      const dayCount = journey.days === 1 ? "1 day" : `${journey.days} days`;
-      const logLine = journey.forcedHours > 0
-        ? `Travel: ${origin.name} → ${destination.name}, ` +
-          `${journey.distanceMiles} mi forced march, ${journey.hours} h. ` +
-          `Forced march: ${journey.forcedHours} h, ` +
-          `DC ${journey.saves.map((s) => s.dc).join("/")} → ` +
-          `${journey.saves.filter((s) => !s.success).length} failed, ` +
-          `exhaustion ${context.character.exhaustionLevel} → ` +
-          `${context.character.exhaustionLevel + journey.exhaustionGained}.`
-        : `Travel: ${origin.name} → ${destination.name}, ` +
-          `${journey.distanceMiles} mi at normal pace, ${dayCount}.`;
-
-      // Origin, destination, entry node and journey are all resolved, and the
-      // gate has no refusal left. Written before the transaction so the
-      // player's line precedes the travel line it writes, and so the
-      // transaction's own boundary is unchanged.
-      await persistPlayerAction();
-
-      await prisma.$transaction(async (tx) => {
-        if (journey.exhaustionGained > 0) {
-          await tx.character.update({
-            where: { id: context.character.id },
-            data: {
-              exhaustionLevel:
-                context.character.exhaustionLevel + journey.exhaustionGained,
-            },
-          });
-        }
-
-        await tx.campaign.update({
-          where: { id: campaignId },
-          data: { currentLocationId: destination.id, currentNodeId: entryNode.id },
-        });
-
-        await tx.gameLog.create({
-          data: { campaignId, role: "system", content: logLine },
-        });
-      });
+      if (refusal) return refusal;
     }
 
     // ── Gate: move ──────────────────────────────────────────────────────────────

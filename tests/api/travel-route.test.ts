@@ -369,4 +369,53 @@ describe("travel gate", () => {
     expect(prismaTx.character.update).not.toHaveBeenCalled();
     expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
   });
+
+  /**
+   * DC-AUD-001, for this gate specifically.
+   *
+   * Every refusal above checks the writes made *inside* the transaction. None
+   * checked the row `persistPlayerAction` writes outside it — and that is the
+   * one that matters most here: `buildCampaignContext` reads those rows back
+   * and `lib/ai/narrator.ts` hands them to the model as `recentDialogue`, so a
+   * refused march left in the log becomes a march the AI can describe. The
+   * rules engine said no and the narrator would never learn it.
+   *
+   * This gap was found by moving `persistPlayerAction()` above the gate's
+   * refusals while extracting the gate: every other test in this file stayed
+   * green. The mutation reintroduced the exact defect DC-AUD-001 closed, and
+   * nothing caught it.
+   */
+  it("writes no canonical player row for a refused journey", async () => {
+    (prisma.location.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "travel",
+      destination: "Atlantis",
+      forceMarch: false,
+    });
+
+    const res = await POST(request("travel to Atlantis"), { params });
+
+    expect(res.status).toBe(400);
+    const userRows = (prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args) => args[0]?.data?.role === "user");
+    expect(userRows).toHaveLength(0);
+  });
+
+  it("writes exactly one canonical player row for a journey that resolves", async () => {
+    // The other half of the same contract: the line must still be written
+    // once when the march goes ahead, so the transcript is not silent about
+    // what the player did.
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "travel",
+      destination: "Gilded Boar",
+      forceMarch: false,
+    });
+
+    await POST(request("travel to the Gilded Boar"), { params });
+
+    const userRows = (prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args) => args[0]?.data?.role === "user");
+    expect(userRows).toHaveLength(1);
+    expect(userRows[0][0].data.content).toBe("travel to the Gilded Boar");
+  });
 });
