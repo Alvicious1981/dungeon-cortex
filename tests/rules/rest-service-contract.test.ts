@@ -363,6 +363,86 @@ describe("resolveRest service contract", () => {
     });
   });
 
+  /**
+   * SRD: "A short rest is a period of downtime, at least 1 hour long" and "A
+   * character CAN spend one or more Hit Dice at the end of a short rest"
+   * (Adventuring.md:166-168). Taking the rest is not conditional on having
+   * dice, and spending them is a choice the player makes per die.
+   *
+   * These two cases are where an implicit request — a player who typed "short
+   * rest" and named no die count — must not be turned into either a refusal or
+   * a wasted resource.
+   */
+  it("spends no Hit Die at full health, and still resolves", async () => {
+    // Nobody would choose to burn a die for nothing, and only a long rest
+    // returns one — half the total at a time. Silently spending it was the
+    // worse of the two edges: a 200 that destroys a resource.
+    const healthy = baseCharacters.map((character) =>
+      character.id === "character-1"
+        ? { ...character, hp: character.maxHp }
+        : character
+    );
+    const { characters, tx } = createTx({ characters: healthy });
+
+    const result = await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      roll: deterministicRoll(6),
+      tx,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      facts: { restType: "short", hpRecovered: 0, hitDiceSpent: 0 },
+    });
+    expect(
+      characters.find((character) => character.id === "character-1")?.hitDiceRemaining
+    ).toBe(2);
+  });
+
+  it("resolves a short rest with no Hit Dice left instead of refusing it", async () => {
+    // The rest is legal; it simply recovers nothing. Refusing it also cost the
+    // narrator the event, since a 4xx writes no canonical player row.
+    const spent = baseCharacters.map((character) =>
+      character.id === "character-1"
+        ? { ...character, hitDiceRemaining: 0 }
+        : character
+    );
+    const { characters, tx } = createTx({ characters: spent });
+
+    const result = await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      roll: deterministicRoll(6),
+      tx,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      facts: { restType: "short", hpRecovered: 0, hitDiceSpent: 0 },
+    });
+    expect(characters.find((character) => character.id === "character-1")?.hp).toBe(4);
+  });
+
+  it("still refuses an explicit request for more dice than are available", async () => {
+    // The distinction the two cases above turn on: an implicit rest that
+    // cannot use a die is not an error, but asking for a die count that does
+    // not exist is. This guard must survive the change.
+    const { tx } = createTx();
+
+    await expect(
+      resolveRest({
+        campaignId: "campaign-1",
+        characterId: "character-1",
+        restType: "short",
+        hitDiceToSpend: 3,
+        tx,
+      })
+    ).rejects.toMatchObject({ code: "INVALID_HIT_DICE" });
+  });
+
   it("short rest does not restore all spell slots", async () => {
     const { characters, tx } = createTx();
 
