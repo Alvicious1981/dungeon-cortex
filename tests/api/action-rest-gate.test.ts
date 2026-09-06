@@ -30,12 +30,9 @@
  * closes it too, by construction rather than by patch: the service reports
  * `hpAfter - hpBefore`, so the figure cannot exceed what was restored.)
  *
- * ── still open ──────────────────────────────────────────────────────────────
- *
- * 7. The long-rest phrase check still overrides the classifier, negation
- *    included: "not a long rest, just a short rest" grants a long rest. That
- *    lives in the route, not the rest domain, so unifying did not touch it. It
- *    is still pinned below, and still open in #130.
+ * 7. The long-rest phrase no longer overrides the classifier. `restType`
+ *    decides, and a sentence naming both rests is refused upstream by
+ *    `parseIntent` instead of being guessed — see tests/ai/intent.test.ts.
  *
  * ── new consequences, pinned deliberately ───────────────────────────────────
  *
@@ -429,21 +426,28 @@ describe("rest gate: what the route still owns", () => {
     expect((await restPayload(res)).type).toBe("LONG_REST");
   });
 
-  it("grants a long rest for wording that explicitly refuses one", async () => {
-    // DIVERGENCE 7, still open. `includes("long rest")` is blind to the
-    // "not a" in front of it, so a sentence the classifier read correctly as a
-    // short rest is overruled by a substring scan — and the direction it errs
-    // in is the one that hands out resources. This lives in the route, not the
-    // rest domain, so the delegation did not touch it. See #130.
+  it("obeys the classifier even when the text names the other rest", async () => {
+    // DIVERGENCE 7 closed. The gate used to OR `restType` with
+    // `action.includes("long rest")`, so any sentence carrying those two words
+    // was upgraded to a long rest whatever the classifier said — negations
+    // included, in the direction that hands out resources.
+    //
+    // The OR is gone: `restType` decides. Its companion half, a parser that
+    // read "not a long rest" as long, is fixed in lib/ai/intent.ts and covered
+    // by tests/ai/intent.test.ts, which now refuses a sentence naming both
+    // rests rather than guessing between them.
     (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
       actionType: "rest", restType: "short",
     });
     givenCharacter({ hp: 4, maxHp: 30, exhaustionLevel: 2 });
 
-    const res = await post("not a long rest, just a short rest");
+    const res = await post("we bed down after the long rest we skipped");
 
-    expect((await restPayload(res)).type).toBe("LONG_REST");
-    expect(characterUpdate().data.hp).toBe(30);
+    expect((await restPayload(res)).type).toBe("SHORT_REST");
+    // The long-rest recovery does not land: a short rest writes hit points and
+    // Hit Dice only, so exhaustion is not even part of the update.
+    expect(characterUpdate().data).not.toHaveProperty("exhaustionLevel");
+    expect(characterUpdate().data).not.toHaveProperty("spellSlots");
   });
 
   it("writes the player's line exactly once for a rest that resolves", async () => {

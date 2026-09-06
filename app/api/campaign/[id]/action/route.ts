@@ -1415,13 +1415,16 @@ async function resolveAction(
     // class before the Hit Die lookup, roll each spent die instead of taking a
     // fixed average, and spend one die rather than every one the character has.
     if (intent.actionType === "rest") {
-      // Unchanged, deliberately: the phrase check still overrides the
-      // classifier, negation included (divergence 7 in #130). It is a route
-      // concern, not a rest-domain one, and folding it into this change would
-      // mix two decisions.
-      const isLongRest =
-        intent.restType === "long" ||
-        trimmedAction.toLowerCase().includes("long rest");
+      // The classifier is the authority on which rest this is.
+      //
+      // This used to be OR'd with `trimmedAction.includes("long rest")`, on the
+      // reading that the phrase could rescue a rest the classifier had got
+      // wrong. It could not: every branch in `parseIntent` that returns
+      // `actionType: "rest"` also sets `restType`, so there was never a gap for
+      // the phrase to fill — only a present value for it to override. What it
+      // did instead was grant a long rest to any sentence containing those two
+      // words, negation included (divergence 7 in #130).
+      const isLongRest = intent.restType === "long";
 
       // The service both resolves and persists, reading the authoritative
       // character row itself rather than trusting the pre-gate snapshot. Run
