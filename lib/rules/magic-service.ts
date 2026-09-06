@@ -38,6 +38,11 @@ interface MagicCampaignRecord {
 
 interface MagicCharacterRecord {
   id: string;
+  /**
+   * Legacy test-double compatibility only. The real Prisma Character model has
+   * no campaignId; production ownership is authoritative on Campaign.characterId.
+   * Never select this field from Prisma.
+   */
   campaignId?: string;
   spellSlots: unknown;
   /**
@@ -195,7 +200,6 @@ async function resolveCharacter(
     where: { id: characterId },
     select: {
       id: true,
-      campaignId: true,
       spellSlots: true,
       // On the read that was already happening: no extra query buys the gate.
       class: true,
@@ -210,10 +214,14 @@ async function resolveCharacter(
     );
   }
 
-  if (
-    (campaign.characterId && campaign.characterId !== character.id) ||
-    (character.campaignId && character.campaignId !== input.campaignId)
-  ) {
+  // Production ownership comes from Campaign.characterId, which is required by
+  // the Prisma schema. The fallback only preserves older injected test doubles
+  // whose campaign fixture predates that field.
+  const campaignMismatch = campaign.characterId
+    ? campaign.characterId !== character.id
+    : Boolean(character.campaignId && character.campaignId !== input.campaignId);
+
+  if (campaignMismatch) {
     throw new MagicServiceError(
       "CHARACTER_CAMPAIGN_MISMATCH",
       `Character ${character.id} does not belong to campaign ${input.campaignId}.`
