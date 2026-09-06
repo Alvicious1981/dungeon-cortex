@@ -495,16 +495,24 @@ export function applyShortRest(character: CharacterState): ShortRestResult {
     // For "Code is Law" we can use expected value or assume a roll. Let's use average (hitDieSize / 2 + 0.5) rounded up? No, let's just use average roll rounded down + con mod.
     // Actually, just standard SRD automated max or average. Let's use average:
     const healing = Math.max(1, Math.floor(hitDieSize / 2) + 1 + conMod);
+
+    // Count what the character actually gained, not what the die offered.
+    // `hp` is clamped to `maxHp` on the line below, so the last die of a rest
+    // that reaches full health almost always grants less than it rolled.
+    // Adding `healing` here instead credited the difference to a total that
+    // leaves the backend: the rest gate puts `hpRecovered` in its
+    // REST_COMPLETED payload and the narrator describes it, so the player was
+    // told about healing the rules had not granted.
+    //
+    // This replaces an "Ensure we didn't overheal" correction that used to sit
+    // after the loop and could never run: it tested `next.hp > next.maxHp`,
+    // which the clamp below has already made impossible.
+    const before = next.hp;
     next.hp = Math.min(next.maxHp, next.hp + healing);
-    hpRecovered += healing;
+    hpRecovered += next.hp - before;
+
     next.hitDiceRemaining -= 1;
     hitDiceSpent += 1;
-  }
-
-  // Ensure we didn't overheal
-  if (next.hp > next.maxHp) {
-    hpRecovered -= (next.hp - next.maxHp);
-    next.hp = next.maxHp;
   }
 
   return { next, hpRecovered, hitDiceSpent };

@@ -34,17 +34,14 @@
  *    too. The lookup misses and falls back to `|| 8`, so every class recovers
  *    on a d8: a fighter and a wizard short-rest identically.
  *
- * 3. A short rest that reaches full health reports the whole die roll rather
- *    than the points it actually granted. `applyShortRest` clamps `hp` with
- *    `Math.min` inside the loop and then adds the unclamped `healing` to
- *    `hpRecovered`; its own "Ensure we didn't overheal" correction tests
- *    `next.hp > next.maxHp`, which that clamp has already made impossible, so
- *    it never runs. Persistence is right; the announced figure is not, and it
- *    is the figure the narrator is given.
+ * A third — a short rest reaching full health reported the whole die roll
+ * instead of the points granted — was fixed rather than pinned, because it
+ * changed only what the player was *told* and not what they received. See
+ * `applyShortRest` in lib/rules/exploration-logic.ts and its tests in
+ * tests/rules/exploration.test.ts.
  *
- * None is fixed here. Fixing them changes recovered hit points, or what the
- * player is told about them, on a live save — a rules decision, not a
- * coverage one.
+ * The two above are not fixed here. Both change how much a character actually
+ * recovers on a live save — a rules decision, not a coverage one. See #130.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
@@ -239,20 +236,15 @@ describe("rest gate: a short rest spends hit dice to heal", () => {
     });
   });
 
-  it("caps hit points at the maximum, but reports the uncapped roll", async () => {
-    // DIVERGENCE 3. 28/30 with dice to spare: one die is spent and the
-    // character correctly ends at 30, having gained 2 points — but the event
-    // announces 5.
+  it("caps hit points at the maximum and reports only what it granted", async () => {
+    // 28/30 with dice to spare: one die is spent, the character ends at 30,
+    // and the event announces the 2 points actually gained.
     //
-    // `applyShortRest` clamps with `Math.min` inside the loop and *then* adds
-    // the full `healing` to `hpRecovered`, so the tally counts points that
-    // were never granted. Its own "Ensure we didn't overheal" correction is
-    // dead code: it tests `next.hp > next.maxHp`, which the clamp above has
-    // already made impossible.
-    //
-    // Persistence is right and only the report is inflated, which is why this
-    // has gone unnoticed — but the narrator is handed these facts, so the
-    // player is told about healing the rules did not grant.
+    // This used to announce the whole 5. `applyShortRest` clamped with
+    // `Math.min` and then added the unclamped `healing` to `hpRecovered`,
+    // while its own "Ensure we didn't overheal" correction could never run —
+    // it tested a condition the clamp had already made impossible. Fixed at
+    // the rule; `tests/rules/exploration.test.ts` holds it there now.
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
       contextWith({ hp: 28, maxHp: 30, hitDiceRemaining: 3, hitDiceTotal: 3 })
     );
@@ -261,8 +253,7 @@ describe("rest gate: a short rest spends hit dice to heal", () => {
 
     const payload = await restPayload(res);
     expect(payload.hitDiceSpent).toBe(1);
-    expect(payload.hpRecovered).toBe(HEAL_PER_DIE); // 5 reported, 2 actually gained
-    // What is persisted is correct.
+    expect(payload.hpRecovered).toBe(2);
     expect(characterUpdate().data.hp).toBe(30);
     expect(characterUpdate().data.hitDiceRemaining).toBe(2);
   });

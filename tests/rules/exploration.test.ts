@@ -32,8 +32,10 @@ import {
   checkRandomEncounter,
   consumeResources,
   applyRest,
+  applyShortRest,
   initialPartyInventory,
   type CampaignTimeState,
+  type CharacterState,
   type PartyInventoryState,
 } from "@/lib/rules/exploration";
 
@@ -1245,5 +1247,76 @@ describe("initialPartyInventory", () => {
     const inv = initialPartyInventory(3);
     expect(inv.torches).toBe(15);
     expect(inv.rations).toBe(21);
+  });
+});
+
+/**
+ * `applyShortRest` had no test of its own until now, which is how the
+ * reporting defect below survived: its only caller is the action route's rest
+ * gate, and that gate was covered by a single assertion on the event type.
+ */
+describe("applyShortRest", () => {
+  const character = (o: Partial<CharacterState> = {}): CharacterState => ({
+    hp: 10,
+    maxHp: 30,
+    level: 3,
+    class: "fighter",
+    stats: {},
+    spellSlots: null,
+    hitDiceTotal: 3,
+    hitDiceRemaining: 3,
+    exhaustionLevel: 0,
+    ...o,
+  });
+
+  it("reports the hit points it actually restored, not the whole roll", () => {
+    // 28/30 with dice to spare. One die is spent and the character reaches 30,
+    // having gained 2 points — so 2 is what the rest recovered.
+    //
+    // This is the figure that leaves the backend: the rest gate puts it in the
+    // REST_COMPLETED payload, and the narrator describes it. Reporting the
+    // uncapped roll tells the player about healing the rules did not grant.
+    const result = applyShortRest(character({ hp: 28 }));
+
+    expect(result.next.hp).toBe(30);
+    expect(result.hitDiceSpent).toBe(1);
+    expect(result.hpRecovered).toBe(2);
+  });
+
+  it("still reports the full amount when nothing was capped", () => {
+    // The ordinary case must be unchanged: 10/30 with one die restores the
+    // whole 5 and none of it is lost to the maximum.
+    const result = applyShortRest(character({ hp: 10, hitDiceRemaining: 1 }));
+
+    expect(result.hpRecovered).toBe(5);
+    expect(result.next.hp).toBe(15);
+  });
+
+  it("keeps the tally and the health it persisted in step", () => {
+    // The invariant the two assertions above are instances of, stated once:
+    // whatever is reported is exactly what the character gained.
+    for (const hp of [1, 10, 26, 28, 29]) {
+      const before = character({ hp });
+      const result = applyShortRest(before);
+      expect(result.hpRecovered, `starting from ${hp} hp`).toBe(
+        result.next.hp - before.hp
+      );
+    }
+  });
+
+  it("spends no dice and reports nothing at full health", () => {
+    const result = applyShortRest(character({ hp: 30 }));
+
+    expect(result.hpRecovered).toBe(0);
+    expect(result.hitDiceSpent).toBe(0);
+    expect(result.next.hitDiceRemaining).toBe(3);
+  });
+
+  it("heals nothing when no hit dice remain", () => {
+    const result = applyShortRest(character({ hp: 5, hitDiceRemaining: 0 }));
+
+    expect(result.hpRecovered).toBe(0);
+    expect(result.hitDiceSpent).toBe(0);
+    expect(result.next.hp).toBe(5);
   });
 });
