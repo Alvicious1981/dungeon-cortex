@@ -105,6 +105,19 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Falsify rest regression locally in runner
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('lib/rules/rest-service.ts')
+          source = path.read_text()
+          needle = '      id: true,\n      hp: true,'
+          replacement = '      id: true,\n      campaignId: true,\n      hp: true,'
+          if needle not in source:
+              raise SystemExit('rest-service Character select anchor not found')
+          path.write_text(source.replace(needle, replacement, 1))
+          PY
+
       - name: Build application
         run: pnpm build
 
