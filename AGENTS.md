@@ -60,8 +60,59 @@ Use the smallest relevant check:
 - `pnpm exec vitest run --maxWorkers=2` — rules, backend, utilities, and regression checks. **Use this, not `pnpm test`.** On this machine plain `pnpm test` produces vitest worker-startup timeouts that read as test failures; capping the workers removes them. A test that *times out* is usually machine contention — re-run that file alone before concluding anything. A test that fails an *assertion* is not contention.
 - `pnpm build` — broad app, route, or framework changes.
 - `pnpm lint` — lint checks when relevant.
-- `pnpm test:e2e` — UI flow or end-to-end behavior.
+- `pnpm test:e2e` — UI flow or end-to-end behavior. **Needs a disposable
+  database and a production build; see the runbook below.** Run bare, three of
+  the five specs fail on a guard, not on your change.
 - `pnpm check-retro` — rules-canon or documentation changes involving D&D terminology.
+
+**`vitest -t` treats a leading slash as a regex delimiter.** `-t "/roll"`
+silently skips every test in the file rather than matching the three whose
+names contain it — 55 skipped, zero run, exit code 0. Filter on a substring
+without the slash (`-t "roll"`) and read the count, not just the colour.
+
+### Running the E2E suite here
+
+`assertSafeE2EDatabase` refuses to touch a database whose name lacks an `e2e`
+or `test` segment, so `pnpm test:e2e` on its own fails `critical-path` and
+`action-idempotency` before they run a line. That refusal is the guard working.
+The real save is never at risk from a bare run.
+
+What actually works on this machine, verified 2026-09-06:
+
+1. A throwaway PostgreSQL with pgvector — the migrations create `vector` and
+   `pg_trgm`, and nothing else:
+   `docker run -d --name dc-e2e-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=dungeon_cortex_e2e -p 55432:5432 pgvector/pgvector:pg16`
+2. `DATABASE_URL` and `DIRECT_URL` pointed at it, then `prisma migrate deploy`.
+   This is the one migration command that is safe to run: it touches the
+   container, never the save.
+3. `pnpm build`, then `pnpm start` with `PORT`, both URLs,
+   `PRIVATE_MODE_ENABLED=true` and `E2E_TEST_MODE=true`.
+4. `pnpm test:e2e` with `PLAYWRIGHT_SKIP_WEBSERVER=1` and
+   `PLAYWRIGHT_BASE_URL` at that port.
+5. Afterwards: stop the server, `docker rm -f -v dc-e2e-pg` (the `-v` drops
+   the volume too).
+
+**Use `pnpm start`, not `pnpm dev`.** Under `pnpm dev` the first request to each
+route compiles it on demand, which blows past Playwright's 5 s `expect` and
+10 s `actionTimeout`: `critical-path` fails on `toHaveURL` and
+`action-idempotency` on a POST that never returns. Both are latency, not
+defects. The Playwright config already uses `pnpm start` in CI for this reason.
+
+**Two hazards worth knowing, both hit once.**
+
+Next takes an already-set environment variable over `.env` — verified by
+pointing `DATABASE_URL` at an unreachable host and watching the server fail
+with `Can't reach database server at 127.0.0.1:1`. That is what makes step 3
+safe. Confirm it that way rather than assuming it, because the failure mode is
+the browser journey writing a character and a campaign into the real save,
+where `cleanupE2ERecords` — which deletes by id against the e2e database —
+would not remove them.
+
+And check what is listening before pointing Playwright anywhere. A killed
+`pnpm dev` leaves its `next` child alive, so the next server takes 3001 while
+an orphan still holds 3000 on `.env`'s database, and Playwright's default base
+URL goes to the orphan. Stopping a task kills the `pnpm` wrapper, not the
+child: kill the PID from `netstat`.
 
 ## Validation by change type
 
@@ -117,6 +168,24 @@ the 49 merge commits with two parents in the history all predate that. When
 merging locally without a PR: squash-merge into `master`, **run the suite on
 the merged result rather than only on the branch**, then push.
 
+**Stacked PRs: retarget the children to `master` before merging the parent.**
+Merging with `--delete-branch` while another PR still points at that branch
+**closes the child**, it does not retarget it. That happened to #133 on
+2026-09-06 and cost a recovery: recreate the base ref, `gh pr reopen`, patch
+the base to `master`, delete the temp ref. Nothing is lost — the branch
+survives — but a closed PR's base cannot be changed, which is the trap.
+
+Squash also breaks the stack's history. After the parent lands as one commit,
+the child's branch still carries the parent's original commits, which `master`
+no longer has. Merge `origin/master` into the child and resolve — that only
+adds commits, so an ordinary push publishes it. Prefer that over rebasing:
+republishing a rebase needs a force push, and if the environment declines one,
+the objects can still be uploaded by pushing the branch under a temporary name
+and then moving the real ref with
+`gh api .../git/refs/heads/<branch> -X PATCH -f sha=<full-sha> -F force=true`.
+A ref update alone fails with `Object does not exist` — it moves a pointer, it
+does not transfer commits.
+
 ## Closed plans
 
 **PLAN-058 (session ledger, atomic action journal, `EncounterMap` replacing
@@ -155,7 +224,8 @@ So, when inspecting:
 
 - For every value produced, confirm something consumes it. For every value consumed, confirm something produces it. A field that only one side touches is the shape of this defect.
 - Prefer a guard that binds both ends over a test that asserts one. `tests/architecture/intent-gate-exhaustiveness.test.ts` and `tests/api/action-intent-contract.test.ts` exist for that reason.
-- Distrust a test that mocks the thing it appears to be testing. Mocking `@/lib/ai/intent` in a route test verifies the gates against hand-written intents and never exercises the classifier that feeds them.
+- Distrust a test that mocks the thing it appears to be testing. Mocking `@/lib/ai/intent` in a route test verifies the gates against hand-written intents and never exercises the classifier that feeds them. **This is not only a coverage gap — the hand-written intent can be wrong, and then it hides which layer holds the defect.** A test pinning "not a long rest, just a short rest" mocked `parseIntent` returning `restType: "short"`; the real classifier returns `"long"` for that sentence, because it decides by asking whether the words appear anywhere. The mock made the defect look like it lived in the route. It lived in both. When a mocked value stands in for a real function's output, check what that function actually returns for the same input.
+- A service can derive a returned value from what a write *returns*, not from what it sent. `resolveRest` computes `hpRecovered` from the row `character.update` gives back, so a mock answering `{}` yields `NaN`, which reaches the client as `null`. Echo the written fields back over the row the way the database would.
 - `vi.mock` of a module does not intercept calls that module makes to itself. Mocking `resolveAttackRoll` does not affect `lib/rules/combat.ts` calling it internally, so an assertion on the mock silently proves nothing.
 - Before trusting a field, check the data. A read-only query against the real table settles in seconds what a type annotation only claims.
 - Re-run the verification immediately before a destructive step, not once at the start of the investigation. The check that matters is the one whose result is still true when the files are deleted.
@@ -176,6 +246,33 @@ while fixing dormant defects:
 confirm red, restore. Where a test guards several things, break each one
 separately — a test that only fails when all of them are gone is guarding one
 thing, not several.
+
+#### Characterisation tests are green on the first run by construction
+
+Pinning behaviour that already exists inverts the usual signal: red-then-green
+is unavailable, because the code already does what you are asserting. The only
+way to learn whether such a test guards anything is to mutate the code and
+watch it fail. Three findings on 2026-09-06 came from doing that, none from
+reading:
+
+- The `travel` gate's DC-AUD-001 guarantee had no coverage. Moving
+  `persistPlayerAction()` above the gate's refusals — reintroducing the exact
+  defect that Issue closed, where a refused march stays in the log and
+  `buildCampaignContext` feeds it to the narrator as `recentDialogue` — left
+  **all nine tests in the file green.** They only checked writes made *inside*
+  the transaction, never the player row written outside it.
+- `applyShortRest` reported the whole die roll instead of the points granted
+  when a rest reached full health, and its own "Ensure we didn't overheal"
+  correction was dead code: it tested a condition the `Math.min` above had
+  already made impossible. A guard with the right name doing nothing is why it
+  read as handled.
+- `MOVE_COMBATANT` was asserted in no test anywhere in the repository, while
+  ~100 lines decided movement legality.
+
+Mutate the rule the test names, not a line near it. Chebyshev→Manhattan,
+footprint collision→anchor-only, and a speed bound off by one each failed a
+different subset — which is what proves the assertions are separable rather
+than one assertion wearing four names.
 
 ### Forcing an attack to land
 
