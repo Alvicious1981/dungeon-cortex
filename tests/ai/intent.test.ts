@@ -255,3 +255,56 @@ describe("parseIntent — travel", () => {
     expect(intent.actionType).toBe("mechanical_ambiguous");
   });
 });
+
+/**
+ * Rest classification. The route's rest gate takes `restType` as authority, so
+ * whatever this parser decides is what a character actually recovers.
+ */
+describe("parseIntent — rest", () => {
+  it("reads a short rest", async () => {
+    const intent = await parseIntent("I take a short rest");
+    expect(intent.actionType).toBe("rest");
+    expect(intent.restType).toBe("short");
+  });
+
+  it("reads a long rest", async () => {
+    const intent = await parseIntent("I take a long rest");
+    expect(intent.actionType).toBe("rest");
+    expect(intent.restType).toBe("long");
+  });
+
+  it("reads the Spanish forms", async () => {
+    expect((await parseIntent("descanso corto")).restType).toBe("short");
+    expect((await parseIntent("descanso largo")).restType).toBe("long");
+  });
+
+  it("treats a bare rest as the short one", async () => {
+    const intent = await parseIntent("rest");
+    expect(intent.actionType).toBe("rest");
+    expect(intent.restType).toBe("short");
+  });
+
+  /**
+   * Fail closed on a sentence that names both rests.
+   *
+   * "not a long rest, just a short rest" used to classify as LONG: the parser
+   * asks only whether the words "long rest" appear anywhere, which a negation
+   * satisfies just as well as an intention. A long rest restores every spell
+   * slot and steps exhaustion down, so guessing wrong in that direction hands
+   * out resources the player never asked for.
+   *
+   * Negation parsing is not the answer — "not", "instead of", "rather than",
+   * "no es un" and the rest of that space is a guessing game. Naming both
+   * rests in one sentence is genuinely ambiguous, and this project already has
+   * an answer for that: refuse and ask for a restatement.
+   */
+  it("refuses a sentence that names both rests", async () => {
+    const intent = await parseIntent("not a long rest, just a short rest");
+    expect(intent.actionType).toBe("mechanical_ambiguous");
+  });
+
+  it("refuses the ambiguity in Spanish too", async () => {
+    const intent = await parseIntent("descanso largo no, descanso corto");
+    expect(intent.actionType).toBe("mechanical_ambiguous");
+  });
+});
