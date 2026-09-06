@@ -499,10 +499,14 @@ export function applyShortRest(character: CharacterState): ShortRestResult {
     // Count what the character actually gained, not what the die offered.
     // `hp` is clamped to `maxHp` on the line below, so the last die of a rest
     // that reaches full health almost always grants less than it rolled.
-    // Adding `healing` here instead credited the difference to a total that
-    // leaves the backend: the rest gate puts `hpRecovered` in its
-    // REST_COMPLETED payload and the narrator describes it, so the player was
-    // told about healing the rules had not granted.
+    // Adding `healing` here instead credited the difference to a figure that
+    // leaves the backend in the REST_COMPLETED payload.
+    //
+    // Nothing consumes that figure today — the narrative adapter drops
+    // REST_COMPLETED, and no component reads the `evt` frame it is streamed
+    // in — so this was a false fact with nowhere to land rather than a lie
+    // the player was shown. Corrected anyway: a number the rules engine
+    // publishes should be true before something starts reading it.
     //
     // This replaces an "Ensure we didn't overheal" correction that used to sit
     // after the loop and could never run: it tested `next.hp > next.maxHp`,
