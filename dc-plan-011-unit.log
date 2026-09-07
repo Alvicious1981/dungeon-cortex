@@ -1,0 +1,364 @@
+
+> dungeon-cortex@0.1.0 test /home/runner/work/dungeon-cortex/dungeon-cortex
+> vitest run
+
+[33mThe plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the [1mresolve.tsconfigPaths[22m option. You can remove the plugin and set [1mresolve.tsconfigPaths: true[22m in your Vite config instead.[39m
+
+[1m[46m RUN [49m[22m [36mv4.1.3 [39m[90m/home/runner/work/dungeon-cortex/dungeon-cortex[39m
+
+ [31m❯[39m tests/rules/combat-pipeline.test.ts [2m([22m[2m54 tests[22m[2m | [22m[31m5 failed[39m[2m)[22m[32m 120[2mms[22m[39m
+       [32m✓[39m updates combatant HP and emits DAMAGE_DEALT on a normal hit[32m 8[2mms[22m[39m
+       [32m✓[39m emits CRITICAL_HIT on a natural 20 and rolls double dice[32m 2[2mms[22m[39m
+       [32m✓[39m emits CRITICAL_MISS on a natural 1 and deals zero damage[32m 2[2mms[22m[39m
+       [32m✓[39m emits ENEMY_DEFEATED when target HP reaches zero[32m 1[2mms[22m[39m
+       [32m✓[39m increments encounter totalDamageDealt when damage > 0[32m 1[2mms[22m[39m
+       [32m✓[39m does not update encounter totalDamageDealt on a fumble (zero damage)[32m 1[2mms[22m[39m
+       [32m✓[39m actorArmorPenalty: true forces the attack roll onto disadvantage[32m 1[2mms[22m[39m
+       [32m✓[39m without actorArmorPenalty, the attack roll is a single unpenalised d20[32m 1[2mms[22m[39m
+       [32m✓[39m decrements the consumed slot and persists it to Character[32m 2[2mms[22m[39m
+       [32m✓[39m emits SPELL_CAST event with level and name when slot is consumed[32m 1[2mms[22m[39m
+       [32m✓[39m throws and makes ZERO database mutations when no spell slots remain[32m 5[2mms[22m[39m
+       [32m✓[39m decrements item quantity when quantity > 1 (not last charge)[32m 1[2mms[22m[39m
+       [32m✓[39m deletes the item record when quantity is 1 (last charge consumed)[32m 1[2mms[22m[39m
+       [32m✓[39m caps spell healing at maxHp — never writes a value above maxHp[32m 1[2mms[22m[39m
+       [32m✓[39m caps item healing at maxHp — never writes a value above maxHp[32m 1[2mms[22m[39m
+       [32m✓[39m takes the remaining quantity from the transaction, not from the caller[32m 1[2mms[22m[39m
+       [32m✓[39m heals nothing when the item is already gone from the transaction's view[32m 1[2mms[22m[39m
+       [32m✓[39m sets concentrationSpellId on Character and emits CONCENTRATION_STARTED when casting a concentration spell[32m 3[2mms[22m[39m
+       [32m✓[39m replaces concentration atomically and emits break before start[32m 1[2mms[22m[39m
+       [32m✓[39m breaks concentration on both Combatant and Character when CON save fails after damage[32m 2[2mms[22m[39m
+       [32m✓[39m preserves concentration when CON save succeeds[32m 1[2mms[22m[39m
+       [32m✓[39m does NOT trigger a CON save when the concentrating target takes zero damage[32m 1[2mms[22m[39m
+       [32m✓[39m deals FULL damage on a failed save[32m 1[2mms[22m[39m
+       [32m✓[39m deals HALF damage (floor) on a successful save[32m 1[2mms[22m[39m
+       [32m✓[39m deals no damage when the SRD save outcome is none[32m 1[2mms[22m[39m
+       [32m✓[39m applies a status condition to the target on a failed save[32m 2[2mms[22m[39m
+       [32m✓[39m does NOT apply a condition when the target succeeds on the save[32m 1[2mms[22m[39m
+       [32m✓[39m builds a targets-only COMBAT_CONSEQUENCE payload[32m 0[2mms[22m[39m
+       [32m✓[39m preserves an empty canonical targets array[32m 0[2mms[22m[39m
+       [32m✓[39m populates the full targets array in the payload[32m 0[2mms[22m[39m
+     [32m✓[39m takes the winner path (claim.count === 1) and marks encounter as resolved when all enemies are dead[32m 18[2mms[22m[39m
+     [32m✓[39m marks encounter as resolved when the player is dead, and never grants XP even though an enemy carries a positive xpValue[32m 3[2mms[22m[39m
+       [32m✓[39m grants the exact sum of enemy xpValue via an atomic increment, never an absolute value, when all enemies are dead[32m 6[2mms[22m[39m
+       [32m✓[39m treats a single enemy missing xpValue as fail-closed: total 0, no partial award[32m 1[2mms[22m[39m
+       [32m✓[39m treats xpValue: 0 as a valid, non-unavailable amount and sums it normally[32m 1[2mms[22m[39m
+       [32m✓[39m resolves normally without touching Character.xp when the total award is exactly 0[32m 0[2mms[22m[39m
+       [32m✓[39m grants independent increments across two distinct awards without reconstructing XP from a prior snapshot[32m 1[2mms[22m[39m
+       [32m✓[39m grants loot on a certified victory, on the same claim that grants XP[32m 2[2mms[22m[39m
+       [32m✓[39m never grants loot when the player is dead, the way XP is withheld[32m 2[2mms[22m[39m
+       [32m✓[39m does not pay twice when a second transaction loses the claim[32m 0[2mms[22m[39m
+       [32m✓[39m resolves the encounter even when the loot grant fails[32m 4[2mms[22m[39m
+     [32m✓[39m takes the fail-closed path (claim.count === 0) without throwing when another transaction already won the claim, and never grants XP[32m 1[2mms[22m[39m
+     [32m✓[39m takes the fail-closed path for any claim.count other than exactly 1, and never grants XP[32m 0[2mms[22m[39m
+     [32m✓[39m advances the turn index and emits TURN_ADVANCE when encounter is ongoing[32m 3[2mms[22m[39m
+     [32m✓[39m wraps turn index to 0 and emits ROUND_ADVANCE when the last combatant's turn ends[32m 1[2mms[22m[39m
+     [32m✓[39m suppresses events when collectEvents is false[32m 1[2mms[22m[39m
+     [32m✓[39m halves spell damage against a resistant target[32m 2[2mms[22m[39m
+     [32m✓[39m resolves a weapon clause as inapplicable to spell damage, silently[32m 1[2mms[22m[39m
+     [32m✓[39m still logs a wording the engine cannot read[32m 1[2mms[22m[39m
+[31m     [31m×[31m applies the condition to a target with no immunities[39m[32m 16[2mms[22m[39m
+[31m     [31m×[31m does not write the condition onto an immune target[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m tells the facts the truth about what took hold[39m[32m 2[2mms[22m[39m
+[31m     [31m×[31m declares the immunity in the system log[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m still applies damage to an immune target[39m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/rules/exploration.test.ts [2m([22m[2m166 tests[22m[2m)[22m[32m 165[2mms[22m[39m
+ [32m✓[39m tests/api/action.test.ts [2m([22m[2m55 tests[22m[2m)[22m[32m 162[2mms[22m[39m
+ [32m✓[39m tests/api/action-intent-contract.test.ts [2m([22m[2m70 tests[22m[2m)[22m[32m 221[2mms[22m[39m
+ [32m✓[39m tests/rules/combat.test.ts [2m([22m[2m89 tests[22m[2m)[22m[32m 83[2mms[22m[39m
+ [32m✓[39m tests/architecture/migration-schema-drift.test.ts [2m([22m[2m57 tests[22m[2m)[22m[32m 96[2mms[22m[39m
+ [32m✓[39m tests/rules/wilderness-service-contract.test.ts [2m([22m[2m36 tests[22m[2m)[22m[33m 404[2mms[22m[39m
+ [32m✓[39m tests/rules/exploration-turn-service-contract.test.ts [2m([22m[2m33 tests[22m[2m)[22m[32m 268[2mms[22m[39m
+ [32m✓[39m tests/rules/progression.test.ts [2m([22m[2m128 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+ [32m✓[39m tests/rules/exploration-service-contract.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 420[2mms[22m[39m
+     [33m[2m✓[22m[39m rejects a missing campaign [33m 317[2mms[22m[39m
+ [32m✓[39m tests/rules/armor-class.test.ts [2m([22m[2m57 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m tests/rules/rest-service-contract.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 107[2mms[22m[39m
+ [32m✓[39m tests/ai/trust-boundary.test.ts [2m([22m[2m50 tests[22m[2m)[22m[32m 65[2mms[22m[39m
+ [32m✓[39m tests/components/ActionInput.test.tsx [2m([22m[2m16 tests[22m[2m)[22m[33m 1252[2mms[22m[39m
+     [33m[2m✓[22m[39m adds selected targets to an external Attack request [33m 322[2mms[22m[39m
+ [32m✓[39m tests/components/LevelUpConfirmation.test.tsx [2m([22m[2m25 tests[22m[2m)[22m[33m 1296[2mms[22m[39m
+ [32m✓[39m tests/rules/geometry.test.ts [2m([22m[2m69 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m tests/rules/social-check-service-contract.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 269[2mms[22m[39m
+ [32m✓[39m tests/rules/magic-service-contract.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 138[2mms[22m[39m
+ [32m✓[39m tests/rules/loot.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m tests/rules/wilderness.test.ts [2m([22m[2m95 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m tests/memory/consolidator.test.ts [2m([22m[2m49 tests[22m[2m)[22m[32m 61[2mms[22m[39m
+ [32m✓[39m tests/api/action-rest-gate.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+ [32m✓[39m tests/memory/formatter.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m tests/architecture/rls-deny-by-default.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m tests/rules/damage-modifiers.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 77[2mms[22m[39m
+ [32m✓[39m tests/rules/model-e-transition.test.ts [2m([22m[2m38 tests[22m[2m)[22m[33m 644[2mms[22m[39m
+ [32m✓[39m tests/narrative/combat-fact-adapter.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m tests/actions/request-receipt.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+ [32m✓[39m tests/rules/navigation-service-contract.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 246[2mms[22m[39m
+ [32m✓[39m tests/api/travel-route.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 47[2mms[22m[39m
+ [32m✓[39m tests/api/action-move-macro.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 52[2mms[22m[39m
+ [32m✓[39m tests/rules/loot-service-contract.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 198[2mms[22m[39m
+ [32m✓[39m tests/rules/model-e-progression-contract.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 124[2mms[22m[39m
+ [32m✓[39m tests/rules/level-up-service-contract.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 122[2mms[22m[39m
+ [32m✓[39m tests/rules/quest-service-contract.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 196[2mms[22m[39m
+ [32m✓[39m tests/rules/encounter-service-contract.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/narrative/narrative-integration.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m tests/ai/intent.test.ts [2m([22m[2m61 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+[90mstderr[2m | tests/memory/pipeline.test.ts[2m > [22m[2msaveMemory[2m > [22m[2mswallows errors silently — a failed write must not throw to the caller
+[22m[39m[saveMemory] Failed to persist memory entry: Error: OpenAI timeout
+    at [90m/home/runner/work/dungeon-cortex/dungeon-cortex/[39mtests/memory/pipeline.test.ts:113:49
+    at [90mfile:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:302:11
+    at [90mfile:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:1903:26
+    at [90mfile:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2326:20
+    at new Promise (<anonymous>)
+    at runWithCancel [90m(file:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2323:10[90m)[39m
+    at [90mfile:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2305:20
+    at new Promise (<anonymous>)
+    at runWithTimeout [90m(file:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2272:10[90m)[39m
+    at [90mfile:///home/runner/work/dungeon-cortex/dungeon-cortex/[39mnode_modules/[4m.pnpm[24m/@vitest+runner@4.1.3/node_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2955:64
+
+ [32m✓[39m tests/memory/pipeline.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m tests/narrative/narrative-validator.test.ts [2m([22m[2m37 tests[22m[2m)[22m[32m 58[2mms[22m[39m
+ [32m✓[39m tests/rules/magic.test.ts [2m([22m[2m48 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m tests/narrative/prompt-builder.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+ [32m✓[39m tests/ai/tools/tool-result-contract.test.ts [2m([22m[2m49 tests[22m[2m)[22m[32m 53[2mms[22m[39m
+ [32m✓[39m tests/components/StoryLog.test.tsx [2m([22m[2m12 tests[22m[2m)[22m[33m 2236[2mms[22m[39m
+     [33m[2m✓[22m[39m preserves previously loaded older history, admits new logs, avoids duplicates, and keeps chronological order across a window slide [33m 1479[2mms[22m[39m
+ [32m✓[39m tests/rules/armor-proficiency.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m tests/rules/npc.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 47[2mms[22m[39m
+ [32m✓[39m tests/rules/social-logic.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m tests/api/level-up-route.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 73[2mms[22m[39m
+ [32m✓[39m tests/actions/roll-command.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 697[2mms[22m[39m
+     [33m[2m✓[22m[39m leaves a bare /roll to the intent gates, unrolled [33m 651[2mms[22m[39m
+ [32m✓[39m tests/components/WildernessHUD.test.tsx [2m([22m[2m40 tests[22m[2m)[22m[33m 1358[2mms[22m[39m
+     [33m[2m✓[22m[39m renders with aria-label 'Wilderness and Travel Status' [33m 460[2mms[22m[39m
+ [32m✓[39m tests/security/prompt-injection.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m tests/rules/diagnose-model-e-transition-contract.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m tests/rules/repair-character-hit-dice-contract.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m tests/api/logs-route.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m tests/ai/tool-result.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/components/SurvivalHUD.test.tsx [2m([22m[2m37 tests[22m[2m)[22m[33m 451[2mms[22m[39m
+ [32m✓[39m tests/rules/contested-checks.test.ts [2m([22m[2m41 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m tests/rules/level-up-service-atomicity.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+ [32m✓[39m tests/rules/hit-dice-integrity.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/rules/spell-resolution-service.test.ts [2m([22m[2m50 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+ [32m✓[39m tests/ai/narrator.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+ [32m✓[39m tests/rules/encounters.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/rules/spell-targeting.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m tests/srd/dnd5eapi/monsters.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+ [32m✓[39m tests/narrative/fallback-prose.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+ [32m✓[39m tests/narrative/negative-controls.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m tests/rules/proficiency.test.ts [2m([22m[2m52 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/rules/damage-modifiers-both-paths.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/rules/quests.test.ts [2m([22m[2m33 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/ai/tools/wilderness.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/components/XPProgressBar.test.tsx [2m([22m[2m22 tests[22m[2m)[22m[33m 635[2mms[22m[39m
+ [32m✓[39m tests/rules/armor-obtainable.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/rules/weapon-profile.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m tests/components/SpoilsOfWar.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[33m 990[2mms[22m[39m
+     [33m[2m✓[22m[39m renders the dialog container with correct ARIA attributes [33m 327[2mms[22m[39m
+ [32m✓[39m tests/rules/spatial.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m tests/rules/weapon-attack.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/api/social-route.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m✓[39m tests/rules/trade.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m✓[39m tests/rules/inventory.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/rules/condition-immunity.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+ [32m✓[39m tests/rules/srd.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 64[2mms[22m[39m
+ [32m✓[39m tests/rules/social.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+[90mstderr[2m | tests/components/DialogueOverlayController.test.tsx[2m > [22m[2mDialogueOverlayController[2m > [22m[2mposts the social action to the campaign's social route
+[22m[39mReceived `true` for a non-boolean attribute `jsx`.
+
+If you want to write it to the DOM, pass a string instead: jsx="true" or jsx={value.toString()}.
+Received `true` for a non-boolean attribute `global`.
+
+If you want to write it to the DOM, pass a string instead: global="true" or global={value.toString()}.
+
+ [32m✓[39m tests/components/DialogueOverlayController.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 791[2mms[22m[39m
+     [33m[2m✓[22m[39m posts the social action to the campaign's social route [33m 327[2mms[22m[39m
+ [32m✓[39m tests/api/encounter-route-xp-snapshot.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m tests/components/AscensionOverlay.test.tsx [2m([22m[2m19 tests[22m[2m)[22m[33m 1384[2mms[22m[39m
+     [33m[2m✓[22m[39m renders the overlay when isOpen is true [33m 395[2mms[22m[39m
+ [32m✓[39m tests/actions/backend-presentation-resolution.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m tests/components/DispositionBadge.test.tsx [2m([22m[2m21 tests[22m[2m)[22m[32m 123[2mms[22m[39m
+ [32m✓[39m tests/app/campaign-page-log-limit.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/rules/attack-bonus-both-ends.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m tests/api/encounter-route-ability-scores.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m tests/components/ExplorationMap.test.tsx [2m([22m[2m14 tests[22m[2m)[22m[33m 623[2mms[22m[39m
+ [32m✓[39m tests/rules/ability-check.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m tests/ai/narrator-active-tools.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m tests/architecture/execute-travel-watch-tool-no-direct-prisma.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/srd/dnd5eapi/client.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m tests/rules/item-effects.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m tests/architecture/execute-exploration-turn-tool-no-direct-prisma.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m tests/rules/travel.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+ [32m✓[39m tests/architecture/schema-reconciliation-migration.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 129[2mms[22m[39m
+ [32m✓[39m tests/memory/context-active-npc.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/srd/dnd5eapi/conditions.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/rules/dice.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m tests/rules/srd-equipment-projection.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 76[2mms[22m[39m
+ [32m✓[39m tests/architecture/generate-location-tool-no-direct-prisma.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/architecture/narrator-tool-containment.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m tests/rules/ability-check-advantage.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m tests/app/campaigns-page.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 95[2mms[22m[39m
+ [32m✓[39m tests/rules/combat-pipeline-healing-atomicity.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/rules/inventory-add-item.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/api/magic-cast-route.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/rules/armor-class-both-ends.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/api/npc-route-identity.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/components/CharacterProfileEditor.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 820[2mms[22m[39m
+     [33m[2m✓[22m[39m explains a locked name and keeps other narrative fields editable [33m 485[2mms[22m[39m
+ [32m✓[39m tests/rules/dungeon.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 285[2mms[22m[39m
+ [32m✓[39m tests/api/rumors-route.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m tests/rules/improvised-actions.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m tests/rules/conditions.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/rules/generator-node-content.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/components/CharacterCreationForm.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 725[2mms[22m[39m
+     [33m[2m✓[22m[39m crea un personaje, crea su campaña y navega al identificador real [33m 328[2mms[22m[39m
+ [32m✓[39m tests/architecture/navigation-tool-no-direct-prisma.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/architecture/srd-monster-single-lookup.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m tests/rules/equipment-slot.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/components/CharacterSheetVTT.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 466[2mms[22m[39m
+ [32m✓[39m tests/ai/tools/srd-lookup.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m tests/rules/weapon-profile-service.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/architecture/intent-gate-exhaustiveness.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/architecture/single-disposition-band.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m tests/rules/combat-pipeline-consumable-atomicity.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/rules/armor-stealth.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m tests/rules/hex-grid.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/architecture/level-up-route-no-direct-prisma.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/architecture/rest-route-no-direct-prisma.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/components/WildernessMapVTT.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 387[2mms[22m[39m
+ [32m✓[39m tests/rules/damage-clauses.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/rules/magic-service-atomicity.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m tests/events/action-transport-request-id.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 106[2mms[22m[39m
+ [32m✓[39m tests/ai/narrator-real-sdk-containment.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 44[2mms[22m[39m
+ [32m✓[39m tests/actions/trade-quantity-validation.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/rules/starting-inventory.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/components/BattleGrid.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 589[2mms[22m[39m
+ [32m✓[39m tests/ai/read-only-projections.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/architecture/magic-cast-route-no-direct-prisma.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/components/MacroDeck.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 595[2mms[22m[39m
+     [33m[2m✓[22m[39m offers only combat actions with authoritative backend gates [33m 397[2mms[22m[39m
+ [32m✓[39m tests/rules/combat-turn-transition-atomicity.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/app/campaign-page-auth.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/architecture/backend-presentation-authority.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/ai/tool-policy.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m tests/rules/srd-equipment-lookup.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/architecture/encounter-resolution-authority.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m tests/architecture/spell-range-exhaustiveness.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m tests/architecture/service-select-fields-exist.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/character-sheet/pdf.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 226[2mms[22m[39m
+ [32m✓[39m tests/rules/armor-penalty-wiring.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/architecture/srd-equipment-single-lookup.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/rules/class-skills.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/rules/srd-monster-lookup.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/components/WildernessMapController.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 328[2mms[22m[39m
+ [32m✓[39m tests/rules/weapon-quality.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/components/InitiativeTracker.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 303[2mms[22m[39m
+ [32m✓[39m tests/rules/rest-service-noop-write.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/character-sheet/contracts.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/rules/map-logic.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m tests/rules/loot-weapon-qualities.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/components/CampaignChrome.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 375[2mms[22m[39m
+ [32m✓[39m tests/architecture/character-sheet-ai-authority.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/actions/trade-auth.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/auth/session.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/components/ZoneGrid.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 244[2mms[22m[39m
+ [32m✓[39m tests/ai/character-profile-proposal.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m tests/components/combat-state.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/character-sheet/view-model.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m tests/components/ExplorationPanel.test.tsx [2m([22m[2m1 test[22m[2m)[22m[33m 448[2mms[22m[39m
+     [33m[2m✓[22m[39m requests exploration movement through the shared stream [33m 434[2mms[22m[39m
+ [32m✓[39m tests/components/DungeonMapVTT.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 205[2mms[22m[39m
+ [32m✓[39m tests/architecture/aoe-shape-exhaustiveness.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m tests/query/srd-monster-query.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 102[2mms[22m[39m
+ [32m✓[39m tests/components/UiPrimitives.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 271[2mms[22m[39m
+ [32m✓[39m tests/architecture/ai-layer-no-direct-state-mutation.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m tests/architecture/rules-no-ai-tools-imports.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m tests/architecture/narrator-no-legacy-downtime-tools.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/api/dnd5e-msw.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m tests/api/encounter-turn-retired.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m tests/components/NPCRoster.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 242[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 5 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/rules/combat-pipeline.test.ts[2m > [22mcondition immunity[2m > [22mapplies the condition to a target with no immunities
+[31m[1mSpellSlotClaimError[22m: No available spell slots remaining at level 1.[39m
+[36m [2m❯[22m Module.executeCombatAction lib/rules/combat-pipeline.ts:[2m400:15[22m[39m
+    [90m398|[39m     [35mif[39m (consumesSlot [33m&&[39m playerCharacterId) {
+    [90m399|[39m       [35mif[39m ([33m![39mpayload[33m.[39mrawSpellSlots) {
+    [90m400|[39m         [35mthrow[39m [35mnew[39m [33mSpellSlotClaimError[39m(payload[33m.[39mspellLevel)[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m401|[39m       }
+    [90m402|[39m       [35mawait[39m [34mclaimSpellSlot[39m(
+[90m [2m❯[22m tests/rules/combat-pipeline.test.ts:[2m1616:27[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/rules/combat-pipeline.test.ts[2m > [22mcondition immunity[2m > [22mdoes not write the condition onto an immune target
+[31m[1mSpellSlotClaimError[22m: No available spell slots remaining at level 1.[39m
+[36m [2m❯[22m Module.executeCombatAction lib/rules/combat-pipeline.ts:[2m400:15[22m[39m
+    [90m398|[39m     [35mif[39m (consumesSlot [33m&&[39m playerCharacterId) {
+    [90m399|[39m       [35mif[39m ([33m![39mpayload[33m.[39mrawSpellSlots) {
+    [90m400|[39m         [35mthrow[39m [35mnew[39m [33mSpellSlotClaimError[39m(payload[33m.[39mspellLevel)[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m401|[39m       }
+    [90m402|[39m       [35mawait[39m [34mclaimSpellSlot[39m(
+[90m [2m❯[22m tests/rules/combat-pipeline.test.ts:[2m1631:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/rules/combat-pipeline.test.ts[2m > [22mcondition immunity[2m > [22mtells the facts the truth about what took hold
+[31m[1mSpellSlotClaimError[22m: No available spell slots remaining at level 1.[39m
+[36m [2m❯[22m Module.executeCombatAction lib/rules/combat-pipeline.ts:[2m400:15[22m[39m
+    [90m398|[39m     [35mif[39m (consumesSlot [33m&&[39m playerCharacterId) {
+    [90m399|[39m       [35mif[39m ([33m![39mpayload[33m.[39mrawSpellSlots) {
+    [90m400|[39m         [35mthrow[39m [35mnew[39m [33mSpellSlotClaimError[39m(payload[33m.[39mspellLevel)[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m401|[39m       }
+    [90m402|[39m       [35mawait[39m [34mclaimSpellSlot[39m(
+[90m [2m❯[22m tests/rules/combat-pipeline.test.ts:[2m1650:27[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/rules/combat-pipeline.test.ts[2m > [22mcondition immunity[2m > [22mdeclares the immunity in the system log
+[31m[1mSpellSlotClaimError[22m: No available spell slots remaining at level 1.[39m
+[36m [2m❯[22m Module.executeCombatAction lib/rules/combat-pipeline.ts:[2m400:15[22m[39m
+    [90m398|[39m     [35mif[39m (consumesSlot [33m&&[39m playerCharacterId) {
+    [90m399|[39m       [35mif[39m ([33m![39mpayload[33m.[39mrawSpellSlots) {
+    [90m400|[39m         [35mthrow[39m [35mnew[39m [33mSpellSlotClaimError[39m(payload[33m.[39mspellLevel)[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m401|[39m       }
+    [90m402|[39m       [35mawait[39m [34mclaimSpellSlot[39m(
+[90m [2m❯[22m tests/rules/combat-pipeline.test.ts:[2m1659:27[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m tests/rules/combat-pipeline.test.ts[2m > [22mcondition immunity[2m > [22mstill applies damage to an immune target
+[31m[1mSpellSlotClaimError[22m: No available spell slots remaining at level 1.[39m
+[36m [2m❯[22m Module.executeCombatAction lib/rules/combat-pipeline.ts:[2m400:15[22m[39m
+    [90m398|[39m     [35mif[39m (consumesSlot [33m&&[39m playerCharacterId) {
+    [90m399|[39m       [35mif[39m ([33m![39mpayload[33m.[39mrawSpellSlots) {
+    [90m400|[39m         [35mthrow[39m [35mnew[39m [33mSpellSlotClaimError[39m(payload[33m.[39mspellLevel)[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m401|[39m       }
+    [90m402|[39m       [35mawait[39m [34mclaimSpellSlot[39m(
+[90m [2m❯[22m tests/rules/combat-pipeline.test.ts:[2m1670:11[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m181 passed[39m[22m[90m (182)[39m
+[2m      Tests [22m [1m[31m5 failed[39m[22m[2m | [22m[1m[32m3346 passed[39m[22m[90m (3351)[39m
+[2m   Start at [22m 22:07:00
+[2m   Duration [22m 70.93s[2m (transform 8.25s, setup 76.97s, import 35.19s, tests 26.80s, environment 30.48s)[22m
+
+
+::error file=/home/runner/work/dungeon-cortex/dungeon-cortex/lib/rules/combat-pipeline.ts,title=tests/rules/combat-pipeline.test.ts > condition immunity > applies the condition to a target with no immunities,line=400,column=15::SpellSlotClaimError: No available spell slots remaining at level 1.%0A ❯ Module.executeCombatAction lib/rules/combat-pipeline.ts:400:15%0A ❯ tests/rules/combat-pipeline.test.ts:1616:27%0A%0A⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯%0ASerialized Error: { slotLevel: 1 }%0A
+
+::error file=/home/runner/work/dungeon-cortex/dungeon-cortex/lib/rules/combat-pipeline.ts,title=tests/rules/combat-pipeline.test.ts > condition immunity > does not write the condition onto an immune target,line=400,column=15::SpellSlotClaimError: No available spell slots remaining at level 1.%0A ❯ Module.executeCombatAction lib/rules/combat-pipeline.ts:400:15%0A ❯ tests/rules/combat-pipeline.test.ts:1631:11%0A%0A⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯%0ASerialized Error: { slotLevel: 1 }%0A
+
+::error file=/home/runner/work/dungeon-cortex/dungeon-cortex/lib/rules/combat-pipeline.ts,title=tests/rules/combat-pipeline.test.ts > condition immunity > tells the facts the truth about what took hold,line=400,column=15::SpellSlotClaimError: No available spell slots remaining at level 1.%0A ❯ Module.executeCombatAction lib/rules/combat-pipeline.ts:400:15%0A ❯ tests/rules/combat-pipeline.test.ts:1650:27%0A%0A⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯%0ASerialized Error: { slotLevel: 1 }%0A
+
+::error file=/home/runner/work/dungeon-cortex/dungeon-cortex/lib/rules/combat-pipeline.ts,title=tests/rules/combat-pipeline.test.ts > condition immunity > declares the immunity in the system log,line=400,column=15::SpellSlotClaimError: No available spell slots remaining at level 1.%0A ❯ Module.executeCombatAction lib/rules/combat-pipeline.ts:400:15%0A ❯ tests/rules/combat-pipeline.test.ts:1659:27%0A%0A⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯%0ASerialized Error: { slotLevel: 1 }%0A
+
+::error file=/home/runner/work/dungeon-cortex/dungeon-cortex/lib/rules/combat-pipeline.ts,title=tests/rules/combat-pipeline.test.ts > condition immunity > still applies damage to an immune target,line=400,column=15::SpellSlotClaimError: No available spell slots remaining at level 1.%0A ❯ Module.executeCombatAction lib/rules/combat-pipeline.ts:400:15%0A ❯ tests/rules/combat-pipeline.test.ts:1670:11%0A%0A⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯%0ASerialized Error: { slotLevel: 1 }%0A
+ ELIFECYCLE  Test failed. See above for more details.
+
+EXIT_STATUS=1
