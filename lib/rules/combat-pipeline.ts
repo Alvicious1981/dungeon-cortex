@@ -80,6 +80,7 @@ function normalizeDamageType(value: string | null | undefined): DamageType {
 }
 
 const MAX_CONSUMABLE_CLAIM_ATTEMPTS = 8;
+const MAX_CHARACTER_HEAL_CAS_ATTEMPTS = 8;
 
 /**
  * Claims exactly one persisted InventoryItem unit for a use_item action.
@@ -146,6 +147,65 @@ async function claimConsumableUnit(
   // Fail closed under sustained contention: without a successful conditional
   // claim this action owns no consumable unit and may grant no effects.
   return false;
+}
+
+/**
+ * Applies one already-rolled heal without allowing a stale Character snapshot
+ * to overwrite healing another transaction committed first.
+ *
+ * The dice result is supplied by the caller and is never recomputed here.
+ * Each attempt reads the latest hp/maxHp pair, derives the capped result, then
+ * conditionally writes only if both values still match the snapshot that
+ * authorised that result. A miss means another writer won; re-read and rebase
+ * the same healing amount. Matching maxHp as well as hp keeps the cap coherent
+ * with concurrent progression or sheet changes.
+ *
+ * Legacy synthetic transaction doubles that do not expose updateMany keep the
+ * previous read/update behaviour. Real Prisma always takes the CAS path, which
+ * is covered by the PostgreSQL healing-concurrency regression.
+ */
+async function applyCharacterHealing(
+  tx: Prisma.TransactionClient,
+  characterId: string,
+  healed: number
+): Promise<number | null> {
+  const characterDb = tx.character;
+
+  if (typeof characterDb.updateMany !== "function") {
+    const character = await characterDb.findUnique({ where: { id: characterId } });
+    if (!character) return null;
+
+    const newHp = Math.min(character.hp + healed, character.maxHp);
+    await characterDb.update({
+      where: { id: characterId },
+      data: { hp: newHp },
+    });
+    return newHp;
+  }
+
+  for (let attempt = 0; attempt < MAX_CHARACTER_HEAL_CAS_ATTEMPTS; attempt += 1) {
+    const character = await characterDb.findUnique({
+      where: { id: characterId },
+      select: { hp: true, maxHp: true },
+    });
+    if (!character) return null;
+
+    const newHp = Math.min(character.hp + healed, character.maxHp);
+    const claim = await characterDb.updateMany({
+      where: {
+        id: characterId,
+        hp: character.hp,
+        maxHp: character.maxHp,
+      },
+      data: { hp: newHp },
+    });
+
+    if (claim.count === 1) return newHp;
+  }
+
+  throw new Error(
+    `Character healing state conflict for ${characterId}; retry the action.`
+  );
 }
 
 export interface CombatActionPayload {
@@ -334,16 +394,12 @@ export async function executeCombatAction(
   if (actionType === "cast_spell" && payload.spellEffect?.type === "healing" && payload.spellEffect.dice) {
     const healed = roll(payload.spellEffect.dice).total;
     if (playerCharacterId) {
-      const character = await tx.character.findUnique({ where: { id: playerCharacterId } });
-      if (character) {
-        const newHp = Math.min(character.hp + healed, character.maxHp);
-        await tx.character.update({
-          where: { id: playerCharacterId },
-          data: { hp: newHp },
+      const newHp = await applyCharacterHealing(tx, playerCharacterId, healed);
+      if (newHp !== null && collectEvents) {
+        events.push({
+          type: "HEALING_RECEIVED",
+          payload: { amount: healed, newHp, spellName: payload.spellName },
         });
-        if (collectEvents) {
-          events.push({ type: "HEALING_RECEIVED", payload: { amount: healed, newHp, spellName: payload.spellName } });
-        }
       }
     }
   }
@@ -352,21 +408,14 @@ export async function executeCombatAction(
   if (actionType === "use_item" && payload.healingDice && itemConsumed) {
     const healed = roll(payload.healingDice).total + (payload.healingBonus ?? 0);
     if (playerCharacterId) {
-      const character = await tx.character.findUnique({ where: { id: playerCharacterId } });
-      if (character) {
-        const newHp = Math.min(character.hp + healed, character.maxHp);
-        await tx.character.update({
-          where: { id: playerCharacterId },
-          data: { hp: newHp },
+      const newHp = await applyCharacterHealing(tx, playerCharacterId, healed);
+      if (newHp !== null && collectEvents) {
+        events.push({
+          type: "HEALING_RECEIVED",
+          payload: { amount: healed, newHp, itemName: payload.itemName },
         });
-        if (collectEvents) {
-          events.push({
-            type: "HEALING_RECEIVED",
-            payload: { amount: healed, newHp, itemName: payload.itemName },
-          });
-          if (newHp <= 0) {
-            events.push({ type: "PLAYER_DOWNED", payload: {} });
-          }
+        if (newHp <= 0) {
+          events.push({ type: "PLAYER_DOWNED", payload: {} });
         }
       }
     }
