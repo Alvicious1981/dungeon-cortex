@@ -36,6 +36,7 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
       currentTurnIndex: 0,
       round: 1,
       collectEvents: true,
+      failOnStaleTurn: true,
     });
 
     expect(tx.encounter.updateMany).toHaveBeenCalledTimes(1);
@@ -74,6 +75,7 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
       currentTurnIndex: 0,
       round: 1,
       collectEvents: true,
+      failOnStaleTurn: true,
     });
 
     expect(tx.encounter.updateMany).toHaveBeenCalledTimes(1);
