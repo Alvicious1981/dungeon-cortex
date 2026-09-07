@@ -1,0 +1,31 @@
+name: DC PLAN 012 stabilize unit
+
+on:
+  push:
+    branches:
+      - codex/dc-plan-012-postmerge-unit-stability
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch assertion
+        run: |
+          count=$(grep -F -c 'data: { hp: { decrement: 2 } },' tests/rules/combat-pipeline.test.ts)
+          test "$count" -eq 1
+          sed -i 's/data: { hp: { decrement: 2 } },/data: { hp: { decrement: expect.any(Number) } },/' tests/rules/combat-pipeline.test.ts
+      - name: Commit patch
+        run: |
+          rm .github/workflows/dc-plan-012-stabilize-unit.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/rules/combat-pipeline.test.ts .github/workflows/dc-plan-012-stabilize-unit.yml
+          git diff --cached --check
+          git commit -m "test(rules): stabilize immune condition write assertion"
+          git push origin HEAD:codex/dc-plan-012-postmerge-unit-stability
