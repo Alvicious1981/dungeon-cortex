@@ -119,7 +119,7 @@ describe("executeCombatAction", () => {
       expect(outcome.consequences[0]?.hpAfter).toBe(12); // 15 - 3
       expect(tx.combatant.update).toHaveBeenCalledWith({
         where: { id: "enemy-1" },
-        data: { hp: { decrement: 3 }, conditions: [] },
+        data: { hp: { decrement: 3 } },
       });
       expect(outcome.events.some((e) => e.type === "DAMAGE_DEALT")).toBe(true);
     });
@@ -185,7 +185,7 @@ describe("executeCombatAction", () => {
       // HP unchanged — the atomic update decrements by zero while preserving conditions.
       expect(tx.combatant.update).toHaveBeenCalledWith({
         where: { id: "enemy-1" },
-        data: { hp: { decrement: 0 }, conditions: [] },
+        data: { hp: { decrement: 0 } },
       });
     });
 
@@ -1630,11 +1630,11 @@ describe("condition immunity", () => {
 
     await executeCombatAction(poisonPayload(target), tx as never);
 
-    expect(tx.combatant.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ conditions: [] }),
-      })
-    );
+    expect(tx.combatant.update).toHaveBeenCalledTimes(1);
+    expect(tx.combatant.update).toHaveBeenCalledWith({
+      where: { id: "enemy-1" },
+      data: { hp: { decrement: 2 } },
+    });
   });
 
   it("tells the facts the truth about what took hold", async () => {
