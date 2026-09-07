@@ -231,3 +231,152 @@ test("@smoke concurrent action-route spell casts consume two slots", async ({ re
     await cleanupE2ERecords(created);
   }
 });
+
+test("@smoke concurrent action-route casts fail closed when only one slot remains", async ({ request }) => {
+  test.setTimeout(90_000);
+  assertSafeE2EDatabase();
+
+  const created: E2ECreatedRecords = {};
+  const prisma = new PrismaClient();
+  const spellId = `action-slot-conflict-${randomUUID()}`;
+  const spellName = `Action Slot Conflict ${randomUUID().slice(0, 8)}`;
+  const action = `cast ${spellName}`;
+
+  let releaseLock!: () => void;
+  const mayReleaseLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+
+  let lockHeld!: () => void;
+  const characterLockHeld = new Promise<void>((resolve) => {
+    lockHeld = resolve;
+  });
+
+  let lockTransaction: Promise<unknown> | undefined;
+
+  try {
+    created.characterId = await createdId(
+      await request.post("/api/character", {
+        data: {
+          name: `Action slot conflict ${randomUUID().slice(0, 8)}`,
+          race: "human",
+          class: "wizard",
+          stats: { STR: 8, DEX: 14, CON: 12, INT: 16, WIS: 10, CHA: 10 },
+        },
+      })
+    );
+
+    created.campaignId = await createdId(
+      await request.post("/api/campaign", {
+        data: {
+          characterId: created.characterId,
+          title: `Action slot conflict ${randomUUID().slice(0, 8)}`,
+        },
+      })
+    );
+
+    await prisma.srdSpell.create({
+      data: {
+        id: spellId,
+        indexSlug: spellId,
+        name: spellName,
+        level: 1,
+        concentration: false,
+        hasHealing: false,
+        hasAreaOfEffect: false,
+        classes: ["wizard"],
+        components: [],
+        data: {
+          index: spellId,
+          name: spellName,
+          level: 1,
+          range: "Self",
+          duration: "Instantaneous",
+          concentration: false,
+        },
+      },
+    });
+
+    await prisma.character.update({
+      where: { id: created.characterId },
+      data: { spellSlots: { "1": { current: 1, max: 1 } } },
+    });
+
+    lockTransaction = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "Character"
+          WHERE "id" = ${created.characterId!}
+          FOR UPDATE
+        `;
+        lockHeld();
+        await mayReleaseLock;
+      },
+      { timeout: 15_000 }
+    );
+
+    await characterLockHeld;
+
+    const firstCast = request.post(`/api/campaign/${created.campaignId}/action`, {
+      data: {
+        requestId: `action-slot-conflict-a-${randomUUID()}`,
+        action,
+      },
+    });
+    const secondCast = request.post(`/api/campaign/${created.campaignId}/action`, {
+      data: {
+        requestId: `action-slot-conflict-b-${randomUUID()}`,
+        action,
+      },
+    });
+
+    await waitForBlockedCharacterUpdates(prisma);
+    releaseLock();
+    await lockTransaction;
+
+    const responses = await Promise.all([firstCast, secondCast]);
+    expect(responses.map((response) => response.status()).sort()).toEqual([200, 409]);
+
+    const success = responses.find((response) => response.status() === 200)!;
+    const conflict = responses.find((response) => response.status() === 409)!;
+
+    await expect(conflict.json()).resolves.toMatchObject({
+      code: "SPELL_SLOT_CONFLICT",
+    });
+
+    const spellEvents = parseSseFrames(await success.text()).filter(
+      (frame) => frame.t === "evt" && frame.e?.type === "SPELL_CAST"
+    );
+    expect(spellEvents).toHaveLength(1);
+    expect(spellEvents[0]?.e?.payload).toMatchObject({
+      spellLevel: 1,
+      spellName,
+      slotConsumed: true,
+    });
+
+    const after = await prisma.character.findUniqueOrThrow({
+      where: { id: created.characterId },
+      select: { spellSlots: true },
+    });
+    expect(after.spellSlots).toEqual({
+      "1": { current: 0, max: 1 },
+    });
+
+    const canonicalActions = await prisma.gameLog.findMany({
+      where: {
+        campaignId: created.campaignId,
+        role: "user",
+        content: action,
+      },
+      select: { id: true },
+    });
+    expect(canonicalActions).toHaveLength(1);
+  } finally {
+    releaseLock();
+    await lockTransaction?.catch(() => undefined);
+    await prisma.srdSpell.deleteMany({ where: { id: spellId } }).catch(() => undefined);
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
