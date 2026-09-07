@@ -42,6 +42,7 @@ import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
   executeCombatAction,
+  SpellSlotClaimError,
   type PipelineCombatant,
 } from "@/lib/rules/combat-pipeline";
 import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact-adapter";
@@ -1125,20 +1126,11 @@ async function resolveAction(
         targets = requestedTargets;
       }
 
-      // The cast is going ahead: now, and only now, is the action canonical and
-      // an unenforceable range worth declaring in the log.
-      await persistPlayerAction();
-
-      if (unenforcedRangeLog) {
-        await prisma.gameLog.create({
-          data: { campaignId, role: "system", content: unenforcedRangeLog },
-        });
-      }
-
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
-      await prisma.$transaction(async (tx) => {
+      try {
+        await prisma.$transaction(async (tx) => {
         const spellOutcome = await executeCombatAction({
           actionType: "cast_spell",
           encounter: context.activeEncounter ? {
@@ -1162,6 +1154,18 @@ async function resolveAction(
           actorConcentrationSpellId: context.character.concentrationSpellId,
         }, tx as Prisma.TransactionClient);
 
+        // The slot claim above is the point of no return. Keep canonical player
+        // history and any range declaration in this same transaction so a
+        // losing concurrent cast cannot leave narratable fiction behind.
+        await tx.gameLog.create({
+          data: { campaignId, role: "user", content: trimmedAction },
+        });
+        if (unenforcedRangeLog) {
+          await tx.gameLog.create({
+            data: { campaignId, role: "system", content: unenforcedRangeLog },
+          });
+        }
+
         await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);
 
         gameEvents.push(...spellOutcome.events);
@@ -1182,7 +1186,20 @@ async function resolveAction(
             targets: spellOutcome.consequences,
           }));
         }
-      });
+        });
+        playerActionLogged = true;
+      } catch (error) {
+        if (error instanceof SpellSlotClaimError) {
+          return NextResponse.json(
+            {
+              error: error.message,
+              code: "SPELL_SLOT_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
     }
 
   if (intent.actionType === "use_item" && intent.targetName) {
