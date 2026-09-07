@@ -1630,11 +1630,11 @@ describe("condition immunity", () => {
 
     await executeCombatAction(poisonPayload(target), tx as never);
 
-    expect(tx.combatant.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ conditions: [] }),
-      })
-    );
+    expect(tx.combatant.update).toHaveBeenCalledTimes(1);
+    expect(tx.combatant.update).toHaveBeenCalledWith({
+      where: { id: "enemy-1" },
+      data: { hp: { decrement: 2 } },
+    });
   });
 
   it("tells the facts the truth about what took hold", async () => {
