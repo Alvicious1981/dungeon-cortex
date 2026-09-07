@@ -512,7 +512,7 @@ export async function executeCombatAction(
       });
 
       const persistedHp =
-        typeof updatedTarget.hp === "number"
+        typeof updatedTarget?.hp === "number"
           ? updatedTarget.hp
           : target.hp - damage;
 
@@ -524,7 +524,7 @@ export async function executeCombatAction(
           where: { id: target.id },
           data: { hp: 0 },
         });
-        newHp = typeof clampedTarget.hp === "number" ? clampedTarget.hp : 0;
+        newHp = typeof clampedTarget?.hp === "number" ? clampedTarget.hp : 0;
       } else {
         newHp = persistedHp;
       }
