@@ -35,9 +35,9 @@ async function createdId(response: {
 
 async function waitForTwoBlockedEncounterUpdates(prisma: PrismaClient): Promise<void> {
   // The action route uses Prisma interactive transactions with the default
-  // 5-second timeout. Both requests should reach their first conditional
-  // Encounter UPDATE quickly, so release the external lock as soon as both
-  // overlapping transition claims are visible.
+  // 5-second timeout. Both requests should reach their conditional Encounter
+  // UPDATE quickly, so release the external lock as soon as both overlapping
+  // transition claims are visible.
   const deadline = Date.now() + 2_000;
 
   while (Date.now() < deadline) {
@@ -76,7 +76,7 @@ async function waitForTwoBlockedEncounterUpdates(prisma: PrismaClient): Promise<
   );
 }
 
-test("@smoke concurrent End Turn preserves both accepted turn transitions", async ({ request }) => {
+test("@smoke concurrent End Turn rejects the stale turn transition", async ({ request }) => {
   test.setTimeout(90_000);
   assertSafeE2EDatabase();
 
@@ -164,8 +164,9 @@ test("@smoke concurrent End Turn preserves both accepted turn transitions", asyn
 
     // Lock only the canonical Encounter row. buildCampaignContext can still
     // read currentTurnIndex=0 under MVCC, while both live End Turn requests
-    // reach a conditional UPDATE and wait. After release, exactly one can claim
-    // 0 -> 1. The other must observe that miss, re-read 1, and claim 1 -> 2.
+    // reach the same conditional UPDATE and wait. After release, exactly one
+    // request may claim 0 -> 1; the other must fail closed against its stale
+    // round/index snapshot rather than reinterpret itself as 1 -> 2.
     lockTransaction = prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw<Array<{ id: string }>>`
@@ -204,28 +205,33 @@ test("@smoke concurrent End Turn preserves both accepted turn transitions", asyn
       secondEndTurn,
     ]);
 
-    expect(firstResponse.status()).toBe(200);
-    expect(secondResponse.status()).toBe(200);
+    const responses = [firstResponse, secondResponse];
+    expect(responses.map((response) => response.status()).sort((a, b) => a - b)).toEqual([
+      200,
+      409,
+    ]);
 
-    const firstFrames = parseSseFrames(await firstResponse.text());
-    const secondFrames = parseSseFrames(await secondResponse.text());
-    const turnEvents = [...firstFrames, ...secondFrames].filter(
+    const successResponse = responses.find((response) => response.status() === 200);
+    const conflictResponse = responses.find((response) => response.status() === 409);
+    expect(successResponse).toBeDefined();
+    expect(conflictResponse).toBeDefined();
+
+    const conflictBody = (await conflictResponse!.json()) as {
+      error?: unknown;
+      code?: unknown;
+    };
+    expect(conflictBody.code).toBe("TURN_STATE_CONFLICT");
+    expect(typeof conflictBody.error).toBe("string");
+
+    const turnEvents = parseSseFrames(await successResponse!.text()).filter(
       (frame) => frame.t === "evt" && frame.e?.type === "TURN_ADVANCE"
     );
 
-    expect(turnEvents).toHaveLength(2);
-
-    // Both distinct requests are still accepted, but the state-machine edges
-    // must be unique. Completion order is nondeterministic, so compare the two
-    // claimed destinations after sorting rather than assigning them to request A/B.
-    const claimedIndexes = turnEvents
-      .map((frame) => frame.e?.payload?.nextTurnIndex)
-      .filter((value): value is number => typeof value === "number")
-      .sort((a, b) => a - b);
-    expect(claimedIndexes).toEqual([1, 2]);
-    expect(
-      turnEvents.map((frame) => frame.e?.payload?.nextRound)
-    ).toEqual([1, 1]);
+    expect(turnEvents).toHaveLength(1);
+    expect(turnEvents[0]?.e?.payload).toMatchObject({
+      nextTurnIndex: 1,
+      nextRound: 1,
+    });
 
     const after = await prisma.encounter.findUniqueOrThrow({
       where: { id: encounter.id },
@@ -234,11 +240,7 @@ test("@smoke concurrent End Turn preserves both accepted turn transitions", asyn
 
     expect(after.status).toBe("active");
     expect(after.round).toBe(1);
-
-    // Sequential semantics: three living combatants, start index 0, two
-    // distinct accepted End Turn actions => 0 -> 1 -> 2. DC-AUD-010 proved the
-    // vulnerable implementation persisted only 1 because both wrote 0 -> 1.
-    expect(after.currentTurnIndex).toBe(2);
+    expect(after.currentTurnIndex).toBe(1);
   } finally {
     releaseLock();
     await lockTransaction?.catch(() => undefined);
