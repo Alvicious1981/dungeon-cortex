@@ -1,0 +1,25 @@
+name: DC PLAN 012 fix unit
+on:
+  push:
+    branches: [codex/dc-plan-012-combatant-conditions-atomicity]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch test
+        run: |
+          python -c 'from pathlib import Path; p=Path("tests/rules/combat-pipeline.test.ts"); s=p.read_text(); old="    expect(tx.combatant.update).toHaveBeenCalledWith(\n      expect.objectContaining({\n        data: expect.objectContaining({ conditions: [] }),\n      })\n    );"; new="    expect(tx.combatant.update).toHaveBeenCalledTimes(1);\n    expect(tx.combatant.update).toHaveBeenCalledWith({\n      where: { id: \"enemy-1\" },\n      data: { hp: { decrement: 2 } },\n    });"; assert s.count(old)==1, s.count(old); p.write_text(s.replace(old,new,1))'
+      - name: Commit
+        run: |
+          rm .github/workflows/dc-plan-012-fix-unit.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/rules/combat-pipeline.test.ts .github/workflows/dc-plan-012-fix-unit.yml
+          git diff --cached --check
+          git commit -m "test(rules): keep immune condition writes absent"
+          git push origin HEAD:codex/dc-plan-012-combatant-conditions-atomicity
