@@ -162,6 +162,9 @@ export async function resolveRumors(
 ): Promise<RumorPayload> {
   const db = resolveDb(input);
 
+  // Either identifier works, the way `findNpc` already resolves one for a
+  // social check. The route holds an `npcId` because the roster clicked one;
+  // the seed path predates it and still serves callers that only know a seed.
   const npc = await db.nPC.findUnique({
     where: input.npcId
       ? { id: input.npcId }
@@ -177,6 +180,9 @@ export async function resolveRumors(
       seed: true,
       name: true,
       disposition: true,
+      // Selected because `getRumorsPayload` takes it and nothing was passing
+      // it: the column exists, the parameter exists, and the personal rumours
+      // an NPC knows came out empty every time.
       knownRumors: true,
     },
   });
@@ -223,6 +229,14 @@ function assertApproach(approach: string): asserts approach is SocialApproach {
   }
 }
 
+/**
+ * Builds the actor `resolveSocialCheck` (the pure function) rolls against,
+ * from a loosely-typed persisted character record. Unknown or malformed
+ * stats/level/proficiencies degrade to safe defaults rather than throwing —
+ * its job here is only to shape the call, not to validate the database.
+ * `resolveSocialCheck` is called from production by
+ * `POST /api/campaign/[id]/social` (`app/api/campaign/[id]/social/route.ts`).
+ */
 function toAbilityCheckActor(character: SocialCharacterRecord): AbilityCheckActor {
   const stats =
     typeof character.stats === "object" && character.stats !== null
@@ -241,6 +255,14 @@ function assertCharacterOwnership(
   characterId: string,
   campaignId: string
 ): void {
+  // This guards a caller that supplies its own `characterId` for a character
+  // other than the campaign's own. The production route never does this — it
+  // omits `characterId` entirely, so `resolveSocialCheckInTransaction` falls
+  // back to `campaign.characterId` and the comparison below is satisfied by
+  // construction (`x !== x` is always false). The route's real protection is
+  // its own `campaign.userId !== user.id` gate, upstream of this call. This
+  // check only fires for a caller — today, only tests — that passes a
+  // `characterId` sourced from somewhere other than the campaign row.
   if (campaign.characterId !== characterId) {
     throw new SocialServiceError(
       "CHARACTER_OWNERSHIP_MISMATCH",
@@ -420,7 +442,7 @@ async function resolveSocialCheckInTransaction(
     }
 
     const write = await db.nPC.updateMany({
-      where: npc.id ?? input.npcId
+      where: (npc.id ?? input.npcId)
         ? { id: npcId, disposition: expectedDisposition }
         : {
             campaignId: input.campaignId,
@@ -464,3 +486,5 @@ export async function resolveSocialCheck(
 
   return db.$transaction((tx) => resolveSocialCheckInTransaction(tx, input));
 }
+
+
