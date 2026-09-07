@@ -282,11 +282,18 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
      */
     const damageWrittenFor = (targetId: string, startingHp: number): number => {
       const call = (prisma.combatant.update as any).mock.calls.find(
-        ([args]: [{ where: { id: string }; data: { hp?: number } }]) =>
-          args.where.id === targetId && typeof args.data.hp === "number",
+        ([args]: [{ where: { id: string }; data: { hp?: number | { decrement?: number } } }]) => {
+          const hp = args.data.hp;
+          return (
+            args.where.id === targetId &&
+            (typeof hp === "number" ||
+              (typeof hp === "object" && hp !== null && typeof hp.decrement === "number"))
+          );
+        },
       );
       if (!call) throw new Error(`No hp write for ${targetId}`);
-      return startingHp - call[0].data.hp;
+      const hp = call[0].data.hp as number | { decrement: number };
+      return typeof hp === "number" ? startingHp - hp : hp.decrement;
     };
 
     it("halves the damage of a mundane weapon against the clause, and says nothing", async () => {

@@ -119,7 +119,7 @@ describe("executeCombatAction", () => {
       expect(outcome.consequences[0]?.hpAfter).toBe(12); // 15 - 3
       expect(tx.combatant.update).toHaveBeenCalledWith({
         where: { id: "enemy-1" },
-        data: { hp: 12, conditions: [] },
+        data: { hp: { decrement: 3 }, conditions: [] },
       });
       expect(outcome.events.some((e) => e.type === "DAMAGE_DEALT")).toBe(true);
     });
@@ -182,10 +182,10 @@ describe("executeCombatAction", () => {
       expect(outcome.consequences[0]?.isFumble).toBe(true);
       expect(outcome.events.some((e) => e.type === "CRITICAL_MISS")).toBe(true);
       expect(outcome.events.some((e) => e.type === "DAMAGE_DEALT")).toBe(false);
-      // HP unchanged — combatant still gets an update (damage=0, conditions unchanged)
+      // HP unchanged — the atomic update decrements by zero while preserving conditions.
       expect(tx.combatant.update).toHaveBeenCalledWith({
         where: { id: "enemy-1" },
-        data: { hp: 15, conditions: [] },
+        data: { hp: { decrement: 0 }, conditions: [] },
       });
     });
 
@@ -1670,7 +1670,7 @@ describe("condition immunity", () => {
     await executeCombatAction(poisonPayload(target), tx as never);
 
     const call = (tx.combatant.update as unknown as { mock: { calls: unknown[][] } })
-      .mock.calls.at(-1)?.[0] as { data: { hp: number } };
-    expect(call.data.hp).toBeLessThan(20);
+      .mock.calls.at(-1)?.[0] as { data: { hp: { decrement: number } } };
+    expect(call.data.hp.decrement).toBeGreaterThan(0);
   });
 });

@@ -501,10 +501,33 @@ export async function executeCombatAction(
     );
 
     if (actionType === "attack" || (actionType === "cast_spell" && payload.spellEffect?.type !== "healing")) {
-      await tx.combatant.update({
+      // HP is a shared counter, not a snapshot field. A whole-value write here
+      // loses damage when two accepted actions start from the same pre-transaction
+      // encounter snapshot. Prisma's atomic decrement is translated to a single
+      // row-level UPDATE, so PostgreSQL serializes concurrent damage against the
+      // value that actually exists when each write acquires the row lock.
+      const updatedTarget = await tx.combatant.update({
         where: { id: target.id },
-        data: { hp: newHp, conditions: finalConditions },
+        data: { hp: { decrement: damage }, conditions: finalConditions },
       });
+
+      const persistedHp =
+        typeof updatedTarget?.hp === "number"
+          ? updatedTarget.hp
+          : target.hp - damage;
+
+      if (persistedHp < 0) {
+        // Keep the domain invariant without exposing a negative committed HP.
+        // The row lock from the decrement is held until this transaction ends,
+        // so the clamp cannot race another damage mutation on this combatant.
+        const clampedTarget = await tx.combatant.update({
+          where: { id: target.id },
+          data: { hp: 0 },
+        });
+        newHp = typeof clampedTarget?.hp === "number" ? clampedTarget.hp : 0;
+      } else {
+        newHp = persistedHp;
+      }
     }
 
     const singleConsequence: SingleTargetConsequence = {
@@ -741,4 +764,3 @@ export async function finalizeEncounterTurn(
     };
   }
 }
-
