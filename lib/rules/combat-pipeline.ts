@@ -81,7 +81,6 @@ function normalizeDamageType(value: string | null | undefined): DamageType {
 
 const MAX_CONSUMABLE_CLAIM_ATTEMPTS = 8;
 const MAX_CHARACTER_HEAL_CAS_ATTEMPTS = 8;
-const MAX_TURN_ADVANCE_CAS_ATTEMPTS = 8;
 
 /**
  * Claims exactly one persisted InventoryItem unit for a use_item action.
@@ -274,6 +273,8 @@ export interface FinalizeEncounterTurnInput {
 export interface FinalizeTurnResult {
   events: GameEvent[];
   encounterResolved: boolean;
+  /** True only when this caller's observed round/index was already stale. */
+  turnAdvanceConflict?: boolean;
   nextTurnIndex?: number;
   nextRound?: number;
 }
@@ -861,73 +862,53 @@ export async function finalizeEncounterTurn(
       return {
         events,
         encounterResolved: false,
+        turnAdvanceConflict: false,
         nextTurnIndex,
         nextRound,
       };
     }
 
-    // A turn transition is a state-machine edge, not an absolute field write.
-    // The caller's snapshot proposes the first edge. `updateMany` authorizes it
-    // only while the persisted encounter still has that exact round/index.
-    // If another request wins first, this request loses that stale claim,
-    // re-reads the committed turn, and applies its distinct accepted End Turn
-    // to the next edge instead. The original transition is therefore emitted
-    // once, never twice, while two distinct accepted submissions still compose
-    // as sequential 0 -> 1 -> 2 semantics.
-    let expectedTurnIndex = currentTurnIndex;
-    let expectedRound = round;
+    // A normal turn transition is one state-machine edge authorised by the
+    // exact persisted snapshot the caller observed. A stale caller must not
+    // silently reinterpret the same request against a newer turn: if the CAS
+    // misses, this request owns no transition and emits no advance event.
+    const { nextTurnIndex, nextRound, roundAdvanced } = advanceTurn({
+      currentTurnIndex,
+      round,
+      combatantCount: allCombatants.length,
+    });
 
-    for (let attempt = 0; attempt < MAX_TURN_ADVANCE_CAS_ATTEMPTS; attempt += 1) {
-      const { nextTurnIndex, nextRound, roundAdvanced } = advanceTurn({
-        currentTurnIndex: expectedTurnIndex,
-        round: expectedRound,
-        combatantCount: allCombatants.length,
-      });
+    const claim = await tx.encounter.updateMany({
+      where: {
+        id: encounterId,
+        status: "active",
+        currentTurnIndex,
+        round,
+      },
+      data: { currentTurnIndex: nextTurnIndex, round: nextRound },
+    });
 
-      const claim = await tx.encounter.updateMany({
-        where: {
-          id: encounterId,
-          status: "active",
-          currentTurnIndex: expectedTurnIndex,
-          round: expectedRound,
-        },
-        data: { currentTurnIndex: nextTurnIndex, round: nextRound },
-      });
-
-      if (claim.count === 1) {
-        if (collectEvents) {
-          events.push({
-            type: roundAdvanced ? "ROUND_ADVANCE" : "TURN_ADVANCE",
-            payload: { nextTurnIndex, nextRound },
-          });
-        }
-
-        return {
-          events,
-          encounterResolved: false,
-          nextTurnIndex,
-          nextRound,
-        };
-      }
-
-      const fresh = await tx.encounter.findUnique({
-        where: { id: encounterId },
-        select: { status: true, currentTurnIndex: true, round: true },
-      });
-
-      if (!fresh || fresh.status !== "active") {
-        return {
-          events,
-          encounterResolved: true,
-        };
-      }
-
-      expectedTurnIndex = fresh.currentTurnIndex;
-      expectedRound = fresh.round;
+    if (claim.count !== 1) {
+      return {
+        events,
+        encounterResolved: false,
+        turnAdvanceConflict: true,
+      };
     }
 
-    throw new Error(
-      `Encounter turn state conflict for ${encounterId}; retry the action.`
-    );
+    if (collectEvents) {
+      events.push({
+        type: roundAdvanced ? "ROUND_ADVANCE" : "TURN_ADVANCE",
+        payload: { nextTurnIndex, nextRound },
+      });
+    }
+
+    return {
+      events,
+      encounterResolved: false,
+      turnAdvanceConflict: false,
+      nextTurnIndex,
+      nextRound,
+    };
   }
 }
