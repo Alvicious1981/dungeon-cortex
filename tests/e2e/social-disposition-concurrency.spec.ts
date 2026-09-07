@@ -72,9 +72,6 @@ test("@smoke concurrent social checks preserve both disposition shifts", async (
     expect(typeof npcBody.id).toBe("string");
     npcId = npcBody.id as string;
 
-    // Put both requests on the same known baseline and skip first-contact
-    // initialization. The race under test starts inside social-service after
-    // it has read this row.
     await prisma.nPC.update({
       where: { id: npcId },
       data: { disposition: 0, hasMetPlayer: true },
@@ -102,6 +99,8 @@ test("@smoke concurrent social checks preserve both disposition shifts", async (
             return row;
           },
           update: (args: unknown) => realTx.nPC.update(args as Prisma.NPCUpdateArgs),
+          updateMany: (args: unknown) =>
+            realTx.nPC.updateMany(args as Prisma.NPCUpdateManyArgs),
         },
       } as unknown as SocialTx;
 
@@ -123,26 +122,24 @@ test("@smoke concurrent social checks preserve both disposition shifts", async (
       intent: "second concurrent attempt",
     });
 
-    // Both calls read disposition 0. The second commits first; the paused call
-    // then resumes with its stale snapshot.
     expect(secondResult.dispositionBefore).toBe(0);
     resumeFirstCheck();
     const firstResult = await firstCheck;
-    expect(firstResult.dispositionBefore).toBe(0);
+
+    // The paused request must detect that disposition 0 is stale and rebase
+    // the same already-rolled check onto the value committed by the second
+    // request. It must not silently overwrite that earlier accepted shift.
+    expect(firstResult.dispositionBefore).toBe(secondResult.dispositionAfter);
+    expect(firstResult.dispositionAfter).toBe(
+      shiftDisposition(secondResult.dispositionAfter, firstResult.success)
+    );
 
     const after = await prisma.nPC.findUniqueOrThrow({
       where: { id: npcId },
       select: { disposition: true },
     });
 
-    // If two calls both return successful service results, persisted state must
-    // account for both reported shifts. Starting from 0 this is always -8, 0,
-    // or +8; a final +/-4 proves that one accepted interaction was overwritten.
-    const expectedAfterBoth = shiftDisposition(
-      secondResult.dispositionAfter,
-      firstResult.success
-    );
-    expect(after.disposition).toBe(expectedAfterBoth);
+    expect(after.disposition).toBe(firstResult.dispositionAfter);
   } finally {
     resumeFirstCheck();
     if (created.campaignId) {
