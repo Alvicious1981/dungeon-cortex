@@ -18,7 +18,7 @@ async function createdId(response: {
   return body.id as string;
 }
 
-async function waitForBlockedInventoryUpdates(
+async function waitForBlockedEquipRequests(
   prisma: PrismaClient,
   expected: number
 ): Promise<void> {
@@ -31,8 +31,11 @@ async function waitForBlockedInventoryUpdates(
       WHERE datname = current_database()
         AND pid <> pg_backend_pid()
         AND wait_event_type = 'Lock'
-        AND query ILIKE '%InventoryItem%'
-        AND query ILIKE 'UPDATE%'
+        AND (
+          (query ILIKE '%InventoryItem%' AND query ILIKE 'UPDATE%')
+          OR
+          (query ILIKE '%Character%' AND query ILIKE 'SELECT%' AND query ILIKE '%FOR UPDATE%')
+        )
     `;
 
     if (Number(rows[0]?.count ?? 0) >= expected) return;
@@ -40,7 +43,7 @@ async function waitForBlockedInventoryUpdates(
   }
 
   throw new Error(
-    `Timed out waiting for ${expected} equip updates to block on locked inventory rows.`
+    `Timed out waiting for ${expected} equip requests to reach lock contention.`
   );
 }
 
@@ -114,11 +117,12 @@ test("@smoke concurrent equips preserve one-item-per-slot invariant", async ({ r
       },
     });
 
-    // Hold both target rows so the two LIVE equip requests can complete their
-    // `updateMany(... equippedSlot: MAIN_HAND -> null)` while the slot is empty,
-    // then both block on their final item update. Releasing the rows afterwards
-    // forces the dangerous interleaving deterministically instead of relying on
-    // scheduler timing.
+    // Hold both target rows. On the vulnerable implementation, both LIVE equip
+    // transactions clear the empty MAIN_HAND slot and then block on these rows.
+    // With character-level serialization, one reaches the inventory row while
+    // the other blocks earlier on Character FOR UPDATE. Either way, observing
+    // two blocked requests proves both submissions are genuinely overlapping
+    // before the external locks are released.
     const lockTransaction = prisma.$transaction(async (tx) => {
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id"
@@ -139,9 +143,7 @@ test("@smoke concurrent equips preserve one-item-per-slot invariant", async ({ r
       data: { action: `equip ${secondItem.name}` },
     });
 
-    // Both requests must reach the final UPDATE and wait on our row locks.
-    // At that point each transaction has already observed MAIN_HAND as empty.
-    await waitForBlockedInventoryUpdates(prisma, 2);
+    await waitForBlockedEquipRequests(prisma, 2);
     releaseLocks();
     await lockTransaction;
 
@@ -163,7 +165,6 @@ test("@smoke concurrent equips preserve one-item-per-slot invariant", async ({ r
     });
 
     // Domain invariant: a character has at most one occupant per equipment slot.
-    // The current route can leave both rows in MAIN_HAND under the forced race.
     expect(equipped).toHaveLength(1);
   } finally {
     releaseLocks();
