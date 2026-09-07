@@ -269,11 +269,15 @@ export interface FinalizeEncounterTurnInput {
   currentTurnIndex: number;
   round: number;
   collectEvents?: boolean;
+  /** End Turn uses fail-closed semantics for an already-stale round/index. */
+  failOnStaleTurn?: boolean;
 }
 
 export interface FinalizeTurnResult {
   events: GameEvent[];
   encounterResolved: boolean;
+  /** True only when this caller's observed round/index was already stale. */
+  turnAdvanceConflict?: boolean;
   nextTurnIndex?: number;
   nextRound?: number;
 }
@@ -719,6 +723,7 @@ export async function finalizeEncounterTurn(
     currentTurnIndex,
     round,
     collectEvents = true,
+    failOnStaleTurn = false,
   } = input;
 
   const events: GameEvent[] = [];
@@ -861,19 +866,18 @@ export async function finalizeEncounterTurn(
       return {
         events,
         encounterResolved: false,
+        turnAdvanceConflict: false,
         nextTurnIndex,
         nextRound,
       };
     }
 
     // A turn transition is a state-machine edge, not an absolute field write.
-    // The caller's snapshot proposes the first edge. `updateMany` authorizes it
-    // only while the persisted encounter still has that exact round/index.
-    // If another request wins first, this request loses that stale claim,
-    // re-reads the committed turn, and applies its distinct accepted End Turn
-    // to the next edge instead. The original transition is therefore emitted
-    // once, never twice, while two distinct accepted submissions still compose
-    // as sequential 0 -> 1 -> 2 semantics.
+    // The caller's snapshot proposes the first edge. End Turn requests opt into
+    // fail-closed semantics: a stale claim returns a conflict instead of being
+    // silently reinterpreted as a later turn. Existing combat-action finalizers
+    // retain their bounded rebase behavior until a separate regression proves
+    // a different contract is required for those flows.
     let expectedTurnIndex = currentTurnIndex;
     let expectedRound = round;
 
@@ -905,8 +909,17 @@ export async function finalizeEncounterTurn(
         return {
           events,
           encounterResolved: false,
+          turnAdvanceConflict: false,
           nextTurnIndex,
           nextRound,
+        };
+      }
+
+      if (failOnStaleTurn) {
+        return {
+          events,
+          encounterResolved: false,
+          turnAdvanceConflict: true,
         };
       }
 

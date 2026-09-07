@@ -36,6 +36,7 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
       currentTurnIndex: 0,
       round: 1,
       collectEvents: true,
+      failOnStaleTurn: true,
     });
 
     expect(tx.encounter.updateMany).toHaveBeenCalledTimes(1);
@@ -52,6 +53,7 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
     expect(tx.encounter.findUnique).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       encounterResolved: false,
+      turnAdvanceConflict: false,
       nextTurnIndex: 1,
       nextRound: 1,
     });
@@ -63,16 +65,9 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
     ]);
   });
 
-  it("rebases a stale accepted turn onto the state committed by the winning request", async () => {
+  it("fails closed when the observed turn snapshot is already stale", async () => {
     const tx = buildCasTx();
-    (tx.encounter.updateMany as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ count: 0 })
-      .mockResolvedValueOnce({ count: 1 });
-    (tx.encounter.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
-      status: "active",
-      currentTurnIndex: 1,
-      round: 1,
-    });
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
 
     const result = await finalizeEncounterTurn({
       tx,
@@ -80,9 +75,11 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
       currentTurnIndex: 0,
       round: 1,
       collectEvents: true,
+      failOnStaleTurn: true,
     });
 
-    expect(tx.encounter.updateMany).toHaveBeenNthCalledWith(1, {
+    expect(tx.encounter.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.encounter.updateMany).toHaveBeenCalledWith({
       where: {
         id: "enc-1",
         status: "active",
@@ -91,30 +88,12 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
       },
       data: { currentTurnIndex: 1, round: 1 },
     });
-    expect(tx.encounter.findUnique).toHaveBeenCalledWith({
-      where: { id: "enc-1" },
-      select: { status: true, currentTurnIndex: true, round: true },
-    });
-    expect(tx.encounter.updateMany).toHaveBeenNthCalledWith(2, {
-      where: {
-        id: "enc-1",
-        status: "active",
-        currentTurnIndex: 1,
-        round: 1,
-      },
-      data: { currentTurnIndex: 2, round: 1 },
-    });
+    expect(tx.encounter.findUnique).not.toHaveBeenCalled();
     expect(tx.encounter.update).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
+    expect(result).toEqual({
+      events: [],
       encounterResolved: false,
-      nextTurnIndex: 2,
-      nextRound: 1,
+      turnAdvanceConflict: true,
     });
-    expect(result.events).toEqual([
-      {
-        type: "TURN_ADVANCE",
-        payload: { nextTurnIndex: 2, nextRound: 1 },
-      },
-    ]);
   });
 });
