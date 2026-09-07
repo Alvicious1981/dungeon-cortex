@@ -661,21 +661,37 @@ export async function executeCombatAction(
 
     totalDamageDealt += damage;
 
-    const finalConditions = conditionsToApply.reduce(
-      (acc, cond) => applyCondition(acc, cond),
-      extractConditions(target.conditions)
-    );
-
     if (actionType === "attack" || (actionType === "cast_spell" && payload.spellEffect?.type !== "healing")) {
-      // HP is a shared counter, not a snapshot field. A whole-value write here
-      // loses damage when two accepted actions start from the same pre-transaction
-      // encounter snapshot. Prisma's atomic decrement is translated to a single
-      // row-level UPDATE, so PostgreSQL serializes concurrent damage against the
-      // value that actually exists when each write acquires the row lock.
+      // The first write owns two jobs and does them exactly once: atomically apply
+      // damage and acquire PostgreSQL's row lock for this Combatant. Crucially it
+      // does not write `conditions`, so a damage-only action can never erase a
+      // condition another transaction committed after this request's snapshot.
       const updatedTarget = await tx.combatant.update({
         where: { id: target.id },
-        data: { hp: { decrement: damage }, conditions: finalConditions },
+        data: { hp: { decrement: damage } },
       });
+
+      if (conditionsToApply.length > 0) {
+        // `update` returns the row as it exists after waiting for any earlier row
+        // lock holder to commit. Rebase condition composition on that persisted
+        // state, not on `target.conditions` from the pre-transaction encounter
+        // snapshot. The row lock remains held until this transaction commits, so
+        // no concurrent writer can slip between this composition and the write.
+        // Reduced unit-test doubles sometimes omit `conditions` from their mocked
+        // update result; only those doubles fall back to the supplied snapshot.
+        const persistedConditions = extractConditions(
+          updatedTarget?.conditions ?? target.conditions
+        );
+        const rebasedConditions = conditionsToApply.reduce(
+          (acc, cond) => applyCondition(acc, cond),
+          persistedConditions
+        );
+
+        await tx.combatant.update({
+          where: { id: target.id },
+          data: { conditions: rebasedConditions },
+        });
+      }
 
       const persistedHp =
         typeof updatedTarget?.hp === "number"
