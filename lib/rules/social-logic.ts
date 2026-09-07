@@ -7,7 +7,12 @@
 
 import { pickSeeded } from "@/lib/rules/generators";
 import { type NPCRole } from "@/lib/rules/npc";
-import { resolveAbilityCheck, type AbilityCheckActor, type Skill } from "@/lib/rules/ability-check";
+import {
+  computeAbilityCheckDC,
+  resolveAbilityCheck,
+  type AbilityCheckActor,
+  type Skill,
+} from "@/lib/rules/ability-check";
 import {
   NPCPersonality,
   DefaultNPCSocialState,
@@ -57,6 +62,34 @@ export function attitudeFor(disposition: number | null | undefined): NpcAttitude
 export function shiftDisposition(disposition: number, success: boolean): number {
   const shifted = disposition + (success ? ATTITUDE_SHIFT : -ATTITUDE_SHIFT);
   return Math.max(MIN_DISPOSITION, Math.min(MAX_DISPOSITION, shifted));
+}
+
+/**
+ * Re-evaluates an already-rolled social check against a newer persisted
+ * disposition. Concurrency retries must never grant another d20 roll merely
+ * because another request updated the same NPC first, so the natural roll,
+ * modifiers and total are preserved while only the attitude-derived DC,
+ * success and disposition transition are recalculated.
+ */
+export function rebaseSocialCheckResult(
+  result: SocialCheckResult,
+  disposition: number | null
+): SocialCheckResult {
+  const dispositionBefore = disposition ?? 0;
+  const attitudeBefore = attitudeFor(dispositionBefore);
+  const dc = computeAbilityCheckDC(ATTITUDE_DIFFICULTY[attitudeBefore]);
+  const success = result.total >= dc;
+  const dispositionAfter = shiftDisposition(dispositionBefore, success);
+
+  return {
+    ...result,
+    dc,
+    success,
+    attitudeBefore,
+    attitudeAfter: attitudeFor(dispositionAfter),
+    dispositionBefore,
+    dispositionAfter,
+  };
 }
 
 /**
