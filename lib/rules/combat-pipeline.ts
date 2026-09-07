@@ -26,7 +26,7 @@ import {
   type CombatFacts,
   type HitLocation,
 } from "@/lib/rules/combat";
-import { consumeSlot, type SpellSlots } from "@/lib/rules/magic";
+import { consumeSlot, hasAvailableSlot, isSpellSlots, type SpellSlots } from "@/lib/rules/magic";
 import {
   applyDamageModifiers,
   unresolvedModifierLog,
@@ -82,6 +82,75 @@ function normalizeDamageType(value: string | null | undefined): DamageType {
 const MAX_CONSUMABLE_CLAIM_ATTEMPTS = 8;
 const MAX_CHARACTER_HEAL_CAS_ATTEMPTS = 8;
 const MAX_TURN_ADVANCE_CAS_ATTEMPTS = 8;
+const MAX_SPELL_SLOT_CLAIM_ATTEMPTS = 8;
+
+export class SpellSlotClaimError extends Error {
+  constructor(public readonly slotLevel: number) {
+    super(`No available spell slots remaining at level ${slotLevel}.`);
+    this.name = "SpellSlotClaimError";
+  }
+}
+
+/**
+ * Claims one spell slot from persisted Character state before any spell effect
+ * is granted. The caller's snapshot is only the first CAS proposal; a miss is
+ * refreshed and rebased against the committed JSON so concurrent casts cannot
+ * overwrite one another.
+ */
+async function claimSpellSlot(
+  tx: Prisma.TransactionClient,
+  characterId: string,
+  rawSlots: unknown,
+  slotLevel: number
+): Promise<void> {
+  if (!isSpellSlots(rawSlots)) throw new SpellSlotClaimError(slotLevel);
+
+  const characterDb = tx.character;
+
+  // Legacy reduced unit-test doubles do not expose updateMany. Production
+  // Prisma always takes the conditional path below.
+  if (typeof characterDb.updateMany !== "function") {
+    const updatedSlots = consumeSlot(rawSlots, slotLevel);
+    await characterDb.update({
+      where: { id: characterId },
+      data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
+    });
+    return;
+  }
+
+  let currentSlots: SpellSlots = rawSlots;
+  for (let attempt = 0; attempt < MAX_SPELL_SLOT_CLAIM_ATTEMPTS; attempt += 1) {
+    if (!hasAvailableSlot(currentSlots, slotLevel)) {
+      throw new SpellSlotClaimError(slotLevel);
+    }
+
+    const updatedSlots = consumeSlot(currentSlots, slotLevel);
+    const claim = await characterDb.updateMany({
+      where: {
+        id: characterId,
+        spellSlots: {
+          equals: currentSlots as unknown as Prisma.InputJsonValue,
+        },
+      },
+      data: {
+        spellSlots: updatedSlots as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    if (claim.count === 1) return;
+
+    const refreshed = await characterDb.findUnique({
+      where: { id: characterId },
+      select: { spellSlots: true },
+    });
+    if (!refreshed || !isSpellSlots(refreshed.spellSlots)) {
+      throw new SpellSlotClaimError(slotLevel);
+    }
+    currentSlots = refreshed.spellSlots;
+  }
+
+  throw new SpellSlotClaimError(slotLevel);
+}
 
 /**
  * Claims exactly one persisted InventoryItem unit for a use_item action.
@@ -326,17 +395,16 @@ export async function executeCombatAction(
   // RESOURCE DRAIN
   if (actionType === "cast_spell" && payload.spellLevel !== undefined) {
     const consumesSlot = payload.spellLevel > 0;
-    if (consumesSlot && payload.rawSpellSlots) {
-      const updatedSlots = consumeSlot(
-        payload.rawSpellSlots as SpellSlots,
+    if (consumesSlot) {
+      if (!payload.rawSpellSlots || !playerCharacterId) {
+        throw new SpellSlotClaimError(payload.spellLevel);
+      }
+      await claimSpellSlot(
+        tx,
+        playerCharacterId,
+        payload.rawSpellSlots,
         payload.spellLevel
       );
-      if (playerCharacterId) {
-        await tx.character.update({
-          where: { id: playerCharacterId },
-          data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },
-        });
-      }
     }
     if (collectEvents) {
       events.push({

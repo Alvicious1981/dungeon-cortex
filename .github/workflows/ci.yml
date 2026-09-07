@@ -9,92 +9,15 @@ on:
       - master
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  patch-dc-plan-011:
-    name: Apply DC-PLAN-011 branch patch
-    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'codex/dc-plan-011-action-spell-slot-atomicity' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout branch
-        uses: actions/checkout@v4
-        with:
-          ref: codex/dc-plan-011-action-spell-slot-atomicity
-          fetch-depth: 0
-
-      - name: Apply minimal production patch and restore workflow
-        shell: bash
-        run: |
-          python <<'PY'
-          from pathlib import Path
-
-          pipeline_path = Path('lib/rules/combat-pipeline.ts')
-          pipeline = pipeline_path.read_text()
-
-          old_import = 'import { consumeSlot, type SpellSlots } from "@/lib/rules/magic";'
-          new_import = 'import { consumeSlot, hasAvailableSlot, isSpellSlots, type SpellSlots } from "@/lib/rules/magic";'
-          assert pipeline.count(old_import) == 1
-          pipeline = pipeline.replace(old_import, new_import)
-
-          constants = '''const MAX_CONSUMABLE_CLAIM_ATTEMPTS = 8;\nconst MAX_CHARACTER_HEAL_CAS_ATTEMPTS = 8;\nconst MAX_TURN_ADVANCE_CAS_ATTEMPTS = 8;'''
-          replacement = '''const MAX_CONSUMABLE_CLAIM_ATTEMPTS = 8;\nconst MAX_CHARACTER_HEAL_CAS_ATTEMPTS = 8;\nconst MAX_TURN_ADVANCE_CAS_ATTEMPTS = 8;\nconst MAX_SPELL_SLOT_CLAIM_ATTEMPTS = 8;\n\nexport class SpellSlotClaimError extends Error {\n  constructor(public readonly slotLevel: number) {\n    super(`No available spell slots remaining at level ${slotLevel}.`);\n    this.name = "SpellSlotClaimError";\n  }\n}\n\n/**\n * Claims one spell slot from persisted Character state before any spell effect\n * is granted. The caller's snapshot is only the first CAS proposal; a miss is\n * refreshed and rebased against the committed JSON so concurrent casts cannot\n * overwrite one another.\n */\nasync function claimSpellSlot(\n  tx: Prisma.TransactionClient,\n  characterId: string,\n  rawSlots: unknown,\n  slotLevel: number\n): Promise<void> {\n  if (!isSpellSlots(rawSlots)) throw new SpellSlotClaimError(slotLevel);\n\n  const characterDb = tx.character;\n\n  // Legacy reduced unit-test doubles do not expose updateMany. Production\n  // Prisma always takes the conditional path below.\n  if (typeof characterDb.updateMany !== "function") {\n    const updatedSlots = consumeSlot(rawSlots, slotLevel);\n    await characterDb.update({\n      where: { id: characterId },\n      data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },\n    });\n    return;\n  }\n\n  let currentSlots: SpellSlots = rawSlots;\n  for (let attempt = 0; attempt < MAX_SPELL_SLOT_CLAIM_ATTEMPTS; attempt += 1) {\n    if (!hasAvailableSlot(currentSlots, slotLevel)) {\n      throw new SpellSlotClaimError(slotLevel);\n    }\n\n    const updatedSlots = consumeSlot(currentSlots, slotLevel);\n    const claim = await characterDb.updateMany({\n      where: {\n        id: characterId,\n        spellSlots: {\n          equals: currentSlots as unknown as Prisma.InputJsonValue,\n        },\n      },\n      data: {\n        spellSlots: updatedSlots as unknown as Prisma.InputJsonValue,\n      },\n    });\n\n    if (claim.count === 1) return;\n\n    const refreshed = await characterDb.findUnique({\n      where: { id: characterId },\n      select: { spellSlots: true },\n    });\n    if (!refreshed || !isSpellSlots(refreshed.spellSlots)) {\n      throw new SpellSlotClaimError(slotLevel);\n    }\n    currentSlots = refreshed.spellSlots;\n  }\n\n  throw new SpellSlotClaimError(slotLevel);\n}'''
-          assert pipeline.count(constants) == 1
-          pipeline = pipeline.replace(constants, replacement)
-
-          old_drain = '''    if (consumesSlot && payload.rawSpellSlots) {\n      const updatedSlots = consumeSlot(\n        payload.rawSpellSlots as SpellSlots,\n        payload.spellLevel\n      );\n      if (playerCharacterId) {\n        await tx.character.update({\n          where: { id: playerCharacterId },\n          data: { spellSlots: updatedSlots as unknown as Prisma.InputJsonValue },\n        });\n      }\n    }'''
-          new_drain = '''    if (consumesSlot) {\n      if (!payload.rawSpellSlots || !playerCharacterId) {\n        throw new SpellSlotClaimError(payload.spellLevel);\n      }\n      await claimSpellSlot(\n        tx,\n        playerCharacterId,\n        payload.rawSpellSlots,\n        payload.spellLevel\n      );\n    }'''
-          assert pipeline.count(old_drain) == 1
-          pipeline = pipeline.replace(old_drain, new_drain)
-          pipeline_path.write_text(pipeline)
-
-          route_path = Path('app/api/campaign/[id]/action/route.ts')
-          route = route_path.read_text()
-          old_pipeline_import = '''  buildCombatConsequenceEvent,\n  finalizeEncounterTurn,\n  executeCombatAction,\n  type PipelineCombatant,'''
-          new_pipeline_import = '''  buildCombatConsequenceEvent,\n  finalizeEncounterTurn,\n  executeCombatAction,\n  SpellSlotClaimError,\n  type PipelineCombatant,'''
-          assert route.count(old_pipeline_import) == 1
-          route = route.replace(old_pipeline_import, new_pipeline_import)
-
-          start = route.index('    // ── Gate: cast_spell')
-          end = route.index('\n  if (intent.actionType === "use_item"', start)
-          cast = route[start:end]
-
-          prelog = '''      // The cast is going ahead: now, and only now, is the action canonical and\n      // an unenforceable range worth declaring in the log.\n      await persistPlayerAction();\n\n      if (unenforcedRangeLog) {\n        await prisma.gameLog.create({\n          data: { campaignId, role: "system", content: unenforcedRangeLog },\n        });\n      }\n\n'''
-          assert cast.count(prelog) == 1
-          cast = cast.replace(prelog, '')
-
-          tx_open = '      await prisma.$transaction(async (tx) => {'
-          assert cast.count(tx_open) == 1
-          cast = cast.replace(tx_open, '      try {\n        await prisma.$transaction(async (tx) => {', 1)
-
-          logs_anchor = '        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);'
-          assert cast.count(logs_anchor) == 1
-          logs_replacement = '''        // The slot claim above is the point of no return. Keep canonical player\n        // history and any range declaration in this same transaction so a\n        // losing concurrent cast cannot leave narratable fiction behind.\n        await tx.gameLog.create({\n          data: { campaignId, role: "user", content: trimmedAction },\n        });\n        if (unenforcedRangeLog) {\n          await tx.gameLog.create({\n            data: { campaignId, role: "system", content: unenforcedRangeLog },\n          });\n        }\n\n''' + logs_anchor
-          cast = cast.replace(logs_anchor, logs_replacement)
-
-          close_at = cast.rfind('      });')
-          assert close_at != -1
-          cast = cast[:close_at] + '''        });\n        playerActionLogged = true;\n      } catch (error) {\n        if (error instanceof SpellSlotClaimError) {\n          return NextResponse.json(\n            {\n              error: error.message,\n              code: "SPELL_SLOT_CONFLICT",\n            },\n            { status: 409 }\n          );\n        }\n        throw error;\n      }''' + cast[close_at + len('      });'):]
-
-          route = route[:start] + cast + route[end:]
-          route_path.write_text(route)
-          PY
-
-          git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/api/campaign/'[id]'/action/route.ts lib/rules/combat-pipeline.ts .github/workflows/ci.yml
-          git diff --cached --check
-          git commit -m "fix(rules): make action spell slot consumption atomic"
-          git push origin HEAD:codex/dc-plan-011-action-spell-slot-atomicity
-
   verify:
     name: Verify
-    needs: patch-dc-plan-011
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
