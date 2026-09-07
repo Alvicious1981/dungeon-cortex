@@ -444,17 +444,44 @@ async function resolveAction(
     }
 
     if (trimmedAction === "End Turn") {
-      await persistPlayerAction();
-
-      await prisma.$transaction(async (tx) => {
-        const finalizeOutcome = await finalizeEncounterTurn({
+      const finalizeOutcome = await prisma.$transaction(async (tx) => {
+        const outcome = await finalizeEncounterTurn({
           tx: tx as Prisma.TransactionClient,
           encounterId: context.activeEncounter!.id,
           currentTurnIndex: context.activeEncounter!.currentTurnIndex,
           round: context.activeEncounter!.round,
         });
-        gameEvents.push(...finalizeOutcome.events);
+
+        // A stale request owns no transition and therefore owns no canonical
+        // player-action log row either. Keep the successful transition and its
+        // history entry in the same transaction so a 409 cannot leave fiction
+        // behind in gameLog.
+        if (!outcome.turnAdvanceConflict) {
+          await tx.gameLog.create({
+            data: {
+              campaignId,
+              role: "user",
+              content: trimmedAction,
+            },
+          });
+        }
+
+        return outcome;
       });
+
+      if (finalizeOutcome.turnAdvanceConflict) {
+        return NextResponse.json(
+          {
+            error:
+              "The encounter turn changed before this End Turn could be applied. Refresh state and try again.",
+            code: "TURN_STATE_CONFLICT",
+          },
+          { status: 409 }
+        );
+      }
+
+      playerActionLogged = true;
+      gameEvents.push(...finalizeOutcome.events);
     }
 
     if (trimmedAction === "Attack") {
