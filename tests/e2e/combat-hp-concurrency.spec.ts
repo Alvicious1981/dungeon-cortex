@@ -160,7 +160,7 @@ test("@smoke concurrent combat damage preserves both accepted hits", async ({ re
       spellLevel: 0,
       spellEffect: {
         type: "damage",
-        dice: "1d1",
+        dice: "1d2",
         damageType: "force",
         hasSavingThrow: false,
       },
@@ -194,11 +194,11 @@ test("@smoke concurrent combat damage preserves both accepted hits", async ({ re
     const secondAction = await prisma.$transaction((tx) =>
       executeCombatAction(payload, tx)
     );
-    expect(secondAction.totalDamageDealt).toBe(1);
+    expect(secondAction.totalDamageDealt).toBeGreaterThan(0);
 
     resumeFirstWrite();
     const firstResult = await firstAction;
-    expect(firstResult.totalDamageDealt).toBe(1);
+    expect(firstResult.totalDamageDealt).toBeGreaterThan(0);
 
     const [persistedTarget, persistedEncounter] = await Promise.all([
       prisma.combatant.findUniqueOrThrow({
@@ -211,12 +211,15 @@ test("@smoke concurrent combat damage preserves both accepted hits", async ({ re
       }),
     ]);
 
-    // Both accepted actions report one point of damage and the encounter's
-    // atomic counter records both. Target HP must therefore also preserve both
-    // points. A final HP of 19 proves one absolute stale write overwrote the
-    // other despite both actions committing.
-    expect(persistedEncounter.totalDamageDealt).toBe(2);
-    expect(persistedTarget.hp).toBe(18);
+    const expectedTotalDamage =
+      firstResult.totalDamageDealt + secondAction.totalDamageDealt;
+
+    // The encounter counter uses an atomic increment, so it independently
+    // proves both accepted damage resolutions committed. Target HP must preserve
+    // the same sum. If the paused stale absolute write wins last, HP instead
+    // reflects only firstResult.totalDamageDealt and silently loses the second.
+    expect(persistedEncounter.totalDamageDealt).toBe(expectedTotalDamage);
+    expect(persistedTarget.hp).toBe(20 - expectedTotalDamage);
   } finally {
     resumeFirstWrite();
     await firstAction?.catch(() => undefined);
