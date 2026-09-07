@@ -274,10 +274,11 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     });
 
     /**
-     * How much damage the target actually took, read off the HP mutation the
-     * route wrote. The pipeline now persists damage as an atomic decrement, so
-     * this helper accepts both that canonical shape and the legacy absolute
-     * numeric shape while older tests are being migrated.
+     * How much damage the target actually took, read off the hp the route
+     * wrote. Asserting the write rather than an intermediate value is what
+     * makes this cover the whole chain: resolveWeaponAttack reads the weapon's
+     * qualities, the route puts them on the payload, the pipeline forwards them
+     * and the damage rule decides with them.
      */
     const damageWrittenFor = (targetId: string, startingHp: number): number => {
       const call = (prisma.combatant.update as any).mock.calls.find(
@@ -296,6 +297,14 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     };
 
     it("halves the damage of a mundane weapon against the clause, and says nothing", async () => {
+      // The clause used to be unreadable, so the route declared the gap and paid
+      // full damage. It is readable now and the Longsword fixture is mundane, so
+      // the resistance applies — and a refusal that no longer happens must not
+      // be logged as though it did.
+      //
+      // `resolveAttackRoll` is called internally by `computeConsequences` as a
+      // local reference, so mocking the export does not reach it. Pin the d20 to
+      // a natural 10 — neither fumble nor crit — so the attack beats AC 10.
       const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
       const resistant = { ...hostile, hp: 100, maxHp: 100, damageResistances: [clause] };
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resistant]));
@@ -321,6 +330,12 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     });
 
     it("pays a magic weapon in full against the same clause", async () => {
+      // The pair that proves the quality crossed every layer. Both weapons roll
+      // the same die and carry no damage bonus — the magic one *declares*
+      // itself magical rather than deriving it from a `+1`, because a bonus
+      // would raise the damage on its own and the comparison would pass with
+      // the quality never leaving the route. Same clause, same pinned roll,
+      // same target: the only difference left is whether the resistance applied.
       const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
 
       const damageWith = async (properties: Record<string, unknown>): Promise<number> => {
@@ -379,6 +394,16 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     });
 
     it("stays silent about an unresolvable clause when the attack missed", async () => {
+      // A miss carries no damage, so "full damage was applied" would be a
+      // false claim persisted into the log the narrator reads. Same chain as
+      // the test above, but no gameLog.create for a system row should fire.
+      //
+      // `resolveAttackRoll` is re-exported by `@/lib/rules/combat` but called
+      // internally by `computeConsequences` as a local reference, so mocking
+      // the export does not reach it. A natural 1 is a guaranteed miss
+      // regardless of AC (`hit: critical || (!fumble && total >= targetAC)`
+      // in lib/rules/combat.ts), so forcing the d20 to its lowest face is the
+      // deterministic way to produce one.
       const clause = "bludgeoning, piercing, and slashing from nonmagical weapons";
       const resistant = { ...hostile, damageResistances: [clause] };
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resistant]));
@@ -402,6 +427,19 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       }
     });
 
+    /**
+     * `actorArmorPenalty` is optional on `CombatActionPayload` with a `false`
+     * default, so dropping it from either call site type-checks and leaves
+     * every other test green — the wizard simply stops being penalised. The
+     * rule itself is covered four times over (armor-proficiency,
+     * armor-obtainable, armor-penalty-wiring, and the payload-to-disadvantage
+     * pair in combat-pipeline.test.ts); what nothing covered until now is that
+     * THIS route puts it on the payload.
+     *
+     * The two contexts differ in one field, `class`. Same armour, same weapon,
+     * same stats, same target — so a difference in what the rule receives can
+     * only come from the wiring under test.
+     */
     const HEAVY_ARMOUR = {
       id: "a1",
       name: "Chain Mail",
@@ -487,12 +525,18 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       { params: Promise.resolve({ id: campaignId }) }
     );
 
+    // Not refused: the dice settle it and narration proceeds.
     expect(res.status).toBe(200);
 
+    // The resolved result reaches the narrator as an already-decided fact.
     expect(prisma.gameLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           role: "system",
+          // +3 STR and +3 proficiency (level 5), so the stored proficiencies
+          // reach the roll rather than being silently dropped.
+          // No band on the intent, so the check falls back to "medium" (DC 15)
+          // and the line names the band it used.
           content: expect.stringMatching(/Athletics check \(STR\): rolled \d+ \+3 \+3 prof = \d+ vs DC 15 \(medium\) → (SUCCESS|FAILURE)/),
         }),
       })
@@ -526,6 +570,11 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(prisma.combatant.update).not.toHaveBeenCalled();
   });
 
+  /**
+   * The macro "Attack" path is a SECOND producer of `actorArmorPenalty`, on a
+   * different gate from the free-text one above. Both were unasserted; a single
+   * test would have left whichever it did not exercise free to drop the field.
+   */
   it("carries the armour penalty on the macro Attack path too", async () => {
     const target = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
     const player = { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
@@ -534,6 +583,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     const mockContext = {
       character: {
         name: "Hero",
+        // A wizard in chain mail: no armour proficiency, so the penalty applies.
         class: "wizard",
         stats: { STR: 10 },
         inventory: [
@@ -601,7 +651,11 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
     const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
     
+    // Attack macro returns a stream (narrative), but we check the logic triggered before that.
     expect(res.status).toBe(200);
+    
+    // Verify Prisma mutations
+    // Should have 2 target updates and 1 encounter update in the transaction
     expect(prisma.combatant.update).toHaveBeenCalledTimes(2);
     expect(prisma.encounter.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "enc_123" }
@@ -622,7 +676,6 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
         stats: { STR: 10 },
         spellSlots: null,
         concentrationSpellId: null,
-        exhaustionLevel: 0,
         inventory: [
           {
             id: "item-1",
@@ -650,6 +703,8 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       targetName: "Antitoxin",
     });
     (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    // Same single charge the inventory above declares — the transaction must
+    // see the row the context saw for this case to be the ordinary one.
     (prisma.inventoryItem.findUnique as any).mockResolvedValue({ quantity: 1 });
 
     const req = new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
@@ -697,6 +752,8 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
     const res = await POST(req, { params: Promise.resolve({ id: campaignId }) });
     expect(res.status).toBe(200);
+    
+    // Should have target auto-selected
     expect(prisma.combatant.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "t1" }
     }));
@@ -709,6 +766,9 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
   const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
   const characterId = "char-1";
 
+  // Full canonical context so formatSystemPrompt (real, unmocked) can render
+  // it. Only `character` fields are varied per test; everything else stays
+  // fixed and empty/absent.
   function buildContext(character: Record<string, unknown>) {
     return {
       character: {
@@ -741,6 +801,14 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
     vi.clearAllMocks();
     (getAuthUser as any).mockResolvedValue(mockUser);
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+    // A benign, non-mechanical intent so none of the mechanical gates fire —
+    // this test suite is only exercising the presentation frame, not combat,
+    // rest, spellcasting, or movement.
+    //
+    // Must be a value IntentSchema can actually produce. This used to be
+    // "look", which the schema rejects: the whole suite was asserting the
+    // behaviour of a request that cannot exist. "general" is the real
+    // classification for input with no mechanical gate.
     (parseIntent as any).mockResolvedValue({ actionType: "general" });
   });
 
@@ -767,9 +835,9 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
       id: characterId,
       class: "fighter",
       level: 1,
-      xp: 300,
+      xp: 300, // xpForLevel(2) — one ascension earned
       maxHp: 10,
-      hitDiceTotal: 1,
+      hitDiceTotal: 1, // settled: hitDiceTotal === level
       stats: { CON: 10 },
     });
 
@@ -833,9 +901,9 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
       id: characterId,
       class: "fighter",
       level: 2,
-      xp: 6_500,
+      xp: 6_500, // xpForLevel(5)
       maxHp: 18,
-      hitDiceTotal: 2,
+      hitDiceTotal: 2, // settled: hitDiceTotal === level
       stats: { CON: 10 },
     });
 
@@ -845,7 +913,7 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
     expect(levelUpFrames).toHaveLength(1);
     expect(levelUpFrames[0].payload).toMatchObject({
       fromLevel: 2,
-      toLevel: 3,
+      toLevel: 3, // never a multi-level jump
       targetLevel: 5,
       pendingLevels: 3,
     });
@@ -878,7 +946,7 @@ describe("Action Route - level_up_available presentation (SEC-AI-001 PR3)", () =
       level: 2,
       xp: 6_500,
       maxHp: 18,
-      hitDiceTotal: 1,
+      hitDiceTotal: 1, // mismatch — old-contract residue, not trustworthy
       stats: { CON: 10 },
     });
 
@@ -921,7 +989,7 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
         name: "Hero",
         class: "fighter",
         level: 1,
-        xp: 250,
+        xp: 250, // xpForLevel(2) = 300 — 50 short of the next ascension
         maxHp: 20,
         hp: 20,
         hitDiceTotal: 1,
@@ -950,14 +1018,23 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
 
     (buildCampaignContext as any).mockResolvedValue(mockContext);
 
+    // finalizeEncounterTurn re-reads combatants fresh, inside the transaction —
+    // this snapshot (not the attack's own damage math) is what drives
+    // "all_enemies_dead". The enemy already carries its backend-authorized
+    // xpValue snapshot (docs/DECISION_XP_AWARD_AUTHORITY.md §5-§6).
     (prisma.combatant.findMany as any).mockResolvedValue([
       { id: "p1", ...NO_MODIFIERS, isPlayer: true, hp: 20 },
       { id: "t1", ...NO_MODIFIERS, isPlayer: false, hp: 0, xpValue: 50 },
     ]);
     (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
+    // Recipient derived exclusively from persisted state: Encounter → Campaign
+    // → characterId (§4) — never from the client, the AI, or a combatant id.
     (prisma.encounter.findUnique as any).mockResolvedValue({
       campaign: { characterId },
     });
+    // The fresh, post-transaction read that drives detectPendingLevelUp —
+    // reflects Character.xp already incremented by the atomic
+    // `xp: { increment: 50 } }` write made inside the transaction (250 + 50 = 300).
     (prisma.character.findUnique as any).mockResolvedValue({
       id: characterId,
       class: "fighter",
@@ -981,6 +1058,8 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
       .filter((chunk) => chunk.startsWith("data: "))
       .map((chunk) => JSON.parse(chunk.slice(6)));
 
+    // The award itself: derived from Encounter → Campaign → characterId,
+    // applied as an atomic increment, never an absolute computed value.
     expect(prisma.encounter.findUnique).toHaveBeenCalledWith({
       where: { id: "enc_1" },
       select: { campaign: { select: { characterId: true } } },
@@ -990,6 +1069,8 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
       data: { xp: { increment: 50 } },
     });
 
+    // Same response, same request cycle: level_up_available appears because
+    // the fresh post-transaction read already reflects the incremented XP.
     const levelUpFrames = frames.filter((f: any) => f.t === "level_up_available");
     expect(levelUpFrames).toHaveLength(1);
     expect(levelUpFrames[0].payload).toMatchObject({
@@ -1000,16 +1081,41 @@ describe("Action Route - combat victory grants XP and surfaces level_up_availabl
   });
 });
 
+/**
+ * DC-AUD-001 — canonical GameLog integrity.
+ *
+ * `GameLog` is campaign history: `buildCampaignContext` reads the recent rows
+ * back and `lib/ai/narrator.ts` hands them to the model as `recentDialogue`.
+ * An action the rules engine refused therefore does not merely sit unused in a
+ * table — it becomes dialogue the narrator treats as something the player
+ * actually did, on every subsequent turn.
+ *
+ * The invariant: an HTTP 4xx mechanical rejection leaves no `role: "user"` row,
+ * and an accepted action leaves exactly one.
+ */
 describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-001)", () => {
   const campaignId = "camp_123";
   const mockUser = { id: "user_123" };
   const mockCampaign = { id: campaignId, userId: mockUser.id, status: "active" };
 
+  /** Every canonical player row the route wrote during this request. */
   const userLogWrites = (): unknown[] =>
     (prisma.gameLog.create as any).mock.calls.filter(
       ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
     );
 
+  /**
+   * DC-AUD-007. The route builds its pre-gate context from the campaign id
+   * alone. The second argument is what turns on semantic memory recall — an
+   * embeddings request plus a pgvector scan — whose result nothing in this
+   * route reads. `parseIntent` is guarded by its own one-parameter signature;
+   * this trigger is not, because `buildCampaignContext(id, playerInput?)` still
+   * accepts the argument, so the regression would compile and lint clean.
+   *
+   * Arity, not value: an explicit `undefined` is the same defect. One call per
+   * request — `streamNarrative` is mocked, so the narrator's own build never
+   * runs here.
+   */
   const expectContextBuiltFromCampaignIdAlone = () => {
     const calls = (buildCampaignContext as unknown as Mock).mock.calls;
     expect(calls).toHaveLength(1);
@@ -1093,6 +1199,8 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       })
     );
 
+    // A combatant id that is not in this encounter: membership is checked
+    // before anything is rolled, so the request never reaches resolution.
     const res = await post({ action: "Attack", targetIds: ["not-in-this-fight"] });
 
     expect(res.status).toBe(400);
@@ -1118,6 +1226,8 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       data: { campaignId, role: "user", content: "Attack" },
     });
 
+    // History order: the player's line is written before the narrator is even
+    // asked for prose, so it can never land after its own assistant reply.
     const firstUserWrite = (prisma.gameLog.create as any).mock.calls.findIndex(
       ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
     );
@@ -1126,6 +1236,10 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
     );
     expect(firstUserWrite).toBeGreaterThanOrEqual(0);
     expect(firstAssistantWrite).toBeGreaterThan(firstUserWrite);
+
+    // Macro path: this one never reaches `parseIntent`, yet the context build
+    // sits above the fast-path gate, so it used to pay for a recall it could
+    // not have consumed.
     expectContextBuiltFromCampaignIdAlone();
   });
 
@@ -1148,6 +1262,7 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       })
     );
 
+    // The command is written before its own result, not after it.
     const calls = (prisma.gameLog.create as any).mock.calls;
     const userIdx = calls.findIndex(([a]: [{ data: { role: string } }]) => a?.data?.role === "user");
     const systemIdx = calls.findIndex(([a]: [{ data: { role: string } }]) => a?.data?.role === "system");
@@ -1166,10 +1281,16 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       data: { campaignId, role: "user", content: "I look around the room" },
     });
     expect(streamNarrative).toHaveBeenCalled();
+
+    // Free-text path: `trimmedAction` is in scope here and reaches
+    // `parseIntent`, but must not reach the context builder.
     expectContextBuiltFromCampaignIdAlone();
   });
 
   it("6. an ability check writes the player's line before the resolved roll", async () => {
+    // The ability-check gate writes a system row of its own. Whatever moves the
+    // player's row must keep it ahead of the mechanical line that answers it,
+    // or the transcript reads as a die rolled for nothing.
     (buildCampaignContext as any).mockResolvedValue(contextWith(null));
     (parseIntent as any).mockResolvedValue({ actionType: "ability_check", skill: "Athletics" });
 
@@ -1211,6 +1332,14 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
   });
 });
 
+/**
+ * DC-AUD-002 — request id transport, server half.
+ *
+ * The route must accept the identifier the client now sends and resolve the
+ * action exactly as before. Transport only: `requestId` is parsed and
+ * validated, never used to deduplicate, and never persisted. Persistent
+ * idempotency is DC-AUD-003.
+ */
 describe("Action Route - requestId transport (DC-AUD-002)", () => {
   const campaignId = "camp_123";
   const mockUser = { id: "user_123" };
@@ -1249,6 +1378,9 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
     (buildCampaignContext as any).mockResolvedValue(context);
     (parseIntent as any).mockResolvedValue({ actionType: "general" });
+    // Since DC-AUD-003 a keyed request acquires a receipt before any gate runs.
+    // These cases are about the transport contract, not idempotency, so the
+    // acquisition simply succeeds and the action proceeds as it always did.
     (prisma.actionRequestReceipt.create as any).mockResolvedValue({ id: "receipt_transport" });
     (prisma.actionRequestReceipt.updateMany as any).mockResolvedValue({ count: 1 });
   });
@@ -1261,6 +1393,8 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
 
     expect(res.status).toBe(200);
     expect(streamNarrative).toHaveBeenCalled();
+    // The identifier is transport metadata: it must not leak into the action
+    // the narrator is handed, nor into canonical history.
     expect((streamNarrative as any).mock.calls.at(-1)?.[1]).toBe("I look around the room");
     expect(prisma.gameLog.create).toHaveBeenCalledWith({
       data: { campaignId, role: "user", content: "I look around the room" },
@@ -1283,6 +1417,8 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
   });
 
   it("refuses an empty requestId rather than treating it as absent", async () => {
+    // A blank identifier is a client bug, not a legacy caller. Accepting it
+    // would hand DC-AUD-003 a key that collides with every other blank one.
     const res = await post({ requestId: "   ", action: "I look around the room" });
 
     expect(res.status).toBe(400);
@@ -1300,6 +1436,21 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
   });
 });
 
+/**
+ * DC-AUD-003 — persistent action idempotency.
+ *
+ * PR #121 carried the client's `requestId` to the server and stopped there.
+ * These tests pin what giving it meaning must and must not do: a retry after a
+ * lost connection is recognised, never executed twice; an id never comes to
+ * mean two different actions; and PR #120's canonical-history invariant is
+ * preserved through the replay path as well as the first attempt.
+ *
+ * Only Prisma is mocked here — the real receipt helper and the real route both
+ * run — so these prove OUR logic given a working unique constraint. That the
+ * constraint exists and serialises concurrent inserts is a database property
+ * this lane cannot observe (`$transaction` is a passthrough that never rolls
+ * back); it is proven in tests/e2e/action-idempotency.spec.ts.
+ */
 describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
   const campaignId = "camp_123";
   const mockUser = { id: "user_123" };
@@ -1345,6 +1496,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
       { params: Promise.resolve({ id: campaignId }) }
     );
 
+  /** A genuine Prisma unique violation, shaped the way the driver reports one. */
   const uniqueViolation = (target: unknown) =>
     new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
       code: "P2002",
@@ -1352,11 +1504,13 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
       meta: { target },
     });
 
+  /** Rows the route wrote to canonical player history. */
   const userLogWrites = () =>
     (prisma.gameLog.create as any).mock.calls.filter(
       ([args]: [{ data: { role: string } }]) => args?.data?.role === "user"
     );
 
+  /** Makes the acquisition collide, handing back the receipt that already exists. */
   const receiptAlreadyExists = (row: Record<string, unknown>) => {
     (prisma.actionRequestReceipt.create as any).mockRejectedValue(
       uniqueViolation(["actorUserId", "requestId"])
@@ -1436,6 +1590,8 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     await expect(res.json()).resolves.toMatchObject({ code: "REQUEST_ID_REUSED" });
     expect(streamNarrative).not.toHaveBeenCalled();
     expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    // The receipt that already owns this id belongs to another action; the
+    // wrapper must leave it exactly as it found it.
     expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1463,10 +1619,16 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     expect(streamNarrative).not.toHaveBeenCalled();
     expect(prisma.gameLog.create).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
+    // Load-bearing: this request never owned the submission, so it must not
+    // publish a receipt id. If it did, the outer 4xx wrapper would flip the
+    // OTHER request's live PROCESSING receipt to REJECTED — destroying the
+    // record of a turn that may well be committing right now.
     expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
   });
 
   it("5. a mechanical refusal is recorded, and its retry replays without touching history", async () => {
+    // First attempt: "Attack" outside combat is refused, and the refusal is
+    // stored so the id means the same thing next time.
     const refusal = await post({ requestId: REQUEST_ID, action: "Attack" });
 
     expect(refusal.status).toBe(400);
@@ -1481,6 +1643,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     );
     expect(userLogWrites()).toHaveLength(0);
 
+    // The retry: replayed verbatim, and PR #120's invariant still holds.
     vi.clearAllMocks();
     (getAuthUser as any).mockResolvedValue(mockUser);
     (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
@@ -1499,6 +1662,8 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     expect(userLogWrites()).toHaveLength(0);
     expect(prisma.gameLog.create).not.toHaveBeenCalled();
     expect(streamNarrative).not.toHaveBeenCalled();
+    // A replayed 4xx is still a 4xx, so the wrapper sees it — but with no
+    // receipt id published it cannot re-settle the stored REJECTED row.
     expect(prisma.actionRequestReceipt.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1539,6 +1704,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
 
     expect(replayed.status).toBe(202);
     await expect(replayed.json()).resolves.toEqual({ ok: true });
+    // Neither the player's command nor a second roll result is written again.
     expect(prisma.gameLog.create).not.toHaveBeenCalled();
   });
 
@@ -1555,6 +1721,8 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
   });
 
   it("9. an unrelated unique violation is never read as an idempotency hit", async () => {
+    // A P2002 raised by some other constraint must not make the route replay
+    // an unrelated receipt. It surfaces as a failure instead.
     (prisma.actionRequestReceipt.create as any).mockRejectedValue(
       uniqueViolation(["some_other_unique_column"])
     );
@@ -1565,6 +1733,9 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
   });
 
   it("A. a completed streaming retry replays the stored events between duplicate and done", async () => {
+    // DC-AUD-004. Without this the replayed turn arrives silent: the client
+    // sees no damage, no turn advance and hears nothing, reconciling only via
+    // its ordinary refresh.
     const stored = [
       { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
       { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", targets: [] } },
@@ -1576,8 +1747,12 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     const parsed = await frames(res);
 
     expect(res.status).toBe(200);
+    // Exact order: the duplicate marker first, then every stored event in the
+    // order it was emitted, then the terminator the client refreshes on.
     expect(parsed.map((f) => f.t)).toEqual(["duplicate", "evt", "evt", "evt", "done"]);
     expect(parsed.slice(1, 4).map((f) => f.e)).toEqual(stored);
+
+    // Still a replay: no mechanics, no narrator, no history.
     expect(streamNarrative).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.combatant.update).not.toHaveBeenCalled();
@@ -1596,6 +1771,8 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
   });
 
   it("C. /roll still replays its stored JSON and never treats replayEvents as a body", async () => {
+    // The `responseStatus !== null` discriminator is unchanged: a JSON
+    // completion replays its body, and events play no part in it.
     receiptAlreadyExists({
       status: ActionRequestStatus.COMPLETED,
       requestHash: fingerprintActionRequest({ action: "/roll 1d20" }),
@@ -1626,6 +1803,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
         args?.data?.status === ActionRequestStatus.COMPLETED
     );
     expect(completion).toBeDefined();
+    // End Turn emits exactly one deterministic advancement event.
     expect(completion![0].data.replayEvents).toEqual([
       expect.objectContaining({ type: expect.stringMatching(/^(TURN|ROUND)_ADVANCE$/) }),
     ]);
