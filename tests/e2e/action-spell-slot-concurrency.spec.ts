@@ -34,6 +34,10 @@ async function createdId(response: {
 }
 
 async function waitForBlockedCharacterUpdates(prisma: PrismaClient): Promise<void> {
+  // Server-side Prisma interactive transactions expire after 5 seconds. Both
+  // action requests should reach their Character UPDATE quickly, so keep this
+  // barrier short and release the external row lock immediately once both stale
+  // writes are proven to be waiting.
   const deadline = Date.now() + 2_000;
 
   while (Date.now() < deadline) {
@@ -114,6 +118,10 @@ test("@smoke concurrent action-route spell casts consume two slots", async ({ re
       })
     );
 
+    // The E2E database is intentionally migration-only, not SRD-seeded. Insert
+    // one isolated level-1 utility spell so this test exercises the real cache
+    // lookup without depending on external data. Utility avoids target/damage
+    // state, isolating spell-slot persistence as the only contested mechanic.
     await prisma.srdSpell.create({
       data: {
         id: spellId,
@@ -142,6 +150,10 @@ test("@smoke concurrent action-route spell casts consume two slots", async ({ re
       data: { spellSlots: initialSlots },
     });
 
+    // The action route obtains Character.spellSlots through buildCampaignContext
+    // before opening the write transaction. A FOR UPDATE lock does not block
+    // those ordinary MVCC SELECTs, so both requests can authorize from current=2.
+    // Their later absolute Character UPDATEs then queue behind this row lock.
     lockTransaction = prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw<Array<{ id: string }>>`
@@ -188,6 +200,8 @@ test("@smoke concurrent action-route spell casts consume two slots", async ({ re
       (frame) => frame.t === "evt" && frame.e?.type === "SPELL_CAST"
     );
 
+    // Distinct requestIds make these two separate accepted actions. Two emitted
+    // slot-consuming spell facts therefore require two persisted level-1 slots.
     expect(spellEvents).toHaveLength(2);
     for (const event of spellEvents) {
       expect(event.e?.payload).toMatchObject({
@@ -202,6 +216,10 @@ test("@smoke concurrent action-route spell casts consume two slots", async ({ re
       select: { spellSlots: true },
     });
 
+    // Domain invariant: starting from two slots, two distinct successful casts
+    // that each report slotConsumed=true must leave zero. The current /action
+    // pipeline instead derives the whole replacement JSON from the same stale
+    // pre-transaction snapshot, so a lost update leaves current=1.
     expect(after.spellSlots).toEqual({
       "1": { current: 0, max: 2 },
     });
