@@ -1234,6 +1234,18 @@ async function resolveAction(
       await persistPlayerAction();
 
       await prisma.$transaction(async (tx) => {
+        // Equipment slots are a character-scoped invariant. Lock the canonical
+        // character row before reading/clearing a slot so two app instances
+        // cannot both observe the same slot as empty and then equip different
+        // items into it. The lock is transaction-scoped and therefore releases
+        // automatically after the clear+equip pair commits or rolls back.
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "Character"
+          WHERE "id" = ${context.character.id}
+          FOR UPDATE
+        `;
+
         await tx.inventoryItem.updateMany({
           where: { characterId: context.character.id, equippedSlot: targetSlot },
           data: { equippedSlot: null },

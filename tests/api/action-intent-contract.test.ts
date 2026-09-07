@@ -35,6 +35,7 @@ vi.mock("@/lib/db/prisma", () => ({
     inventoryItem: { delete: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     character: { findUnique: vi.fn(), update: vi.fn() },
     srdSpell: { findUnique: vi.fn(), findMany: vi.fn() },
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (cb) => cb(prisma)),
   },
 }));
