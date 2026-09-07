@@ -450,6 +450,7 @@ async function resolveAction(
           encounterId: context.activeEncounter!.id,
           currentTurnIndex: context.activeEncounter!.currentTurnIndex,
           round: context.activeEncounter!.round,
+          failOnStaleTurn: true,
         });
 
         // A stale request owns no transition and therefore owns no canonical
