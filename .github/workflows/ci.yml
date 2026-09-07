@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-dc-plan-011-diagnostics-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   diagnose-dc-plan-011:
