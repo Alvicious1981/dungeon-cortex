@@ -79,6 +79,75 @@ function normalizeDamageType(value: string | null | undefined): DamageType {
     : "force";
 }
 
+const MAX_CONSUMABLE_CLAIM_ATTEMPTS = 8;
+
+/**
+ * Claims exactly one persisted InventoryItem unit for a use_item action.
+ *
+ * The row read is only a proposal for which conditional mutation to attempt.
+ * Authorization comes from the mutation's affected-row count, never from that
+ * snapshot. If another transaction wins between read and write, this re-reads
+ * and retries against the committed quantity. A single remaining unit is
+ * deleted conditionally; stacked items are decremented conditionally.
+ *
+ * The fallback exists only for legacy injected unit-test doubles that predate
+ * Prisma updateMany support in their synthetic surface. Real Prisma always
+ * exposes updateMany, and the real-PostgreSQL concurrency regression exercises
+ * the conditional path below.
+ */
+async function claimConsumableUnit(
+  tx: Prisma.TransactionClient,
+  itemId: string
+): Promise<boolean> {
+  const inventoryItem = tx.inventoryItem;
+
+  if (typeof inventoryItem.updateMany !== "function") {
+    const row = await inventoryItem.findUnique({
+      where: { id: itemId },
+      select: { quantity: true },
+    });
+    const remaining = row?.quantity ?? 0;
+    if (remaining < 1) return false;
+
+    if (remaining === 1) {
+      await inventoryItem.deleteMany({ where: { id: itemId } });
+    } else {
+      await inventoryItem.update({
+        where: { id: itemId },
+        data: { quantity: remaining - 1 },
+      });
+    }
+    return true;
+  }
+
+  for (let attempt = 0; attempt < MAX_CONSUMABLE_CLAIM_ATTEMPTS; attempt += 1) {
+    const row = await inventoryItem.findUnique({
+      where: { id: itemId },
+      select: { quantity: true },
+    });
+    const remaining = row?.quantity ?? 0;
+    if (remaining < 1) return false;
+
+    if (remaining === 1) {
+      const claim = await inventoryItem.deleteMany({
+        where: { id: itemId, quantity: 1 },
+      });
+      if (claim.count === 1) return true;
+      continue;
+    }
+
+    const claim = await inventoryItem.updateMany({
+      where: { id: itemId, quantity: remaining },
+      data: { quantity: { decrement: 1 } },
+    });
+    if (claim.count === 1) return true;
+  }
+
+  // Fail closed under sustained contention: without a successful conditional
+  // claim this action owns no consumable unit and may grant no effects.
+  return false;
+}
+
 export interface CombatActionPayload {
   actionType: CombatActionType;
   encounter: PipelineEncounterState;
@@ -215,29 +284,7 @@ export async function executeCombatAction(
       });
     }
   } else if (actionType === "use_item" && payload.itemId) {
-    // Read inside the transaction rather than trusting a quantity the caller
-    // read before it opened. In the action route that read happens in
-    // `buildCampaignContext`, before `prisma.$transaction`, so the row it saw
-    // can already be spent by the time this write lands.
-    const row = await tx.inventoryItem.findUnique({
-      where: { id: payload.itemId },
-      select: { quantity: true },
-    });
-    const remaining = row?.quantity ?? 0;
-
-    if (remaining >= 1) {
-      itemConsumed = true;
-      if (remaining === 1) {
-        // `deleteMany`, not `delete`: a row already gone must be a no-op, not
-        // a P2025 that rolls back an otherwise valid turn.
-        await tx.inventoryItem.deleteMany({ where: { id: payload.itemId } });
-      } else {
-        await tx.inventoryItem.update({
-          where: { id: payload.itemId },
-          data: { quantity: remaining - 1 },
-        });
-      }
-    }
+    itemConsumed = await claimConsumableUnit(tx, payload.itemId);
   }
 
   // CONCENTRATION START / REPLACEMENT
