@@ -395,8 +395,8 @@ export async function executeCombatAction(
   // RESOURCE DRAIN
   if (actionType === "cast_spell" && payload.spellLevel !== undefined) {
     const consumesSlot = payload.spellLevel > 0;
-    if (consumesSlot) {
-      if (!payload.rawSpellSlots || !playerCharacterId) {
+    if (consumesSlot && playerCharacterId) {
+      if (!payload.rawSpellSlots) {
         throw new SpellSlotClaimError(payload.spellLevel);
       }
       await claimSpellSlot(
