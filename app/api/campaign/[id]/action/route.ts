@@ -11,7 +11,6 @@ import {
   spellcastingAbility,
   calculateProficiency, calculateSpellSaveDC 
 } from "@/lib/rules/magic";
-import { castSpell, MagicServiceError } from "@/lib/rules/magic-service";
 import {
   resolveCachedSpell,
   type ResolvedSpellEffect,
@@ -43,6 +42,7 @@ import {
   buildCombatConsequenceEvent,
   finalizeEncounterTurn,
   executeCombatAction,
+  SpellSlotClaimError,
   type PipelineCombatant,
 } from "@/lib/rules/combat-pipeline";
 import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact-adapter";
@@ -1131,108 +1131,75 @@ async function resolveAction(
 
       try {
         await prisma.$transaction(async (tx) => {
-          // Claim the resource before anything else becomes canonical. The
-          // magic service owns the proven compare-and-set loop from DC-PLAN-004:
-          // a stale snapshot cannot overwrite a competing spell-slot update.
-          if (usesSpellSlot) {
-            await castSpell({
-              campaignId,
-              characterId: context.character.id,
-              spellLevel: effect.level,
-              slotLevel: effectiveSlotLevel,
-              tx: tx as unknown as Parameters<typeof castSpell>[0]["tx"],
-            });
-          }
+        const spellOutcome = await executeCombatAction({
+          actionType: "cast_spell",
+          encounter: context.activeEncounter ? {
+            id: context.activeEncounter.id,
+            round: context.activeEncounter.round,
+            currentTurnIndex: context.activeEncounter.currentTurnIndex,
+            totalDamageDealt: context.activeEncounter.totalDamageDealt,
+            status: "active",
+            combatants: context.activeEncounter.combatants as PipelineCombatant[],
+          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+          actorId: playerCombatant?.id ?? context.character.id,
+          actorName: context.character.name,
+          actorConditions: playerConditions,
+          targetCombatants: targets,
+          spellName: intent.spellName,
+          spellLevel: effectiveSlotLevel,
+          spellEffect: effect,
+          spellSaveDC: saveDC,
+          rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
+          playerCharacterId: context.character.id,
+          actorConcentrationSpellId: context.character.concentrationSpellId,
+        }, tx as Prisma.TransactionClient);
 
-          // Only a cast that owns its slot may enter canonical player history.
-          // Keep the history line, range declaration and spell mechanics in the
-          // same transaction so a rejected concurrent cast leaves no fiction.
-          await tx.gameLog.create({
-            data: {
-              campaignId,
-              role: "user",
-              content: trimmedAction,
-            },
-          });
-
-          if (unenforcedRangeLog) {
-            await tx.gameLog.create({
-              data: { campaignId, role: "system", content: unenforcedRangeLog },
-            });
-          }
-
-          const spellOutcome = await executeCombatAction({
-            actionType: "cast_spell",
-            encounter: context.activeEncounter ? {
-              id: context.activeEncounter.id,
-              round: context.activeEncounter.round,
-              currentTurnIndex: context.activeEncounter.currentTurnIndex,
-              totalDamageDealt: context.activeEncounter.totalDamageDealt,
-              status: "active",
-              combatants: context.activeEncounter.combatants as PipelineCombatant[],
-            } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
-            actorId: playerCombatant?.id ?? context.character.id,
-            actorName: context.character.name,
-            actorConditions: playerConditions,
-            targetCombatants: targets,
-            spellName: intent.spellName,
-            spellLevel: effectiveSlotLevel,
-            spellEffect: effect,
-            spellSaveDC: saveDC,
-            // Slot persistence already happened above through castSpell().
-            // Omitting rawSpellSlots prevents the combat pipeline from issuing
-            // the stale whole-JSON Character.update that DC-AUD-011 exposed.
-            playerCharacterId: context.character.id,
-            actorConcentrationSpellId: context.character.concentrationSpellId,
-          }, tx as Prisma.TransactionClient);
-
-          await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);
-
-          gameEvents.push(...spellOutcome.events);
-
-          if (context.activeEncounter) {
-            const finalizeOutcome = await finalizeEncounterTurn({
-              tx: tx as Prisma.TransactionClient,
-              encounterId: context.activeEncounter.id,
-              currentTurnIndex: context.activeEncounter.currentTurnIndex,
-              round: context.activeEncounter.round,
-            });
-            gameEvents.push(...finalizeOutcome.events);
-          }
-
-          if (spellOutcome.consequences.length > 0) {
-            gameEvents.push(buildCombatConsequenceEvent({
-              attackerName: context.character.name,
-              targets: spellOutcome.consequences,
-            }));
-          }
+        // The slot claim above is the point of no return. Keep canonical player
+        // history and any range declaration in this same transaction so a
+        // losing concurrent cast cannot leave narratable fiction behind.
+        await tx.gameLog.create({
+          data: { campaignId, role: "user", content: trimmedAction },
         });
-      } catch (error) {
-        if (error instanceof MagicServiceError) {
-          if (error.code === "NO_SPELL_SLOT_AVAILABLE") {
-            return NextResponse.json(
-              {
-                error:
-                  "The available spell slots changed before this cast could claim one. Refresh state and try again.",
-                code: "SPELL_SLOT_CONFLICT",
-              },
-              { status: 409 }
-            );
-          }
+        if (unenforcedRangeLog) {
+          await tx.gameLog.create({
+            data: { campaignId, role: "system", content: unenforcedRangeLog },
+          });
+        }
 
-          const status =
-            error.code === "CAMPAIGN_NOT_FOUND" || error.code === "CHARACTER_NOT_FOUND"
-              ? 404
-              : 400;
+        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);
+
+        gameEvents.push(...spellOutcome.events);
+
+        if (context.activeEncounter) {
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: tx as Prisma.TransactionClient,
+            encounterId: context.activeEncounter.id,
+            currentTurnIndex: context.activeEncounter.currentTurnIndex,
+            round: context.activeEncounter.round,
+          });
+          gameEvents.push(...finalizeOutcome.events);
+        }
+
+        if (spellOutcome.consequences.length > 0) {
+          gameEvents.push(buildCombatConsequenceEvent({
+            attackerName: context.character.name,
+            targets: spellOutcome.consequences,
+          }));
+        }
+        });
+        playerActionLogged = true;
+      } catch (error) {
+        if (error instanceof SpellSlotClaimError) {
           return NextResponse.json(
-            { error: error.message, code: error.code },
-            { status }
+            {
+              error: error.message,
+              code: "SPELL_SLOT_CONFLICT",
+            },
+            { status: 409 }
           );
         }
         throw error;
       }
-
-      playerActionLogged = true;
     }
 
   if (intent.actionType === "use_item" && intent.targetName) {
