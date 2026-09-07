@@ -35,7 +35,7 @@ async function waitForBlockedInventoryUpdates(
         AND query ILIKE 'UPDATE%'
     `;
 
-    if (Number(rows[0]?.count ?? 0n) >= expected) return;
+    if (Number(rows[0]?.count ?? 0) >= expected) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
