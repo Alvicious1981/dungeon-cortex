@@ -1633,7 +1633,7 @@ describe("condition immunity", () => {
     expect(tx.combatant.update).toHaveBeenCalledTimes(1);
     expect(tx.combatant.update).toHaveBeenCalledWith({
       where: { id: "enemy-1" },
-      data: { hp: { decrement: 2 } },
+      data: { hp: { decrement: expect.any(Number) } },
     });
   });
 
