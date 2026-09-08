@@ -731,6 +731,15 @@ describe("executeCombatAction", () => {
 
       const outcome = await executeCombatAction(payload, tx);
 
+      const characterUpdate = tx.character.update as ReturnType<typeof vi.fn>;
+      const combatantUpdate = tx.combatant.update as ReturnType<typeof vi.fn>;
+      const characterClearIndex = characterUpdate.mock.calls.findIndex(
+        ([args]) => args.data?.concentrationSpellId === null
+      );
+      const hpDecrementCalls = combatantUpdate.mock.calls
+        .map((call, index) => ({ call, index }))
+        .filter(({ call: [args] }) => args.data?.hp?.decrement !== undefined);
+
       // Combatant row must be cleared
       expect(tx.combatant.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -744,6 +753,15 @@ describe("executeCombatAction", () => {
           where: { id: "char-1" },
           data: { concentrationSpellId: null },
         })
+      );
+      expect(characterClearIndex).toBeGreaterThanOrEqual(0);
+      expect(hpDecrementCalls).toHaveLength(1);
+      expect(hpDecrementCalls[0]?.call[0]).toEqual({
+        where: { id: "player-1" },
+        data: { hp: { decrement: 6 } },
+      });
+      expect(characterUpdate.mock.invocationCallOrder[characterClearIndex]).toBeLessThan(
+        combatantUpdate.mock.invocationCallOrder[hpDecrementCalls[0]!.index]!
       );
       expect(outcome.events.some((e) => e.type === "CONCENTRATION_BROKEN")).toBe(true);
     });
@@ -785,6 +803,15 @@ describe("executeCombatAction", () => {
         (c) => c[0].data?.concentrationSpellId === null
       );
       expect(concClearOnCombatant).toBeUndefined();
+
+      const hpDecrementCalls = (tx.combatant.update as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([args]) => args.data?.hp?.decrement !== undefined
+      );
+      expect(hpDecrementCalls).toHaveLength(1);
+      expect(hpDecrementCalls[0]?.[0]).toEqual({
+        where: { id: "player-1" },
+        data: { hp: { decrement: 6 } },
+      });
 
       expect(tx.character.update).not.toHaveBeenCalledWith(
         expect.objectContaining({ data: { concentrationSpellId: null } })

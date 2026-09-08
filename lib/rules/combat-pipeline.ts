@@ -661,6 +661,24 @@ export async function executeCombatAction(
 
     totalDamageDealt += damage;
 
+    // Resolve the save before taking the Combatant row lock. When damage breaks
+    // player concentration, Character is the canonical first lock and its clear
+    // remains in this transaction with the HP decrement and mirrored Combatant
+    // state. A successful save deliberately performs no Character write.
+    let concentrationCheck: ReturnType<typeof resolveConcentrationCheck> | null = null;
+    if (damage > 0 && target.concentrationSpellId) {
+      const targetStats = (target.stats as Record<string, number>) || {};
+      const conMod = abilityModifier(targetStats.CON ?? 10);
+      concentrationCheck = resolveConcentrationCheck(damage, conMod);
+
+      if (!concentrationCheck.success && target.isPlayer && playerCharacterId) {
+        await tx.character.update({
+          where: { id: playerCharacterId },
+          data: { concentrationSpellId: null },
+        });
+      }
+    }
+
     if (actionType === "attack" || (actionType === "cast_spell" && payload.spellEffect?.type !== "healing")) {
       // The first write owns two jobs and does them exactly once: atomically apply
       // damage and acquire PostgreSQL's row lock for this Combatant. Crucially it
@@ -751,30 +769,22 @@ export async function executeCombatAction(
       }
     }
 
-    // Concentration Check
-    if (damage > 0 && target.concentrationSpellId) {
-      const targetStats = (target.stats as Record<string, number>) || {};
-      const conMod = abilityModifier(targetStats.CON ?? 10);
-      const conSave = resolveConcentrationCheck(damage, conMod);
+    // Mirror a failed concentration save after the exactly-once HP decrement.
+    if (concentrationCheck && !concentrationCheck.success) {
+      await tx.combatant.update({
+        where: { id: target.id },
+        data: { concentrationSpellId: null },
+      });
 
-      if (!conSave.success) {
-        if (target.isPlayer && playerCharacterId) {
-          await tx.character.update({
-            where: { id: playerCharacterId },
-            data: { concentrationSpellId: null },
-          });
-        }
-        await tx.combatant.update({
-          where: { id: target.id },
-          data: { concentrationSpellId: null },
+      if (collectEvents) {
+        events.push({
+          type: "CONCENTRATION_BROKEN",
+          payload: {
+            targetName: target.name,
+            dc: concentrationCheck.dc,
+            roll: concentrationCheck.total,
+          },
         });
-
-        if (collectEvents) {
-          events.push({
-            type: "CONCENTRATION_BROKEN",
-            payload: { targetName: target.name, dc: conSave.dc, roll: conSave.total },
-          });
-        }
       }
     }
   }
