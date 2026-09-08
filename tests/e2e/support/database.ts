@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 export interface E2ECreatedRecords {
   campaignId?: string;
@@ -32,6 +32,39 @@ export function assertSafeE2EDatabase(): void {
   }
 }
 
+function isLateGameLogCleanupRace(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code !== "P2003") return false;
+
+  const meta = error.meta as
+    | { modelName?: unknown; constraint?: unknown }
+    | undefined;
+
+  return (
+    meta?.modelName === "Campaign" &&
+    meta.constraint === "GameLog_campaignId_fkey"
+  );
+}
+
+async function deleteCampaignRecords(
+  prisma: PrismaClient,
+  campaignId: string
+): Promise<void> {
+  // The action route can persist its assistant GameLog from Next's after(...)
+  // hook after the first deleteMany has completed. Retry this exact FK race
+  // once, re-deleting logs before the second campaign-delete attempt.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await prisma.gameLog.deleteMany({ where: { campaignId } });
+
+    try {
+      await prisma.campaign.deleteMany({ where: { id: campaignId } });
+      return;
+    } catch (error) {
+      if (attempt === 1 || !isLateGameLogCleanupRace(error)) throw error;
+    }
+  }
+}
+
 /**
  * Deletes only the records created by one browser journey. The private-mode
  * user is intentionally retained because the application owns that singleton.
@@ -46,12 +79,7 @@ export async function cleanupE2ERecords(
 
   try {
     if (records.campaignId) {
-      await prisma.gameLog.deleteMany({
-        where: { campaignId: records.campaignId },
-      });
-      await prisma.campaign.deleteMany({
-        where: { id: records.campaignId },
-      });
+      await deleteCampaignRecords(prisma, records.campaignId);
     }
 
     if (records.characterId) {
