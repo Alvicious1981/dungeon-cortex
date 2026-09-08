@@ -56,6 +56,34 @@ function toPipelineCombatant(row: {
   };
 }
 
+async function waitForBlockedConcentrationWrite(
+  prisma: PrismaClient
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+
+  while (Date.now() < deadline) {
+    const blocked = await prisma.$queryRaw<Array<{ query: string }>>`
+      SELECT query
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND pid <> pg_backend_pid()
+        AND wait_event_type = 'Lock'
+        AND query ILIKE '%concentrationSpellId%'
+        AND (
+          query ILIKE '%Character%'
+          OR query ILIKE '%Combatant%'
+        )
+    `;
+
+    if (blocked.length > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error(
+    "Timed out waiting for a Character or Combatant concentration write to block"
+  );
+}
+
 test("@smoke concentration break and replacement do not deadlock", async ({ request }) => {
   test.setTimeout(90_000);
   assertSafeE2EDatabase();
@@ -71,9 +99,9 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
     firstCombatantLocked = resolve;
   });
 
-  let secondCharacterLocked!: () => void;
-  const secondHasCharacterLock = new Promise<void>((resolve) => {
-    secondCharacterLocked = resolve;
+  let resumeDamageWrite!: () => void;
+  const damageWriteMayResume = new Promise<void>((resolve) => {
+    resumeDamageWrite = resolve;
   });
 
   const originalRandom = Math.random;
@@ -209,8 +237,9 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
     let randomIndex = 0;
     Math.random = () => randomValues[randomIndex++] ?? 0.0;
 
-    // Transaction A takes the Combatant row lock through the real HP decrement,
-    // then pauses before it attempts to clear Character concentration.
+    // Transaction A pauses immediately after the real HP decrement. Under the
+    // corrected order it already owns Character before Combatant; under the old
+    // order it owns only Combatant at this point.
     damageAction = prisma.$transaction(async (realTx) => {
       let paused = false;
       const instrumentedTx = {
@@ -222,7 +251,7 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
             if (!paused) {
               paused = true;
               firstCombatantLocked();
-              await secondHasCharacterLock;
+              await damageWriteMayResume;
             }
             return result;
           },
@@ -242,33 +271,18 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
 
     await firstHasCombatantLock;
 
-    // Transaction B takes the Character row lock while A still owns the
-    // Combatant row lock. Its next write is Combatant concentration. A's next
-    // concentration write is Character. The current opposite lock ordering
-    // therefore creates a real PostgreSQL deadlock instead of serializing.
-    replacementAction = prisma.$transaction(async (realTx) => {
-      let signaled = false;
-      const instrumentedTx = {
-        character: {
-          update: async (args: unknown) => {
-            const result = await realTx.character.update(
-              args as Prisma.CharacterUpdateArgs
-            );
-            if (!signaled) {
-              signaled = true;
-              secondCharacterLocked();
-            }
-            return result;
-          },
-        },
-        combatant: {
-          update: (args: unknown) =>
-            realTx.combatant.update(args as Prisma.CombatantUpdateArgs),
-        },
-      } as unknown as Prisma.TransactionClient;
+    // Transaction B now reaches whichever concentration write the lock order
+    // makes wait: Combatant on the old inverse order, Character on the canonical
+    // order. Releasing A only after PostgreSQL reports that blocked write keeps
+    // the regression deterministic without assuming which implementation is
+    // under test. The old order forms a cycle and remains RED; the canonical
+    // order serializes both operations.
+    replacementAction = prisma.$transaction((realTx) =>
+      executeCombatAction(replacementPayload, realTx)
+    );
 
-      return executeCombatAction(replacementPayload, instrumentedTx);
-    });
+    await waitForBlockedConcentrationWrite(prisma);
+    resumeDamageWrite();
 
     const [damageResult, replacementResult] = await Promise.allSettled([
       damageAction,
@@ -296,12 +310,11 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
 
     // Concentration is mirrored on Character and the active player Combatant;
     // whichever operation serializes last, the committed pair must agree.
-    expect(persistedCharacter.concentrationSpellId).toBe(
-      persistedPlayer.concentrationSpellId
-    );
+    expect(persistedCharacter.concentrationSpellId).toBe("Haste");
+    expect(persistedPlayer.concentrationSpellId).toBe("Haste");
   } finally {
     Math.random = originalRandom;
-    secondCharacterLocked();
+    resumeDamageWrite();
     await Promise.allSettled([
       damageAction ?? Promise.resolve(undefined),
       replacementAction ?? Promise.resolve(undefined),

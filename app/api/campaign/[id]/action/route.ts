@@ -129,6 +129,29 @@ async function writeSystemLogs(
   }
 }
 
+/**
+ * A damaging action can update Combatant and then certify a victory whose XP
+ * award updates Character in `finalizeEncounterTurn`. Actions that do not
+ * already claim a spell slot or start concentration take this lock first, so
+ * every transaction that can write both rows follows Character → Combatant.
+ *
+ * Reduced route-test doubles may omit Prisma's raw-query surface. Production
+ * transactions always expose it and therefore always take this lock.
+ */
+async function lockCharacterForCombatAction(
+  tx: Prisma.TransactionClient,
+  characterId: string
+): Promise<void> {
+  if (typeof tx.$queryRaw !== "function") return;
+
+  await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "Character"
+    WHERE "id" = ${characterId}
+    FOR UPDATE
+  `;
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 /**
@@ -546,6 +569,10 @@ async function resolveAction(
       }
 
       await prisma.$transaction(async (tx) => {
+        await lockCharacterForCombatAction(
+          tx as Prisma.TransactionClient,
+          context.character.id
+        );
         const attackOutcome = await executeCombatAction({
           actionType: "attack",
           encounter: {
@@ -1131,7 +1158,13 @@ async function resolveAction(
 
       try {
         await prisma.$transaction(async (tx) => {
-        const spellOutcome = await executeCombatAction({
+          if (!usesSpellSlot && !effect.concentration && targets.length > 0) {
+            await lockCharacterForCombatAction(
+              tx as Prisma.TransactionClient,
+              context.character.id
+            );
+          }
+          const spellOutcome = await executeCombatAction({
           actionType: "cast_spell",
           encounter: context.activeEncounter ? {
             id: context.activeEncounter.id,
@@ -1387,6 +1420,10 @@ async function resolveAction(
       }
 
       await prisma.$transaction(async (tx) => {
+        await lockCharacterForCombatAction(
+          tx as Prisma.TransactionClient,
+          context.character.id
+        );
         const attackOutcome = await executeCombatAction({
           actionType: "attack",
           encounter: {
