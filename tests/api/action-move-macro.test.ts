@@ -167,6 +167,23 @@ beforeEach(() => {
 });
 
 describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", () => {
+  it("refuses movement while an enemy owns the initiative slot (DC-AUD-014)", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(
+        encounterWith([
+          combatant({ id: "g1", name: "Goblin", isPlayer: false, x: 2, y: 2 }),
+          combatant({ id: "p1", x: 0, y: 0 }),
+        ])
+      )
+    );
+
+    const res = await post({ action: "Move", targetX: 1, targetY: 0 });
+
+    expect.soft(res.status).toBe(409);
+    expect.soft(prisma.combatant.update).not.toHaveBeenCalled();
+    expect.soft(userLogWrites()).toHaveLength(0);
+  });
+
   it("refuses Move with no active encounter", async () => {
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith(null));
 
@@ -305,6 +322,42 @@ describe("Move macro: speed bounds the distance", () => {
     expect(res.status).toBe(200);
     const ev = await moveEvent(res);
     expect(ev.payload.distanceFt).toBe(30);
+  });
+
+  it("refuses cumulative movement beyond one turn's allowance (DC-AUD-014)", async () => {
+    const player = combatant({ x: 0, y: 0, stats: { speed: 30 } });
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockImplementation(async () =>
+      contextWith(encounterWith([{ ...player }]))
+    );
+    (prisma.combatant.update as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ data }: { data: { x: number; y: number } }) => {
+        player.x = data.x;
+        player.y = data.y;
+        return { ...player };
+      }
+    );
+
+    const first = await post({ action: "Move", targetX: 4, targetY: 0 });
+    const second = await post({ action: "Move", targetX: 8, targetY: 0 });
+
+    expect.soft(first.status).toBe(200);
+    expect.soft(second.ok).toBe(false);
+    expect.soft({ x: player.x, y: player.y }).toEqual({ x: 4, y: 0 });
+    expect.soft(userLogWrites()).toHaveLength(1);
+  });
+});
+
+describe("Move macro: authoritative map bounds", () => {
+  it("refuses a negative coordinate outside every 0-based encounter map (DC-AUD-014)", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 0, y: 0 })]))
+    );
+
+    const res = await post({ action: "Move", targetX: -1, targetY: 0 });
+
+    expect.soft(res.status).toBe(400);
+    expect.soft(prisma.combatant.update).not.toHaveBeenCalled();
+    expect.soft(userLogWrites()).toHaveLength(0);
   });
 });
 

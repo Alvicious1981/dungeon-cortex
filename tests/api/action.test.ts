@@ -619,6 +619,84 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(call?.[0].attackerArmorPenalty).toBe(true);
   });
 
+  it("refuses a player attack while an enemy owns the initiative slot (DC-AUD-014)", async () => {
+    const enemy = {
+      id: "t1",
+      name: "Goblin",
+      hp: 100,
+      maxHp: 100,
+      ac: 1,
+      conditions: "[]",
+      ...NO_MODIFIERS,
+      isPlayer: false,
+      initiativeTotal: 20,
+    };
+    const player = {
+      id: "p1",
+      name: "Hero",
+      hp: 20,
+      maxHp: 20,
+      conditions: "[]",
+      ...NO_MODIFIERS,
+      isPlayer: true,
+      initiativeTotal: 10,
+      // Opaque on purpose: the repository declares no production JSON shape
+      // or reset semantics for actionBudget yet.
+      actionBudget: { auditSentinel: "unchanged" },
+    };
+    const combatants = [enemy, player];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1",
+        name: "Hero",
+        class: "fighter",
+        level: 1,
+        stats: { STR: 10 },
+        inventory: [],
+      },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: {
+        id: "enc_123",
+        currentTurnIndex: 0,
+        round: 1,
+        totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+    try {
+      const res = await POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "Attack", targetIds: [enemy.id] }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+      const combatantWrites = (prisma.combatant.update as Mock).mock.calls.map(
+        ([args]) => args as { where: { id: string }; data: Record<string, unknown> }
+      );
+      const userLogs = (prisma.gameLog.create as Mock).mock.calls.filter(
+        ([args]) => args?.data?.role === "user"
+      );
+
+      expect.soft(res.status).toBe(409);
+      expect.soft(
+        combatantWrites.filter(({ where, data }) => where.id === enemy.id && "hp" in data)
+      ).toHaveLength(0);
+      expect.soft(
+        combatantWrites.filter(({ where, data }) => where.id === player.id && "actionBudget" in data)
+      ).toHaveLength(0);
+      expect.soft(userLogs).toHaveLength(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("handles multi-target Attack via targetIds", async () => {
     const target1 = { id: "t1", name: "Goblin 1", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
     const target2 = { id: "t2", name: "Goblin 2", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
