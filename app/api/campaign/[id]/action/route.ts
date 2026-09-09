@@ -76,6 +76,7 @@ import {
 import { resolveTravelGate } from "@/lib/actions/travel-command";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
+import { resolveEncounterTurnAuthority } from "@/lib/rules/turn-authority";
 
 /**
  * The request body, declared once in `lib/events/action-transport.ts` and
@@ -150,6 +151,41 @@ async function lockCharacterForCombatAction(
     WHERE "id" = ${characterId}
     FOR UPDATE
   `;
+}
+
+function playerTurnRefusal(
+  encounter: NonNullable<Awaited<ReturnType<typeof buildCampaignContext>>["activeEncounter"]>
+): Response | null {
+  const authority = resolveEncounterTurnAuthority(encounter);
+
+  if (!authority.ok) {
+    if (authority.code === "INVALID_PLAYER_COMBATANT") {
+      return NextResponse.json(
+        { error: "Player combatant not found in encounter." },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        error: "The active encounter has invalid turn state.",
+        code: authority.code,
+      },
+      { status: 409 }
+    );
+  }
+
+  if (!authority.playerOwnsTurn) {
+    return NextResponse.json(
+      {
+        error: "The current initiative slot belongs to another combatant.",
+        code: "NOT_PLAYER_TURN",
+      },
+      { status: 409 }
+    );
+  }
+
+  return null;
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -467,6 +503,9 @@ async function resolveAction(
       return NextResponse.json({ error: "No active encounter." }, { status: 400 });
     }
 
+    const turnRefusal = playerTurnRefusal(context.activeEncounter);
+    if (turnRefusal) return turnRefusal;
+
     if (trimmedAction === "End Turn") {
       const finalizeOutcome = await prisma.$transaction(async (tx) => {
         const outcome = await finalizeEncounterTurn({
@@ -732,6 +771,16 @@ async function resolveAction(
     // model call: parseIntent resolves by pattern and fails closed, so the same
     // input always reaches the same gate.
     const intent = await parseIntent(trimmedAction);
+
+    if (
+      context.activeEncounter &&
+      (intent.actionType === "attack" ||
+        intent.actionType === "cast_spell" ||
+        intent.actionType === "use_item")
+    ) {
+      const turnRefusal = playerTurnRefusal(context.activeEncounter);
+      if (turnRefusal) return turnRefusal;
+    }
 
     // ── Gate: improvised action → ability check ─────────────────────────────────
     // The SRD's universal fallback. The action has no dedicated rule, so the

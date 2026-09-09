@@ -72,17 +72,18 @@ function createDb(options?: {
       create: vi.fn(async ({ data }) => ({
         id: "enc-1",
         combatants: data.combatants.create
-          .map((combatant: { name: string; initiativeTotal: number; isPlayer: boolean; xpValue: number | null }) => ({
+          .map((combatant: { name: string; initiativeTotal: number; initiativeOrder: number; isPlayer: boolean; xpValue: number | null }) => ({
             name: combatant.name,
             initiativeTotal: combatant.initiativeTotal,
+            initiativeOrder: combatant.initiativeOrder,
             isPlayer: combatant.isPlayer,
             xpValue: combatant.xpValue,
           }))
           .sort(
             (
-              a: { initiativeTotal: number },
-              b: { initiativeTotal: number }
-            ) => b.initiativeTotal - a.initiativeTotal
+              a: { initiativeOrder: number },
+              b: { initiativeOrder: number }
+            ) => a.initiativeOrder - b.initiativeOrder
           ),
       })),
     },
@@ -145,6 +146,7 @@ describe("spawnCombatEncounter service contract", () => {
               maxHp: 20,
               ac: 13,
               initiativeTotal: 21,
+              initiativeOrder: 0,
               stats: { DEX: 14 },
               conditionImmunities: [],
               damageImmunities: [],
@@ -159,6 +161,7 @@ describe("spawnCombatEncounter service contract", () => {
               maxHp: 11,
               ac: 13,
               initiativeTotal: 6,
+              initiativeOrder: 1,
               stats: { STR: 10, DEX: 12, CON: 10, INT: 10, WIS: 10, CHA: 10 },
               conditionImmunities: [],
               damageImmunities: [],
@@ -169,7 +172,7 @@ describe("spawnCombatEncounter service contract", () => {
           ],
         },
       },
-      include: { combatants: { orderBy: { initiativeTotal: "desc" } } },
+      include: { combatants: { orderBy: [{ initiativeOrder: "asc" }] } },
     });
   });
 
@@ -210,6 +213,36 @@ describe("spawnCombatEncounter service contract", () => {
       WIS: 10,
       CHA: 10,
     });
+  });
+
+  it("persists the exact initiative order when equal totals use deeper tie-breakers", async () => {
+    const db = createDb();
+    const queryMonsters = vi.fn(async () => [wolf]);
+    // Player: natural 10 + DEX 2 = 12. Wolf: natural 11 + DEX 1 = 12.
+    // The existing rollInitiative contract puts the player first by DEX.
+    mockRandom([0.45, 0.5]);
+
+    await spawnCombatEncounter({
+      campaignId: "campaign-1",
+      targetCR: 0.25,
+      theme: "beast",
+      db,
+      queryMonsters,
+    });
+
+    const call = (db.encounter.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(
+      call.data.combatants.create.map(
+        (combatant: { name: string; initiativeTotal: number; initiativeOrder?: number }) => ({
+          name: combatant.name,
+          initiativeTotal: combatant.initiativeTotal,
+          initiativeOrder: combatant.initiativeOrder,
+        })
+      )
+    ).toEqual([
+      { name: "Aldric", initiativeTotal: 12, initiativeOrder: 0 },
+      { name: "Wolf", initiativeTotal: 12, initiativeOrder: 1 },
+    ]);
   });
 
   it("persists the monster's exact SrdMonster-authorized xp as the combatant's xpValue snapshot", async () => {

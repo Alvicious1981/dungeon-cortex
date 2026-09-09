@@ -35,6 +35,7 @@ vi.mock("@/lib/db/prisma", () => ({
       count: vi.fn(async () => 1),
       findMany: vi.fn(async () => []),
     },
+    encounter: { update: vi.fn(), updateMany: vi.fn() },
     combatant: { update: vi.fn() },
     character: { findUnique: vi.fn(async () => null) },
     actionRequestReceipt: { create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
@@ -167,6 +168,26 @@ beforeEach(() => {
 });
 
 describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", () => {
+  it("refuses movement while an enemy owns the initiative slot (DC-AUD-014)", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(
+        encounterWith([
+          combatant({ id: "g1", name: "Goblin", isPlayer: false, x: 2, y: 2 }),
+          combatant({ id: "p1", x: 0, y: 0 }),
+        ])
+      )
+    );
+
+    const res = await post({ action: "Move", targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
+    expect.soft(prisma.combatant.update).not.toHaveBeenCalled();
+    expect.soft(prisma.encounter.update).not.toHaveBeenCalled();
+    expect.soft(prisma.encounter.updateMany).not.toHaveBeenCalled();
+    expect.soft(userLogWrites()).toHaveLength(0);
+  });
+
   it("refuses Move with no active encounter", async () => {
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(contextWith(null));
 

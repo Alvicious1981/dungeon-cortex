@@ -283,7 +283,7 @@ model Encounter {
   // "active" | "resolved" | "fled"
   round            Int      @default(1)
   currentTurnIndex Int      @default(0)
-  // Zero-based index into combatants ordered by initiativeTotal DESC.
+  // Zero-based index into combatants ordered by Combatant.initiativeOrder ASC.
   totalDamageDealt Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -304,6 +304,9 @@ model Combatant {
   maxHp                Int
   ac                   Int     @default(10)
   initiativeTotal      Int
+  /// Stable zero-based ordinal from rollInitiative's fully resolved order.
+  /// currentTurnIndex indexes combatants by this field, never by row-return order.
+  initiativeOrder      Int
   stats                Json    @default("{}")
   conditions           Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
@@ -342,6 +345,7 @@ model Combatant {
   zone      Zone?     @relation(fields: [zoneId], references: [id])
 
   @@index([encounterId])
+  @@unique([encounterId, initiativeOrder])
   @@index([encounterId, zoneId])
   @@index([zoneId], map: "Combatant_zoneId_idx")
 }

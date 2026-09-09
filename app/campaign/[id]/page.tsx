@@ -27,6 +27,7 @@ import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
+import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
@@ -189,7 +190,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       encounters: {
         where: { status: "active" },
         include: {
-          combatants: { orderBy: { initiativeTotal: "desc" } },
+          combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
         },
       },
     },

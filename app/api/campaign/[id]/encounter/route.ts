@@ -8,6 +8,7 @@ import {
   monsterAbilityScores,
   type MonsterAbilityFields,
 } from "@/lib/rules/encounter-service";
+import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 
 interface EnemyInput {
   name: string;
@@ -211,7 +212,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     // 3. Prepare Combatant Data with spatial placement tied to zoneId
     let enemyIdx = 0;
-    const combatantData = order.map((entry) => {
+    const combatantData = order.map((entry, initiativeOrder) => {
       const isPlayer = entry.id === "player";
       let posX, posY;
 
@@ -237,6 +238,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           maxHp: campaign.character.maxHp,
           ac: playerAC,
           initiativeTotal: entry.initiative,
+          initiativeOrder,
           stats: campaign.character.stats || {},
           concentrationSpellId: campaign.character.concentrationSpellId,
           x: posX,
@@ -259,6 +261,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         maxHp: enemy.maxHp,
         ac: enemy.ac,
         initiativeTotal: entry.initiative,
+        initiativeOrder,
         stats: enemy.stats || {},
         x: posX,
         y: posY,
@@ -276,7 +279,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return tx.encounter.findUnique({
       where: { id: e.id },
       include: {
-        combatants: { orderBy: { initiativeTotal: "desc" } },
+        combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
         zones: { orderBy: [{ x: "asc" }, { y: "asc" }] },
       },
     });

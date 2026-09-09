@@ -291,6 +291,28 @@ describe("buildCampaignContext", () => {
     expect(ctx.relevantMemories).toEqual([]);
   });
 
+  it("loads the active encounter in persisted initiative order", async () => {
+    mockCampaignFindUnique.mockResolvedValueOnce({ character: characterFixture } as never);
+    mockEncounterFindFirst.mockResolvedValueOnce(null);
+    mockGameLogFindMany.mockResolvedValueOnce([]);
+    mockQuestFindMany.mockResolvedValueOnce([]);
+
+    await buildCampaignContext(CAMPAIGN_ID);
+
+    expect(mockEncounterFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { campaignId: CAMPAIGN_ID, status: "active" },
+        select: expect.objectContaining({
+          currentTurnIndex: true,
+          combatants: expect.objectContaining({
+            select: expect.objectContaining({ initiativeOrder: true }),
+            orderBy: [{ initiativeOrder: "asc" }],
+          }),
+        }),
+      }),
+    );
+  });
+
   it("throws when the campaign does not exist", async () => {
     mockCampaignFindUnique.mockResolvedValueOnce(null);
     mockEncounterFindFirst.mockResolvedValueOnce(null);
