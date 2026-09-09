@@ -15,6 +15,7 @@
 
 import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@prisma/client";
+import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import { searchMemories } from "@/lib/memory/search";
 import type { NPCPersonality } from "@/lib/rules/social";
 import type { NPCTraits } from "@/lib/rules/npc";
@@ -64,7 +65,7 @@ export interface ContextEncounter {
   id: string;
   round: number;
   currentTurnIndex: number;
-  /** Ordered by initiativeTotal DESC — index 0 acts first. */
+  /** Ordered by the persisted initiativeOrder — index 0 acts first. */
   combatants: ContextCombatant[];
   /** Total damage dealt to enemies. */
   totalDamageDealt: number;
@@ -85,6 +86,8 @@ export interface ContextCombatant {
   /** Armor Class — used for attack roll resolution. */
   ac: number;
   initiativeTotal: number;
+  /** Stable zero-based identity indexed by currentTurnIndex. */
+  initiativeOrder: number;
   /** Raw JSON string[] of active condition names. */
   conditions: Prisma.JsonValue;
   /** Raw JSON — { STR, DEX, CON, INT, WIS, CHA } */
@@ -410,6 +413,7 @@ export async function buildCampaignContext(
             maxHp: true,
             ac: true,
             initiativeTotal: true,
+            initiativeOrder: true,
             conditions: true,
             stats: true,
             damageImmunities: true,
@@ -421,7 +425,7 @@ export async function buildCampaignContext(
             y: true,
             size: true,
           },
-          orderBy: { initiativeTotal: "desc" },
+          orderBy: COMBATANT_INITIATIVE_ORDER,
         },
       },
     }),

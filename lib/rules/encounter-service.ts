@@ -17,6 +17,7 @@ import {
   queryMonsters as defaultQueryMonsters,
 } from "@/lib/rules/srd-monster-lookup";
 import type { Monster } from "@/lib/rules/srd";
+import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 
 export interface EncounterInventoryItemRecord {
   type: string;
@@ -49,6 +50,7 @@ interface ActiveEncounterRecord {
 interface CreatedCombatantRecord {
   name: string;
   initiativeTotal: number;
+  initiativeOrder: number;
   isPlayer: boolean;
 }
 
@@ -82,6 +84,7 @@ interface EncounterDb {
             maxHp: number;
             ac: number;
             initiativeTotal: number;
+            initiativeOrder: number;
             /// Backend-authorized XP snapshot (docs/DECISION_XP_AWARD_AUTHORITY.md §5-§6).
             /// null = unavailable; never derived from adjustedXP/xpForCR/encounterMultiplier.
             xpValue: number | null;
@@ -89,7 +92,7 @@ interface EncounterDb {
         };
       };
       include: {
-        combatants: { orderBy: { initiativeTotal: "desc" } };
+        combatants: { orderBy: typeof COMBATANT_INITIATIVE_ORDER };
       };
     }): Promise<CreatedEncounterRecord>;
   };
@@ -258,7 +261,7 @@ export async function spawnCombatEncounter(
 
   const { order } = rollInitiative(initiativeInputs);
 
-  const combatantData = order.map((entry) => {
+  const combatantData = order.map((entry, initiativeOrder) => {
     const isPlayer = entry.id.startsWith("player-");
     if (isPlayer) {
       return {
@@ -268,6 +271,7 @@ export async function spawnCombatEncounter(
         maxHp: campaign.character.maxHp,
         ac: playerAC,
         initiativeTotal: entry.initiative,
+        initiativeOrder,
         // Persisted so rules that resolve against a creature's ability scores
         // read real numbers. Without this the column kept its {} default and
         // every such rule silently saw 10 for everyone.
@@ -293,6 +297,7 @@ export async function spawnCombatEncounter(
       maxHp: monster.hit_points,
       ac: acFromMonsterData(buildMonsterRawData(monster)),
       initiativeTotal: entry.initiative,
+      initiativeOrder,
       stats: monsterAbilityScores(monster),
       // Snapshotted rather than looked up at damage time: Combatant has no
       // reference back to SrdMonster, only a name, and resolving by name in the
@@ -316,7 +321,7 @@ export async function spawnCombatEncounter(
       combatants: { create: combatantData },
     },
     include: {
-      combatants: { orderBy: { initiativeTotal: "desc" } },
+      combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
     },
   });
 

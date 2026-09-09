@@ -77,8 +77,7 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
       {
         data: {
           // Two live hostiles alongside the player: enough that the encounter
-          // cannot resolve during this End Turn, and enough that a single
-          // advancement does not wrap from the opening index.
+          // cannot resolve during this End Turn.
           enemies: [
             { name: "Goblin Uno", hp: 7, maxHp: 7, dexModifier: 2 },
             { name: "Goblin Dos", hp: 7, maxHp: 7, dexModifier: 1 },
@@ -88,6 +87,21 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
     );
     expect(encounterResponse.status()).toBe(201);
     const encounterId = ((await encounterResponse.json()) as { id: string }).id;
+
+    const createdEncounter = await prisma.encounter.findUniqueOrThrow({
+      where: { id: encounterId },
+      include: { combatants: true },
+    });
+    const playerTurnIndex = createdEncounter.combatants.find(
+      (combatant) => combatant.isPlayer,
+    )?.initiativeOrder;
+    if (playerTurnIndex === undefined) {
+      throw new Error("Encounter fixture has no player initiative slot");
+    }
+    await prisma.encounter.update({
+      where: { id: encounterId },
+      data: { currentTurnIndex: playerTurnIndex },
+    });
 
     // ── Baseline, read straight from PostgreSQL ──────────────────────────────
     const before = await prisma.encounter.findUniqueOrThrow({

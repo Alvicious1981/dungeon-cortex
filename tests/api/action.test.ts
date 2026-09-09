@@ -110,6 +110,12 @@ const NO_MODIFIERS = {
   conditionImmunities: [] as string[],
 };
 
+function canonicalUserLogWrites(): unknown[] {
+  return (prisma.gameLog.create as Mock).mock.calls.filter(
+    ([args]) => args?.data?.role === "user"
+  );
+}
+
 describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   const campaignId = "camp_123";
   const mockUser = { id: "user_123" };
@@ -208,6 +214,22 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(res.status).toBe(400);
       expect(streamNarrative).not.toHaveBeenCalled();
       expect(prisma.combatant.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a free-text attack while an enemy owns the initiative slot", async () => {
+      const enemyTurnContext = contextWith([hostile, hero]);
+      (buildCampaignContext as any).mockResolvedValue(enemyTurnContext);
+      (prisma.combatant.findMany as any).mockResolvedValue([hostile, hero]);
+
+      const res = await attackWith({ targetName: "Goblin" });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+      expect(prisma.character.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+      expect(canonicalUserLogWrites()).toHaveLength(0);
     });
 
     it("refuses an ambiguous name rather than attacking every match", async () => {
@@ -617,6 +639,143 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(res.status).toBe(200);
     const call = (computeConsequences as any).mock.calls.at(-1);
     expect(call?.[0].attackerArmorPenalty).toBe(true);
+  });
+
+  it("refuses a macro Attack while an enemy owns the initiative slot", async () => {
+    const enemy = {
+      id: "t1", name: "Goblin", hp: 100, maxHp: 100, ac: 1,
+      conditions: "[]", ...NO_MODIFIERS, isPlayer: false,
+      initiativeTotal: 20, initiativeOrder: 0,
+    };
+    const player = {
+      id: "p1", name: "Hero", hp: 20, maxHp: 20, ac: 12,
+      conditions: "[]", ...NO_MODIFIERS, isPlayer: true,
+      initiativeTotal: 10, initiativeOrder: 1,
+    };
+    const combatants = [enemy, player];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1", name: "Hero", class: "fighter", level: 1,
+        stats: { STR: 10 }, inventory: [],
+      },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0,
+        round: 1, totalDamageDealt: 0, combatants,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+    try {
+      const res = await POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "Attack", targetIds: [enemy.id] }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
+      expect(prisma.combatant.update).not.toHaveBeenCalled();
+      expect(prisma.character.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+      expect(canonicalUserLogWrites()).toHaveLength(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("refuses use_item while an enemy owns the initiative slot", async () => {
+    const combatants = [
+      {
+        id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false,
+        hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null,
+        initiativeTotal: 20, initiativeOrder: 0,
+      },
+      {
+        id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true,
+        hp: 10, maxHp: 20, ac: 12, conditions: [], concentrationSpellId: null,
+        initiativeTotal: 10, initiativeOrder: 1,
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: {
+        id: "char-1", name: "Hero", class: "fighter", level: 1,
+        stats: { CON: 12 }, spellSlots: null, concentrationSpellId: null,
+        inventory: [{
+          id: "item-1", name: "Potion of Healing", type: "consumable",
+          quantity: 1, properties: { healingDice: "2d4", healingBonus: 2 },
+        }],
+      },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0,
+        round: 1, totalDamageDealt: 0, combatants,
+      },
+    });
+    (parseIntent as any).mockResolvedValue({
+      actionType: "use_item",
+      targetName: "Potion of Healing",
+    });
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "Use the Potion of Healing" }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
+    expect(prisma.inventoryItem.findUnique).not.toHaveBeenCalled();
+    expect(prisma.inventoryItem.update).not.toHaveBeenCalled();
+    expect(prisma.inventoryItem.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.character.update).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(prisma.encounter.update).not.toHaveBeenCalled();
+    expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+    expect(canonicalUserLogWrites()).toHaveLength(0);
+  });
+
+  it("refuses End Turn while an enemy owns the initiative slot", async () => {
+    const combatants = [
+      {
+        id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false,
+        hp: 10, maxHp: 10, initiativeTotal: 20, initiativeOrder: 0,
+      },
+      {
+        id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true,
+        hp: 20, maxHp: 20, initiativeTotal: 10, initiativeOrder: 1,
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "char-1", name: "Hero", class: "fighter", level: 1, stats: {}, inventory: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0,
+        round: 3, totalDamageDealt: 0, combatants,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "End Turn" }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
+    expect(prisma.encounter.update).not.toHaveBeenCalled();
+    expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(canonicalUserLogWrites()).toHaveLength(0);
   });
 
   it("handles multi-target Attack via targetIds", async () => {

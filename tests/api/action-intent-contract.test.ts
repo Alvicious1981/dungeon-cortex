@@ -673,6 +673,43 @@ describe("un conjuro sin nivel declarado se resuelve al nivel del propio conjuro
   });
 });
 
+describe("la autoridad de turno precede el coste y el efecto de un conjuro", () => {
+  it("rechaza Fireball cuando el enemigo ocupa currentTurnIndex", async () => {
+    const enemy = {
+      id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false,
+      hp: 20, maxHp: 20, ac: 12, conditions: [], concentrationSpellId: null,
+      stats: { DEX: 10 }, x: 1, y: 0, size: "Medium",
+      initiativeTotal: 20, initiativeOrder: 0,
+    };
+    const caster = {
+      id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true,
+      hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null,
+      stats: { INT: 16 }, x: 0, y: 0, size: "Medium",
+      initiativeTotal: 10, initiativeOrder: 1,
+    };
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", status: "active", round: 2, currentTurnIndex: 0,
+        totalDamageDealt: 0, combatants: [enemy, caster],
+      },
+    });
+
+    const { res } = await post("I cast Fireball", { targetIds: [enemy.id] });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
+    expect(prisma.character.update).not.toHaveBeenCalled();
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(prisma.encounter.update).not.toHaveBeenCalled();
+    expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+    const userLogs = (prisma.gameLog.create as any).mock.calls.filter(
+      ([args]: [{ data: { role?: string } }]) => args?.data?.role === "user"
+    );
+    expect(userLogs).toHaveLength(0);
+  });
+});
+
 describe("un conjuro puede alcanzar a varias criaturas", () => {
   /** Magic Missile as the SRD cache stores it: level 1, damage, no save. */
   const MAGIC_MISSILE = {
