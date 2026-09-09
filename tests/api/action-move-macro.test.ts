@@ -36,9 +36,10 @@ vi.mock("@/lib/db/prisma", () => ({
       findMany: vi.fn(async () => []),
     },
     encounter: { update: vi.fn(), updateMany: vi.fn() },
-    combatant: { update: vi.fn() },
+    combatant: { update: vi.fn(), updateMany: vi.fn() },
     character: { findUnique: vi.fn(async () => null) },
     actionRequestReceipt: { create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
+    $transaction: vi.fn(async (callback: (tx: unknown) => unknown) => callback(prisma)),
   },
 }));
 
@@ -143,6 +144,12 @@ const userLogWrites = () =>
     (args) => args[0]?.data?.role === "user"
   );
 
+const expectNoMovePersistence = () => {
+  expect.soft(prisma.$transaction).not.toHaveBeenCalled();
+  expect.soft(prisma.combatant.updateMany).not.toHaveBeenCalled();
+  expect.soft(prisma.combatant.update).not.toHaveBeenCalled();
+};
+
 /** Parses the SSE body into its frames. */
 async function frames(res: Response): Promise<Record<string, any>[]> {
   const body = await res.text();
@@ -165,6 +172,7 @@ beforeEach(() => {
   });
   (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (prisma.combatant.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  (prisma.combatant.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
 });
 
 describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", () => {
@@ -182,7 +190,7 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
-    expect.soft(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect.soft(prisma.encounter.update).not.toHaveBeenCalled();
     expect.soft(prisma.encounter.updateMany).not.toHaveBeenCalled();
     expect.soft(userLogWrites()).toHaveLength(0);
@@ -195,7 +203,7 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "No active encounter." });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect(userLogWrites()).toHaveLength(0);
   });
 
@@ -210,7 +218,7 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
     await expect(res.json()).resolves.toEqual({
       error: "Move requires integer targetX and targetY.",
     });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect(userLogWrites()).toHaveLength(0);
   });
 
@@ -227,7 +235,7 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
     await expect(res.json()).resolves.toEqual({
       error: "Move requires integer targetX and targetY.",
     });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
   });
 
   it("refuses when the encounter holds no player combatant", async () => {
@@ -241,7 +249,7 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
     await expect(res.json()).resolves.toEqual({
       error: "Player combatant not found in encounter.",
     });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect(userLogWrites()).toHaveLength(0);
   });
 
@@ -254,7 +262,7 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "Already at that position." });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect(userLogWrites()).toHaveLength(0);
   });
 });
@@ -268,7 +276,7 @@ describe("Move macro: speed bounds the distance", () => {
     const res = await post({ action: "Move", targetX: 6, targetY: 0 });
 
     expect(res.status).toBe(200);
-    expect(prisma.combatant.update).toHaveBeenCalledTimes(1);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it("refuses the seventh square at the default speed, naming both figures", async () => {
@@ -282,7 +290,7 @@ describe("Move macro: speed bounds the distance", () => {
     await expect(res.json()).resolves.toEqual({
       error: "Movement exceeds speed. Distance: 35 ft, speed: 30 ft.",
     });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect(userLogWrites()).toHaveLength(0);
   });
 
@@ -295,7 +303,7 @@ describe("Move macro: speed bounds the distance", () => {
     const res = await post({ action: "Move", targetX: 8, targetY: 0 });
 
     expect(res.status).toBe(200);
-    expect(prisma.combatant.update).toHaveBeenCalledTimes(1);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to 30 ft when the recorded speed is not a usable number", async () => {
@@ -311,6 +319,7 @@ describe("Move macro: speed bounds the distance", () => {
     await expect(res.json()).resolves.toEqual({
       error: "Movement exceeds speed. Distance: 35 ft, speed: 30 ft.",
     });
+    expectNoMovePersistence();
   });
 
   it("counts a diagonal as one square, per the SRD grid rule", async () => {
@@ -344,7 +353,7 @@ describe("Move macro: collision respects creature footprints", () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "Target square is occupied." });
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expectNoMovePersistence();
     expect(userLogWrites()).toHaveLength(0);
   });
 
@@ -364,6 +373,7 @@ describe("Move macro: collision respects creature footprints", () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "Target square is occupied." });
+    expectNoMovePersistence();
   });
 
   it("does not let the mover's own footprint block its move", async () => {
@@ -376,7 +386,7 @@ describe("Move macro: collision respects creature footprints", () => {
     const res = await post({ action: "Move", targetX: 1, targetY: 1 });
 
     expect(res.status).toBe(200);
-    expect(prisma.combatant.update).toHaveBeenCalledTimes(1);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it("treats an unrecognised size as Medium rather than failing the turn", async () => {
@@ -394,11 +404,33 @@ describe("Move macro: collision respects creature footprints", () => {
     const res = await post({ action: "Move", targetX: 1, targetY: 1 });
 
     expect(res.status).toBe(200);
-    expect(prisma.combatant.update).toHaveBeenCalledTimes(1);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("Move macro: a legal move persists and is announced", () => {
+  it("returns MOVE_STATE_CONFLICT without history when the expected origin is stale", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 1, y: 2 })]))
+    );
+    (prisma.combatant.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+
+    const res = await post({ action: "Move", targetX: 4, targetY: 2 });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "The combatant moved before this Move could be applied. Refresh state and try again.",
+      code: "MOVE_STATE_CONFLICT",
+    });
+    expect(prisma.combatant.updateMany).toHaveBeenCalledWith({
+      where: { id: "p1", x: 1, y: 2 },
+      data: { x: 4, y: 2 },
+    });
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+
   it("writes the new coordinates and emits MOVE_COMBATANT with the journey", async () => {
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
       contextWith(encounterWith([combatant({ x: 1, y: 2 })]))
@@ -407,10 +439,12 @@ describe("Move macro: a legal move persists and is announced", () => {
     const res = await post({ action: "Move", targetX: 4, targetY: 2 });
 
     expect(res.status).toBe(200);
-    expect(prisma.combatant.update).toHaveBeenCalledWith({
-      where: { id: "p1" },
+    expect(prisma.combatant.updateMany).toHaveBeenCalledWith({
+      where: { id: "p1", x: 1, y: 2 },
       data: { x: 4, y: 2 },
     });
+    expect(prisma.combatant.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
 
     const ev = await moveEvent(res);
     expect(ev).toEqual({

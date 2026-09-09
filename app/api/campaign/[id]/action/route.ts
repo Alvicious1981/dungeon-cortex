@@ -77,6 +77,7 @@ import { resolveTravelGate } from "@/lib/actions/travel-command";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 import { resolveEncounterTurnAuthority } from "@/lib/rules/turn-authority";
+import { persistMoveTransition } from "@/lib/db/move-transition";
 
 /**
  * The request body, declared once in `lib/events/action-transport.ts` and
@@ -741,15 +742,37 @@ async function resolveAction(
         }
       }
 
-      // ── State mutation ─────────────────────────────────────────────────────
-      // Distance and collision have both cleared, so the move is legal and the
-      // action is canonical.
-      await persistPlayerAction();
+      // ── Atomic state/history transition ────────────────────────────────────
+      // The context above is a snapshot. Claim exactly that origin instead of
+      // silently rebasing a stale request onto coordinates another Move has
+      // already committed. The canonical player row shares this transaction,
+      // so neither state nor history can commit without the other.
+      const moveTransition = await prisma.$transaction((tx) =>
+        persistMoveTransition(tx, {
+          campaignId,
+          combatantId: playerCombatant.id,
+          expectedFromX: from.x,
+          expectedFromY: from.y,
+          targetX,
+          targetY,
+          playerAction: trimmedAction,
+        })
+      );
 
-      await prisma.combatant.update({
-        where: { id: playerCombatant.id },
-        data: { x: targetX, y: targetY },
-      });
+      if (moveTransition === "stale") {
+        return NextResponse.json(
+          {
+            error:
+              "The combatant moved before this Move could be applied. Refresh state and try again.",
+            code: "MOVE_STATE_CONFLICT",
+          },
+          { status: 409 }
+        );
+      }
+
+      // The transaction already persisted the one canonical player action.
+      // Prevent the generic path below from creating a duplicate.
+      playerActionLogged = true;
 
       gameEvents.push({
         type: "MOVE_COMBATANT",
