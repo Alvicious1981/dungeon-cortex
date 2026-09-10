@@ -277,16 +277,19 @@ model GameLog {
 }
 
 model Encounter {
-  id               String   @id @default(cuid())
-  campaignId       String
-  status           String   @default("active")
+  id                         String   @id @default(cuid())
+  campaignId                 String
+  status                     String   @default("active")
   // "active" | "resolved" | "fled"
-  round            Int      @default(1)
-  currentTurnIndex Int      @default(0)
+  round                      Int      @default(1)
+  currentTurnIndex           Int      @default(0)
   // Zero-based index into combatants ordered by Combatant.initiativeOrder ASC.
-  totalDamageDealt Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  /// Feet spent by the combatant that owns the current round/index turn.
+  /// Null is fail-closed legacy state; every successful turn advance resets it to zero.
+  currentTurnMovementSpentFt Int?
+  totalDamageDealt           Int      @default(0)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 
   campaign   Campaign    @relation(fields: [campaignId], references: [id])
   combatants Combatant[]

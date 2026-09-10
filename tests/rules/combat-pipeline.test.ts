@@ -1468,7 +1468,7 @@ describe("finalizeEncounterTurn", () => {
     expect(tx.encounter.updateMany).not.toHaveBeenCalled();
     expect(tx.encounter.update).toHaveBeenCalledWith({
       where: { id: "enc-1" },
-      data: { currentTurnIndex: 1, round: 1 },
+      data: { currentTurnIndex: 1, round: 1, currentTurnMovementSpentFt: 0 },
     });
     expect(result.events.some((e) => e.type === "TURN_ADVANCE")).toBe(true);
   });
@@ -1495,7 +1495,7 @@ describe("finalizeEncounterTurn", () => {
     expect(result.nextRound).toBe(2);
     expect(tx.encounter.update).toHaveBeenCalledWith({
       where: { id: "enc-1" },
-      data: { currentTurnIndex: 0, round: 2 },
+      data: { currentTurnIndex: 0, round: 2, currentTurnMovementSpentFt: 0 },
     });
     expect(result.events.some((e) => e.type === "ROUND_ADVANCE")).toBe(true);
   });
