@@ -49,20 +49,6 @@ enum ActionRequestStatus {
   REJECTED
 }
 
-model Zone {
-  id          String @id @default(cuid())
-  encounterId String
-  name        String
-  x           Int    @default(0)
-  y           Int    @default(0)
-
-  encounter  Encounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
-  combatants Combatant[]
-
-  @@unique([encounterId, x, y])
-  @@index([encounterId])
-}
-
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -293,7 +279,6 @@ model Encounter {
 
   campaign   Campaign    @relation(fields: [campaignId], references: [id])
   combatants Combatant[]
-  zones      Zone[]
 
   @@index([campaignId], map: "Encounter_campaignId_idx")
 }
@@ -327,7 +312,6 @@ model Combatant {
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
   size                 String  @default("Medium")
-  zoneId               String?
   /// Successful death saves accumulated while the combatant is at 0 hit points.
   deathSaveSuccesses   Int     @default(0)
   /// Failed death saves accumulated while the combatant is at 0 hit points.
@@ -345,12 +329,9 @@ model Combatant {
   xpValue              Int?
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
-  zone      Zone?     @relation(fields: [zoneId], references: [id])
 
   @@index([encounterId])
   @@unique([encounterId, initiativeOrder])
-  @@index([encounterId, zoneId])
-  @@index([zoneId], map: "Combatant_zoneId_idx")
 }
 
 model InventoryItem {

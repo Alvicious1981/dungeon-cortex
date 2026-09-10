@@ -195,7 +195,11 @@ does not transfer commits.
 #65 (PR #58 stabilization) were closed `not planned` on 2026-08-30, after an
 audit confirmed `EncounterMap`, `ActionRequest` and `GameEventRecord` never
 reached `master` and no file from the PR's change list landed there either.
-`Zone` remains the only spatial model in production.
+`Zone` was retired by DC-PLAN-014E after its runtime writers were removed in a
+separate rollout stage. `Combatant.x`/`y` remains the sole persisted combat
+position on the fixed 10×10 grid; no `EncounterMap` replaced it.
+Deploy the Zone-free application/client against the compatible old schema and
+drain every older instance before applying the destructive retirement migration.
 
 Do not treat #63/#64/#65 or the PR #58 branch as live work, do not
 cherry-pick from that branch, and do not resume any PLAN-058/D-series
