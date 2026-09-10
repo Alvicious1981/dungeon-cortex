@@ -50,6 +50,50 @@
 import type { DifficultyBand } from "./ability-check";
 import type { Skill } from "./ability-check";
 
+export type ImprovisedCombatCost = "action" | "attack" | "movement";
+
+export type ImprovisedCombatPolicy =
+  | Readonly<{
+      cost: "action";
+      resolution: "check";
+    }>
+  | Readonly<{
+      cost: ImprovisedCombatCost;
+      resolution: "unsupported";
+      refusalCode:
+        | "COMBAT_EFFECT_UNSUPPORTED"
+        | "COMBAT_MOVEMENT_CHECK_UNSUPPORTED";
+    }>;
+
+const ACTION_CHECK = Object.freeze({
+  cost: "action",
+  resolution: "check",
+} satisfies ImprovisedCombatPolicy);
+
+const MOVEMENT_UNSUPPORTED = Object.freeze({
+  cost: "movement",
+  resolution: "unsupported",
+  refusalCode: "COMBAT_MOVEMENT_CHECK_UNSUPPORTED",
+} satisfies ImprovisedCombatPolicy);
+
+const ACTION_EFFECT_UNSUPPORTED = Object.freeze({
+  cost: "action",
+  resolution: "unsupported",
+  refusalCode: "COMBAT_EFFECT_UNSUPPORTED",
+} satisfies ImprovisedCombatPolicy);
+
+const ATTACK_EFFECT_UNSUPPORTED = Object.freeze({
+  cost: "attack",
+  resolution: "unsupported",
+  refusalCode: "COMBAT_EFFECT_UNSUPPORTED",
+} satisfies ImprovisedCombatPolicy);
+
+const MOVEMENT_EFFECT_UNSUPPORTED = Object.freeze({
+  cost: "movement",
+  resolution: "unsupported",
+  refusalCode: "COMBAT_EFFECT_UNSUPPORTED",
+} satisfies ImprovisedCombatPolicy);
+
 export interface ImprovisedAction {
   /** Matches the player's phrasing. Anchored: the verb must open the action. */
   readonly pattern: RegExp;
@@ -65,6 +109,8 @@ export interface ImprovisedAction {
    * scores set the DC and the band is not used.
    */
   readonly opposedBy?: ImprovisedOpposition;
+  /** Backend-owned legality and cost when the same check is attempted in combat. */
+  readonly combat: ImprovisedCombatPolicy;
 }
 
 export interface ImprovisedMatch {
@@ -121,16 +167,29 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:climb|jump|leap|swim)\b|^(?:trepo|trepar|escalo|escalar|salto|saltar|nado|nadar)\b/i,
     skill: "Athletics",
     band: "easy",
+    combat: MOVEMENT_UNSUPPORTED,
   },
   {
-    // Moving a creature or a heavy object that resists you.
+    // Starting a grapple or shove replaces an attack, but the resulting
+    // grappled/prone/position state is not represented by this fallback.
     pattern:
-      /^(?:i\s+)?(?:push|shove|drag|grapple|wrestle)\b|^(?:empujo|empujar|arrastro|arrastrar|agarro|agarrar|derribo|derribar)\b/i,
+      /^(?:i\s+)?(?:push|shove|grapple|wrestle)\b|^(?:empujo|empujar|agarro|agarrar|derribo|derribar)\b/i,
     skill: "Athletics",
     band: "medium",
     // SRD resolves shoving and grappling as a contest against the target's
     // Athletics, or its Acrobatics if that serves it better.
     opposedBy: { skills: ["Athletics", "Acrobatics"], scope: "target" },
+    combat: ATTACK_EFFECT_UNSUPPORTED,
+  },
+  {
+    // Dragging a creature belongs to movement after a grapple. Neither the
+    // grapple state nor moved-target distance exists in this fallback.
+    pattern:
+      /^(?:i\s+)?(?:drag)\b|^(?:arrastro|arrastrar)\b/i,
+    skill: "Athletics",
+    band: "medium",
+    opposedBy: { skills: ["Athletics", "Acrobatics"], scope: "target" },
+    combat: MOVEMENT_EFFECT_UNSUPPORTED,
   },
   {
     // Overcoming something built or weighted to resist: a barred door, a
@@ -139,13 +198,25 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:force|pry|break|smash|lift|disarm)\b|^(?:fuerzo|forzar|rompo|romper|levanto|levantar|desarmo|desarmar)\b/i,
     skill: "Athletics",
     band: "hard",
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
 
   {
     pattern:
-      /^(?:i\s+)?(?:tumble|balance|vault|somersault|dodge)\b|^(?:hago\s+una\s+voltereta|me\s+equilibro|equilibrarme|esquivo|esquivar)\b/i,
+      /^(?:i\s+)?(?:tumble|balance|vault|somersault)\b|^(?:hago\s+una\s+voltereta|me\s+equilibro|equilibrarme)\b/i,
     skill: "Acrobatics",
     band: "medium",
+    combat: MOVEMENT_UNSUPPORTED,
+  },
+  {
+    // Dodge is an action with a persistent defensive effect, not an
+    // Acrobatics roll. The outside-combat fallback remains compatible, while
+    // combat refuses until that effect has backend state.
+    pattern:
+      /^(?:i\s+)?(?:dodge)\b|^(?:esquivo|esquivar)\b/i,
+    skill: "Acrobatics",
+    band: "medium",
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
   {
     // Taking something off a person without them noticing is one of the DMG's
@@ -157,6 +228,7 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
     // SRD: contested by the mark's own passive Perception — not by whoever
     // happens to be standing nearby with the sharpest eyes.
     opposedBy: { skills: ["Perception"], scope: "target" },
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
   {
     pattern:
@@ -166,6 +238,7 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
     // SRD: a Stealth check is contested by the passive Perception of every
     // creature that might notice, so the most alert one sets the difficulty.
     opposedBy: { skills: ["Perception"], scope: "observers" },
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
   {
     // Noticing what is there to be noticed, rather than deducing what is hidden.
@@ -173,18 +246,30 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:listen|spot|notice|watch|peek)\b|^(?:escucho|escuchar|observo|observar|vigilo|vigilar|atisbo|atisbar)\b/i,
     skill: "Perception",
     band: "easy",
+    combat: ACTION_CHECK,
   },
   {
     pattern:
       /^(?:i\s+)?(?:examine|inspect|study|search|investigate|analyse|analyze)\b|^(?:examino|examinar|inspecciono|inspeccionar|estudio|estudiar|busco|buscar|investigo|investigar|registro|registrar|analizo|analizar)\b/i,
     skill: "Investigation",
     band: "medium",
+    combat: ACTION_CHECK,
   },
   {
     pattern:
-      /^(?:i\s+)?(?:track|forage|navigate|forrage)\b|^(?:rastreo|rastrear|forrajeo|forrajear|oriento|orientarme)\b/i,
+      /^(?:i\s+)?(?:track|navigate)\b|^(?:rastreo|rastrear|oriento|orientarme)\b/i,
     skill: "Survival",
     band: "medium",
+    combat: ACTION_CHECK,
+  },
+  {
+    // A successful forage produces resources; no combat inventory transition
+    // represents that effect.
+    pattern:
+      /^(?:i\s+)?(?:forage|forrage)\b|^(?:forrajeo|forrajear)\b/i,
+    skill: "Survival",
+    band: "medium",
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
   {
     // The SRD's own anchor: stabilising a dying creature is DC 10.
@@ -192,34 +277,54 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
       /^(?:i\s+)?(?:heal|treat|bandage|stabilise|stabilize)\b|^(?:curo|curar|sano|sanar|vendo|vendar|estabilizo|estabilizar)\b/i,
     skill: "Medicine",
     band: "easy",
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
   {
     pattern:
-      /^(?:i\s+)?(?:calm|tame|soothe|ride)\b|^(?:calmo|calmar|domo|domar|monto|montar)\b/i,
+      /^(?:i\s+)?(?:calm|tame|soothe)\b|^(?:calmo|calmar|domo|domar)\b/i,
     skill: "Animal Handling",
     band: "medium",
+    combat: ACTION_EFFECT_UNSUPPORTED,
+  },
+  {
+    pattern:
+      /^(?:i\s+)?(?:ride)\b|^(?:monto|montar)\b/i,
+    skill: "Animal Handling",
+    band: "medium",
+    combat: MOVEMENT_EFFECT_UNSUPPORTED,
   },
   {
     pattern:
       /^(?:i\s+)?(?:persuade|convince|plead|negotiate)\b|^(?:persuado|persuadir|convenzo|convencer|negocio|negociar|suplico|suplicar)\b/i,
     skill: "Persuasion",
     band: "medium",
+    combat: ACTION_CHECK,
   },
   {
     // Selling a lie to someone with reason to doubt you.
     pattern:
-      /^(?:i\s+)?(?:lie|deceive|bluff|trick|disguise)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir|disfrazo|disfrazarme)\b/i,
+      /^(?:i\s+)?(?:lie|deceive|bluff|trick)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir)\b/i,
     skill: "Deception",
     band: "hard",
     // SRD: contested by the listener's Insight. The lie is told to someone
     // specific; an unrelated creature overhearing it is not the contest.
     opposedBy: { skills: ["Insight"], scope: "target" },
+    combat: ACTION_CHECK,
+  },
+  {
+    pattern:
+      /^(?:i\s+)?(?:disguise)\b|^(?:disfrazo|disfrazarme)\b/i,
+    skill: "Deception",
+    band: "hard",
+    opposedBy: { skills: ["Insight"], scope: "target" },
+    combat: ACTION_EFFECT_UNSUPPORTED,
   },
   {
     pattern:
       /^(?:i\s+)?(?:intimidate|threaten|menace|scare)\b|^(?:intimido|intimidar|amenazo|amenazar|asusto|asustar)\b/i,
     skill: "Intimidation",
     band: "medium",
+    combat: ACTION_CHECK,
   },
 ];
 

@@ -11,6 +11,72 @@ import {
   computeAbilityCheckDC,
 } from "@/lib/rules/ability-check";
 
+const ACTION_CHECK = {
+  cost: "action",
+  resolution: "check",
+} as const;
+
+const EFFECT_UNSUPPORTED = (cost: "action" | "attack" | "movement") => ({
+  cost,
+  resolution: "unsupported",
+  refusalCode: "COMBAT_EFFECT_UNSUPPORTED",
+} as const);
+
+const MOVEMENT_UNSUPPORTED = {
+  cost: "movement",
+  resolution: "unsupported",
+  refusalCode: "COMBAT_MOVEMENT_CHECK_UNSUPPORTED",
+} as const;
+
+const COMBAT_POLICY_CASES = [
+  ["I listen", ACTION_CHECK],
+  ["escucho", ACTION_CHECK],
+  ["I search", ACTION_CHECK],
+  ["investigo", ACTION_CHECK],
+  ["I track", ACTION_CHECK],
+  ["oriento", ACTION_CHECK],
+  ["I persuade", ACTION_CHECK],
+  ["convenzo", ACTION_CHECK],
+  ["I lie", ACTION_CHECK],
+  ["miento", ACTION_CHECK],
+  ["I intimidate", ACTION_CHECK],
+  ["amenazo", ACTION_CHECK],
+  ["I climb", MOVEMENT_UNSUPPORTED],
+  ["trepo", MOVEMENT_UNSUPPORTED],
+  ["I jump", MOVEMENT_UNSUPPORTED],
+  ["salto", MOVEMENT_UNSUPPORTED],
+  ["I swim", MOVEMENT_UNSUPPORTED],
+  ["nado", MOVEMENT_UNSUPPORTED],
+  ["I tumble", MOVEMENT_UNSUPPORTED],
+  ["hago una voltereta", MOVEMENT_UNSUPPORTED],
+  ["I drag", EFFECT_UNSUPPORTED("movement")],
+  ["arrastro", EFFECT_UNSUPPORTED("movement")],
+  ["I ride", EFFECT_UNSUPPORTED("movement")],
+  ["monto", EFFECT_UNSUPPORTED("movement")],
+  ["I shove", EFFECT_UNSUPPORTED("attack")],
+  ["empujo", EFFECT_UNSUPPORTED("attack")],
+  ["I grapple", EFFECT_UNSUPPORTED("attack")],
+  ["agarro", EFFECT_UNSUPPORTED("attack")],
+  ["I force", EFFECT_UNSUPPORTED("action")],
+  ["fuerzo", EFFECT_UNSUPPORTED("action")],
+  ["I disarm", EFFECT_UNSUPPORTED("action")],
+  ["desarmo", EFFECT_UNSUPPORTED("action")],
+  ["I pickpocket", EFFECT_UNSUPPORTED("action")],
+  ["robo", EFFECT_UNSUPPORTED("action")],
+  ["I hide", EFFECT_UNSUPPORTED("action")],
+  ["me escondo", EFFECT_UNSUPPORTED("action")],
+  ["I forage", EFFECT_UNSUPPORTED("action")],
+  ["forrajeo", EFFECT_UNSUPPORTED("action")],
+  ["I stabilize", EFFECT_UNSUPPORTED("action")],
+  ["estabilizo", EFFECT_UNSUPPORTED("action")],
+  ["I calm", EFFECT_UNSUPPORTED("action")],
+  ["calmo", EFFECT_UNSUPPORTED("action")],
+  ["I disguise", EFFECT_UNSUPPORTED("action")],
+  ["disfrazo", EFFECT_UNSUPPORTED("action")],
+  ["I dodge", EFFECT_UNSUPPORTED("action")],
+  ["esquivo", EFFECT_UNSUPPORTED("action")],
+] as const;
+
 describe("tabla de acciones improvisadas", () => {
   // Guardia estructural. Un verbo añadido sin dificultad, o con una habilidad
   // que el motor no conoce, deja de compilar mentalmente aquí en vez de
@@ -19,6 +85,36 @@ describe("tabla de acciones improvisadas", () => {
     for (const action of IMPROVISED_ACTIONS) {
       expect(DIFFICULTY_BANDS).toContain(action.band);
       expect(SKILL_ABILITY).toHaveProperty(action.skill);
+    }
+  });
+
+  it("cada entrada declara un coste y una resolución de combate completos", () => {
+    for (const action of IMPROVISED_ACTIONS) {
+      expect(["action", "attack", "movement"]).toContain(action.combat.cost);
+      expect(["check", "unsupported"]).toContain(action.combat.resolution);
+
+      if (action.combat.resolution === "check") {
+        expect(action.combat).not.toHaveProperty("refusalCode");
+      } else {
+        expect([
+          "COMBAT_EFFECT_UNSUPPORTED",
+          "COMBAT_MOVEMENT_CHECK_UNSUPPORTED",
+        ]).toContain(action.combat.refusalCode);
+      }
+    }
+  });
+
+  it.each(COMBAT_POLICY_CASES)(
+    "%s conserva la política de combate SRD fijada",
+    (input, expected) => {
+      expect(matchImprovisedAction(input)?.action.combat).toEqual(expected);
+    }
+  );
+
+  it("ningún verbo representativo casa con dos entradas tras separar políticas", () => {
+    for (const [input] of COMBAT_POLICY_CASES) {
+      const matches = IMPROVISED_ACTIONS.filter((action) => action.pattern.test(input));
+      expect(matches, input).toHaveLength(1);
     }
   });
 

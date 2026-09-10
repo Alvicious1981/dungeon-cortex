@@ -129,6 +129,23 @@ describe("deterministic intent parser", () => {
     expect(await bandFor("I force the door")).toBe("hard");
   });
 
+  it.each([
+    ["I dodge", "Acrobatics", "medium"],
+    ["I forage", "Survival", "medium"],
+    ["I disguise myself", "Deception", "hard"],
+    ["I ride the horse", "Animal Handling", "medium"],
+    ["I drag the goblin", "Athletics", "medium"],
+  ])(
+    "keeps %s classified after its combat policy is separated",
+    async (input, skill, band) => {
+      await expect(parseIntent(input)).resolves.toMatchObject({
+        actionType: "ability_check",
+        skill,
+        band,
+      });
+    }
+  );
+
   it("never lets an improvised check shadow a dedicated mechanic", async () => {
     // "attack" has its own gate and must keep it.
     await expect(parseIntent("attack the goblin")).resolves.toMatchObject({
