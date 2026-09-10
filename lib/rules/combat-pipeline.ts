@@ -544,7 +544,6 @@ export async function executeCombatAction(
         isMelee: true,
         encounterSnapshot: snapshot,
         usedSenses: [],
-        zones: [],
         targetModifiers: {
           immunities: target.damageImmunities ?? [],
           resistances: target.damageResistances ?? [],

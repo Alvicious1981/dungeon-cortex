@@ -70,22 +70,8 @@ async function createMoveFixture(
       currentTurnIndex: 0,
       currentTurnMovementSpentFt: 0,
       totalDamageDealt: 0,
-      zones: {
-        create: Array.from({ length: 9 }, (_, index) => ({
-          name: `Zone ${index}`,
-          x: index % 3,
-          y: Math.floor(index / 3),
-        })),
-      },
     },
-    include: { zones: true },
   });
-
-  const zoneAt = (x: number, y: number): string => {
-    const zone = encounter.zones.find((candidate) => candidate.x === x && candidate.y === y);
-    if (!zone) throw new Error(`Missing persisted zone at ${x},${y}.`);
-    return zone.id;
-  };
 
   const [player, enemy] = await prisma.$transaction([
     prisma.combatant.create({
@@ -102,7 +88,6 @@ async function createMoveFixture(
         conditions: [],
         x: 1,
         y: 1,
-        zoneId: zoneAt(1, 1),
       },
     }),
     prisma.combatant.create({
@@ -119,7 +104,6 @@ async function createMoveFixture(
         conditions: [],
         x: 2,
         y: 2,
-        zoneId: zoneAt(2, 2),
       },
     }),
   ]);
