@@ -63,8 +63,8 @@ Handles player actions, deterministic gates, state mutation, game events, and na
 | --- | --- | --- | --- |
 | `action` | string | Yes | Player action or macro action. |
 | `targetIds` | string array | No | Combatant IDs for targeted actions. |
-| `targetX` | number | No | Tactical grid destination X for movement. |
-| `targetY` | number | No | Tactical grid destination Y for movement. |
+| `targetX` | integer | No | Zero-based tactical-grid anchor X for movement (`0` through `9`). |
+| `targetY` | integer | No | Zero-based tactical-grid anchor Y for movement (`0` through `9`). |
 
 ### Macro actions
 
@@ -73,6 +73,12 @@ The route supports deterministic macro actions that bypass LLM intent parsing fo
 - `Attack`
 - `End Turn`
 - `Move`
+
+`Move` uses the creature's top-left footprint anchor on the fixed 10×10 combat
+grid. The whole footprint must fit: a Large creature, for example, may anchor
+at `(8,8)` but not `(9,8)`. An invalid destination returns HTTP `400` with
+`code: "MOVE_OUT_OF_BOUNDS"` before combat state, movement budget, canonical
+history, or movement events are changed.
 
 ### Non-streaming action exception
 

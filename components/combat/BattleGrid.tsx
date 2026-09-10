@@ -10,8 +10,8 @@ import {
   type DungeonActionErrorDetail,
   type DungeonActionRequestDetail,
 } from "@/lib/events/action-transport";
+import { COMBAT_GRID_SIZE } from "@/lib/rules/geometry";
 
-const GRID_SIZE = 10;
 type Position = { x: number; y: number };
 type KeyboardMove = { id: string; origin: Position; destination: Position };
 
@@ -53,7 +53,7 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
   }, [combatants, dragId, keyboardMove, movePending]);
 
   function getCurrentPos(combatant: BattleGridCombatant): Position {
-    const maxStart = GRID_SIZE - sizeToSquares(combatant.size);
+    const maxStart = COMBAT_GRID_SIZE - sizeToSquares(combatant.size);
     const source = dragId === combatant.id && dragCell ? dragCell : positions[combatant.id] ?? { x: combatant.x, y: combatant.y };
     return { x: clamp(source.x, 0, maxStart), y: clamp(source.y, 0, maxStart) };
   }
@@ -63,10 +63,10 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
     if (!board) return null;
     const rect = board.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
-    const maxStart = GRID_SIZE - size;
+    const maxStart = COMBAT_GRID_SIZE - size;
     return {
-      x: clamp(Math.floor((clientX - rect.left) / (rect.width / GRID_SIZE)), 0, maxStart),
-      y: clamp(Math.floor((clientY - rect.top) / (rect.height / GRID_SIZE)), 0, maxStart),
+      x: clamp(Math.floor((clientX - rect.left) / (rect.width / COMBAT_GRID_SIZE)), 0, maxStart),
+      y: clamp(Math.floor((clientY - rect.top) / (rect.height / COMBAT_GRID_SIZE)), 0, maxStart),
     };
   }
 
@@ -155,7 +155,7 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
       event.preventDefault();
       const current = positions[combatant.id] ?? { x: combatant.x, y: combatant.y };
       const origin = keyboardMove?.id === combatant.id ? keyboardMove.origin : current;
-      const maxStart = GRID_SIZE - sizeToSquares(combatant.size);
+      const maxStart = COMBAT_GRID_SIZE - sizeToSquares(combatant.size);
       const destination = { x: clamp(current.x + delta.x, 0, maxStart), y: clamp(current.y + delta.y, 0, maxStart) };
       setPositions((previous) => ({ ...previous, [combatant.id]: destination }));
       if (destination.x === origin.x && destination.y === origin.y) {
@@ -177,14 +177,14 @@ export default function BattleGrid({ combatants, activeCombatantId }: BattleGrid
   return (
     <section aria-label="Tactical battle grid" className="rounded-sm border border-zinc-700/80 bg-zinc-950/90 p-3 shadow-[0_8px_28px_rgba(0,0,0,0.55)]">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300" style={{ fontFamily: "var(--font-cinzel)" }}>Tactical Grid 10x10</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300" style={{ fontFamily: "var(--font-cinzel)" }}>Tactical Grid {COMBAT_GRID_SIZE}x{COMBAT_GRID_SIZE}</p>
         {movePending && <span role="status" className="text-[11px] text-amber-300/90">Backend validating…</span>}
       </div>
       <p id="battle-grid-help" className="sr-only">Player token: drag with a pointer, or use arrow keys to preview a move, Enter to submit it, and Escape to cancel. The backend validates the destination.</p>
 
       <div ref={boardRef} role="grid" aria-describedby="battle-grid-help" className="relative aspect-square w-full overflow-hidden rounded-sm border border-zinc-700/80 bg-zinc-900" style={{ backgroundImage: "radial-gradient(circle at 15% 10%, rgba(255,255,255,0.04), transparent 45%), linear-gradient(to bottom, rgba(24,24,27,0.98), rgba(9,9,11,0.98))" }}>
-        <div aria-hidden="true" className="absolute inset-0 grid grid-cols-10 grid-rows-10">{Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => <div key={index} className="border border-zinc-700/50" />)}</div>
-        <div className="absolute inset-0 grid grid-cols-10 grid-rows-10">
+        <div aria-hidden="true" className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${COMBAT_GRID_SIZE}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${COMBAT_GRID_SIZE}, minmax(0, 1fr))` }}>{Array.from({ length: COMBAT_GRID_SIZE * COMBAT_GRID_SIZE }).map((_, index) => <div key={index} className="border border-zinc-700/50" />)}</div>
+        <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${COMBAT_GRID_SIZE}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${COMBAT_GRID_SIZE}, minmax(0, 1fr))` }}>
           {combatants.map((combatant) => {
             const pos = getCurrentPos(combatant);
             const side = sizeToSquares(combatant.size);
