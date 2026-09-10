@@ -1033,6 +1033,98 @@ test("stale expected origin returns a terminal MOVE_STATE_CONFLICT without a pla
   }
 });
 
+test("@smoke out-of-bounds Move rejects the complete footprint without state or history", async ({
+  request,
+}) => {
+  assertSafeE2EDatabase();
+
+  const created: E2ECreatedRecords = {};
+  const prisma = new PrismaClient();
+  let encounterId: string | undefined;
+
+  try {
+    const fixture = await createMoveFixture(request, prisma, created, "Bounded Move");
+    encounterId = fixture.encounterId;
+
+    // The anchor is a legal square but a Large creature would also occupy
+    // x=10. Persist a valid starting footprint one square to its left so the
+    // refusal cannot be explained by distance, collision, or stale origin.
+    await prisma.combatant.update({
+      where: { id: fixture.playerId },
+      data: { x: 8, y: 8, size: "Large" },
+    });
+
+    const requestId = `bounded-move-${randomUUID()}`;
+    const requestData = {
+      requestId,
+      action: "Move",
+      targetX: 9,
+      targetY: 8,
+    };
+    const response = await request.post(`/api/campaign/${created.campaignId}/action`, {
+      data: requestData,
+    });
+    const responseBody = await response.json();
+
+    expect(response.status()).toBe(400);
+    expect(responseBody).toEqual({
+      error: "Move destination is outside the combat grid.",
+      code: "MOVE_OUT_OF_BOUNDS",
+    });
+
+    const [player, encounter, moveLogs, receipt] = await Promise.all([
+      prisma.combatant.findUniqueOrThrow({
+        where: { id: fixture.playerId },
+        select: { x: true, y: true, size: true },
+      }),
+      prisma.encounter.findUniqueOrThrow({
+        where: { id: fixture.encounterId },
+        select: { currentTurnMovementSpentFt: true },
+      }),
+      prisma.gameLog.count({
+        where: { campaignId: created.campaignId, role: "user", content: "Move" },
+      }),
+      prisma.actionRequestReceipt.findUniqueOrThrow({
+        where: {
+          actorUserId_requestId: {
+            actorUserId: "00000000-0000-0000-0000-000000000000",
+            requestId,
+          },
+        },
+        select: { status: true, responseStatus: true, responseBody: true },
+      }),
+    ]);
+
+    expect(player).toEqual({ x: 8, y: 8, size: "Large" });
+    expect(encounter.currentTurnMovementSpentFt).toBe(0);
+    expect(moveLogs).toBe(0);
+    expect(receipt).toEqual({
+      status: "REJECTED",
+      responseStatus: 400,
+      responseBody,
+    });
+
+    const replay = await request.post(`/api/campaign/${created.campaignId}/action`, {
+      data: requestData,
+    });
+    expect(replay.status()).toBe(400);
+    expect(await replay.json()).toEqual(responseBody);
+    await expect(
+      prisma.combatant.findUniqueOrThrow({
+        where: { id: fixture.playerId },
+        select: { x: true, y: true },
+      })
+    ).resolves.toEqual({ x: 8, y: 8 });
+  } finally {
+    if (encounterId) {
+      await prisma.combatant.deleteMany({ where: { encounterId } });
+      await prisma.encounter.deleteMany({ where: { id: encounterId } });
+    }
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
+
 test("legal Move atomically persists one transition and one canonical log", async ({ request }) => {
   assertSafeE2EDatabase();
 

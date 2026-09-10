@@ -51,6 +51,7 @@ import { abilityModifier } from "@/lib/rules/dice";
 import { getItemProperties, validateOwnership } from "@/lib/rules/inventory";
 import {
   chebyshevSquares,
+  isFootprintWithinCombatGrid,
   isOccupied,
   sizeToSquares,
   type GridCombatant,
@@ -689,6 +690,23 @@ async function resolveAction(
         );
       }
 
+      const from = { x: playerCombatant.x, y: playerCombatant.y };
+      const to = { x: targetX, y: targetY };
+      const moverSize: SizeCategory = toSizeCategory(playerCombatant.size);
+
+      // The board contract is fixed and immutable for the lifetime of this
+      // request, so bounds need no transactional claim. Reject before opening
+      // the Combatant -> Encounter -> GameLog authority transaction.
+      if (!isFootprintWithinCombatGrid(to, moverSize)) {
+        return NextResponse.json(
+          {
+            error: "Move destination is outside the combat grid.",
+            code: "MOVE_OUT_OF_BOUNDS",
+          },
+          { status: 400 }
+        );
+      }
+
       // ── Speed extraction ──────────────────────────────────────────────────
       // Attempt to read speed from the combatant's stats JSON.
       // Fallback: 30 ft (6 squares) — the D&D 5e 2014 SRD default.
@@ -701,8 +719,6 @@ async function resolveAction(
       const speedSquares = Math.floor(speedFt / 5);
 
       // ── Distance validation (Chebyshev — 5e grid diagonal = 1 square) ─────
-      const from = { x: playerCombatant.x, y: playerCombatant.y };
-      const to   = { x: targetX, y: targetY };
       const distSquares = chebyshevSquares(from, to);
 
       if (distSquares === 0) {
@@ -722,8 +738,6 @@ async function resolveAction(
       // ── Collision validation (size-aware footprint) ────────────────────────
       // Build a list of all other combatants as GridCombatants, then check
       // every square the mover's footprint would cover at the destination.
-      const moverSize: SizeCategory = toSizeCategory(playerCombatant.size);
-
       const otherCombatants: GridCombatant[] = context.activeEncounter.combatants
         .filter(c => c.id !== playerCombatant.id)
         .map(c => ({

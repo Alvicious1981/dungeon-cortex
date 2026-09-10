@@ -53,6 +53,15 @@ export interface GridCombatant {
 // ---------------------------------------------------------------------------
 
 /**
+ * Present-day tactical combat board width and height, in 5 ft squares.
+ *
+ * Dungeon Cortex currently exposes one fixed square board. Keeping the value
+ * in the rules layer makes the Move gate and BattleGrid consume the same
+ * contract; changing to persisted dimensions is a separate schema decision.
+ */
+export const COMBAT_GRID_SIZE = 10
+
+/**
  * Half-angle of a D&D 5e 2014 RAW cone in radians.
  * Derived from "width at distance d = d" → tan(θ) = 0.5 → θ = arctan(0.5).
  * ≈ 26.565°
@@ -286,6 +295,29 @@ export function sizeToSquares(size: SizeCategory): number {
     case "Gargantuan":
       return 4
   }
+}
+
+/**
+ * Returns whether a creature's complete footprint fits on the combat board.
+ *
+ * The coordinate is the footprint's top-left anchor, so checking the anchor
+ * alone is insufficient for Large and larger creatures at the right or bottom
+ * edge. Both lower bounds are inclusive and both upper bounds are exclusive.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function isFootprintWithinCombatGrid(
+  anchor: GridPoint,
+  size: SizeCategory
+): boolean {
+  const side = sizeToSquares(size)
+
+  return (
+    anchor.x >= 0 &&
+    anchor.y >= 0 &&
+    anchor.x + side <= COMBAT_GRID_SIZE &&
+    anchor.y + side <= COMBAT_GRID_SIZE
+  )
 }
 
 /**

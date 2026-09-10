@@ -270,6 +270,129 @@ describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", (
   });
 });
 
+describe("Move macro: the complete footprint stays inside the 10x10 grid (DC-PLAN-014D)", () => {
+  const expectOutOfBounds = async (res: Response) => {
+    const eventResponse = res.clone();
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "Move destination is outside the combat grid.",
+      code: "MOVE_OUT_OF_BOUNDS",
+    });
+    expectNoMovePersistence();
+    expect.soft(userLogWrites()).toHaveLength(0);
+    expect.soft(prisma.gameLog.create).not.toHaveBeenCalled();
+    expect.soft(await moveEvent(eventResponse)).toBeUndefined();
+  };
+
+  it("refuses a negative X before spending movement or writing history", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 0, y: 0 })]))
+    );
+
+    await expectOutOfBounds(await post({ action: "Move", targetX: -1, targetY: 0 }));
+  });
+
+  it("refuses a negative Y before spending movement or writing history", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 0, y: 0 })]))
+    );
+
+    await expectOutOfBounds(await post({ action: "Move", targetX: 0, targetY: -1 }));
+  });
+
+  it("allows the lower-left origin square", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 1, y: 1 })]))
+    );
+
+    const res = await post({ action: "Move", targetX: 0, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a Medium creature on the upper-right square", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 8, y: 8 })]))
+    );
+
+    const res = await post({ action: "Move", targetX: 9, targetY: 9 });
+
+    expect(res.status).toBe(200);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses one square beyond the X boundary", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 9, y: 8 })]))
+    );
+
+    await expectOutOfBounds(await post({ action: "Move", targetX: 10, targetY: 8 }));
+  });
+
+  it("refuses one square beyond the Y boundary", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 8, y: 9 })]))
+    );
+
+    await expectOutOfBounds(await post({ action: "Move", targetX: 8, targetY: 10 }));
+  });
+
+  it("refuses a Large creature whose anchor is inside but footprint crosses the edge", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 8, y: 8, size: "Large" })]))
+    );
+
+    await expectOutOfBounds(await post({ action: "Move", targetX: 9, targetY: 8 }));
+  });
+
+  it("allows a Large creature whose footprint exactly reaches both upper edges", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 7, y: 8, size: "Large" })]))
+    );
+
+    const res = await post({ action: "Move", targetX: 8, targetY: 8 });
+
+    expect(res.status).toBe(200);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles an idempotent out-of-bounds refusal as REJECTED", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([combatant({ x: 0, y: 0 })]))
+    );
+    (prisma.actionRequestReceipt.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "receipt_bounds",
+    });
+    (prisma.actionRequestReceipt.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    const res = await post({
+      requestId: "bounds-refusal",
+      action: "Move",
+      targetX: -1,
+      targetY: 0,
+    });
+
+    expect(res.status).toBe(400);
+    expect(prisma.actionRequestReceipt.updateMany).toHaveBeenCalledWith({
+      where: { id: "receipt_bounds", status: "PROCESSING" },
+      data: {
+        status: "REJECTED",
+        responseStatus: 400,
+        responseBody: {
+          error: "Move destination is outside the combat grid.",
+          code: "MOVE_OUT_OF_BOUNDS",
+        },
+      },
+    });
+    expectNoMovePersistence();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+});
+
 describe("Move macro: speed bounds the distance", () => {
   it("allows exactly the default 30 ft — six squares", async () => {
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(

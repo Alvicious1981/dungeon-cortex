@@ -42,7 +42,7 @@ describe("BattleGrid", () => {
   ];
 
   it("renders a 10x10 tactical grid", () => {
-    render(
+    const { container } = render(
       <BattleGrid
         combatants={combatants}
         activeCombatantId="pc-1"
@@ -50,6 +50,12 @@ describe("BattleGrid", () => {
     );
 
     expect(screen.getByText("Tactical Grid 10x10")).toBeInTheDocument();
+    const gridLines = container.querySelector('[aria-hidden="true"]');
+    expect(gridLines).toHaveStyle({
+      gridTemplateColumns: "repeat(10, minmax(0, 1fr))",
+      gridTemplateRows: "repeat(10, minmax(0, 1fr))",
+    });
+    expect(gridLines?.children).toHaveLength(100);
     expect(screen.getByLabelText("Aldric token at 1,2")).toBeInTheDocument();
     expect(screen.getByLabelText("Ogre token at 2,3")).toBeInTheDocument();
   });
