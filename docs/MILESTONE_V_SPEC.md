@@ -1,6 +1,8 @@
 # Milestone V: The Cartographer & The Chronicler
 ## Phase 0: Technical Specification & Data Architecture
 
+> Historical proposal only. The `EncounterMap` design below was closed unimplemented with PLAN-058. The current contract is a fixed 10×10 grid with `Combatant.x`/`y` as the sole persisted combat position; DC-PLAN-014E retired `Zone` without adding persisted map dimensions.
+
 ### 1. Architectural Goal
 Transition the combat resolution engine from an abstract "Zone" system to a deterministic, coordinate-based Tactical Map (Grid) supporting multi-target AoE calculations, line-of-sight approximations, and precise movement constraints using D&D 5e RAW rules.
 

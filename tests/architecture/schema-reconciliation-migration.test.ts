@@ -53,7 +53,6 @@ describe("non-legacy schema reconciliation migration", () => {
     }
 
     expect(migration).toContain('CREATE INDEX IF NOT EXISTS "Combatant_zoneId_idx"');
-    expect(schema).toContain('@@index([zoneId], map: "Combatant_zoneId_idx")');
   });
 
   it("reconciles only verified active tables and excludes legacy subsystems", () => {

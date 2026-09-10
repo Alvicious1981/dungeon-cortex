@@ -896,7 +896,7 @@ export function resolveAttackRoll(
    * would leak into everywhere conditions are listed and narrated.
    *
    * This is the sixth parameter after retirement of the never-supplied legacy
-   * Zone spatial context.
+   * spatial argument.
    */
   armorPenalty: boolean = false
 ): AttackRollResult {

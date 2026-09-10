@@ -102,11 +102,12 @@ This registry defines deprecated fields and legacy logic paths to remove during 
 
 The deprecated flat members were removed from `CombatConsequencePayload`. The strict consequence event now contains only `attackerName` and complete `targets[]` entries.
 
-### 5.2 Legacy UI update paths — Resolved 2026-07-25
+### 5.2 Legacy UI update paths — Resolved 2026-07-25; dead VTT removed 2026-09-10
 
-- `CombatHUDController`, `ConsequenceLog`, and `CombatVTT` consume `targets[]` directly.
+- `CombatHUDController` and `ConsequenceLog` consume `targets[]` directly.
 - Multi-target HP and condition feedback is applied locally before the authoritative refresh.
 - No flat-field fallback or `as CombatConsequencePayload` cast remains in active consumers.
+- The unrendered `CombatVTT`/`ZoneGrid` legacy surface was removed with Zone retirement.
 
 ### 5.3 Legacy/duplicate action pathways — Resolved 2026-07-25
 
@@ -119,6 +120,13 @@ The deprecated flat members were removed from `CombatConsequencePayload`. The st
 - The duplicate encounter-turn mutation endpoint returns HTTP 410 with migration guidance.
 - Turn-spending attack, spell, item, and explicit end-turn branches use the canonical finalizer and emit `TURN_ADVANCE` or `ROUND_ADVANCE` when the encounter remains active.
 - Spell mechanics no longer depend on an AI-layer lookup helper; the backend SRD service returns source-traceable resolved effects.
+
+### 5.5 Legacy Zone spatial state — Removed 2026-09-10
+
+- `Combatant.x`/`y` is the sole persisted combat position: a 0-based top-left footprint anchor in the fixed 10×10 encounter grid.
+- The orphaned `Zone` model, `Combatant.zoneId`, dead Zone rules, and dead Zone UI were retired after reachable writers were removed in a separate stage. Deploy the Zone-free application/client against the old schema, drain every older instance, then apply the destructive migration.
+- No `EncounterMap` or persisted dimensions were introduced; PLAN-058 remains closed and unimplemented.
+
 ## 6. Backend-First Execution Policy
 
 No UI-first implementation is allowed for rules-critical completion. Recommended sequence:
