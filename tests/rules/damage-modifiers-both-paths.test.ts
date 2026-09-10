@@ -86,7 +86,6 @@ describe("both damage paths resolve modifiers identically", () => {
       isMelee: true,
       encounterSnapshot: makeSnapshot(),
       usedSenses: [],
-      zones: [],
       targetModifiers: input.modifiers,
     });
 

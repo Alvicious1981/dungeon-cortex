@@ -75,26 +75,35 @@ function post(body: unknown): Promise<Response> {
   return POST(req, { params: Promise.resolve({ id: CAMPAIGN_ID }) });
 }
 
-function mockTransaction(): { createMany: ReturnType<typeof vi.fn> } {
+function mockTransaction(): {
+  createMany: ReturnType<typeof vi.fn>;
+  zoneCreate: ReturnType<typeof vi.fn>;
+  encounterFindUnique: ReturnType<typeof vi.fn>;
+} {
   let combatants: any[] = [];
   const createMany = vi.fn(async ({ data }: any) => {
     combatants = data;
     return { count: data.length };
   });
+  const zoneCreate = vi.fn(async ({ data }: any) => ({
+    id: `zone_${data.x}_${data.y}`,
+    ...data,
+  }));
+  const encounterFindUnique = vi.fn(async () => ({ id: "enc_1", combatants }));
   (prisma.$transaction as any).mockImplementation(async (cb: any) => {
     const tx = {
       encounter: {
         create: vi.fn(async () => ({ id: "enc_1" })),
-        findUnique: vi.fn(async () => ({ id: "enc_1", combatants, zones: [] })),
+        findUnique: encounterFindUnique,
       },
       zone: {
-        create: vi.fn(async ({ data }: any) => ({ id: `zone_${data.x}_${data.y}`, ...data })),
+        create: zoneCreate,
       },
       combatant: { createMany },
     };
     return cb(tx);
   });
-  return { createMany };
+  return { createMany, zoneCreate, encounterFindUnique };
 }
 
 function persisted(createMany: ReturnType<typeof vi.fn>): any[] {
@@ -114,6 +123,24 @@ afterEach(() => {
 });
 
 describe("POST /api/campaign/[id]/encounter — Combatant.stats", () => {
+  it("creates the coordinate encounter without reading or writing legacy Zone state", async () => {
+    const { createMany, zoneCreate, encounterFindUnique } = mockTransaction();
+
+    const res = await post({
+      enemies: [{ name: "Goblin", hp: 7, maxHp: 7, dexModifier: 2 }],
+    });
+
+    expect(res.status).toBe(201);
+    expect(zoneCreate).not.toHaveBeenCalled();
+    expect(persisted(createMany).every((combatant) => !("zoneId" in combatant))).toBe(true);
+    expect(encounterFindUnique).toHaveBeenCalledWith({
+      where: { id: "enc_1" },
+      include: {
+        combatants: { orderBy: [{ initiativeOrder: "asc" }] },
+      },
+    });
+  });
+
   it("persists the monster's real SRD ability scores, not an empty block", async () => {
     const { createMany } = mockTransaction();
     (prisma.srdMonster.findUnique as any).mockResolvedValue({

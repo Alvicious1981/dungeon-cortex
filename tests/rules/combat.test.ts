@@ -745,29 +745,29 @@ describe("deriveNarrativeTags", () => {
 
 describe("selectTacticalHooks", () => {
   it("returns an array", () => {
-    expect(Array.isArray(selectTacticalHooks(makeFacts(), []))).toBe(true);
+    expect(Array.isArray(selectTacticalHooks(makeFacts()))).toBe(true);
   });
 
   it("suggests 'disarm' when hit location is arm", () => {
-    expect(selectTacticalHooks(makeFacts({ hit_location: "arm"  }), [])).toContain("disarm");
+    expect(selectTacticalHooks(makeFacts({ hit_location: "arm"  }))).toContain("disarm");
   });
 
   it("suggests 'disarm' when hit location is hand", () => {
-    expect(selectTacticalHooks(makeFacts({ hit_location: "hand" }), [])).toContain("disarm");
+    expect(selectTacticalHooks(makeFacts({ hit_location: "hand" }))).toContain("disarm");
   });
 
   it("suggests 'trip' when hit location is leg, knee, or foot", () => {
     for (const loc of ["leg", "knee", "foot"] as const) {
-      expect(selectTacticalHooks(makeFacts({ hit_location: loc }), [])).toContain("trip");
+      expect(selectTacticalHooks(makeFacts({ hit_location: loc }))).toContain("trip");
     }
   });
 
   it("suggests 'exploit' when there is overkill", () => {
-    expect(selectTacticalHooks(makeFacts({ overkill: 5 }), [])).toContain("exploit");
+    expect(selectTacticalHooks(makeFacts({ overkill: 5 }))).toContain("exploit");
   });
 
   it("returns only lowercase strings", () => {
-    const hooks = selectTacticalHooks(makeFacts({ hit_location: "arm", overkill: 3 }), []);
+    const hooks = selectTacticalHooks(makeFacts({ hit_location: "arm", overkill: 3 }));
     for (const h of hooks) expect(h).toBe(h.toLowerCase());
   });
 });
@@ -797,7 +797,6 @@ describe("computeConsequences", () => {
       isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
-      zones:             [],
     });
 
     // Required top-level keys
@@ -837,7 +836,6 @@ describe("computeConsequences", () => {
       isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
-      zones:             [],
     });
     expect(result.combat_facts.attacker).toBe("PC:Kara");
     expect(result.combat_facts.defender).toBe("NPC:Orc");
@@ -876,7 +874,6 @@ describe("computeConsequences", () => {
       isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
-      zones:             [],
     });
     // Disadvantage keeps the lower of the two queued rolls.
     expect(result.combat_facts.attack_roll).toBe(2);
@@ -905,7 +902,6 @@ describe("computeConsequences", () => {
       isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
-      zones:             [],
     });
     // No disadvantage: only a single d20 is rolled and kept.
     expect(result.combat_facts.attack_roll).toBe(19);
@@ -932,7 +928,6 @@ describe("computeConsequences", () => {
       isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
-      zones:             [],
     });
     expect(result.combat_facts.is_fumble).toBe(true);
     expect(result.combat_facts.damage).toBe(0);
@@ -959,7 +954,6 @@ describe("computeConsequences", () => {
       isMelee:           true,
       encounterSnapshot: makeSnapshot(),
       usedSenses:        [],
-      zones:             [],
     });
     expect(result.combat_facts.hp_before).toBe(0);
     expect(result.combat_facts.hp_after).toBe(0);
@@ -997,7 +991,6 @@ describe("computeConsequences", () => {
         ]
       }),
       usedSenses:        [],
-      zones:             [],
     });
     // Calculation: 
     // Crit: +0.4, Kill: +0.2, Overkill: +0.2, Status: +0.1
@@ -1034,7 +1027,6 @@ function consequenceInput(overrides: Partial<ComputeConsequencesInput> = {}): Co
     isMelee: true,
     encounterSnapshot: makeSnapshot(),
     usedSenses: [],
-    zones: [],
     ...overrides,
   };
 }

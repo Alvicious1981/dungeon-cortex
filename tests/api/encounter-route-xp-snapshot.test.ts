@@ -68,10 +68,7 @@ function mockTransaction(): { createMany: ReturnType<typeof vi.fn> } {
     const tx = {
       encounter: {
         create: vi.fn(async () => ({ id: encounterId })),
-        findUnique: vi.fn(async () => ({ id: encounterId, combatants, zones: [] })),
-      },
-      zone: {
-        create: vi.fn(async ({ data }: any) => ({ id: `zone_${data.x}_${data.y}`, ...data })),
+        findUnique: vi.fn(async () => ({ id: encounterId, combatants })),
       },
       combatant: {
         createMany,

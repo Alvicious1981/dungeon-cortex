@@ -210,7 +210,7 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
     //
     // Torn down here rather than by widening the shared helper: this journey
     // created the extra state, so it owns removing it. Combatants first, then
-    // the encounter, whose Zones cascade with it.
+    // the encounter.
     if (created.campaignId) {
       const encounters = await prisma.encounter.findMany({
         where: { campaignId: created.campaignId },

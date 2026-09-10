@@ -22,11 +22,11 @@ import { resolveAttackRoll } from "@/lib/rules/combat";
 
 describe("resolveAttackRoll takes the armour penalty", () => {
   it("reports disadvantage when the flag is set", () => {
-    expect(resolveAttackRoll(5, 10, [], [], true, undefined, true).disadvantage).toBe(true);
+    expect(resolveAttackRoll(5, 10, [], [], true, true).disadvantage).toBe(true);
   });
 
   it("reports no disadvantage when it is not", () => {
-    expect(resolveAttackRoll(5, 10, [], [], true, undefined, false).disadvantage).toBe(false);
+    expect(resolveAttackRoll(5, 10, [], [], true, false).disadvantage).toBe(false);
   });
 
   it("defaults to no penalty when the parameter is omitted", () => {
@@ -42,7 +42,7 @@ describe("resolveAttackRoll takes the armour penalty", () => {
     // divergence is pre-existing and out of scope; see the plan's "A rule this
     // codebase does not implement" note. Pinning it here means PR 3 changes it
     // deliberately rather than by accident.
-    const result = resolveAttackRoll(5, 10, ["invisible"], [], true, undefined, true);
+    const result = resolveAttackRoll(5, 10, ["invisible"], [], true, true);
     expect(result.advantage).toBe(true);
     expect(result.disadvantage).toBe(true);
   });

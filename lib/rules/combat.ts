@@ -11,7 +11,6 @@ import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
 import { evaluateAdvantage, isKnownCondition } from "./conditions";
 
-import { calculateDistance, type GridZone } from "./spatial";
 import {
   applyDamageModifiers,
   DAMAGE_TYPES,
@@ -202,12 +201,6 @@ export function removeCondition(
 // Milestone J — Slice 1: Consequences Engine types
 // ---------------------------------------------------------------------------
 
-export interface AttackSpatialContext {
-  attackerZone: GridZone;
-  targetZone: GridZone;
-  rangeInFeet: number;
-}
-
 // The vocabulary moved to `lib/rules/damage-modifiers.ts`, which needs the list
 // as a value while this file needs `applyDamageModifiers` as one. Re-exported
 // here so no importer had to change.
@@ -317,7 +310,6 @@ export interface ComputeConsequencesInput {
   isMelee: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
-  zones: Array<{ name: string }>;
   /**
    * The target's SRD damage modifiers. Optional so that every existing caller
    * and fixture keeps compiling; absent means no modifiers, which is what a
@@ -624,15 +616,13 @@ export function selectSenses(usedRecently: string[]): string[] {
 // ── selectTacticalHooks ──────────────────────────────────────────────────────
 
 /**
- * Derives tactical action hooks from hit location and zone context.
+ * Derives tactical action hooks from the resolved hit.
  * Returns lowercase action strings. @pure
  */
 export function selectTacticalHooks(
-  facts: CombatFacts,
-  zones: Array<{ name: string }>
+  facts: CombatFacts
 ): string[] {
   const hooks: string[] = [];
-  void zones;
 
   // Always available in melee.
   hooks.push("push");
@@ -670,7 +660,7 @@ export function computeConsequences(
     flatDamageBonus = 0,
     targetAC, targetHp, targetMaxHp,
     statusApplied, encounterSnapshot,
-    usedSenses, zones,
+    usedSenses,
     attackerConditions,
     defenderConditions,
     attackerArmorPenalty,
@@ -686,7 +676,6 @@ export function computeConsequences(
     attackerConditions,
     defenderConditions,
     isMelee,
-    undefined,
     attackerArmorPenalty ?? false
   );
 
@@ -755,7 +744,7 @@ export function computeConsequences(
   const combat_beat        = deriveCombatBeat(encounterSnapshot, combat_facts);
   const style_dsl          = deriveStyleDSL(narrative_intensity, combat_beat);
   const suggested_senses   = selectSenses(usedSenses);
-  const suggested_actions  = selectTacticalHooks(combat_facts, zones);
+  const suggested_actions  = selectTacticalHooks(combat_facts);
 
   return {
     combat_facts,
@@ -897,9 +886,7 @@ export function resolveAttackRoll(
   targetAC: number,
   attackerConditions: string[] = [],
   defenderConditions: string[] = [],
-  /** @deprecated — Use spatialContext instead. */
   isMelee: boolean = true,
-  spatialContext?: AttackSpatialContext,
   /**
    * SRD: armour the attacker lacks proficiency with gives disadvantage on any
    * attack involving Strength or Dexterity — which every weapon attack is.
@@ -908,31 +895,11 @@ export function resolveAttackRoll(
    * unproficient wearer is not an SRD condition and a CONDITION_REGISTRY entry
    * would leak into everywhere conditions are listed and narrated.
    *
-   * It lands seventh because the sixth parameter, `spatialContext`, is supplied
-   * by no call site anywhere and is left undisturbed rather than removed.
+   * This is the sixth parameter after retirement of the never-supplied legacy
+   * Zone spatial context.
    */
   armorPenalty: boolean = false
 ): AttackRollResult {
-  if (spatialContext) {
-    const distance = calculateDistance(
-      spatialContext.attackerZone,
-      spatialContext.targetZone
-    );
-    if (distance > spatialContext.rangeInFeet) {
-      return {
-        roll: 0,
-        dice: [],
-        total: 0,
-        advantage: false,
-        disadvantage: false,
-        hit: false,
-        critical: false,
-        fumble: false,
-        reason: "out_of_range",
-      };
-    }
-  }
-
   const evaluated = evaluateAdvantage(
     attackerConditions,
     defenderConditions,

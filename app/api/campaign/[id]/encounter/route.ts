@@ -159,22 +159,24 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const { order } = rollInitiative(combatantInputs);
 
-  // Define spatial scaling
+  // Preserve the established initial formation as in-memory coordinates inside
+  // the fixed 10×10 combat grid. These dimensions are layout choices only;
+  // Combatant.x/y is the persisted spatial authority.
   const totalCombatants = combatantInputs.length;
-  const mapSize = totalCombatants > 9 ? 5 : 3;
-  const centerX = Math.floor(mapSize / 2);
-  const centerY = Math.floor(mapSize / 2);
+  const layoutSize = totalCombatants > 9 ? 5 : 3;
+  const centerX = Math.floor(layoutSize / 2);
+  const centerY = Math.floor(layoutSize / 2);
 
   // Available slots for enemies (all cells except center)
   const enemySlots: Array<{ x: number; y: number }> = [];
-  for (let x = 0; x < mapSize; x++) {
-    for (let y = 0; y < mapSize; y++) {
+  for (let x = 0; x < layoutSize; x++) {
+    for (let y = 0; y < layoutSize; y++) {
       if (x === centerX && y === centerY) continue;
       enemySlots.push({ x, y });
     }
   }
 
-  // Transaction for atomic spatial initialization
+  // Transaction for atomic encounter and coordinate initialization.
   const encounter = await prisma.$transaction(async (tx) => {
     // 1. Create Encounter
     const e = await tx.encounter.create({
@@ -187,31 +189,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       },
     });
 
-    // 2. Create Zones (Grid Cells)
-    const zonesToCreate = [];
-    for (let x = 0; x < mapSize; x++) {
-      for (let y = 0; y < mapSize; y++) {
-        zonesToCreate.push({
-          encounterId: e.id,
-          name: `z_${x}_${y}`,
-          x,
-          y,
-        });
-      }
-    }
-
-    // Using a loop to ensure we have the created objects with IDs
-    const createdZones = await Promise.all(
-      zonesToCreate.map((z) => tx.zone.create({ data: z }))
-    );
-
-    // Map coordinates to zone IDs for fast lookup
-    const zoneMap: Record<string, string> = {};
-    createdZones.forEach((z) => {
-      zoneMap[`${z.x},${z.y}`] = z.id;
-    });
-
-    // 3. Prepare Combatant Data with spatial placement tied to zoneId
+    // 2. Prepare Combatant data with authoritative coordinate placement.
     let enemyIdx = 0;
     const combatantData = order.map((entry, initiativeOrder) => {
       const isPlayer = entry.id === "player";
@@ -227,12 +205,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         enemyIdx++;
       }
       
-      const zoneId = zoneMap[`${posX},${posY}`];
-      
       if (isPlayer) {
         return {
           encounterId: e.id,
-          zoneId,
           name: campaign.character.name,
           isPlayer: true,
           hp: campaign.character.hp,
@@ -255,7 +230,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
       return {
         encounterId: e.id,
-        zoneId,
         name: enemy.name,
         isPlayer: false,
         hp: enemy.hp,
@@ -271,17 +245,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       };
     });
 
-    // 4. Create Combatants
+    // 3. Create Combatants
     await tx.combatant.createMany({
       data: combatantData,
     });
 
-    // 5. Return complete graph
+    // 4. Return the coordinate-authoritative encounter.
     return tx.encounter.findUnique({
       where: { id: e.id },
       include: {
         combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
-        zones: { orderBy: [{ x: "asc" }, { y: "asc" }] },
       },
     });
   });
