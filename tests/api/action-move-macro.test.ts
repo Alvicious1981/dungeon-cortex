@@ -106,6 +106,7 @@ const encounterWith = (combatants: unknown[]) => ({
   id: "enc_1",
   round: 1,
   currentTurnIndex: 0,
+  currentTurnMovementSpentFt: 0,
   totalDamageDealt: 0,
   combatants,
 });
@@ -146,6 +147,7 @@ const userLogWrites = () =>
 
 const expectNoMovePersistence = () => {
   expect.soft(prisma.$transaction).not.toHaveBeenCalled();
+  expect.soft(prisma.encounter.updateMany).not.toHaveBeenCalled();
   expect.soft(prisma.combatant.updateMany).not.toHaveBeenCalled();
   expect.soft(prisma.combatant.update).not.toHaveBeenCalled();
 };
@@ -173,6 +175,7 @@ beforeEach(() => {
   (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (prisma.combatant.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (prisma.combatant.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
+  (prisma.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
 });
 
 describe("Move macro: refusals never mutate the grid or the log (DC-AUD-001)", () => {
@@ -336,6 +339,170 @@ describe("Move macro: speed bounds the distance", () => {
     const ev = await moveEvent(res);
     expect(ev.payload.distanceFt).toBe(30);
   });
+
+  it("fails closed when a legacy active turn has no authoritative budget", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith({
+        ...encounterWith([combatant({ x: 0, y: 0 })]),
+        currentTurnMovementSpentFt: null,
+      })
+    );
+
+    const res = await post({ action: "Move", targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Movement budget is unavailable for this legacy turn. Advance the turn to initialize it.",
+      code: "MOVEMENT_BUDGET_UNAVAILABLE",
+    });
+    expectNoMovePersistence();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+
+  it("refuses cumulative movement beyond one turn's allowance (DC-PLAN-014C)", async () => {
+    const player = combatant({ x: 0, y: 0, stats: { speed: 30 } });
+    const encounter = {
+      ...encounterWith([player]),
+      currentTurnMovementSpentFt: 0,
+    };
+
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockImplementation(async () =>
+      contextWith(encounter)
+    );
+    (prisma.combatant.updateMany as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where, data }: {
+        where: { id: string; x: number; y: number };
+        data: { x: number; y: number };
+      }) => {
+        if (where.id !== player.id || where.x !== player.x || where.y !== player.y) {
+          return { count: 0 };
+        }
+        player.x = data.x;
+        player.y = data.y;
+        return { count: 1 };
+      }
+    );
+    (prisma.encounter.updateMany as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where, data }: {
+        where: {
+          id: string;
+          round: number;
+          currentTurnIndex: number;
+          currentTurnMovementSpentFt: { equals: number; lte: number };
+        };
+        data: { currentTurnMovementSpentFt: { increment: number } };
+      }) => {
+        if (
+          where.id !== encounter.id ||
+          where.round !== encounter.round ||
+          where.currentTurnIndex !== encounter.currentTurnIndex ||
+          where.currentTurnMovementSpentFt.equals !== encounter.currentTurnMovementSpentFt ||
+          encounter.currentTurnMovementSpentFt > where.currentTurnMovementSpentFt.lte
+        ) {
+          return { count: 0 };
+        }
+
+        encounter.currentTurnMovementSpentFt +=
+          data.currentTurnMovementSpentFt.increment;
+        return { count: 1 };
+      }
+    );
+
+    const first = await post({ action: "Move", targetX: 4, targetY: 0 });
+    const second = await post({ action: "Move", targetX: 8, targetY: 0 });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    await expect(second.json()).resolves.toEqual({
+      error: "Movement exceeds the remaining allowance for this turn.",
+      code: "MOVEMENT_BUDGET_EXCEEDED",
+      speedFt: 30,
+      spentFt: 20,
+      remainingFt: 10,
+      requestedFt: 20,
+    });
+    expect({ x: player.x, y: player.y }).toEqual({ x: 4, y: 0 });
+    expect(encounter.currentTurnMovementSpentFt).toBe(20);
+    expect(userLogWrites()).toHaveLength(1);
+    expect(await moveEvent(first)).toMatchObject({ type: "MOVE_COMBATANT" });
+  });
+
+  it("allows split movement through exact exhaustion, then rejects any further movement", async () => {
+    const player = combatant({ x: 0, y: 0, stats: { speed: 30 } });
+    const encounter = {
+      ...encounterWith([player]),
+      currentTurnMovementSpentFt: 0,
+    };
+
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockImplementation(async () =>
+      contextWith(encounter)
+    );
+    (prisma.combatant.updateMany as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where, data }: {
+        where: { id: string; x: number; y: number };
+        data: { x: number; y: number };
+      }) => {
+        if (where.id !== player.id || where.x !== player.x || where.y !== player.y) {
+          return { count: 0 };
+        }
+        player.x = data.x;
+        player.y = data.y;
+        return { count: 1 };
+      }
+    );
+    (prisma.encounter.updateMany as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where, data }: {
+        where: {
+          id: string;
+          round: number;
+          currentTurnIndex: number;
+          currentTurnMovementSpentFt: { equals: number; lte: number };
+        };
+        data: { currentTurnMovementSpentFt: { increment: number } };
+      }) => {
+        if (
+          where.id !== encounter.id ||
+          where.round !== encounter.round ||
+          where.currentTurnIndex !== encounter.currentTurnIndex ||
+          where.currentTurnMovementSpentFt.equals !== encounter.currentTurnMovementSpentFt ||
+          encounter.currentTurnMovementSpentFt > where.currentTurnMovementSpentFt.lte
+        ) {
+          return { count: 0 };
+        }
+        encounter.currentTurnMovementSpentFt +=
+          data.currentTurnMovementSpentFt.increment;
+        return { count: 1 };
+      }
+    );
+
+    const first = await post({ action: "Move", targetX: 2, targetY: 0 });
+    const second = await post({ action: "Move", targetX: 4, targetY: 0 });
+    const third = await post({ action: "Move", targetX: 6, targetY: 0 });
+    const exhausted = await post({ action: "Move", targetX: 7, targetY: 0 });
+
+    expect([first.status, second.status, third.status]).toEqual([200, 200, 200]);
+    expect(exhausted.status).toBe(409);
+    await expect(exhausted.json()).resolves.toMatchObject({
+      code: "MOVEMENT_BUDGET_EXCEEDED",
+      spentFt: 30,
+      remainingFt: 0,
+      requestedFt: 5,
+    });
+    expect(encounter.currentTurnMovementSpentFt).toBe(30);
+    expect({ x: player.x, y: player.y }).toEqual({ x: 6, y: 0 });
+    expect(userLogWrites()).toHaveLength(3);
+    const successfulEvents = await Promise.all([
+      moveEvent(first),
+      moveEvent(second),
+      moveEvent(third),
+    ]);
+    expect(successfulEvents.map((event) => event?.type)).toEqual([
+      "MOVE_COMBATANT",
+      "MOVE_COMBATANT",
+      "MOVE_COMBATANT",
+    ]);
+  });
 });
 
 describe("Move macro: collision respects creature footprints", () => {
@@ -420,7 +587,7 @@ describe("Move macro: a legal move persists and is announced", () => {
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({
       error:
-        "The combatant moved before this Move could be applied. Refresh state and try again.",
+        "Authoritative Move state changed before this Move could be applied. Refresh state and try again.",
       code: "MOVE_STATE_CONFLICT",
     });
     expect(prisma.combatant.updateMany).toHaveBeenCalledWith({

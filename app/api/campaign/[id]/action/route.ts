@@ -77,7 +77,10 @@ import { resolveTravelGate } from "@/lib/actions/travel-command";
 import { Prisma } from "@prisma/client";
 import type { ContextCombatant } from "@/lib/memory/context";
 import { resolveEncounterTurnAuthority } from "@/lib/rules/turn-authority";
-import { persistMoveTransition } from "@/lib/db/move-transition";
+import {
+  MoveStateConflictError,
+  persistMoveTransition,
+} from "@/lib/db/move-transition";
 
 /**
  * The request body, declared once in `lib/events/action-transport.ts` and
@@ -742,29 +745,94 @@ async function resolveAction(
         }
       }
 
+      const requestedDistanceFt = distSquares * 5;
+      const movementAllowanceFt = speedSquares * 5;
+      const spentFt = context.activeEncounter.currentTurnMovementSpentFt;
+
+      if (spentFt === null || !Number.isInteger(spentFt) || spentFt < 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Movement budget is unavailable for this legacy turn. Advance the turn to initialize it.",
+            code: "MOVEMENT_BUDGET_UNAVAILABLE",
+          },
+          { status: 409 }
+        );
+      }
+
+      const remainingFt = Math.max(0, movementAllowanceFt - spentFt);
+      if (requestedDistanceFt > remainingFt) {
+        return NextResponse.json(
+          {
+            error: "Movement exceeds the remaining allowance for this turn.",
+            code: "MOVEMENT_BUDGET_EXCEEDED",
+            speedFt: movementAllowanceFt,
+            spentFt,
+            remainingFt,
+            requestedFt: requestedDistanceFt,
+          },
+          { status: 409 }
+        );
+      }
+
       // ── Atomic state/history transition ────────────────────────────────────
       // The context above is a snapshot. Claim exactly that origin instead of
       // silently rebasing a stale request onto coordinates another Move has
       // already committed. The canonical player row shares this transaction,
       // so neither state nor history can commit without the other.
-      const moveTransition = await prisma.$transaction((tx) =>
-        persistMoveTransition(tx, {
-          campaignId,
-          combatantId: playerCombatant.id,
-          expectedFromX: from.x,
-          expectedFromY: from.y,
-          targetX,
-          targetY,
-          playerAction: trimmedAction,
-        })
-      );
+      let moveTransition;
+      try {
+        moveTransition = await prisma.$transaction((tx) =>
+          persistMoveTransition(tx, {
+            campaignId,
+            encounterId: context.activeEncounter!.id,
+            combatantId: playerCombatant.id,
+            expectedFromX: from.x,
+            expectedFromY: from.y,
+            expectedRound: context.activeEncounter!.round,
+            expectedTurnIndex: context.activeEncounter!.currentTurnIndex,
+            expectedMovementSpentFt: spentFt,
+            requestedDistanceFt,
+            speedFt: movementAllowanceFt,
+            targetX,
+            targetY,
+            playerAction: trimmedAction,
+          })
+        );
+      } catch (error) {
+        if (error instanceof MoveStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "Authoritative Move state changed before this Move could be applied. Refresh state and try again.",
+              code: "MOVE_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
 
       if (moveTransition === "stale") {
         return NextResponse.json(
           {
             error:
-              "The combatant moved before this Move could be applied. Refresh state and try again.",
+              "Authoritative Move state changed before this Move could be applied. Refresh state and try again.",
             code: "MOVE_STATE_CONFLICT",
+          },
+          { status: 409 }
+        );
+      }
+
+      if (moveTransition === "budget-exceeded") {
+        return NextResponse.json(
+          {
+            error: "Movement exceeds the remaining allowance for this turn.",
+            code: "MOVEMENT_BUDGET_EXCEEDED",
+            speedFt: movementAllowanceFt,
+            spentFt,
+            remainingFt,
+            requestedFt: requestedDistanceFt,
           },
           { status: 409 }
         );

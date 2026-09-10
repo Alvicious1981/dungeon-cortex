@@ -137,6 +137,7 @@ describe("spawnCombatEncounter service contract", () => {
         status: "active",
         round: 1,
         currentTurnIndex: 0,
+        currentTurnMovementSpentFt: 0,
         combatants: {
           create: [
             {

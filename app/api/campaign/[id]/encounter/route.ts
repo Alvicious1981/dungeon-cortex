@@ -183,6 +183,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         status: "active",
         round: 1,
         currentTurnIndex: 0,
+        currentTurnMovementSpentFt: 0,
       },
     });
 

@@ -878,7 +878,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     });
     expect(prisma.encounter.update).toHaveBeenCalledWith({
       where: { id: "enc_123" },
-      data: { currentTurnIndex: 1, round: 1 },
+      data: { currentTurnIndex: 1, round: 1, currentTurnMovementSpentFt: 0 },
     });
     expect(stream).toContain('"type":"TURN_ADVANCE"');
   });

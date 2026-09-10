@@ -944,7 +944,11 @@ export async function finalizeEncounterTurn(
 
       await tx.encounter.update({
         where: { id: encounterId },
-        data: { currentTurnIndex: nextTurnIndex, round: nextRound },
+        data: {
+          currentTurnIndex: nextTurnIndex,
+          round: nextRound,
+          currentTurnMovementSpentFt: 0,
+        },
       });
 
       if (collectEvents) {
@@ -986,7 +990,11 @@ export async function finalizeEncounterTurn(
           currentTurnIndex: expectedTurnIndex,
           round: expectedRound,
         },
-        data: { currentTurnIndex: nextTurnIndex, round: nextRound },
+        data: {
+          currentTurnIndex: nextTurnIndex,
+          round: nextRound,
+          currentTurnMovementSpentFt: 0,
+        },
       });
 
       if (claim.count === 1) {

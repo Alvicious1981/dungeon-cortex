@@ -76,6 +76,7 @@ interface EncounterDb {
         status: string;
         round: number;
         currentTurnIndex: number;
+        currentTurnMovementSpentFt: number;
         combatants: {
           create: Array<{
             name: string;
@@ -318,6 +319,7 @@ export async function spawnCombatEncounter(
       status: "active",
       round: 1,
       currentTurnIndex: 0,
+      currentTurnMovementSpentFt: 0,
       combatants: { create: combatantData },
     },
     include: {
