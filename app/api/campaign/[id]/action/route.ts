@@ -881,7 +881,8 @@ async function resolveAction(
       context.activeEncounter &&
       (intent.actionType === "attack" ||
         intent.actionType === "cast_spell" ||
-        intent.actionType === "use_item")
+        intent.actionType === "use_item" ||
+        intent.actionType === "ability_check")
     ) {
       const turnRefusal = playerTurnRefusal(context.activeEncounter);
       if (turnRefusal) return turnRefusal;
@@ -893,6 +894,41 @@ async function resolveAction(
     // as a resolved fact before narration, so the AI describes an outcome the
     // backend already determined instead of inventing one.
     if (intent.actionType === "ability_check" && intent.skill) {
+      // The classifier identifies the skill and DC band, but combat legality
+      // belongs to the rules table. Re-match the same normalized player input
+      // here instead of trusting policy data carried by an intent object.
+      const improvisedMatch = matchImprovisedAction(trimmedAction);
+
+      if (context.activeEncounter) {
+        // A future classifier/table mismatch must not acquire an accidental
+        // combat action policy. Refuse the mechanically ambiguous request.
+        if (!improvisedMatch) {
+          return NextResponse.json(
+            {
+              error:
+                "That combat check could not be matched to an authoritative action policy. State the exact action and target.",
+              code: "MECHANICAL_CLARIFICATION_REQUIRED",
+            },
+            { status: 400 }
+          );
+        }
+
+        const combatPolicy = improvisedMatch.action.combat;
+        if (combatPolicy.resolution === "unsupported") {
+          const movementUnsupported =
+            combatPolicy.refusalCode === "COMBAT_MOVEMENT_CHECK_UNSUPPORTED";
+          return NextResponse.json(
+            {
+              error: movementUnsupported
+                ? "That movement check is not supported during combat."
+                : "That action requires a combat effect the rules engine does not support.",
+              code: combatPolicy.refusalCode,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       const charData = context.character;
 
       // Advantage and disadvantage come from persisted state, never from the
@@ -944,7 +980,7 @@ async function resolveAction(
       // question, and the AI layer's schema should not be the place it lives.
       // matchImprovisedAction normalises its input, so this lookup and the
       // parser's agree by construction.
-      const opposedBy = matchImprovisedAction(trimmedAction)?.action.opposedBy;
+      const opposedBy = improvisedMatch?.action.opposedBy;
 
       // A creature that is unaware of its surroundings resists nothing: an
       // unconscious sentry sets no difficulty for sneaking past it. Only the two
