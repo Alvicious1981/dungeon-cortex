@@ -981,11 +981,10 @@ export async function finalizeEncounterTurn(
     }
 
     // A turn transition is a state-machine edge, not an absolute field write.
-    // The caller's snapshot proposes the first edge. End Turn requests opt into
-    // fail-closed semantics: a stale claim returns a conflict instead of being
-    // silently reinterpreted as a later turn. Existing combat-action finalizers
-    // retain their bounded rebase behavior until a separate regression proves
-    // a different contract is required for those flows.
+    // The caller's snapshot proposes the first edge. Player turn-spending callers
+    // opt into fail-closed semantics: a stale claim returns a conflict instead of
+    // being silently reinterpreted as a later turn. Legacy callers that omit the
+    // flag retain the bounded rebase behavior below.
     let expectedTurnIndex = currentTurnIndex;
     let expectedRound = round;
 
