@@ -156,7 +156,10 @@ beforeEach(() => {
   (prisma.character.findUnique as any).mockResolvedValue({
     id: characterId, campaignId, class: "wizard", level: 5, xp: 0,
     hp: 10, maxHp: 20, hitDiceTotal: 5, hitDiceRemaining: 5,
-    exhaustionLevel: 0, spellSlots: null, stats: { CON: 12 },
+    exhaustionLevel: 0, spellSlots: null,
+    stats: { STR: 14, DEX: 12, CON: 12, INT: 16, WIS: 10, CHA: 10 },
+    skillProficiencies: ["Investigation", "Stealth"],
+    inventory: [],
   });
   // No fight running, so a rest is not refused.
   (prisma.encounter.findFirst as any).mockResolvedValue(null);
@@ -269,6 +272,7 @@ describe("una contienda deriva la CD del que se resiste", () => {
 
   function withHostiles(hostiles: Array<Record<string, unknown>>) {
     const base = contextFor();
+    (prisma.combatant.findMany as any).mockResolvedValue([player, ...hostiles]);
     (buildCampaignContext as any).mockResolvedValue({
       ...base,
       activeEncounter: {
@@ -286,92 +290,12 @@ describe("una contienda deriva la CD del que se resiste", () => {
     return event.e.payload;
   }
 
-  it("esconderse de un centinela despierto es más difícil que de uno obtuso", async () => {
-    // Lo que las puntuaciones persistidas en Combatant hacen posible: hasta
-    // ahora stats era {} para todos y ambos casos habrían dado el mismo número.
-    withHostiles([{ id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
-    const alert = await checkPayload("I hide behind the crates");
-
-    withHostiles([{ id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } }]);
-    const oblivious = await checkPayload("I hide behind the crates");
-
-    expect(alert.dcSource).toBe("contest");
-    expect(alert.dc).toBe(14);
-    expect(oblivious.dc).toBe(8);
-  });
-
-  it("ante varios observadores manda el más despierto", async () => {
-    withHostiles([
-      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I hide behind the crates")).dc).toBe(14);
-  });
-
-  it("ignora a los caídos: un centinela inconsciente no vigila", async () => {
-    withHostiles([
-      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 0, maxHp: 8, conditions: [], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
-  });
-
-  it("un hostil sin características no abarata la acción por debajo de la banda", async () => {
-    // La regresión que encontró la revisión: los enemigos creados por la ruta de
-    // encuentro se guardaban con stats vacío, y tratarlos como criatura promedio
-    // daba CD 10 — más fácil que esconderse sin nadie delante (CD 15).
-    withHostiles([
-      { id: "t1", name: "Unknown", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: {} },
-    ]);
-    const watched = await checkPayload("I hide behind the crates");
-
-    (buildCampaignContext as any).mockResolvedValue(contextFor());
-    const alone = await checkPayload("I hide behind the crates");
-
-    expect(watched.dcSource).toBe("band");
-    expect(watched.dc).toBe(alone.dc);
-  });
-
   it("sin encuentro activo no hay contienda y manda la banda", async () => {
     (buildCampaignContext as any).mockResolvedValue(contextFor());
 
     const payload = await checkPayload("I hide behind the crates");
     expect(payload.dcSource).toBe("band");
     expect(payload.band).toBe("medium");
-  });
-
-  it("un observador inconsciente no vigila, aunque siga en pie", async () => {
-    // hp > 0 no basta: un centinela dormido por un conjuro conserva sus puntos
-    // de golpe y no se entera de nada. Antes fijaba la CD completa.
-    withHostiles([
-      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["unconscious"], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I hide behind the crates")).dc).toBe(8);
-  });
-
-  it("un observador aturdido sí vigila: no puede actuar, pero mira", async () => {
-    withHostiles([
-      { id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["stunned"], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I hide behind the crates")).dc).toBe(14);
-  });
-
-  it("robar a alguien lo resiste ese alguien, no el testigo más agudo", async () => {
-    // El SRD enfrenta el hurto a la Percepción del propio incauto. Antes la CD
-    // salía del guardia de al lado, que ni siquiera era el objetivo.
-    withHostiles([
-      { id: "t1", name: "Merchant", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 8 } },
-      { id: "t2", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
-    ]);
-
-    const payload = await checkPayload("I pickpocket the Merchant");
-    expect(payload.dcSource).toBe("contest");
-    expect(payload.dc).toBe(9); // Merchant WIS 8 → 10 - 1
   });
 
   it("mentir lo resiste quien escucha, no un hostil ajeno", async () => {
@@ -383,65 +307,68 @@ describe("una contienda deriva la CD del que se resiste", () => {
     expect((await checkPayload("I lie to the Innkeeper")).dc).toBe(10);
   });
 
-  it("esconderse sigue siendo cosa de todos: nombrar a uno no ciega al otro", async () => {
-    // Contraste deliberado con los dos anteriores. Decir de quién te escondes no
-    // impide que el segundo centinela te vea.
-    withHostiles([
-      { id: "t1", name: "Drunk", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-      { id: "t2", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I hide from the Drunk")).dc).toBe(14);
-  });
-
   it("un objetivo nombrado que no existe cae a la banda, no adivina", async () => {
     withHostiles([
       { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
     ]);
 
-    expect((await checkPayload("I pickpocket the Merchant")).dcSource).toBe("band");
+    expect((await checkPayload("I lie to the Merchant")).dcSource).toBe("band");
   });
 
-  it("nombrar al empujado lo distingue entre varios candidatos", async () => {
-    // Antes de extraer objetivo, dos hostiles bastaban para renunciar a la
-    // contienda. El nombre resuelve la ambigüedad: se empuja al goblin, y la CD
-    // sale de la Fuerza del goblin, no de la del orco.
+  it("dos objetivos con el mismo nombre siguen siendo ambiguos", async () => {
     withHostiles([
-      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18, DEX: 8 } },
-      { id: "t2", name: "Orc", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4, DEX: 4 } },
+      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
+      { id: "t2", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
     ]);
 
-    const payload = await checkPayload("I shove the Goblin");
-    expect(payload.dcSource).toBe("contest");
-    expect(payload.dc).toBe(14);
-  });
-
-  it("dos criaturas con el mismo nombre siguen siendo ambiguas", async () => {
-    // El nombre ya no basta para distinguirlas, así que no se contiende contra
-    // una suposición — la regla que ya aplica la puerta de ataque.
-    withHostiles([
-      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
-      { id: "t2", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 4 } },
-    ]);
-
-    expect((await checkPayload("I shove the Goblin")).dcSource).toBe("band");
+    expect((await checkPayload("I lie to the Guard")).dcSource).toBe("band");
   });
 
   it("sin nombrar objetivo, un único candidato es inequívoco", async () => {
     withHostiles([
-      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { STR: 18 } },
+      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
     ]);
 
-    const payload = await checkPayload("I shove");
+    const payload = await checkPayload("I lie");
     expect(payload.dcSource).toBe("contest");
     expect(payload.dc).toBe(14);
   });
 
+  it("un objetivo inconsciente no opone su Perspicacia", async () => {
+    withHostiles([
+      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["unconscious"], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I lie to the Guard")).dcSource).toBe("band");
+  });
+
+  it("un objetivo aturdido aún opone su Perspicacia", async () => {
+    withHostiles([
+      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["stunned"], stats: { WIS: 18 } },
+    ]);
+
+    expect((await checkPayload("I lie to the Guard")).dc).toBe(14);
+  });
+
   it("la línea del registro distingue una contienda de una banda", async () => {
     withHostiles([{ id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
-    await post("I hide behind the crates");
+    await post("I lie to the Sentry");
 
     expect(systemLogs().some((line) => line.includes("(contested)"))).toBe(true);
+  });
+
+  it.each([
+    ["I hide behind the crates", "COMBAT_EFFECT_UNSUPPORTED"],
+    ["I pickpocket the Merchant", "COMBAT_EFFECT_UNSUPPORTED"],
+    ["I shove the Goblin", "COMBAT_EFFECT_UNSUPPORTED"],
+  ])("%s no conserva una contienda sin efecto mecánico", async (action, code) => {
+    withHostiles([
+      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18, STR: 18 } },
+    ]);
+
+    const { res } = await post(action);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code });
   });
 });
 

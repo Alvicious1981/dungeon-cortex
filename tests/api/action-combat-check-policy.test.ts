@@ -12,7 +12,11 @@ import { prisma } from "@/lib/db/prisma";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { resolveAbilityCheck } from "@/lib/rules/ability-check";
-import { finalizeEncounterTurn } from "@/lib/rules/combat-pipeline";
+import {
+  executeCombatAction,
+  finalizeEncounterTurn,
+} from "@/lib/rules/combat-pipeline";
+import { resolveCachedSpell } from "@/lib/rules/spell-resolution-service";
 import {
   acquireActionReceipt,
   completeActionReceipt,
@@ -74,7 +78,29 @@ vi.mock("@/lib/rules/ability-check", async (importActual) => {
 
 vi.mock("@/lib/rules/combat-pipeline", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/rules/combat-pipeline")>();
-  return { ...actual, finalizeEncounterTurn: vi.fn() };
+  return {
+    ...actual,
+    executeCombatAction: vi.fn(),
+    finalizeEncounterTurn: vi.fn(),
+  };
+});
+
+vi.mock("@/lib/rules/weapon-attack", () => ({
+  resolveWeaponAttack: vi.fn(async () => ({
+    weaponDice: "1d8",
+    damageType: "slashing",
+    attackModifier: 6,
+    flatDamageBonus: 4,
+    qualities: {},
+  })),
+  unresolvedCategoryLog: vi.fn(() => "CATEGORY_UNRESOLVED"),
+}));
+
+vi.mock("@/lib/rules/spell-resolution-service", async (importActual) => {
+  const actual = await importActual<
+    typeof import("@/lib/rules/spell-resolution-service")
+  >();
+  return { ...actual, resolveCachedSpell: vi.fn() };
 });
 
 vi.mock("@/lib/actions/request-receipt", async (importActual) => {
@@ -133,6 +159,25 @@ const enemy = {
   initiativeOrder: 1,
 };
 
+const inventory = [
+  {
+    id: "weapon_longsword",
+    name: "Longsword",
+    type: "weapon",
+    quantity: 1,
+    properties: { damageDice: "1d8", damageType: "slashing" },
+    equippedSlot: "MAIN_HAND",
+  },
+  {
+    id: "potion_healing",
+    name: "Healing Potion",
+    type: "consumable",
+    quantity: 1,
+    properties: { healingDice: "2d4", healingBonus: 2 },
+    equippedSlot: null,
+  },
+];
+
 function contextWithEncounter(currentTurnIndex: number) {
   return {
     character: {
@@ -150,7 +195,7 @@ function contextWithEncounter(currentTurnIndex: number) {
       spellSlots: null,
       concentrationSpellId: null,
       skillProficiencies: ["Investigation", "Perception"],
-      inventory: [],
+      inventory,
     },
     relevantMemories: [],
     recentLogs: [],
@@ -167,11 +212,14 @@ function contextWithEncounter(currentTurnIndex: number) {
   };
 }
 
-async function post(action: string, requestId?: string) {
+async function post(
+  action: string,
+  options: { requestId?: string; targetIds?: string[] } = {}
+) {
   return POST(
     new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
       method: "POST",
-      body: JSON.stringify({ action, ...(requestId ? { requestId } : {}) }),
+      body: JSON.stringify({ action, ...options }),
     }),
     { params: Promise.resolve({ id: campaignId }) }
   );
@@ -241,6 +289,31 @@ beforeEach(() => {
     ],
     turnAdvanceConflict: false,
   });
+  (executeCombatAction as any).mockResolvedValue({
+    events: [{ type: "DAMAGE_DEALT", payload: { damage: 1 } }],
+    consequences: [],
+    totalDamageDealt: 1,
+    consequenceDetails: [],
+    systemLogs: [],
+  });
+  (resolveCachedSpell as any).mockResolvedValue({
+    id: "spell_guidance",
+    name: "Guidance",
+    level: 0,
+    slotLevel: 0,
+    concentration: false,
+    sourceEndpoint: "/api/spells/guidance",
+    area: null,
+    unsupportedAreaType: null,
+    range: { kind: "self" },
+    type: "utility",
+    dice: null,
+    damageType: null,
+    hasSavingThrow: false,
+    saveAbility: null,
+    saveDamage: "none",
+    condition: null,
+  });
   (acquireActionReceipt as any).mockResolvedValue({
     outcome: "acquired",
     receiptId: "receipt_check_policy",
@@ -272,7 +345,9 @@ describe("autoridad de turno para chequeos en combate", () => {
 
 describe("transición atómica de un chequeo permitido", () => {
   it("bloquea y relee el personaje, registra en tx y publica tras commit", async () => {
-    const res = await post("I inspect the room", "req_check_policy");
+    const res = await post("I inspect the room", {
+      requestId: "req_check_policy",
+    });
     const body = await res.text();
 
     expect(res.status).toBe(200);
@@ -375,6 +450,78 @@ describe("transición atómica de un chequeo permitido", () => {
     expect(streamNarrative).not.toHaveBeenCalled();
     expect(completeActionReceipt).not.toHaveBeenCalled();
   });
+});
+
+const TURN_SPENDING_ACTIONS: Array<
+  [string, string, { requestId?: string; targetIds?: string[] }]
+> = [
+  ["macro attack", "Attack", { targetIds: [enemy.id] }],
+  ["parsed attack", "I attack Goblin", {}],
+  ["combat spell", "I cast Guidance", {}],
+  ["combat item", "I use Healing Potion", {}],
+  ["combat check", "I inspect the room", {}],
+];
+
+describe("contrato fail-closed compartido por acciones que terminan turno", () => {
+  it.each(TURN_SPENDING_ACTIONS)(
+    "%s solicita el CAS contra el turno observado",
+    async (_name, action, options) => {
+      const res = await post(action, options);
+
+      expect(res.status).toBe(200);
+      expect(finalizeEncounterTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          encounterId: "enc_check_policy",
+          currentTurnIndex: 0,
+          round: 2,
+          failOnStaleTurn: true,
+        })
+      );
+      expect(tx.gameLog.create).toHaveBeenCalledWith({
+        data: { campaignId, role: "user", content: action },
+      });
+      const globalMechanicalLogs = (prisma.gameLog.create as any).mock.calls.filter(
+        ([args]: [{ data?: { role?: string } }]) =>
+          args?.data?.role === "user" || args?.data?.role === "system"
+      );
+      expect(globalMechanicalLogs).toHaveLength(0);
+      if (_name.includes("attack")) {
+        expect(tx.gameLog.create).toHaveBeenCalledWith({
+          data: {
+            campaignId,
+            role: "system",
+            content: "CATEGORY_UNRESOLVED",
+          },
+        });
+      }
+    }
+  );
+
+  it.each(TURN_SPENDING_ACTIONS)(
+    "%s aborta sin hechos cuando pierde el CAS",
+    async (_name, action, options) => {
+      (finalizeEncounterTurn as any).mockResolvedValue({
+        events: [],
+        turnAdvanceConflict: true,
+      });
+
+      const res = await post(action, options);
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({
+        code: "TURN_STATE_CONFLICT",
+      });
+      expect(tx.gameLog.create).not.toHaveBeenCalled();
+      const globalMechanicalLogs = (prisma.gameLog.create as any).mock.calls.filter(
+        ([args]: [{ data?: { role?: string } }]) =>
+          args?.data?.role === "user" || args?.data?.role === "system"
+      );
+      expect(globalMechanicalLogs).toHaveLength(0);
+      expect(commitMarker).not.toHaveBeenCalled();
+      expect(streamNarrative).not.toHaveBeenCalled();
+      expect(completeActionReceipt).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe("política fail-closed de chequeos en combate", () => {

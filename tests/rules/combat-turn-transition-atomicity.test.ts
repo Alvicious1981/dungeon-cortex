@@ -26,6 +26,61 @@ function buildCasTx() {
 }
 
 describe("finalizeEncounterTurn atomic turn claims", () => {
+  it("binds a fail-closed resolved-encounter claim to the observed turn", async () => {
+    const tx = buildCasTx();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 20 },
+      { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 0 },
+    ]);
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
+
+    const result = await finalizeEncounterTurn({
+      tx,
+      encounterId: "enc-1",
+      currentTurnIndex: 0,
+      round: 3,
+      failOnStaleTurn: true,
+    });
+
+    expect(tx.encounter.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "enc-1",
+        status: "active",
+        currentTurnIndex: 0,
+        round: 3,
+      },
+      data: { status: "resolved" },
+    });
+    expect(result).toMatchObject({
+      encounterResolved: true,
+      turnAdvanceConflict: false,
+    });
+  });
+
+  it("reports a conflict when a fail-closed resolved claim loses", async () => {
+    const tx = buildCasTx();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 20 },
+      { id: "enemy-1", isPlayer: false, hp: 0, xpValue: 50 },
+    ]);
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 0 });
+
+    const result = await finalizeEncounterTurn({
+      tx,
+      encounterId: "enc-1",
+      currentTurnIndex: 0,
+      round: 3,
+      failOnStaleTurn: true,
+    });
+
+    expect(result).toEqual({
+      events: [],
+      encounterResolved: true,
+      turnAdvanceConflict: true,
+    });
+    expect(tx.encounter.findUnique).not.toHaveBeenCalled();
+  });
+
   it("claims the observed persisted turn before emitting its advance", async () => {
     const tx = buildCasTx();
     (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });

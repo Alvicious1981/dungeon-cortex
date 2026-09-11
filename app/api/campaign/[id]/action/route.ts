@@ -625,67 +625,89 @@ async function resolveAction(
         ? unresolvedCategoryLog({ weaponName: foundWeapon.name, attack })
         : null;
 
-      // Point of no return for the macro attack: targets are resolved and every
-      // refusal above has been passed, so the action is canonical from here.
-      await persistPlayerAction();
+      try {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
+          await lockCharacterForCombatAction(
+            transactionClient,
+            context.character.id
+          );
+          const attackOutcome = await executeCombatAction({
+            actionType: "attack",
+            encounter: {
+              id: activeEncounter.id,
+              round: activeEncounter.round,
+              currentTurnIndex: activeEncounter.currentTurnIndex,
+              totalDamageDealt: activeEncounter.totalDamageDealt,
+              status: "active",
+              combatants: activeEncounter.combatants as PipelineCombatant[],
+            },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            actorArmorPenalty: armorPenaltyFor({
+              inventory: context.character.inventory,
+              characterClass: context.character.class,
+            }).applies,
+            targetCombatants: targets,
+            weaponName: foundWeapon?.name || "Unarmed",
+            weaponDice: attack.weaponDice,
+            damageType: attack.damageType as DamageType,
+            attackModifier: attack.attackModifier,
+            flatDamageBonus: attack.flatDamageBonus,
+            weaponQualities: attack.qualities,
+            playerCharacterId: context.character.id,
+          }, transactionClient);
 
-      if (categoryLog) {
-        await prisma.gameLog.create({
-          data: { campaignId, role: "system", content: categoryLog },
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await lockCharacterForCombatAction(
-          tx as Prisma.TransactionClient,
-          context.character.id
-        );
-        const attackOutcome = await executeCombatAction({
-          actionType: "attack",
-          encounter: {
-            id: activeEncounter.id,
-            round: activeEncounter.round,
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: transactionClient,
+            encounterId: activeEncounter.id,
             currentTurnIndex: activeEncounter.currentTurnIndex,
-            totalDamageDealt: activeEncounter.totalDamageDealt,
-            status: "active",
-            combatants: activeEncounter.combatants as PipelineCombatant[],
-          },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          actorArmorPenalty: armorPenaltyFor({
-            inventory: context.character.inventory,
-            characterClass: context.character.class,
-          }).applies,
-          targetCombatants: targets,
-          weaponName: foundWeapon?.name || "Unarmed",
-          weaponDice: attack.weaponDice,
-          damageType: attack.damageType as DamageType,
-          attackModifier: attack.attackModifier,
-          flatDamageBonus: attack.flatDamageBonus,
-          weaponQualities: attack.qualities,
-          playerCharacterId: context.character.id,
-        }, tx as Prisma.TransactionClient);
+            round: activeEncounter.round,
+            failOnStaleTurn: true,
+          });
+          if (finalizeOutcome.turnAdvanceConflict) {
+            throw new TurnStateConflictError();
+          }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, attackOutcome.systemLogs);
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+          if (categoryLog) {
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "system", content: categoryLog },
+            });
+          }
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            attackOutcome.systemLogs
+          );
 
-        gameEvents.push(...attackOutcome.events);
-
-        const finalizeOutcome = await finalizeEncounterTurn({
-          tx: tx as Prisma.TransactionClient,
-          encounterId: activeEncounter.id,
-          currentTurnIndex: activeEncounter.currentTurnIndex,
-          round: activeEncounter.round,
+          return { attackOutcome, turnEvents: finalizeOutcome.events };
         });
-        gameEvents.push(...finalizeOutcome.events);
 
-        if (attackOutcome.consequences.length > 0) {
+        playerActionLogged = true;
+        gameEvents.push(...committed.attackOutcome.events, ...committed.turnEvents);
+        if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: attackOutcome.consequences,
+            targets: committed.attackOutcome.consequences,
           }));
         }
-      });
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this attack could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
     }
 
     if (trimmedAction === "Move") {
@@ -1423,76 +1445,95 @@ async function resolveAction(
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
       try {
-        await prisma.$transaction(async (tx) => {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
           if (!usesSpellSlot && !effect.concentration && targets.length > 0) {
             await lockCharacterForCombatAction(
-              tx as Prisma.TransactionClient,
+              transactionClient,
               context.character.id
             );
           }
           const spellOutcome = await executeCombatAction({
-          actionType: "cast_spell",
-          encounter: context.activeEncounter ? {
-            id: context.activeEncounter.id,
-            round: context.activeEncounter.round,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            totalDamageDealt: context.activeEncounter.totalDamageDealt,
-            status: "active",
-            combatants: context.activeEncounter.combatants as PipelineCombatant[],
-          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          targetCombatants: targets,
-          spellName: intent.spellName,
-          spellLevel: effectiveSlotLevel,
-          spellEffect: effect,
-          spellSaveDC: saveDC,
-          rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
-          playerCharacterId: context.character.id,
-          actorConcentrationSpellId: context.character.concentrationSpellId,
-        }, tx as Prisma.TransactionClient);
+            actionType: "cast_spell",
+            encounter: context.activeEncounter ? {
+              id: context.activeEncounter.id,
+              round: context.activeEncounter.round,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              totalDamageDealt: context.activeEncounter.totalDamageDealt,
+              status: "active",
+              combatants: context.activeEncounter.combatants as PipelineCombatant[],
+            } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            targetCombatants: targets,
+            spellName: intent.spellName,
+            spellLevel: effectiveSlotLevel,
+            spellEffect: effect,
+            spellSaveDC: saveDC,
+            rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
+            playerCharacterId: context.character.id,
+            actorConcentrationSpellId: context.character.concentrationSpellId,
+          }, transactionClient);
 
-        // The slot claim above is the point of no return. Keep canonical player
-        // history and any range declaration in this same transaction so a
-        // losing concurrent cast cannot leave narratable fiction behind.
-        await tx.gameLog.create({
-          data: { campaignId, role: "user", content: trimmedAction },
+          let turnEvents: GameEvent[] = [];
+          if (context.activeEncounter) {
+            const finalizeOutcome = await finalizeEncounterTurn({
+              tx: transactionClient,
+              encounterId: context.activeEncounter.id,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              round: context.activeEncounter.round,
+              failOnStaleTurn: true,
+            });
+            if (finalizeOutcome.turnAdvanceConflict) {
+              throw new TurnStateConflictError();
+            }
+            turnEvents = finalizeOutcome.events;
+          }
+
+          // Only the transaction that owns the turn may publish canonical
+          // history for the cast.
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+          if (unenforcedRangeLog) {
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "system", content: unenforcedRangeLog },
+            });
+          }
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            spellOutcome.systemLogs
+          );
+
+          return { spellOutcome, turnEvents };
         });
-        if (unenforcedRangeLog) {
-          await tx.gameLog.create({
-            data: { campaignId, role: "system", content: unenforcedRangeLog },
-          });
-        }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);
-
-        gameEvents.push(...spellOutcome.events);
-
-        if (context.activeEncounter) {
-          const finalizeOutcome = await finalizeEncounterTurn({
-            tx: tx as Prisma.TransactionClient,
-            encounterId: context.activeEncounter.id,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            round: context.activeEncounter.round,
-          });
-          gameEvents.push(...finalizeOutcome.events);
-        }
-
-        if (spellOutcome.consequences.length > 0) {
+        playerActionLogged = true;
+        gameEvents.push(...committed.spellOutcome.events, ...committed.turnEvents);
+        if (committed.spellOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: spellOutcome.consequences,
+            targets: committed.spellOutcome.consequences,
           }));
         }
-        });
-        playerActionLogged = true;
       } catch (error) {
         if (error instanceof SpellSlotClaimError) {
           return NextResponse.json(
             {
               error: error.message,
               code: "SPELL_SLOT_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this spell could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
             },
             { status: 409 }
           );
@@ -1519,46 +1560,73 @@ async function resolveAction(
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
-      // Ownership is proven, so the action is canonical.
-      await persistPlayerAction();
+      try {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
+          const itemOutcome = await executeCombatAction({
+            actionType: "use_item",
+            encounter: context.activeEncounter ? {
+              id: context.activeEncounter.id,
+              round: context.activeEncounter.round,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              totalDamageDealt: context.activeEncounter.totalDamageDealt,
+              status: "active",
+              combatants: context.activeEncounter.combatants as PipelineCombatant[],
+            } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            targetCombatants: [],
+            itemId: foundItem.id,
+            itemName: foundItem.name,
 
-      await prisma.$transaction(async (tx) => {
-        const itemOutcome = await executeCombatAction({
-          actionType: "use_item",
-          encounter: context.activeEncounter ? {
-            id: context.activeEncounter.id,
-            round: context.activeEncounter.round,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            totalDamageDealt: context.activeEncounter.totalDamageDealt,
-            status: "active",
-            combatants: context.activeEncounter.combatants as PipelineCombatant[],
-          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          targetCombatants: [],
-          itemId: foundItem.id,
-          itemName: foundItem.name,
+            healingDice: consumableProps?.healingDice,
+            healingBonus: consumableProps?.healingBonus,
+            playerCharacterId: context.character.id,
+          }, transactionClient);
 
-          healingDice: consumableProps?.healingDice,
-          healingBonus: consumableProps?.healingBonus,
-          playerCharacterId: context.character.id,
-        }, tx as Prisma.TransactionClient);
+          let turnEvents: GameEvent[] = [];
+          if (context.activeEncounter) {
+            const finalizeOutcome = await finalizeEncounterTurn({
+              tx: transactionClient,
+              encounterId: context.activeEncounter.id,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              round: context.activeEncounter.round,
+              failOnStaleTurn: true,
+            });
+            if (finalizeOutcome.turnAdvanceConflict) {
+              throw new TurnStateConflictError();
+            }
+            turnEvents = finalizeOutcome.events;
+          }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, itemOutcome.systemLogs);
-
-        gameEvents.push(...itemOutcome.events);
-
-        if (context.activeEncounter) {
-          const finalizeOutcome = await finalizeEncounterTurn({
-            tx: tx as Prisma.TransactionClient,
-            encounterId: context.activeEncounter.id,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            round: context.activeEncounter.round,
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
           });
-          gameEvents.push(...finalizeOutcome.events);
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            itemOutcome.systemLogs
+          );
+
+          return { itemOutcome, turnEvents };
+        });
+
+        playerActionLogged = true;
+        gameEvents.push(...committed.itemOutcome.events, ...committed.turnEvents);
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this item use could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
         }
-      });
+        throw error;
+      }
     }
 
     // ── Gate: equip ─────────────────────────────────────────────────────────────
@@ -1675,67 +1743,89 @@ async function resolveAction(
         attack,
       });
 
-      // Exactly one living hostile target and a weapon to swing: the attack is
-      // canonical from here.
-      await persistPlayerAction();
+      try {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
+          await lockCharacterForCombatAction(
+            transactionClient,
+            context.character.id
+          );
+          const attackOutcome = await executeCombatAction({
+            actionType: "attack",
+            encounter: {
+              id: context.activeEncounter!.id,
+              round: context.activeEncounter!.round,
+              currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+              totalDamageDealt: context.activeEncounter!.totalDamageDealt,
+              status: "active",
+              combatants: context.activeEncounter!.combatants as PipelineCombatant[],
+            },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            actorArmorPenalty: armorPenaltyFor({
+              inventory: context.character.inventory,
+              characterClass: context.character.class,
+            }).applies,
+            targetCombatants: targets,
+            weaponName: foundWeapon.name,
+            weaponDice: attack.weaponDice,
+            damageType: attack.damageType as DamageType,
+            attackModifier: attack.attackModifier,
+            flatDamageBonus: attack.flatDamageBonus,
+            weaponQualities: attack.qualities,
+            playerCharacterId: context.character.id,
+          }, transactionClient);
 
-      if (categoryLog) {
-        await prisma.gameLog.create({
-          data: { campaignId, role: "system", content: categoryLog },
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await lockCharacterForCombatAction(
-          tx as Prisma.TransactionClient,
-          context.character.id
-        );
-        const attackOutcome = await executeCombatAction({
-          actionType: "attack",
-          encounter: {
-            id: context.activeEncounter!.id,
-            round: context.activeEncounter!.round,
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: transactionClient,
+            encounterId: context.activeEncounter!.id,
             currentTurnIndex: context.activeEncounter!.currentTurnIndex,
-            totalDamageDealt: context.activeEncounter!.totalDamageDealt,
-            status: "active",
-            combatants: context.activeEncounter!.combatants as PipelineCombatant[],
-          },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          actorArmorPenalty: armorPenaltyFor({
-            inventory: context.character.inventory,
-            characterClass: context.character.class,
-          }).applies,
-          targetCombatants: targets,
-          weaponName: foundWeapon.name,
-          weaponDice: attack.weaponDice,
-          damageType: attack.damageType as DamageType,
-          attackModifier: attack.attackModifier,
-          flatDamageBonus: attack.flatDamageBonus,
-          weaponQualities: attack.qualities,
-          playerCharacterId: context.character.id,
-        }, tx as Prisma.TransactionClient);
+            round: context.activeEncounter!.round,
+            failOnStaleTurn: true,
+          });
+          if (finalizeOutcome.turnAdvanceConflict) {
+            throw new TurnStateConflictError();
+          }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, attackOutcome.systemLogs);
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+          if (categoryLog) {
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "system", content: categoryLog },
+            });
+          }
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            attackOutcome.systemLogs
+          );
 
-        gameEvents.push(...attackOutcome.events);
-
-        const finalizeOutcome = await finalizeEncounterTurn({
-          tx: tx as Prisma.TransactionClient,
-          encounterId: context.activeEncounter!.id,
-          currentTurnIndex: context.activeEncounter!.currentTurnIndex,
-          round: context.activeEncounter!.round,
+          return { attackOutcome, turnEvents: finalizeOutcome.events };
         });
-        gameEvents.push(...finalizeOutcome.events);
 
-        if (attackOutcome.consequences.length > 0) {
+        playerActionLogged = true;
+        gameEvents.push(...committed.attackOutcome.events, ...committed.turnEvents);
+        if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: attackOutcome.consequences,
+            targets: committed.attackOutcome.consequences,
           }));
         }
-      });
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this attack could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
     }
 
     // ── Gate: rest ──────────────────────────────────────────────────────────────
