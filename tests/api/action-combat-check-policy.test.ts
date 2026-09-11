@@ -12,6 +12,11 @@ import { prisma } from "@/lib/db/prisma";
 import { buildCampaignContext } from "@/lib/memory/context";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { resolveAbilityCheck } from "@/lib/rules/ability-check";
+import { finalizeEncounterTurn } from "@/lib/rules/combat-pipeline";
+import {
+  acquireActionReceipt,
+  completeActionReceipt,
+} from "@/lib/actions/request-receipt";
 
 vi.mock("next/server", async (importActual) => {
   const actual = await importActual<any>();
@@ -65,6 +70,21 @@ vi.mock("@/lib/ai/narrator", () => ({
 vi.mock("@/lib/rules/ability-check", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/rules/ability-check")>();
   return { ...actual, resolveAbilityCheck: vi.fn(actual.resolveAbilityCheck) };
+});
+
+vi.mock("@/lib/rules/combat-pipeline", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/rules/combat-pipeline")>();
+  return { ...actual, finalizeEncounterTurn: vi.fn() };
+});
+
+vi.mock("@/lib/actions/request-receipt", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/actions/request-receipt")>();
+  return {
+    ...actual,
+    acquireActionReceipt: vi.fn(),
+    completeActionReceipt: vi.fn(),
+    rejectActionReceipt: vi.fn(),
+  };
 });
 
 const campaignId = "camp_check_policy";
@@ -147,15 +167,33 @@ function contextWithEncounter(currentTurnIndex: number) {
   };
 }
 
-async function post(action: string) {
+async function post(action: string, requestId?: string) {
   return POST(
     new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
       method: "POST",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...(requestId ? { requestId } : {}) }),
     }),
     { params: Promise.resolve({ id: campaignId }) }
   );
 }
+
+const canonicalCharacter = {
+  id: characterId,
+  class: "wizard",
+  level: 9,
+  stats: { ...player.stats, INT: 18 },
+  skillProficiencies: ["Investigation"],
+  exhaustionLevel: 0,
+  inventory: [],
+};
+
+const tx = {
+  $queryRaw: vi.fn(async () => [{ id: characterId }]),
+  character: { findUnique: vi.fn(async () => canonicalCharacter) },
+  gameLog: { create: vi.fn(async () => ({})) },
+};
+
+const commitMarker = vi.fn();
 
 function expectNoMechanicalWork(): void {
   expect(resolveAbilityCheck).not.toHaveBeenCalled();
@@ -184,6 +222,29 @@ beforeEach(() => {
     hitDiceTotal: 5,
     stats: player.stats,
   });
+  (prisma.$transaction as any).mockImplementation(async (callback: any) => {
+    const value = await callback(tx);
+    commitMarker();
+    return value;
+  });
+  (finalizeEncounterTurn as any).mockResolvedValue({
+    events: [
+      {
+        type: "TURN_ADVANCE",
+        payload: {
+          encounterId: "enc_check_policy",
+          previousTurnIndex: 0,
+          currentTurnIndex: 1,
+          round: 2,
+        },
+      },
+    ],
+    turnAdvanceConflict: false,
+  });
+  (acquireActionReceipt as any).mockResolvedValue({
+    outcome: "acquired",
+    receiptId: "receipt_check_policy",
+  });
   (buildCampaignContext as any).mockResolvedValue(contextWithEncounter(0));
 });
 
@@ -206,6 +267,113 @@ describe("autoridad de turno para chequeos en combate", () => {
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({ code: "INVALID_TURN_INDEX" });
     expectNoMechanicalWork();
+  });
+});
+
+describe("transición atómica de un chequeo permitido", () => {
+  it("bloquea y relee el personaje, registra en tx y publica tras commit", async () => {
+    const res = await post("I inspect the room", "req_check_policy");
+    const body = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.character.findUnique).toHaveBeenCalledWith({
+      where: { id: characterId },
+      select: {
+        id: true,
+        class: true,
+        level: true,
+        stats: true,
+        skillProficiencies: true,
+        exhaustionLevel: true,
+        inventory: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            quantity: true,
+            properties: true,
+            equippedSlot: true,
+          },
+        },
+      },
+    });
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.character.findUnique.mock.invocationCallOrder[0]!
+    );
+
+    expect(resolveAbilityCheck).toHaveBeenCalledOnce();
+    expect(resolveAbilityCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ skill: "Investigation", band: "medium" }),
+      expect.objectContaining({
+        stats: expect.objectContaining({ INT: 18 }),
+        level: 9,
+        skillProficiencies: ["Investigation"],
+      })
+    );
+    expect(tx.character.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+      (resolveAbilityCheck as any).mock.invocationCallOrder[0]
+    );
+
+    expect(finalizeEncounterTurn).toHaveBeenCalledWith({
+      tx,
+      encounterId: "enc_check_policy",
+      currentTurnIndex: 0,
+      round: 2,
+      failOnStaleTurn: true,
+    });
+    expect(tx.gameLog.create).toHaveBeenNthCalledWith(1, {
+      data: { campaignId, role: "user", content: "I inspect the room" },
+    });
+    expect(tx.gameLog.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          campaignId,
+          role: "system",
+          content: expect.stringContaining("Investigation check"),
+        }),
+      })
+    );
+    const globalMechanicalLogs = (prisma.gameLog.create as any).mock.calls.filter(
+      ([args]: [{ data?: { role?: string } }]) =>
+        args?.data?.role === "user" || args?.data?.role === "system"
+    );
+    expect(globalMechanicalLogs).toHaveLength(0);
+
+    const checkAt = body.indexOf("ABILITY_CHECK_RESOLVED");
+    const turnAt = body.indexOf("TURN_ADVANCE");
+    expect(checkAt).toBeGreaterThanOrEqual(0);
+    expect(turnAt).toBeGreaterThan(checkAt);
+    expect(commitMarker).toHaveBeenCalledOnce();
+    expect(commitMarker.mock.invocationCallOrder[0]).toBeLessThan(
+      (streamNarrative as any).mock.invocationCallOrder[0]
+    );
+    expect(completeActionReceipt).toHaveBeenCalledWith(
+      "receipt_check_policy",
+      expect.arrayContaining([
+        expect.objectContaining({ type: "ABILITY_CHECK_RESOLVED" }),
+        expect.objectContaining({ type: "TURN_ADVANCE" }),
+      ])
+    );
+  });
+
+  it("aborta y devuelve conflicto cuando pierde el CAS de turno", async () => {
+    (finalizeEncounterTurn as any).mockResolvedValue({
+      events: [],
+      turnAdvanceConflict: true,
+    });
+
+    const res = await post("I inspect the room");
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "TURN_STATE_CONFLICT" });
+    expect(resolveAbilityCheck).toHaveBeenCalledOnce();
+    expect(tx.gameLog.create).not.toHaveBeenCalled();
+    expect(commitMarker).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+    expect(completeActionReceipt).not.toHaveBeenCalled();
   });
 });
 
