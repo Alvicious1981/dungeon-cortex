@@ -150,6 +150,8 @@ describe("qué acciones son contiendas", () => {
     ["I pickpocket the merchant", "Sleight of Hand", "target"],
     ["I lie to the guard", "Deception", "target"],
     ["I shove the goblin", "Athletics", "target"],
+    ["I drag the goblin", "Athletics", "target"],
+    ["I disguise myself from the guard", "Deception", "target"],
   ])("%s se resuelve como contienda", (input, skill, scope) => {
     const action = matchImprovisedAction(input)?.action;
     expect(action?.skill).toBe(skill);
@@ -229,6 +231,8 @@ describe("texto que sigue al verbo", () => {
     ["I pickpocket the merchant", "the merchant"],
     ["I lie to the guard", "to the guard"],
     ["I shove the goblin", "the goblin"],
+    ["I drag the goblin", "the goblin"],
+    ["I disguise myself from the guard", "myself from the guard"],
     ["robo al mercader", "al mercader"],
     ["miento al guardia", "al guardia"],
   ])("%s deja %s", (input, rest) => {

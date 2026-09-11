@@ -94,6 +94,32 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - Consequences must be batched in one `COMBAT_CONSEQUENCE` frame using `targets[]`.
 - Local UI feedback should update each target before final refresh.
 
+### 4.4 Player Turn-Spending Action Authority
+
+- Natural-language attack, spell, item-use, and ability-check intents require
+  the player's current initiative slot while an encounter is active. Macro
+  Attack and End Turn use the same player-turn authority.
+- An allowed in-combat ability check is a player-turn action: backend rules
+  resolve the roll and it consumes the action by ending the turn. Outside
+  combat, the established non-turn-bound ability-check behavior remains.
+- The improvised-action rules table, not the intent parser or narrator, owns
+  combat legality. Checks that require unrepresented movement or mechanical
+  effect state fail closed before any roll, GameLog, event, turn transition, or
+  narration (`COMBAT_MOVEMENT_CHECK_UNSUPPORTED` or
+  `COMBAT_EFFECT_UNSUPPORTED`).
+- Every player-requested turn-ending path—End Turn, macro and parsed attacks,
+  combat spells, combat item use, and allowed combat checks—claims the observed
+  Encounter round/index through the canonical finalizer. Effect/resource
+  changes and canonical logs share its transaction; a stale claim rolls back
+  and returns HTTP 409 / `TURN_STATE_CONFLICT`; events and narration are
+  published only after commit.
+- `Combatant.actionBudget` remains dormant nullable legacy JSON. It has no
+  reachable producer, validated shape, reset lifecycle, or mechanical reader
+  and is not action-economy authority.
+- Combat equipment cost and the persisted free object-interaction budget are
+  approved for DC-PLAN-016B but are not implemented by 016A. Until 016B lands,
+  do not describe the current equipment gate as turn-cost authoritative.
+
 ## 5. Obsolescence Registry
 
 This registry defines deprecated fields and legacy logic paths to remove during cleanup after migration safety checks.
@@ -118,7 +144,10 @@ The deprecated flat members were removed from `CombatConsequencePayload`. The st
 ### 5.4 Legacy route logic and drift debt — Resolved 2026-07-25
 
 - The duplicate encounter-turn mutation endpoint returns HTTP 410 with migration guidance.
-- Turn-spending attack, spell, item, and explicit end-turn branches use the canonical finalizer and emit `TURN_ADVANCE` or `ROUND_ADVANCE` when the encounter remains active.
+- Turn-spending attack, spell, item, ability-check, and explicit end-turn
+  branches use the canonical fail-closed finalizer and emit `TURN_ADVANCE` or
+  `ROUND_ADVANCE` only for a committed transition while the encounter remains
+  active.
 - Spell mechanics no longer depend on an AI-layer lookup helper; the backend SRD service returns source-traceable resolved effects.
 
 ### 5.5 Legacy Zone spatial state — Removed 2026-09-10

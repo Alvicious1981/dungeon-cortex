@@ -76,7 +76,7 @@ import {
 } from "@/lib/actions/roll-command";
 import { resolveTravelGate } from "@/lib/actions/travel-command";
 import { Prisma } from "@prisma/client";
-import type { ContextCombatant } from "@/lib/memory/context";
+import type { ContextCharacter, ContextCombatant } from "@/lib/memory/context";
 import { resolveEncounterTurnAuthority } from "@/lib/rules/turn-authority";
 import {
   MoveStateConflictError,
@@ -156,6 +156,29 @@ async function lockCharacterForCombatAction(
     WHERE "id" = ${characterId}
     FOR UPDATE
   `;
+}
+
+class TurnStateConflictError extends Error {
+  constructor() {
+    super("The encounter turn changed before the action could commit.");
+    this.name = "TurnStateConflictError";
+  }
+}
+
+function formatAbilityCheckLog(
+  result: ReturnType<typeof resolveAbilityCheck>
+): string {
+  return (
+    `🎲 ${result.skill} check (${result.ability}): rolled ${result.roll} ` +
+    `${result.abilityModifier >= 0 ? "+" : ""}${result.abilityModifier}` +
+    `${result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : ""}` +
+    `${result.rollMode !== "normal" ? ` with ${result.rollMode}` : ""}` +
+    ` = ${result.total} vs DC ${result.dc} ` +
+    `(${result.dcSource === "contest" ? "contested" : result.band}) → ` +
+    `${result.success ? "SUCCESS" : "FAILURE"}` +
+    `${result.isCriticalSuccess ? " (natural 20)" : ""}` +
+    `${result.isCriticalFailure ? " (natural 1)" : ""}.`
+  );
 }
 
 function playerTurnRefusal(
@@ -602,67 +625,89 @@ async function resolveAction(
         ? unresolvedCategoryLog({ weaponName: foundWeapon.name, attack })
         : null;
 
-      // Point of no return for the macro attack: targets are resolved and every
-      // refusal above has been passed, so the action is canonical from here.
-      await persistPlayerAction();
+      try {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
+          await lockCharacterForCombatAction(
+            transactionClient,
+            context.character.id
+          );
+          const attackOutcome = await executeCombatAction({
+            actionType: "attack",
+            encounter: {
+              id: activeEncounter.id,
+              round: activeEncounter.round,
+              currentTurnIndex: activeEncounter.currentTurnIndex,
+              totalDamageDealt: activeEncounter.totalDamageDealt,
+              status: "active",
+              combatants: activeEncounter.combatants as PipelineCombatant[],
+            },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            actorArmorPenalty: armorPenaltyFor({
+              inventory: context.character.inventory,
+              characterClass: context.character.class,
+            }).applies,
+            targetCombatants: targets,
+            weaponName: foundWeapon?.name || "Unarmed",
+            weaponDice: attack.weaponDice,
+            damageType: attack.damageType as DamageType,
+            attackModifier: attack.attackModifier,
+            flatDamageBonus: attack.flatDamageBonus,
+            weaponQualities: attack.qualities,
+            playerCharacterId: context.character.id,
+          }, transactionClient);
 
-      if (categoryLog) {
-        await prisma.gameLog.create({
-          data: { campaignId, role: "system", content: categoryLog },
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await lockCharacterForCombatAction(
-          tx as Prisma.TransactionClient,
-          context.character.id
-        );
-        const attackOutcome = await executeCombatAction({
-          actionType: "attack",
-          encounter: {
-            id: activeEncounter.id,
-            round: activeEncounter.round,
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: transactionClient,
+            encounterId: activeEncounter.id,
             currentTurnIndex: activeEncounter.currentTurnIndex,
-            totalDamageDealt: activeEncounter.totalDamageDealt,
-            status: "active",
-            combatants: activeEncounter.combatants as PipelineCombatant[],
-          },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          actorArmorPenalty: armorPenaltyFor({
-            inventory: context.character.inventory,
-            characterClass: context.character.class,
-          }).applies,
-          targetCombatants: targets,
-          weaponName: foundWeapon?.name || "Unarmed",
-          weaponDice: attack.weaponDice,
-          damageType: attack.damageType as DamageType,
-          attackModifier: attack.attackModifier,
-          flatDamageBonus: attack.flatDamageBonus,
-          weaponQualities: attack.qualities,
-          playerCharacterId: context.character.id,
-        }, tx as Prisma.TransactionClient);
+            round: activeEncounter.round,
+            failOnStaleTurn: true,
+          });
+          if (finalizeOutcome.turnAdvanceConflict) {
+            throw new TurnStateConflictError();
+          }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, attackOutcome.systemLogs);
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+          if (categoryLog) {
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "system", content: categoryLog },
+            });
+          }
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            attackOutcome.systemLogs
+          );
 
-        gameEvents.push(...attackOutcome.events);
-
-        const finalizeOutcome = await finalizeEncounterTurn({
-          tx: tx as Prisma.TransactionClient,
-          encounterId: activeEncounter.id,
-          currentTurnIndex: activeEncounter.currentTurnIndex,
-          round: activeEncounter.round,
+          return { attackOutcome, turnEvents: finalizeOutcome.events };
         });
-        gameEvents.push(...finalizeOutcome.events);
 
-        if (attackOutcome.consequences.length > 0) {
+        playerActionLogged = true;
+        gameEvents.push(...committed.attackOutcome.events, ...committed.turnEvents);
+        if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: attackOutcome.consequences,
+            targets: committed.attackOutcome.consequences,
           }));
         }
-      });
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this attack could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
     }
 
     if (trimmedAction === "Move") {
@@ -881,7 +926,8 @@ async function resolveAction(
       context.activeEncounter &&
       (intent.actionType === "attack" ||
         intent.actionType === "cast_spell" ||
-        intent.actionType === "use_item")
+        intent.actionType === "use_item" ||
+        intent.actionType === "ability_check")
     ) {
       const turnRefusal = playerTurnRefusal(context.activeEncounter);
       if (turnRefusal) return turnRefusal;
@@ -893,139 +939,227 @@ async function resolveAction(
     // as a resolved fact before narration, so the AI describes an outcome the
     // backend already determined instead of inventing one.
     if (intent.actionType === "ability_check" && intent.skill) {
-      const charData = context.character;
+      const checkSkill = intent.skill;
 
-      // Advantage and disadvantage come from persisted state, never from the
-      // wording of the action. Exhaustion applies everywhere; conditions live on
-      // the Combatant, so outside an encounter there are none to read.
-      const checkConditions = context.activeEncounter
-        ? extractConditions(
-            context.activeEncounter.combatants.find((c) => c.isPlayer)?.conditions
-          )
-        : [];
-      const { advantage, disadvantage } = evaluateAbilityCheckAdvantage(
-        checkConditions,
-        charData.exhaustionLevel
-      );
+      // The classifier identifies the skill and DC band, but combat legality
+      // belongs to the rules table. Re-match the same normalized player input
+      // here instead of trusting policy data carried by an intent object.
+      const improvisedMatch = matchImprovisedAction(trimmedAction);
 
-      // SRD: armour you lack proficiency with gives disadvantage on any check
-      // that involves Strength or Dexterity — four of the eighteen skills. It is
-      // passed as a value rather than modelled as a condition: an unproficient
-      // wearer is not an SRD condition, and a CONDITION_REGISTRY entry would
-      // leak into everywhere conditions are listed and narrated.
-      const armorPenalty = armorPenaltyFor({
-        inventory: charData.inventory,
-        characterClass: charData.class,
-      });
-      const armorDisadvantage =
-        armorPenalty.applies && penalisedByArmor(intent.skill);
+      if (context.activeEncounter) {
+        // A future classifier/table mismatch must not acquire an accidental
+        // combat action policy. Refuse the mechanically ambiguous request.
+        if (!improvisedMatch) {
+          return NextResponse.json(
+            {
+              error:
+                "That combat check could not be matched to an authoritative action policy. State the exact action and target.",
+              code: "MECHANICAL_CLARIFICATION_REQUIRED",
+            },
+            { status: 400 }
+          );
+        }
 
-      // SRD: armour marked "Stealth: Disadvantage" costs its wearer the Stealth
-      // check, whether or not they are proficient with it — a different rule
-      // from the one above, which is why it is a second term and not a widening
-      // of the first. A proficient fighter in chain mail takes this one alone.
-      const stealthDisadvantage = stealthDisadvantageFor({
-        inventory: charData.inventory,
-        skill: intent.skill,
-      });
-
-      // A worn item can grant advantage. Passed beside the condition result
-      // rather than folded into it for the same reason the armour penalty is:
-      // an equipped item is not an SRD condition, and a CONDITION_REGISTRY
-      // entry would leak into everywhere conditions are listed and narrated.
-      // The two cancel inside resolveAbilityCheck, per the SRD.
-      const itemAdvantage = abilityCheckAdvantageFrom({
-        inventory: charData.inventory,
-        skill: intent.skill,
-      });
-
-      // Who, if anyone, is resisting. The rules table is consulted again rather
-      // than carried on the intent: which creature opposes a shove is a rules
-      // question, and the AI layer's schema should not be the place it lives.
-      // matchImprovisedAction normalises its input, so this lookup and the
-      // parser's agree by construction.
-      const opposedBy = matchImprovisedAction(trimmedAction)?.action.opposedBy;
-
-      // A creature that is unaware of its surroundings resists nothing: an
-      // unconscious sentry sets no difficulty for sneaking past it. Only the two
-      // conditions the SRD describes that way are excluded — a stunned guard
-      // cannot act but is still watching.
-      const candidates = (context.activeEncounter?.combatants ?? []).filter(
-        (c) =>
-          !c.isPlayer &&
-          c.hp > 0 &&
-          !isUnawareOfSurroundings(extractConditions(c.conditions))
-      );
-
-      // "observers" is anyone who might notice; "target" is the one creature the
-      // action names, since the SRD contests a pickpocket against the mark and a
-      // lie against the listener, not against the sharpest bystander. A named
-      // target that matches no one, or more than one, falls back to the band
-      // rather than contesting against a guess — the rule the attack gate uses.
-      let resisting: typeof candidates = [];
-      if (opposedBy?.scope === "observers") {
-        resisting = candidates;
-      } else if (opposedBy?.scope === "target") {
-        if (intent.targetName) {
-          const needle = intent.targetName.toLowerCase();
-          const named = candidates.filter((c) => c.name.toLowerCase().includes(needle));
-          if (named.length === 1) resisting = named;
-        } else if (candidates.length === 1) {
-          // Unnamed but unambiguous: only one creature it could be.
-          resisting = candidates;
+        const combatPolicy = improvisedMatch.action.combat;
+        if (combatPolicy.resolution === "unsupported") {
+          const movementUnsupported =
+            combatPolicy.refusalCode === "COMBAT_MOVEMENT_CHECK_UNSUPPORTED";
+          return NextResponse.json(
+            {
+              error: movementUnsupported
+                ? "That movement check is not supported during combat."
+                : "That action requires a combat effect the rules engine does not support.",
+              code: combatPolicy.refusalCode,
+            },
+            { status: 400 }
+          );
         }
       }
 
-      const opponents = resisting.map(
-        (c) => (c.stats ?? {}) as Partial<Record<Ability, number>>
-      );
+      type CheckCharacterState = Pick<
+        ContextCharacter,
+        | "class"
+        | "level"
+        | "stats"
+        | "skillProficiencies"
+        | "exhaustionLevel"
+        | "inventory"
+      >;
 
-      const result = resolveAbilityCheck(
-        {
-          skill: intent.skill,
-          band: intent.band,
-          advantage: advantage || itemAdvantage,
-          disadvantage: disadvantage || armorDisadvantage || stealthDisadvantage,
-          ...(opposedBy && opponents.length > 0
-            ? { opposition: { opponents, skills: opposedBy.skills } }
-            : {}),
-        },
-        {
-          stats: (charData.stats ?? {}) as Partial<Record<Ability, number>>,
-          level: charData.level,
-          skillProficiencies: parseSkillProficiencies(charData.skillProficiencies),
+      const resolveCheck = (charData: CheckCharacterState) => {
+        // Advantage and disadvantage come from persisted state, never from the
+        // wording of the action. Exhaustion applies everywhere; conditions live
+        // on the Combatant, so outside an encounter there are none to read.
+        const checkConditions = context.activeEncounter
+          ? extractConditions(
+              context.activeEncounter.combatants.find((c) => c.isPlayer)?.conditions
+            )
+          : [];
+        const { advantage, disadvantage } = evaluateAbilityCheckAdvantage(
+          checkConditions,
+          charData.exhaustionLevel
+        );
+
+        // Armour and item modifiers must come from the inventory read after the
+        // Character lock. Concurrent equipment writes take that same lock.
+        const armorPenalty = armorPenaltyFor({
+          inventory: charData.inventory,
+          characterClass: charData.class,
+        });
+        const armorDisadvantage =
+          armorPenalty.applies && penalisedByArmor(checkSkill);
+        const stealthDisadvantage = stealthDisadvantageFor({
+          inventory: charData.inventory,
+          skill: checkSkill,
+        });
+        const itemAdvantage = abilityCheckAdvantageFrom({
+          inventory: charData.inventory,
+          skill: checkSkill,
+        });
+
+        const opposedBy = improvisedMatch?.action.opposedBy;
+        const candidates = (context.activeEncounter?.combatants ?? []).filter(
+          (c) =>
+            !c.isPlayer &&
+            c.hp > 0 &&
+            !isUnawareOfSurroundings(extractConditions(c.conditions))
+        );
+
+        let resisting: typeof candidates = [];
+        if (opposedBy?.scope === "observers") {
+          resisting = candidates;
+        } else if (opposedBy?.scope === "target") {
+          if (intent.targetName) {
+            const needle = intent.targetName.toLowerCase();
+            const named = candidates.filter((c) =>
+              c.name.toLowerCase().includes(needle)
+            );
+            if (named.length === 1) resisting = named;
+          } else if (candidates.length === 1) {
+            resisting = candidates;
+          }
         }
-      );
 
-      // The check has resolved; the action is canonical. Written before the
-      // line below so the transcript reads as the attempt and then its result,
-      // not a die rolled for nothing.
-      await persistPlayerAction();
+        const opponents = resisting.map(
+          (c) => (c.stats ?? {}) as Partial<Record<Ability, number>>
+        );
 
-      // The log line states where the DC came from and how the die was rolled,
-      // so the player can audit the number instead of being handed a bare "DC
-      // 15" with no provenance.
-      await prisma.gameLog.create({
-        data: {
-          campaignId,
-          role: "system",
-          content:
-            `🎲 ${result.skill} check (${result.ability}): rolled ${result.roll} ` +
-            `${result.abilityModifier >= 0 ? "+" : ""}${result.abilityModifier}` +
-            `${result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : ""}` +
-            `${result.rollMode !== "normal" ? ` with ${result.rollMode}` : ""}` +
-            ` = ${result.total} vs DC ${result.dc} ` +
-            `(${result.dcSource === "contest" ? "contested" : result.band}) → ` +
-            `${result.success ? "SUCCESS" : "FAILURE"}` +
-            `${result.isCriticalSuccess ? " (natural 20)" : ""}` +
-            `${result.isCriticalFailure ? " (natural 1)" : ""}.`,
-        },
-      });
+        return resolveAbilityCheck(
+          {
+            skill: checkSkill,
+            band: intent.band,
+            advantage: advantage || itemAdvantage,
+            disadvantage:
+              disadvantage || armorDisadvantage || stealthDisadvantage,
+            ...(opposedBy && opponents.length > 0
+              ? { opposition: { opponents, skills: opposedBy.skills } }
+              : {}),
+          },
+          {
+            stats: (charData.stats ?? {}) as Partial<Record<Ability, number>>,
+            level: charData.level,
+            skillProficiencies: parseSkillProficiencies(
+              charData.skillProficiencies
+            ),
+          }
+        );
+      };
 
-      gameEvents.push({
-        type: "ABILITY_CHECK_RESOLVED",
-        payload: { ...result },
-      });
+      if (context.activeEncounter) {
+        try {
+          const committed = await prisma.$transaction(async (tx) => {
+            const transactionClient = tx as Prisma.TransactionClient;
+            await lockCharacterForCombatAction(
+              transactionClient,
+              context.character.id
+            );
+
+            const charData = await transactionClient.character.findUnique({
+              where: { id: context.character.id },
+              select: {
+                id: true,
+                class: true,
+                level: true,
+                stats: true,
+                skillProficiencies: true,
+                exhaustionLevel: true,
+                inventory: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    quantity: true,
+                    properties: true,
+                    equippedSlot: true,
+                  },
+                },
+              },
+            });
+            if (!charData) {
+              throw new Error("Character disappeared during combat check.");
+            }
+
+            const result = resolveCheck(charData);
+            const finalizeOutcome = await finalizeEncounterTurn({
+              tx: transactionClient,
+              encounterId: context.activeEncounter!.id,
+              currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+              round: context.activeEncounter!.round,
+              failOnStaleTurn: true,
+            });
+            if (finalizeOutcome.turnAdvanceConflict) {
+              throw new TurnStateConflictError();
+            }
+
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "user", content: trimmedAction },
+            });
+            await transactionClient.gameLog.create({
+              data: {
+                campaignId,
+                role: "system",
+                content: formatAbilityCheckLog(result),
+              },
+            });
+
+            return { result, turnEvents: finalizeOutcome.events };
+          });
+
+          playerActionLogged = true;
+          gameEvents.push(
+            { type: "ABILITY_CHECK_RESOLVED", payload: { ...committed.result } },
+            ...committed.turnEvents
+          );
+        } catch (error) {
+          if (error instanceof TurnStateConflictError) {
+            return NextResponse.json(
+              {
+                error:
+                  "The encounter turn changed before this check could be applied. Refresh state and try again.",
+                code: "TURN_STATE_CONFLICT",
+              },
+              { status: 409 }
+            );
+          }
+          throw error;
+        }
+      } else {
+        const result = resolveCheck(context.character);
+
+        // Outside combat the established non-turn-bound behavior stays intact.
+        await persistPlayerAction();
+        await prisma.gameLog.create({
+          data: {
+            campaignId,
+            role: "system",
+            content: formatAbilityCheckLog(result),
+          },
+        });
+        gameEvents.push({
+          type: "ABILITY_CHECK_RESOLVED",
+          payload: { ...result },
+        });
+      }
     }
 
     // ── Gate: unclassifiable mechanical intent ──────────────────────────────────
@@ -1311,76 +1445,95 @@ async function resolveAction(
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
       try {
-        await prisma.$transaction(async (tx) => {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
           if (!usesSpellSlot && !effect.concentration && targets.length > 0) {
             await lockCharacterForCombatAction(
-              tx as Prisma.TransactionClient,
+              transactionClient,
               context.character.id
             );
           }
           const spellOutcome = await executeCombatAction({
-          actionType: "cast_spell",
-          encounter: context.activeEncounter ? {
-            id: context.activeEncounter.id,
-            round: context.activeEncounter.round,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            totalDamageDealt: context.activeEncounter.totalDamageDealt,
-            status: "active",
-            combatants: context.activeEncounter.combatants as PipelineCombatant[],
-          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          targetCombatants: targets,
-          spellName: intent.spellName,
-          spellLevel: effectiveSlotLevel,
-          spellEffect: effect,
-          spellSaveDC: saveDC,
-          rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
-          playerCharacterId: context.character.id,
-          actorConcentrationSpellId: context.character.concentrationSpellId,
-        }, tx as Prisma.TransactionClient);
+            actionType: "cast_spell",
+            encounter: context.activeEncounter ? {
+              id: context.activeEncounter.id,
+              round: context.activeEncounter.round,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              totalDamageDealt: context.activeEncounter.totalDamageDealt,
+              status: "active",
+              combatants: context.activeEncounter.combatants as PipelineCombatant[],
+            } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            targetCombatants: targets,
+            spellName: intent.spellName,
+            spellLevel: effectiveSlotLevel,
+            spellEffect: effect,
+            spellSaveDC: saveDC,
+            rawSpellSlots: isSpellSlots(rawSlots) ? rawSlots : undefined,
+            playerCharacterId: context.character.id,
+            actorConcentrationSpellId: context.character.concentrationSpellId,
+          }, transactionClient);
 
-        // The slot claim above is the point of no return. Keep canonical player
-        // history and any range declaration in this same transaction so a
-        // losing concurrent cast cannot leave narratable fiction behind.
-        await tx.gameLog.create({
-          data: { campaignId, role: "user", content: trimmedAction },
+          let turnEvents: GameEvent[] = [];
+          if (context.activeEncounter) {
+            const finalizeOutcome = await finalizeEncounterTurn({
+              tx: transactionClient,
+              encounterId: context.activeEncounter.id,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              round: context.activeEncounter.round,
+              failOnStaleTurn: true,
+            });
+            if (finalizeOutcome.turnAdvanceConflict) {
+              throw new TurnStateConflictError();
+            }
+            turnEvents = finalizeOutcome.events;
+          }
+
+          // Only the transaction that owns the turn may publish canonical
+          // history for the cast.
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+          if (unenforcedRangeLog) {
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "system", content: unenforcedRangeLog },
+            });
+          }
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            spellOutcome.systemLogs
+          );
+
+          return { spellOutcome, turnEvents };
         });
-        if (unenforcedRangeLog) {
-          await tx.gameLog.create({
-            data: { campaignId, role: "system", content: unenforcedRangeLog },
-          });
-        }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, spellOutcome.systemLogs);
-
-        gameEvents.push(...spellOutcome.events);
-
-        if (context.activeEncounter) {
-          const finalizeOutcome = await finalizeEncounterTurn({
-            tx: tx as Prisma.TransactionClient,
-            encounterId: context.activeEncounter.id,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            round: context.activeEncounter.round,
-          });
-          gameEvents.push(...finalizeOutcome.events);
-        }
-
-        if (spellOutcome.consequences.length > 0) {
+        playerActionLogged = true;
+        gameEvents.push(...committed.spellOutcome.events, ...committed.turnEvents);
+        if (committed.spellOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: spellOutcome.consequences,
+            targets: committed.spellOutcome.consequences,
           }));
         }
-        });
-        playerActionLogged = true;
       } catch (error) {
         if (error instanceof SpellSlotClaimError) {
           return NextResponse.json(
             {
               error: error.message,
               code: "SPELL_SLOT_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this spell could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
             },
             { status: 409 }
           );
@@ -1407,46 +1560,73 @@ async function resolveAction(
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
-      // Ownership is proven, so the action is canonical.
-      await persistPlayerAction();
+      try {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
+          const itemOutcome = await executeCombatAction({
+            actionType: "use_item",
+            encounter: context.activeEncounter ? {
+              id: context.activeEncounter.id,
+              round: context.activeEncounter.round,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              totalDamageDealt: context.activeEncounter.totalDamageDealt,
+              status: "active",
+              combatants: context.activeEncounter.combatants as PipelineCombatant[],
+            } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            targetCombatants: [],
+            itemId: foundItem.id,
+            itemName: foundItem.name,
 
-      await prisma.$transaction(async (tx) => {
-        const itemOutcome = await executeCombatAction({
-          actionType: "use_item",
-          encounter: context.activeEncounter ? {
-            id: context.activeEncounter.id,
-            round: context.activeEncounter.round,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            totalDamageDealt: context.activeEncounter.totalDamageDealt,
-            status: "active",
-            combatants: context.activeEncounter.combatants as PipelineCombatant[],
-          } : { id: "", round: 0, currentTurnIndex: 0, totalDamageDealt: 0, status: "active", combatants: [] },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          targetCombatants: [],
-          itemId: foundItem.id,
-          itemName: foundItem.name,
+            healingDice: consumableProps?.healingDice,
+            healingBonus: consumableProps?.healingBonus,
+            playerCharacterId: context.character.id,
+          }, transactionClient);
 
-          healingDice: consumableProps?.healingDice,
-          healingBonus: consumableProps?.healingBonus,
-          playerCharacterId: context.character.id,
-        }, tx as Prisma.TransactionClient);
+          let turnEvents: GameEvent[] = [];
+          if (context.activeEncounter) {
+            const finalizeOutcome = await finalizeEncounterTurn({
+              tx: transactionClient,
+              encounterId: context.activeEncounter.id,
+              currentTurnIndex: context.activeEncounter.currentTurnIndex,
+              round: context.activeEncounter.round,
+              failOnStaleTurn: true,
+            });
+            if (finalizeOutcome.turnAdvanceConflict) {
+              throw new TurnStateConflictError();
+            }
+            turnEvents = finalizeOutcome.events;
+          }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, itemOutcome.systemLogs);
-
-        gameEvents.push(...itemOutcome.events);
-
-        if (context.activeEncounter) {
-          const finalizeOutcome = await finalizeEncounterTurn({
-            tx: tx as Prisma.TransactionClient,
-            encounterId: context.activeEncounter.id,
-            currentTurnIndex: context.activeEncounter.currentTurnIndex,
-            round: context.activeEncounter.round,
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
           });
-          gameEvents.push(...finalizeOutcome.events);
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            itemOutcome.systemLogs
+          );
+
+          return { itemOutcome, turnEvents };
+        });
+
+        playerActionLogged = true;
+        gameEvents.push(...committed.itemOutcome.events, ...committed.turnEvents);
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this item use could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
         }
-      });
+        throw error;
+      }
     }
 
     // ── Gate: equip ─────────────────────────────────────────────────────────────
@@ -1563,67 +1743,89 @@ async function resolveAction(
         attack,
       });
 
-      // Exactly one living hostile target and a weapon to swing: the attack is
-      // canonical from here.
-      await persistPlayerAction();
+      try {
+        const committed = await prisma.$transaction(async (tx) => {
+          const transactionClient = tx as Prisma.TransactionClient;
+          await lockCharacterForCombatAction(
+            transactionClient,
+            context.character.id
+          );
+          const attackOutcome = await executeCombatAction({
+            actionType: "attack",
+            encounter: {
+              id: context.activeEncounter!.id,
+              round: context.activeEncounter!.round,
+              currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+              totalDamageDealt: context.activeEncounter!.totalDamageDealt,
+              status: "active",
+              combatants: context.activeEncounter!.combatants as PipelineCombatant[],
+            },
+            actorId: playerCombatant?.id ?? context.character.id,
+            actorName: context.character.name,
+            actorConditions: playerConditions,
+            actorArmorPenalty: armorPenaltyFor({
+              inventory: context.character.inventory,
+              characterClass: context.character.class,
+            }).applies,
+            targetCombatants: targets,
+            weaponName: foundWeapon.name,
+            weaponDice: attack.weaponDice,
+            damageType: attack.damageType as DamageType,
+            attackModifier: attack.attackModifier,
+            flatDamageBonus: attack.flatDamageBonus,
+            weaponQualities: attack.qualities,
+            playerCharacterId: context.character.id,
+          }, transactionClient);
 
-      if (categoryLog) {
-        await prisma.gameLog.create({
-          data: { campaignId, role: "system", content: categoryLog },
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await lockCharacterForCombatAction(
-          tx as Prisma.TransactionClient,
-          context.character.id
-        );
-        const attackOutcome = await executeCombatAction({
-          actionType: "attack",
-          encounter: {
-            id: context.activeEncounter!.id,
-            round: context.activeEncounter!.round,
+          const finalizeOutcome = await finalizeEncounterTurn({
+            tx: transactionClient,
+            encounterId: context.activeEncounter!.id,
             currentTurnIndex: context.activeEncounter!.currentTurnIndex,
-            totalDamageDealt: context.activeEncounter!.totalDamageDealt,
-            status: "active",
-            combatants: context.activeEncounter!.combatants as PipelineCombatant[],
-          },
-          actorId: playerCombatant?.id ?? context.character.id,
-          actorName: context.character.name,
-          actorConditions: playerConditions,
-          actorArmorPenalty: armorPenaltyFor({
-            inventory: context.character.inventory,
-            characterClass: context.character.class,
-          }).applies,
-          targetCombatants: targets,
-          weaponName: foundWeapon.name,
-          weaponDice: attack.weaponDice,
-          damageType: attack.damageType as DamageType,
-          attackModifier: attack.attackModifier,
-          flatDamageBonus: attack.flatDamageBonus,
-          weaponQualities: attack.qualities,
-          playerCharacterId: context.character.id,
-        }, tx as Prisma.TransactionClient);
+            round: context.activeEncounter!.round,
+            failOnStaleTurn: true,
+          });
+          if (finalizeOutcome.turnAdvanceConflict) {
+            throw new TurnStateConflictError();
+          }
 
-        await writeSystemLogs(tx as Prisma.TransactionClient, campaignId, attackOutcome.systemLogs);
+          await transactionClient.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+          if (categoryLog) {
+            await transactionClient.gameLog.create({
+              data: { campaignId, role: "system", content: categoryLog },
+            });
+          }
+          await writeSystemLogs(
+            transactionClient,
+            campaignId,
+            attackOutcome.systemLogs
+          );
 
-        gameEvents.push(...attackOutcome.events);
-
-        const finalizeOutcome = await finalizeEncounterTurn({
-          tx: tx as Prisma.TransactionClient,
-          encounterId: context.activeEncounter!.id,
-          currentTurnIndex: context.activeEncounter!.currentTurnIndex,
-          round: context.activeEncounter!.round,
+          return { attackOutcome, turnEvents: finalizeOutcome.events };
         });
-        gameEvents.push(...finalizeOutcome.events);
 
-        if (attackOutcome.consequences.length > 0) {
+        playerActionLogged = true;
+        gameEvents.push(...committed.attackOutcome.events, ...committed.turnEvents);
+        if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
-            targets: attackOutcome.consequences,
+            targets: committed.attackOutcome.consequences,
           }));
         }
-      });
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this attack could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
     }
 
     // ── Gate: rest ──────────────────────────────────────────────────────────────

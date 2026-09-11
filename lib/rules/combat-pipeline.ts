@@ -338,7 +338,7 @@ export interface FinalizeEncounterTurnInput {
   currentTurnIndex: number;
   round: number;
   collectEvents?: boolean;
-  /** End Turn uses fail-closed semantics for an already-stale round/index. */
+  /** Turn-spending callers use fail-closed semantics for stale round/index. */
   failOnStaleTurn?: boolean;
 }
 
@@ -827,7 +827,11 @@ export async function finalizeEncounterTurn(
     // duplicate caller matches zero rows and this becomes a no-op instead of a
     // second transition.
     const claim = await tx.encounter.updateMany({
-      where: { id: encounterId, status: "active" },
+      where: {
+        id: encounterId,
+        status: "active",
+        ...(failOnStaleTurn ? { currentTurnIndex, round } : {}),
+      },
       data: { status: "resolved" },
     });
 
@@ -917,14 +921,24 @@ export async function finalizeEncounterTurn(
       return {
         events,
         encounterResolved: true,
+        ...(failOnStaleTurn ? { turnAdvanceConflict: false } : {}),
       };
     }
 
-    // Fail-closed: claim.count !== 1 — the claim was already won elsewhere
-    // (or, defensively, an unexpected match count). This transaction never
-    // reaches the winner branch above, so no future reward path can open
-    // from here. The encounter is still mechanically resolved from the
-    // caller's point of view.
+    // A player action requesting fail-closed semantics owns no resolved-state
+    // transition when its observed round/index is stale. The caller aborts the
+    // transaction, rolling back the damage/resource changes that preceded this
+    // finalizer as well as every canonical log.
+    if (failOnStaleTurn) {
+      return {
+        events,
+        encounterResolved: true,
+        turnAdvanceConflict: true,
+      };
+    }
+
+    // Legacy bounded behavior: another caller already resolved the encounter,
+    // so this transaction reaches no reward path but observes a resolved fight.
     return {
       events,
       encounterResolved: true,
@@ -967,11 +981,10 @@ export async function finalizeEncounterTurn(
     }
 
     // A turn transition is a state-machine edge, not an absolute field write.
-    // The caller's snapshot proposes the first edge. End Turn requests opt into
-    // fail-closed semantics: a stale claim returns a conflict instead of being
-    // silently reinterpreted as a later turn. Existing combat-action finalizers
-    // retain their bounded rebase behavior until a separate regression proves
-    // a different contract is required for those flows.
+    // The caller's snapshot proposes the first edge. Player turn-spending callers
+    // opt into fail-closed semantics: a stale claim returns a conflict instead of
+    // being silently reinterpreted as a later turn. Legacy callers that omit the
+    // flag retain the bounded rebase behavior below.
     let expectedTurnIndex = currentTurnIndex;
     let expectedRound = round;
 
