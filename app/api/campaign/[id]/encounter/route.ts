@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
@@ -177,7 +178,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   // Transaction for atomic encounter and coordinate initialization.
-  const encounter = await prisma.$transaction(async (tx) => {
+  let encounter;
+  try {
+    encounter = await prisma.$transaction(async (tx) => {
     // 1. Create Encounter
     const e = await tx.encounter.create({
       data: {
@@ -252,13 +255,37 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     });
 
     // 4. Return the coordinate-authoritative encounter.
-    return tx.encounter.findUnique({
-      where: { id: e.id },
-      include: {
-        combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
-      },
+      return tx.encounter.findUnique({
+        where: { id: e.id },
+        include: {
+          combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
+        },
+      });
     });
-  });
+  } catch (error) {
+    // The database-level partial unique index is the final authority for
+    // concurrent acquisition. If another request wins after our pre-check,
+    // return the canonical conflict response and leave this transaction rolled back.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const winner = await prisma.encounter.findFirst({
+        where: { campaignId, status: "active" },
+      });
+      if (winner) {
+        return NextResponse.json(
+          {
+            error: "An active encounter already exists.",
+            encounterId: winner.id,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    throw error;
+  }
 
   return NextResponse.json(encounter, { status: 201 });
 }
