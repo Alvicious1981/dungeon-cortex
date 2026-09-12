@@ -67,6 +67,8 @@ export interface ContextEncounter {
   currentTurnIndex: number;
   /** Integer feet spent in this round/index turn; null is fail-closed legacy state. */
   currentTurnMovementSpentFt: number | null;
+  /** Null is fail-closed legacy state; this is mechanical state, never narration. */
+  currentTurnObjectInteractionUsed: boolean | null;
   /** Ordered by the persisted initiativeOrder — index 0 acts first. */
   combatants: ContextCombatant[];
   /** Total damage dealt to enemies. */
@@ -406,6 +408,7 @@ export async function buildCampaignContext(
         round: true,
         currentTurnIndex: true,
         currentTurnMovementSpentFt: true,
+        currentTurnObjectInteractionUsed: true,
         totalDamageDealt: true,
         combatants: {
           select: {
