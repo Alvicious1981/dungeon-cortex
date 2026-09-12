@@ -7,8 +7,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const prismaTx = vi.hoisted(() => ({
-  campaign: { update: vi.fn() },
-  character: { update: vi.fn() },
+  campaign: { updateMany: vi.fn() },
+  character: { updateMany: vi.fn() },
   gameLog: { create: vi.fn() },
 }));
 
@@ -122,8 +122,8 @@ describe("travel gate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     primeContext();
-    prismaTx.campaign.update.mockResolvedValue({});
-    prismaTx.character.update.mockResolvedValue({});
+    prismaTx.campaign.updateMany.mockResolvedValue({ count: 1 });
+    prismaTx.character.updateMany.mockResolvedValue({ count: 1 });
     prismaTx.gameLog.create.mockResolvedValue({});
   });
 
@@ -137,8 +137,8 @@ describe("travel gate", () => {
     const res = await POST(request("travel to the Gilded Boar"), { params });
 
     expect(res.status).toBe(200);
-    expect(prismaTx.campaign.update).toHaveBeenCalledWith({
-      where: { id: "camp_1" },
+    expect(prismaTx.campaign.updateMany).toHaveBeenCalledWith({
+      where: { id: "camp_1", currentLocationId: "loc_origin" },
       data: { currentLocationId: "loc_dest", currentNodeId: "node_entry" },
     });
   });
@@ -156,7 +156,7 @@ describe("travel gate", () => {
 
     await POST(request("travel to the Gilded Boar"), { params });
 
-    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(prismaTx.character.updateMany).not.toHaveBeenCalled();
   });
 
   it("persists the exhaustion a failed forced march resolved", async () => {
@@ -180,8 +180,8 @@ describe("travel gate", () => {
 
     await POST(request("travel to the Gilded Boar, forced march"), { params });
 
-    expect(prismaTx.character.update).toHaveBeenCalledWith({
-      where: { id: "char_1" },
+    expect(prismaTx.character.updateMany).toHaveBeenCalledWith({
+      where: { id: "char_1", exhaustionLevel: 0 },
       data: { exhaustionLevel: Math.min(6, forcedHours) },
     });
     vi.restoreAllMocks();
@@ -198,8 +198,8 @@ describe("travel gate", () => {
     const res = await POST(request("travel to Atlantis"), { params });
 
     expect(res.status).toBe(400);
-    expect(prismaTx.campaign.update).not.toHaveBeenCalled();
-    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(prismaTx.campaign.updateMany).not.toHaveBeenCalled();
+    expect(prismaTx.character.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses a journey to where the party already stands", async () => {
@@ -217,7 +217,7 @@ describe("travel gate", () => {
     const res = await POST(request("travel to the Sable Crypt"), { params });
 
     expect(res.status).toBe(400);
-    expect(prismaTx.campaign.update).not.toHaveBeenCalled();
+    expect(prismaTx.campaign.updateMany).not.toHaveBeenCalled();
   });
 
   it("writes a system log line carrying the resolved figures", async () => {
@@ -289,9 +289,10 @@ describe("travel gate", () => {
     const expectedExhaustion =
       CHARACTER.exhaustionLevel + journey.exhaustionGained;
 
-    expect(prismaTx.gameLog.create).toHaveBeenCalledTimes(1);
-    const content = (prismaTx.gameLog.create as ReturnType<typeof vi.fn>).mock
-      .calls[0][0].data.content as string;
+    const systemRows = (prismaTx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
+      .filter((args) => args[0]?.data?.role === "system");
+    expect(systemRows).toHaveLength(1);
+    const content = systemRows[0][0].data.content as string;
 
     expect(content).toContain(`Forced march: ${journey.forcedHours} h`);
     expect(content).toContain(`DC ${dcList}`);
@@ -319,8 +320,8 @@ describe("travel gate", () => {
     const res = await POST(request("travel to"), { params });
 
     expect(res.status).toBe(400);
-    expect(prismaTx.campaign.update).not.toHaveBeenCalled();
-    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(prismaTx.campaign.updateMany).not.toHaveBeenCalled();
+    expect(prismaTx.character.updateMany).not.toHaveBeenCalled();
     expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
     expect(streamNarrative).not.toHaveBeenCalled();
   });
@@ -365,8 +366,8 @@ describe("travel gate", () => {
     const res = await POST(request("travel to the Gilded Boar"), { params });
 
     expect(res.status).toBe(409);
-    expect(prismaTx.campaign.update).not.toHaveBeenCalled();
-    expect(prismaTx.character.update).not.toHaveBeenCalled();
+    expect(prismaTx.campaign.updateMany).not.toHaveBeenCalled();
+    expect(prismaTx.character.updateMany).not.toHaveBeenCalled();
     expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
   });
 
@@ -396,7 +397,7 @@ describe("travel gate", () => {
     const res = await POST(request("travel to Atlantis"), { params });
 
     expect(res.status).toBe(400);
-    const userRows = (prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
+    const userRows = (prismaTx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
       .filter((args) => args[0]?.data?.role === "user");
     expect(userRows).toHaveLength(0);
   });
@@ -413,7 +414,7 @@ describe("travel gate", () => {
 
     await POST(request("travel to the Gilded Boar"), { params });
 
-    const userRows = (prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
+    const userRows = (prismaTx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls
       .filter((args) => args[0]?.data?.role === "user");
     expect(userRows).toHaveLength(1);
     expect(userRows[0][0].data.content).toBe("travel to the Gilded Boar");
