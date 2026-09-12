@@ -961,6 +961,7 @@ export async function finalizeEncounterTurn(
           currentTurnIndex: nextTurnIndex,
           round: nextRound,
           currentTurnMovementSpentFt: 0,
+          currentTurnObjectInteractionUsed: false,
         },
       });
 
@@ -1006,6 +1007,7 @@ export async function finalizeEncounterTurn(
           currentTurnIndex: nextTurnIndex,
           round: nextRound,
           currentTurnMovementSpentFt: 0,
+          currentTurnObjectInteractionUsed: false,
         },
       });
 
