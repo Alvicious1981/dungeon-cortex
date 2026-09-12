@@ -273,6 +273,9 @@ model Encounter {
   /// Feet spent by the combatant that owns the current round/index turn.
   /// Null is fail-closed legacy state; every successful turn advance resets it to zero.
   currentTurnMovementSpentFt Int?
+  /// Whether the active round/index turn has spent its free object interaction.
+  /// Null is fail-closed legacy state; every successful turn advance resets it to false.
+  currentTurnObjectInteractionUsed Boolean?
   totalDamageDealt           Int      @default(0)
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt

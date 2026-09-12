@@ -26,6 +26,10 @@ import {
   penalisedByArmor,
 } from "@/lib/rules/armor-proficiency";
 import { slotFor } from "@/lib/rules/equipment-slot";
+import {
+  EquipmentTransitionError,
+  persistEquipmentTransition,
+} from "@/lib/db/equipment-transition";
 import { abilityCheckAdvantageFrom } from "@/lib/rules/item-effects";
 import { stealthDisadvantageFor } from "@/lib/rules/armor-stealth";
 import {
@@ -1640,40 +1644,67 @@ async function resolveAction(
         );
       }
 
-      const { slot: targetSlot } = slotFor(foundItem);
+      if (context.activeEncounter) {
+        const turnRefusal = playerTurnRefusal(context.activeEncounter);
+        if (turnRefusal) return turnRefusal;
+        try {
+          const committed = await prisma.$transaction((tx) =>
+            persistEquipmentTransition(tx, {
+              campaignId,
+              characterId: context.character.id,
+              itemId: foundItem.id,
+              encounterId: context.activeEncounter!.id,
+              expectedRound: context.activeEncounter!.round,
+              expectedTurnIndex: context.activeEncounter!.currentTurnIndex,
+              playerAction: trimmedAction,
+            })
+          );
+          playerActionLogged = true;
+          gameEvents.push(...committed.events);
+        } catch (error) {
+          if (error instanceof EquipmentTransitionError) {
+            return NextResponse.json(
+              {
+                error: "The equipment change is unavailable in the current combat state.",
+                code: error.code,
+              },
+              { status: 409 }
+            );
+          }
+          throw error;
+        }
+      } else {
+        const { slot: targetSlot } = slotFor(foundItem);
+        // Outside combat retains the established immediate, atomic swap.
+        await prisma.$transaction(async (tx) => {
+          // Equipment slots are character-scoped. The canonical Character
+          // lock serializes competing swaps across application instances.
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id"
+            FROM "Character"
+            WHERE "id" = ${context.character.id}
+            FOR UPDATE
+          `;
 
-      // Ownership is proven, so the action is canonical.
-      await persistPlayerAction();
+          await tx.inventoryItem.updateMany({
+            where: { characterId: context.character.id, equippedSlot: targetSlot },
+            data: { equippedSlot: null },
+          });
 
-      await prisma.$transaction(async (tx) => {
-        // Equipment slots are a character-scoped invariant. Lock the canonical
-        // character row before reading/clearing a slot so two app instances
-        // cannot both observe the same slot as empty and then equip different
-        // items into it. The lock is transaction-scoped and therefore releases
-        // automatically after the clear+equip pair commits or rolls back.
-        await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT "id"
-          FROM "Character"
-          WHERE "id" = ${context.character.id}
-          FOR UPDATE
-        `;
-
-        await tx.inventoryItem.updateMany({
-          where: { characterId: context.character.id, equippedSlot: targetSlot },
-          data: { equippedSlot: null },
+          await tx.inventoryItem.update({
+            where: { id: foundItem.id },
+            data: { equippedSlot: targetSlot },
+          });
+          await tx.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
         });
-
-        await tx.inventoryItem.update({
-          where: { id: foundItem.id },
-          data: { equippedSlot: targetSlot },
+        playerActionLogged = true;
+        gameEvents.push({
+          type: "EQUIP_ITEM",
+          payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
         });
-      });
-      
-      // Send event to update the UI
-      gameEvents.push({
-        type: "EQUIP_ITEM",
-        payload: { itemId: foundItem.id, itemName: foundItem.name, targetSlot },
-      });
+      }
     }
 
     // ── Gate: attack ────────────────────────────────────────────────────────────

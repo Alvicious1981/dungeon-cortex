@@ -102,7 +102,12 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
         currentTurnIndex: 0,
         round: 1,
       },
-      data: { currentTurnIndex: 1, round: 1, currentTurnMovementSpentFt: 0 },
+      data: {
+        currentTurnIndex: 1,
+        round: 1,
+        currentTurnMovementSpentFt: 0,
+        currentTurnObjectInteractionUsed: false,
+      },
     });
     expect(tx.encounter.update).not.toHaveBeenCalled();
     expect(tx.encounter.findUnique).not.toHaveBeenCalled();
@@ -141,7 +146,12 @@ describe("finalizeEncounterTurn atomic turn claims", () => {
         currentTurnIndex: 0,
         round: 1,
       },
-      data: { currentTurnIndex: 1, round: 1, currentTurnMovementSpentFt: 0 },
+      data: {
+        currentTurnIndex: 1,
+        round: 1,
+        currentTurnMovementSpentFt: 0,
+        currentTurnObjectInteractionUsed: false,
+      },
     });
     expect(tx.encounter.findUnique).not.toHaveBeenCalled();
     expect(tx.encounter.update).not.toHaveBeenCalled();

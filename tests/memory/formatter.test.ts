@@ -58,6 +58,7 @@ const combatEncounter: CampaignContext["activeEncounter"] = {
   round: 4,
   currentTurnIndex: 0,
   currentTurnMovementSpentFt: 0,
+  currentTurnObjectInteractionUsed: false,
   totalDamageDealt: 0,
   combatants: [
     {
@@ -407,6 +408,7 @@ describe("formatSystemPrompt — relevance clipping", () => {
         round: 1,
         currentTurnIndex: 0,
         currentTurnMovementSpentFt: 0,
+        currentTurnObjectInteractionUsed: false,
         totalDamageDealt: 0,
         combatants: [],
       },
@@ -465,6 +467,7 @@ describe("formatSystemPrompt — enemy damage and condition constraints", () => 
     round: 2,
     currentTurnIndex: 0,
     currentTurnMovementSpentFt: 0,
+    currentTurnObjectInteractionUsed: false,
     totalDamageDealt: 7,
     combatants: [
       {
