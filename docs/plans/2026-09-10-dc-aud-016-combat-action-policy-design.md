@@ -93,10 +93,10 @@ and combat checks claim the observed turn fail closed in their owning
 transaction. Real PostgreSQL races prove exactly one winner for End Turn versus
 End Turn, an allowed check, or a weapon attack.
 
-DC-PLAN-016B is not implemented by this status change. Combat equipment still
-requires the separately staged persisted object-interaction field, pure cost
-matrix, and atomic equipment transition described below. `Combatant.actionBudget`
-remains dormant and is not authority.
+DC-PLAN-016B is implemented by the combat equipment transition. Its persisted
+Encounter field, pure cost matrix, Character-first lock, conditional budget or
+turn claim, inventory mutation, and canonical log form one atomic boundary.
+`Combatant.actionBudget` remains dormant and is not authority.
 
 ## 3. Scope
 
