@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier } from "@/lib/rules/dice";
 import {
@@ -314,34 +315,56 @@ export async function spawnCombatEncounter(
     };
   });
 
-  const encounter = await db.encounter.create({
-    data: {
-      campaignId: input.campaignId,
-      status: "active",
-      round: 1,
-      currentTurnIndex: 0,
-      currentTurnMovementSpentFt: 0,
-      currentTurnObjectInteractionUsed: false,
-      combatants: { create: combatantData },
-    },
-    include: {
-      combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
-    },
-  });
+  try {
+    const encounter = await db.encounter.create({
+      data: {
+        campaignId: input.campaignId,
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
+        currentTurnMovementSpentFt: 0,
+        currentTurnObjectInteractionUsed: false,
+        combatants: { create: combatantData },
+      },
+      include: {
+        combatants: { orderBy: COMBATANT_INITIATIVE_ORDER },
+      },
+    });
 
-  return {
-    ok: true,
-    encounterId: encounter.id,
-    enemies: selectedMonsters.map((monster) => ({
-      name: monster.name,
-      cr: monster.challenge_rating ?? 0,
-      hp: monster.hit_points,
-    })),
-    adjustedXP: calculateAdjustedXP(selectedMonsters),
-    initiativeOrder: encounter.combatants.map((combatant) => ({
-      name: combatant.name,
-      initiative: combatant.initiativeTotal,
-      isPlayer: combatant.isPlayer,
-    })),
-  };
+    return {
+      ok: true,
+      encounterId: encounter.id,
+      enemies: selectedMonsters.map((monster) => ({
+        name: monster.name,
+        cr: monster.challenge_rating ?? 0,
+        hp: monster.hit_points,
+      })),
+      adjustedXP: calculateAdjustedXP(selectedMonsters),
+      initiativeOrder: encounter.combatants.map((combatant) => ({
+        name: combatant.name,
+        initiative: combatant.initiativeTotal,
+        isPlayer: combatant.isPlayer,
+      })),
+    };
+  } catch (error) {
+    // PostgreSQL owns the invariant through the partial unique index on active
+    // encounters. A concurrent loser must resolve to the already-created
+    // encounter instead of surfacing an unhandled uniqueness failure.
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const winner = await db.encounter.findFirst({
+        where: { campaignId: input.campaignId, status: "active" },
+      });
+      if (winner) {
+        return {
+          error: "An active encounter already exists.",
+          encounterId: winner.id,
+        };
+      }
+    }
+
+    throw error;
+  }
 }
