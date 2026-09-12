@@ -26,6 +26,7 @@
  */
 
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier } from "@/lib/rules/dice";
 import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
@@ -54,7 +55,14 @@ export interface TravelGateInput {
    * as a callback rather than reimplemented here so the "written at most once"
    * guarantee it shares with every other gate keeps a single owner.
    */
-  persistPlayerAction: () => Promise<void>;
+  persistPlayerAction: (tx: Prisma.TransactionClient) => Promise<void>;
+}
+
+class TravelStateConflictError extends Error {
+  constructor() {
+    super("The campaign travel origin changed before the journey could commit.");
+    this.name = "TravelStateConflictError";
+  }
 }
 
 /**
@@ -173,31 +181,68 @@ export async function resolveTravelGate({
     : `Travel: ${origin.name} → ${destination.name}, ` +
       `${journey.distanceMiles} mi at normal pace, ${dayCount}.`;
 
-  // Origin, destination, entry node and journey are all resolved, and the
-  // gate has no refusal left. Written before the transaction so the
-  // player's line precedes the travel line it writes, and so the
-  // transaction's own boundary is unchanged.
-  await persistPlayerAction();
+  try {
+    await prisma.$transaction(async (tx) => {
+      // The player line is part of the same atomic unit as the state transition.
+      // Keeping it first preserves history ordering, while a stale-origin loser
+      // now rolls it back together with every other travel side effect.
+      await persistPlayerAction(tx);
 
-  await prisma.$transaction(async (tx) => {
-    if (journey.exhaustionGained > 0) {
-      await tx.character.update({
-        where: { id: character.id },
+      // Claim exactly the origin this request validated. PostgreSQL re-checks
+      // the predicate after waiting on a concurrent writer, so only one of two
+      // incompatible A → B / A → C transitions can update the campaign.
+      const campaignClaim = await tx.campaign.updateMany({
+        where: {
+          id: campaignId,
+          currentLocationId: originId,
+        },
         data: {
-          exhaustionLevel: character.exhaustionLevel + journey.exhaustionGained,
+          currentLocationId: destination.id,
+          currentNodeId: entryNode.id,
         },
       });
+
+      if (campaignClaim.count !== 1) {
+        throw new TravelStateConflictError();
+      }
+
+      // The journey was resolved from this exact exhaustion snapshot. If the
+      // snapshot changed concurrently, fail closed and roll back the campaign
+      // claim and both log rows rather than overwrite newer character state.
+      if (journey.exhaustionGained > 0) {
+        const exhaustionClaim = await tx.character.updateMany({
+          where: {
+            id: character.id,
+            exhaustionLevel: character.exhaustionLevel,
+          },
+          data: {
+            exhaustionLevel:
+              character.exhaustionLevel + journey.exhaustionGained,
+          },
+        });
+
+        if (exhaustionClaim.count !== 1) {
+          throw new TravelStateConflictError();
+        }
+      }
+
+      await tx.gameLog.create({
+        data: { campaignId, role: "system", content: logLine },
+      });
+    });
+  } catch (error) {
+    if (error instanceof TravelStateConflictError) {
+      return NextResponse.json(
+        {
+          error:
+            "The party moved or its travel state changed before this journey could commit. Refresh state and try again.",
+          code: "TRAVEL_STATE_CONFLICT",
+        },
+        { status: 409 }
+      );
     }
-
-    await tx.campaign.update({
-      where: { id: campaignId },
-      data: { currentLocationId: destination.id, currentNodeId: entryNode.id },
-    });
-
-    await tx.gameLog.create({
-      data: { campaignId, role: "system", content: logLine },
-    });
-  });
+    throw error;
+  }
 
   return null;
 }
