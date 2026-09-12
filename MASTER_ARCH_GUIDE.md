@@ -116,9 +116,15 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - `Combatant.actionBudget` remains dormant nullable legacy JSON. It has no
   reachable producer, validated shape, reset lifecycle, or mechanical reader
   and is not action-economy authority.
-- Combat equipment cost and the persisted free object-interaction budget are
-  approved for DC-PLAN-016B but are not implemented by 016A. Until 016B lands,
-  do not describe the current equipment gate as turn-cost authoritative.
+- Combat equipment cost is backend-authoritative. Body armour changes are
+  refused in combat; shields require an action; weapons and accessories use
+  the current turn's Encounter-owned free object interaction when available,
+  then require the action. The Character lock, budget/turn CAS, inventory
+  swap, and canonical user log share one transaction. Failed claims roll back
+  and emit no event or narration.
+- `Encounter.currentTurnObjectInteractionUsed` is the sole persisted free
+  object-interaction budget. Null legacy state fails closed, new encounters
+  initialize it to false, and every successful turn advance resets it to false.
 
 ## 5. Obsolescence Registry
 
