@@ -137,7 +137,7 @@ test("@smoke concurrent travel transitions claim the validated origin at most on
 
     const persistPlayerAction = (content: string) =>
       async (tx: Prisma.TransactionClient): Promise<void> => {
-      await tx.gameLog.create({
+        await tx.gameLog.create({
         data: {
           campaignId: created.campaignId!,
           role: "user",
@@ -153,7 +153,7 @@ test("@smoke concurrent travel transitions claim the validated origin at most on
       // Production resolveTravelGate has completed every travel validation before
       // it awaits this callback. Holding both callers here therefore makes both
       // operations carry the same validated origin snapshot into the competing
-      // Campaign writes, without mocking Prisma or changing production code.
+      // Campaign writes, without mocking Prisma or adding a test-only hook.
       await bothAtCommitBoundary;
     };
 
