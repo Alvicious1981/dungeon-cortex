@@ -79,7 +79,7 @@ async function waitForBlockedEncounterUpdates(
   );
 }
 
-type TurnRaceKind = "end_turn" | "ability_check" | "weapon_attack";
+type TurnRaceKind = "end_turn" | "ability_check" | "weapon_attack" | "equipment";
 
 interface TurnRaceCase {
   kind: TurnRaceKind;
@@ -95,6 +95,11 @@ const TURN_RACES: readonly TurnRaceCase[] = [
     action: "I inspect the room",
   },
   { kind: "weapon_attack", label: "a weapon attack", action: "Attack" },
+  {
+    kind: "equipment",
+    label: "an equipment action",
+    action: "Equip Turn Race Charm",
+  },
 ];
 
 for (const race of TURN_RACES) {
@@ -160,12 +165,25 @@ for (const race of TURN_RACES) {
         });
       }
 
+      if (race.kind === "equipment") {
+        await prisma.inventoryItem.create({
+          data: {
+            characterId: created.characterId,
+            name: "Turn Race Charm",
+            type: "misc",
+            quantity: 1,
+            properties: {},
+          },
+        });
+      }
+
       const encounter = await prisma.encounter.create({
         data: {
           campaignId: created.campaignId,
           status: "active",
           round: 1,
           currentTurnIndex: 0,
+          currentTurnObjectInteractionUsed: race.kind === "equipment",
           totalDamageDealt: 0,
           combatants: {
             create: [
@@ -278,7 +296,9 @@ for (const race of TURN_RACES) {
         error?: unknown;
         code?: unknown;
       };
-      expect(conflictBody.code).toBe("TURN_STATE_CONFLICT");
+      expect(conflictBody.code).toBe(
+        race.kind === "equipment" ? "EQUIPMENT_STATE_CONFLICT" : "TURN_STATE_CONFLICT"
+      );
       expect(typeof conflictBody.error).toBe("string");
 
       const successFrames = parseSseFrames(await successResponse!.text());
@@ -343,6 +363,17 @@ for (const race of TURN_RACES) {
         });
         expect(targetAfter.hp).toBe(attackTarget.hp);
         expect(after.totalDamageDealt).toBe(0);
+      }
+
+      if (race.kind === "equipment" && !contenderSucceeded) {
+        const itemAfter = await prisma.inventoryItem.findFirstOrThrow({
+          where: {
+            characterId: created.characterId,
+            name: "Turn Race Charm",
+          },
+          select: { equippedSlot: true },
+        });
+        expect(itemAfter.equippedSlot).toBeNull();
       }
     } finally {
       releaseLock();
