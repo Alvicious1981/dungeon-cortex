@@ -186,6 +186,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         round: 1,
         currentTurnIndex: 0,
         currentTurnMovementSpentFt: 0,
+        currentTurnObjectInteractionUsed: false,
       },
     });
 
