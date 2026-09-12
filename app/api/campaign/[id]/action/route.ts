@@ -480,16 +480,24 @@ async function resolveAction(
   // request but the trailing call below covers whatever matched no gate; a
   // second call is a no-op, not a duplicate row.
   let playerActionLogged = false;
-  const persistPlayerAction = async (): Promise<void> => {
+  const persistPlayerAction = async (
+    tx?: Prisma.TransactionClient
+  ): Promise<void> => {
     if (playerActionLogged) return;
+
+    const data = {
+      campaignId,
+      role: "user",
+      content: trimmedAction,
+    };
+
+    if (tx) {
+      await tx.gameLog.create({ data });
+    } else {
+      await prisma.gameLog.create({ data });
+    }
+
     playerActionLogged = true;
-    await prisma.gameLog.create({
-      data: {
-        campaignId,
-        role: "user",
-        content: trimmedAction,
-      },
-    });
   };
 
   // Step 2: Detect and resolve /roll commands (non-streaming, quick response)
