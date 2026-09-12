@@ -15,9 +15,11 @@
  * is a refusal the route must return unchanged. Collapsing that to a thrown
  * error would change status codes.
  *
- * Nothing here was redesigned. The order of the checks, the wording of every
- * refusal, the log line, the transaction boundary and the point at which the
- * player's action becomes canonical are the ones the route had.
+ * DC-PLAN-018 keeps the existing validation/refusal semantics but makes the
+ * successful transition atomic: the validated origin is claimed with a
+ * compare-and-set update, and the player/system logs plus any exhaustion write
+ * live in the same transaction. A stale traveler therefore leaves no history
+ * or character-state side effects.
  *
  * The route keeps the `intent.actionType === "travel"` dispatch: two
  * architecture guards read that file as text, and
@@ -51,9 +53,9 @@ export interface TravelGateInput {
     exhaustionLevel: number;
   };
   /**
-   * The route's single idempotent writer of the player's own log line. Passed
-   * as a callback rather than reimplemented here so the "written at most once"
-   * guarantee it shares with every other gate keeps a single owner.
+   * The route's single idempotent writer of the player's own log line. Travel
+   * supplies its transaction so the canonical player line rolls back with a
+   * stale-origin loser instead of surviving as contradictory history.
    */
   persistPlayerAction: (tx: Prisma.TransactionClient) => Promise<void>;
 }
