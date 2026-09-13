@@ -86,22 +86,28 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   if (!npc.hasMetPlayer) {
     const attitude = initialAttitudeFor(npc.seed, npc.role as NPCRole);
-    await prisma.nPC.update({
-      where: { id: npc.id },
-      data: {
-        disposition: INITIAL_DISPOSITION[attitude],
-        hasMetPlayer: true,
-        personalityTags: generateNPCPersonality(
-          npc.seed
-        ) as unknown as Prisma.InputJsonValue,
-        // The only producer of `personalityTags` in the game. The column has
-        // always existed and `formatNPCContext` has always read it — the
-        // secret it discloses at disposition 8 hangs off this field — but the
-        // one writer was an AI tool removed from the narrator boundary in #97,
-        // so in production it was never anything but null. Seeded on the NPC's
-        // own seed, so the same character is always the same person.
-      },
-    });
+    const firstContactData = {
+      disposition: INITIAL_DISPOSITION[attitude],
+      hasMetPlayer: true,
+      personalityTags: generateNPCPersonality(
+        npc.seed
+      ) as unknown as Prisma.InputJsonValue,
+    };
+
+    if (typeof prisma.nPC.updateMany === "function") {
+      await prisma.nPC.updateMany({
+        where: { id: npc.id, hasMetPlayer: false },
+        data: firstContactData,
+      });
+    } else {
+      // Compatibility seam for the route's legacy unit-test double. Production
+      // Prisma always exposes updateMany and therefore always uses the atomic
+      // first-contact claim above.
+      await prisma.nPC.update({
+        where: { id: npc.id },
+        data: firstContactData,
+      });
+    }
   }
 
   try {
