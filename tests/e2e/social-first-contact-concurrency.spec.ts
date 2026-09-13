@@ -20,7 +20,6 @@ type RouteNpcDelegate = {
   findUnique(
     args: Prisma.NPCFindUniqueArgs
   ): Promise<Prisma.NPCGetPayload<Record<string, never>> | null>;
-  update(args: Prisma.NPCUpdateArgs): Promise<unknown>;
 };
 
 type SocialRouteResult = {
@@ -59,38 +58,6 @@ function socialRequest(
   );
 }
 
-async function waitForDispositionToLeave(
-  prisma: PrismaClient,
-  npcId: string,
-  initialDisposition: number
-): Promise<void> {
-  const deadline = Date.now() + 10_000;
-
-  while (Date.now() < deadline) {
-    const row = await prisma.nPC.findUnique({
-      where: { id: npcId },
-      select: { disposition: true, hasMetPlayer: true },
-    });
-
-    // The row starts at null, so "different from the initial value" alone is
-    // not enough. Wait until first contact has actually been established and
-    // a social check has then moved the initialized disposition.
-    if (
-      row?.hasMetPlayer === true &&
-      row.disposition !== null &&
-      row.disposition !== initialDisposition
-    ) {
-      return;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-
-  throw new Error(
-    "Timed out waiting for the first social check to move disposition."
-  );
-}
-
 test("@smoke concurrent first-contact social actions preserve both accepted disposition shifts", async ({
   request,
 }) => {
@@ -102,7 +69,6 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
   const routeNpc = routePrisma.nPC as unknown as RouteNpcDelegate;
 
   const originalFindUnique = routeNpc.findUnique.bind(routePrisma.nPC);
-  const originalUpdate = routeNpc.update.bind(routePrisma.nPC);
   const originalRandom = Math.random;
 
   let npcId: string | undefined;
@@ -111,7 +77,6 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
     releaseBothRouteReads = resolve;
   });
   let staleFirstContactReads = 0;
-  let firstContactWrites = 0;
 
   try {
     created.characterId = await createdId(
@@ -192,28 +157,11 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
       return row;
     };
 
-    // Let one stale initializer through. Hold the other until the first request
-    // has completed its real social CAS and moved disposition away from the
-    // deterministic initial value. The delayed production update then executes
-    // with its stale hasMetPlayer=false decision.
-    routeNpc.update = async (args: Prisma.NPCUpdateArgs): Promise<any> => {
-      const data = args.data as Record<string, unknown>;
-      const isFirstContactWrite =
-        args.where.id === npcId && data.hasMetPlayer === true;
-
-      if (isFirstContactWrite) {
-        firstContactWrites += 1;
-        if (firstContactWrites === 2) {
-          await waitForDispositionToLeave(
-            observer,
-            npcId!,
-            initialDisposition
-          );
-        }
-      }
-
-      return originalUpdate(args);
-    };
+    // The production route no longer performs the first-contact write itself.
+    // Both requests have nevertheless crossed the same stale route snapshot
+    // before entering the transactional social service. The assertions below
+    // verify that the service serializes initialization and composes both
+    // accepted disposition transitions in PostgreSQL.
 
     // Natural 1 plus CHA -1 fails every initial commoner attitude DC. Keeping
     // both rolls deterministic makes the expected sequential disposition exact.
@@ -250,12 +198,11 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
     expect(results.every((result) => result.ok === true)).toBe(true);
     expect(results.every((result) => result.success === false)).toBe(true);
 
-    // Prove the deterministic seam actually exercised two stale route reads
-    // and two first-contact writes. Without these checks a fast scheduler or
-    // duplicated module instance could make the test pass without testing the
-    // race we intend to force.
+    // Prove both requests entered from the same never-met route snapshot.
+    // The old vulnerable implementation then issued two unconditional writes;
+    // the fixed implementation delegates initialization to the transactional
+    // compare-and-set path instead.
     expect(staleFirstContactReads).toBe(2);
-    expect(firstContactWrites).toBe(2);
 
     const after = await observer.nPC.findUniqueOrThrow({
       where: { id: npcId },
@@ -285,7 +232,6 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
     releaseBothRouteReads();
 
     routeNpc.findUnique = originalFindUnique;
-    routeNpc.update = originalUpdate;
     Math.random = originalRandom;
 
     if (created.campaignId) {
