@@ -286,7 +286,7 @@ function expectNoForbiddenRetroTerms(result: unknown) {
  * never once fired.
  */
 const CHARACTER_FIELDS = ["id", "stats", "level", "skillProficiencies"] as const;
-const NPC_FIELDS = ["id", "campaignId", "seed", "name", "disposition", "hasMetPlayer"] as const;
+const NPC_FIELDS = ["id", "campaignId", "seed", "name", "role", "disposition", "hasMetPlayer"] as const;
 const CAMPAIGN_FIELDS = ["id", "characterId", "userId", "status"] as const;
 
 function project<T extends Record<string, unknown>>(
