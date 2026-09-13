@@ -7,7 +7,7 @@ import {
   LevelUpServiceError,
   type LevelUpServiceErrorCode,
 } from "@/lib/rules/level-up-service";
-import { LevelUpPayloadSchema } from "@/lib/rules/progression";
+import { LevelUpPayloadSchema, MAX_LEVEL, MIN_LEVEL } from "@/lib/rules/progression";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -15,12 +15,14 @@ interface RouteContext {
 
 /**
  * `.strict()` is the point of this schema: an unexpected key is a rejected
- * request, not a silently dropped one. A client trying to smuggle
- * characterId, targetLevel, source, or any other authority field gets a 400.
+ * request, not a silently dropped one. The only assertion the client may send
+ * besides its HP choice is the observed target level; authority fields such as
+ * characterId and source still get a 400.
  */
 const levelUpRequestSchema = z
   .object({
     useAverage: z.boolean(),
+    targetLevel: z.number().int().min(MIN_LEVEL).max(MAX_LEVEL),
   })
   .strict();
 
@@ -60,7 +62,8 @@ const MESSAGE_BY_CODE: Record<LevelUpServiceErrorCode, string> = {
  * parsing, auth, ownership, and response shape. All XP, hit-die, and
  * hit-point arithmetic — and the persistence transaction — are delegated to
  * `applyLevelUp` (Model E). The client contributes exactly one bit
- * (`useAverage`); everything else is derived server-side.
+ * (`useAverage`) plus the observed transition endpoint (`targetLevel`); the
+ * service derives and validates everything mechanical server-side.
  */
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: campaignId } = await params;
@@ -106,6 +109,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     const result = await applyLevelUp({
       campaignId: campaign.id,
       characterId: campaign.characterId,
+      targetLevel: parsed.data.targetLevel,
       useAverage: parsed.data.useAverage,
       source: LEVEL_UP_SOURCE,
     });

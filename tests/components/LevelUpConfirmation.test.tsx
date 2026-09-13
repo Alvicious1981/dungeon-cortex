@@ -212,7 +212,7 @@ describe("B. LevelUpConfirmation — presentation", () => {
 // ─── C. Request contract ─────────────────────────────────────────────────────
 
 describe("C. LevelUpConfirmation — request contract", () => {
-  it("C1. sends { useAverage: true } when the player takes the average", async () => {
+  it("C1. sends the displayed next level when the player takes the average", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ payload: APPLIED }));
@@ -224,11 +224,14 @@ describe("C. LevelUpConfirmation — request contract", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/campaign/campaign-7/level-up",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ useAverage: true }) })
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ useAverage: true, targetLevel: AVAILABLE.toLevel }),
+      })
     );
   });
 
-  it("C2. sends { useAverage: false } and nothing else when the player rolls", async () => {
+  it("C2. sends the displayed next level when the player rolls", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ payload: APPLIED }));
@@ -239,9 +242,10 @@ describe("C. LevelUpConfirmation — request contract", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    // The single authority bit, and no smuggled level or hit-point field.
-    expect(body).toEqual({ useAverage: false });
-    expect(Object.keys(body)).toEqual(["useAverage"]);
+    // `targetLevel` is the observed transition endpoint, not the later
+    // XP-supported level and not a client-selected mechanical outcome.
+    expect(body).toEqual({ useAverage: false, targetLevel: AVAILABLE_MULTI.toLevel });
+    expect(Object.keys(body).sort()).toEqual(["targetLevel", "useAverage"]);
   });
 
   it("C3. uses the campaignId passed as a prop", async () => {
@@ -403,7 +407,7 @@ describe("F. LevelUpConfirmation — recoverable failures keep the panel", () =>
       .mockResolvedValueOnce(jsonResponse({ payload: APPLIED }));
 
     render(<LevelUpConfirmationController campaignId="campaign-1" />);
-    emitAvailable();
+    emitAvailable(AVAILABLE_MULTI);
     fireEvent.click(averageButton());
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
@@ -418,6 +422,12 @@ describe("F. LevelUpConfirmation — recoverable failures keep the panel", () =>
 
     await waitFor(() => expect(applied.spy).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, request] of fetchMock.mock.calls) {
+      expect(JSON.parse((request as RequestInit).body as string)).toEqual({
+        useAverage: true,
+        targetLevel: AVAILABLE_MULTI.toLevel,
+      });
+    }
 
     applied.stop();
   });
@@ -544,7 +554,9 @@ describe("H. Flujo integrado UI", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/campaign/campaign-9/level-up",
-      expect.objectContaining({ body: JSON.stringify({ useAverage: false }) })
+      expect.objectContaining({
+        body: JSON.stringify({ useAverage: false, targetLevel: AVAILABLE.toLevel }),
+      })
     );
 
     // 5) Only the applied payload reaches the celebration, and the panel is gone.

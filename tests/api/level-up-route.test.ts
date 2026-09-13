@@ -86,7 +86,7 @@ describe("POST /api/campaign/[id]/level-up — authentication and authorisation"
     const { AuthError } = await import("@/lib/auth/session");
     (getAuthUser as any).mockRejectedValue(new AuthError("Not authenticated."));
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
 
     expect(res.status).toBe(401);
     expect(applyLevelUp).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe("POST /api/campaign/[id]/level-up — authentication and authorisation"
   it("returns 404 for a campaign that does not exist", async () => {
     (prisma.campaign.findFirst as any).mockResolvedValue(null);
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
     const body = await res.json();
 
     expect(res.status).toBe(404);
@@ -108,7 +108,7 @@ describe("POST /api/campaign/[id]/level-up — authentication and authorisation"
     // user never matches the query, so this indistinguishable from "not found".
     (prisma.campaign.findFirst as any).mockResolvedValue(null);
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
     const body = await res.json();
 
     expect(res.status).toBe(404);
@@ -117,7 +117,7 @@ describe("POST /api/campaign/[id]/level-up — authentication and authorisation"
   });
 
   it("scopes the campaign lookup to the authenticated user", async () => {
-    await post({ useAverage: true });
+    await post({ useAverage: true, targetLevel: 2 });
 
     expect(prisma.campaign.findFirst).toHaveBeenCalledWith({
       where: { id: CAMPAIGN_ID, userId: USER.id },
@@ -146,7 +146,6 @@ describe("POST /api/campaign/[id]/level-up — input contract", () => {
 
   it.each([
     ["characterId", { useAverage: true, characterId: "someone-else" }],
-    ["targetLevel", { useAverage: true, targetLevel: 20 }],
     ["source", { useAverage: true, source: "triggerLevelUp" }],
     ["hpRoll", { useAverage: true, hpRoll: 10 }],
     ["hpGained", { useAverage: true, hpGained: 99 }],
@@ -168,7 +167,7 @@ describe("POST /api/campaign/[id]/level-up — input contract", () => {
 
 describe("POST /api/campaign/[id]/level-up — applying", () => {
   it("applies with the average and returns the resolved payload", async () => {
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -176,6 +175,7 @@ describe("POST /api/campaign/[id]/level-up — applying", () => {
     expect(applyLevelUp).toHaveBeenCalledWith({
       campaignId: CAMPAIGN_ID,
       characterId: "char_1",
+      targetLevel: 2,
       useAverage: true,
       source: "level_up_route",
     });
@@ -183,30 +183,41 @@ describe("POST /api/campaign/[id]/level-up — applying", () => {
   });
 
   it("applies with a roll", async () => {
-    const res = await post({ useAverage: false });
+    const res = await post({ useAverage: false, targetLevel: 2 });
 
     expect(res.status).toBe(200);
     expect(applyLevelUp).toHaveBeenCalledWith(
-      expect.objectContaining({ useAverage: false, source: "level_up_route" })
+      expect.objectContaining({ targetLevel: 2, useAverage: false, source: "level_up_route" })
     );
   });
 
-  it("derives the character from the campaign, never from the request", async () => {
-    await post({ useAverage: true });
+  it("derives the character from the campaign, while preserving the observed target level", async () => {
+    await post({ useAverage: true, targetLevel: 2 });
     const call = (applyLevelUp as any).mock.calls[0][0];
 
     expect(call.characterId).toBe(CAMPAIGN.characterId);
     expect(call.campaignId).toBe(CAMPAIGN_ID);
-    expect(call).not.toHaveProperty("targetLevel");
+    expect(call).toMatchObject({ targetLevel: 2 });
+  });
+
+  it.each([
+    ["missing targetLevel", { useAverage: true }],
+    ["fractional targetLevel", { useAverage: true, targetLevel: 2.5 }],
+    ["string targetLevel", { useAverage: true, targetLevel: "2" }],
+  ])("rejects an invalid target level (%s) with 400", async (_label, body) => {
+    const res = await post(body);
+
+    expect(res.status).toBe(400);
+    expect(applyLevelUp).not.toHaveBeenCalled();
   });
 
   it("fixes `source` in code rather than taking it from the body", async () => {
-    await post({ useAverage: true });
+    await post({ useAverage: true, targetLevel: 2 });
     expect((applyLevelUp as any).mock.calls[0][0].source).toBe("level_up_route");
   });
 
   it("strips service-only bookkeeping from the response", async () => {
-    const body = await (await post({ useAverage: true })).json();
+    const body = await (await post({ useAverage: true, targetLevel: 2 })).json();
 
     for (const leaked of [
       "previousXP", "newXP", "facts", "ok", "campaignId", "source",
@@ -218,7 +229,7 @@ describe("POST /api/campaign/[id]/level-up — applying", () => {
   });
 
   it("satisfies the Model E level-up invariant on success", async () => {
-    const body = await (await post({ useAverage: true })).json();
+    const body = await (await post({ useAverage: true, targetLevel: 2 })).json();
 
     expect(body.payload.newLevel).toBe(APPLIED.previousLevel + 1);
     expect(body.payload.newHitDiceTotal).toBe(body.payload.newLevel);
@@ -238,7 +249,7 @@ describe("POST /api/campaign/[id]/level-up — failure mapping", () => {
   ])("maps %s to %i", async (code, status) => {
     (applyLevelUp as any).mockRejectedValue(await levelUpError(code));
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
     const body = await res.json();
 
     expect(res.status).toBe(status);
@@ -251,16 +262,16 @@ describe("POST /api/campaign/[id]/level-up — failure mapping", () => {
   it("returns 409 when there is no pending level-up", async () => {
     (applyLevelUp as any).mockRejectedValue(await levelUpError("INVALID_LEVEL_UP_STATE"));
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("There is no pending level-up to apply.");
   });
 
-  it("treats INVALID_LEVEL_JUMP defensively even though this route never sends targetLevel", async () => {
+  it("maps INVALID_LEVEL_JUMP from the observed-target assertion defensively", async () => {
     (applyLevelUp as any).mockRejectedValue(await levelUpError("INVALID_LEVEL_JUMP"));
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("This level-up cannot be applied in a single step.");
@@ -272,7 +283,7 @@ describe("POST /api/campaign/[id]/level-up — failure mapping", () => {
       new Error("PrismaClientKnownRequestError: P2002 at db.public.Character")
     );
 
-    const res = await post({ useAverage: true });
+    const res = await post({ useAverage: true, targetLevel: 2 });
     const body = await res.json();
 
     expect(res.status).toBe(500);
