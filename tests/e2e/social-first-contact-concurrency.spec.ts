@@ -69,10 +69,17 @@ async function waitForDispositionToLeave(
   while (Date.now() < deadline) {
     const row = await prisma.nPC.findUnique({
       where: { id: npcId },
-      select: { disposition: true },
+      select: { disposition: true, hasMetPlayer: true },
     });
 
-    if (row?.disposition !== initialDisposition) {
+    // The row starts at null, so "different from the initial value" alone is
+    // not enough. Wait until first contact has actually been established and
+    // a social check has then moved the initialized disposition.
+    if (
+      row?.hasMetPlayer === true &&
+      row.disposition !== null &&
+      row.disposition !== initialDisposition
+    ) {
       return;
     }
 
