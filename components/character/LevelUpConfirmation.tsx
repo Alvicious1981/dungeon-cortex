@@ -96,8 +96,9 @@ export function LevelUpDecisionPanel({
       const response = await fetch(`/api/campaign/${campaignId}/level-up`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Exactly one field. Nothing else is ours to send.
-        body: JSON.stringify({ useAverage }),
+        // `toLevel` binds retries to the concrete transition the backend
+        // presented. The server still derives and validates the level.
+        body: JSON.stringify({ useAverage, targetLevel: payload.toLevel }),
       });
 
       const body = (await response.json().catch(() => ({}))) as {

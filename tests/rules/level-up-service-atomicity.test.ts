@@ -113,10 +113,11 @@ function makeStore(row: Row) {
   };
 }
 
-function call(store: ReturnType<typeof makeStore>) {
+function call(store: ReturnType<typeof makeStore>, targetLevel?: number) {
   return applyLevelUp({
     campaignId: "campaign-1",
     characterId: "character-1",
+    targetLevel,
     source: "test",
     // Deterministic HP gain so concurrency assertions don't depend on rolls.
     useAverage: true,
@@ -258,5 +259,19 @@ describe("applyLevelUp — concurrent confirmations (Model E)", () => {
     await expect(call(store)).rejects.toBeInstanceOf(LevelUpServiceError);
     expect(store.writes).toHaveLength(1);
     expect(store.row.level).toBe(2);
+  });
+
+  it("rejects a retried observed 2 to 3 confirmation instead of applying 3 to 4", async () => {
+    const store = makeStore(
+      pendingRow({ xp: xpForLevel(4), level: 2, hitDiceTotal: 2, hitDiceRemaining: 2 })
+    );
+
+    await expect(call(store, 3)).resolves.toMatchObject({ newLevel: 3 });
+
+    await expect(call(store, 3)).rejects.toMatchObject({
+      code: "INVALID_LEVEL_JUMP",
+    });
+    expect(store.row.level).toBe(3);
+    expect(store.writes).toHaveLength(1);
   });
 });
