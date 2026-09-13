@@ -91,14 +91,29 @@ export async function moveToNode(
     return { success: false, error: msg, passageType: edge.passageType };
   }
 
-  // JIT: Generate content for the target node if it's unexplored
-  await generateNodeContent(tx, targetNode.id);
-
-  // Update the campaign's spatial state
-  await tx.campaign.update({
-    where: { id: campaignId },
-    data: { currentNodeId: targetNode.id }
+  // Atomically claim the exact origin state that was validated above. Two
+  // concurrent moves may both read the same origin, but only one may update
+  // the campaign while it still matches that origin.
+  const movementClaim = await tx.campaign.updateMany({
+    where: {
+      id: campaignId,
+      currentLocationId: campaign.currentLocationId,
+      currentNodeId: campaign.currentNodeId,
+    },
+    data: { currentNodeId: targetNode.id },
   });
+
+  if (movementClaim.count !== 1) {
+    return {
+      success: false,
+      error: "Party position changed before this move could be applied.",
+    };
+  }
+
+  // JIT content generation happens only after the movement claim succeeds and
+  // remains inside the same transaction, so a losing move cannot mutate its
+  // target node.
+  await generateNodeContent(tx, targetNode.id);
 
   return { 
     success: true, 
