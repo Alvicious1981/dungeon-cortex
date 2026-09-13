@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { expect, test } from "@playwright/test";
 
-import { POST as resolveSocialRoute } from "../../app/api/campaign/[id]/social/route";
-import { prisma as routePrisma } from "../../lib/db/prisma";
+import { POST as resolveSocialRoute } from "@/app/api/campaign/[id]/social/route";
+import { prisma as routePrisma } from "@/lib/db/prisma";
 import {
   generateNPCPersonality,
   initialAttitudeFor,
@@ -242,6 +242,13 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
 
     expect(results.every((result) => result.ok === true)).toBe(true);
     expect(results.every((result) => result.success === false)).toBe(true);
+
+    // Prove the deterministic seam actually exercised two stale route reads
+    // and two first-contact writes. Without these checks a fast scheduler or
+    // duplicated module instance could make the test pass without testing the
+    // race we intend to force.
+    expect(staleFirstContactReads).toBe(2);
+    expect(firstContactWrites).toBe(2);
 
     const after = await observer.nPC.findUniqueOrThrow({
       where: { id: npcId },
