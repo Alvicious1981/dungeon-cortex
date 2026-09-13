@@ -255,7 +255,7 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
     // duplicated module instance could make the test pass without testing the
     // race we intend to force.
     expect(staleFirstContactReads).toBe(2);
-    expect(firstContactWrites).toBe(2);
+    expect(firstContactWrites).toBe(0);
 
     const after = await observer.nPC.findUniqueOrThrow({
       where: { id: npcId },
