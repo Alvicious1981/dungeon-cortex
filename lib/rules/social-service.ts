@@ -1,10 +1,15 @@
 import { prisma } from "@/lib/db/prisma";
+import type { Prisma } from "@prisma/client";
 import type { RumorPayload, SocialCheckResult } from "@/lib/rules/social";
 import {
   resolveSocialCheck as resolveSocialCheckPure,
   rebaseSocialCheckResult,
   getRumorsPayload,
+  generateNPCPersonality,
+  initialAttitudeFor,
+  INITIAL_DISPOSITION,
 } from "@/lib/rules/social-logic";
+import type { NPCRole } from "@/lib/rules/npc";
 import type { AbilityCheckActor, Ability } from "@/lib/rules/ability-check";
 
 export type SocialApproach = "persuade" | "intimidate" | "deceive";
@@ -49,8 +54,10 @@ interface SocialNpcRecord {
   campaignId?: string;
   seed?: string;
   name?: string;
+  role?: string;
   disposition?: number | null;
   hasMetPlayer?: boolean;
+  personalityTags?: unknown;
   knownRumors?: unknown;
 }
 
@@ -82,16 +89,25 @@ interface SocialDb {
     }): Promise<SocialNpcRecord | null | undefined>;
     update(args: {
       where: { id: string } | { campaignId_seed: { campaignId: string; seed: string } };
-      data: { disposition: number };
+      data: {
+        disposition?: number;
+        hasMetPlayer?: boolean;
+        personalityTags?: Prisma.InputJsonValue;
+      };
     }): Promise<SocialNpcRecord>;
     updateMany?(args: {
       where: {
         id?: string;
         campaignId?: string;
         seed?: string;
-        disposition: number | null;
+        disposition?: number | null;
+        hasMetPlayer?: boolean;
       };
-      data: { disposition: number };
+      data: {
+        disposition?: number;
+        hasMetPlayer?: boolean;
+        personalityTags?: Prisma.InputJsonValue;
+      };
     }): Promise<{ count: number }>;
   };
   locationNode: {
@@ -302,6 +318,7 @@ async function findNpc(
         campaignId: true,
         seed: true,
         name: true,
+        role: true,
         disposition: true,
         hasMetPlayer: true,
       },
@@ -321,6 +338,7 @@ async function findNpc(
         campaignId: true,
         seed: true,
         name: true,
+        role: true,
         disposition: true,
         hasMetPlayer: true,
       },
@@ -406,9 +424,96 @@ async function resolveSocialCheckInTransaction(
   if (!npc) {
     throw new SocialServiceError(
       "NPC_NOT_FOUND",
-      "NPC not found. Call establishInitialDisposition first to establish first contact."
+      "NPC not found."
     );
   }
+  assertNpcOwnership(npc, input.campaignId);
+
+  if (!npc.hasMetPlayer) {
+    const npcId = npc.id ?? input.npcId ?? input.npcSeed;
+    const npcSeed = npc.seed ?? input.npcSeed ?? npcId;
+    if (!npcId || !npcSeed) {
+      throw new SocialServiceError("NPC_NOT_FOUND", "Missing NPC identity.");
+    }
+
+    const role = npc.role as NPCRole | undefined;
+    if (!role) {
+      throw new SocialServiceError(
+        "NPC_NOT_FOUND",
+        "NPC role is missing; first contact cannot be initialized."
+      );
+    }
+
+    const attitude = initialAttitudeFor(npcSeed, role);
+    const initialDisposition = INITIAL_DISPOSITION[attitude];
+    const personalityTags = generateNPCPersonality(
+      npcSeed
+    ) as unknown as Prisma.InputJsonValue;
+
+    if (!db.nPC.updateMany) {
+      await db.nPC.update({
+        where: input.npcSeed
+          ? {
+              campaignId_seed: {
+                campaignId: input.campaignId,
+                seed: input.npcSeed,
+              },
+            }
+          : { id: npcId },
+        data: {
+          disposition: initialDisposition,
+          hasMetPlayer: true,
+          personalityTags,
+        },
+      });
+      npc = {
+        ...npc,
+        disposition: initialDisposition,
+        hasMetPlayer: true,
+        personalityTags,
+      };
+    } else {
+      // First contact and the social shift live in the same transaction.
+      // PostgreSQL re-checks this predicate after any concurrent row lock
+      // clears, so exactly one never-met caller may initialize the NPC.
+      const firstContactClaim = await db.nPC.updateMany({
+        where: {
+          id: npcId,
+          campaignId: input.campaignId,
+          hasMetPlayer: false,
+        },
+        data: {
+          disposition: initialDisposition,
+          hasMetPlayer: true,
+          personalityTags,
+        },
+      });
+
+      if (firstContactClaim.count === 1) {
+        npc = {
+          ...npc,
+          disposition: initialDisposition,
+          hasMetPlayer: true,
+          personalityTags,
+        };
+      } else {
+        // A concurrent first-contact transaction won the claim. Because its
+        // initialization and social CAS are in one transaction, this fresh
+        // read observes the winner's committed disposition shift, not merely
+        // the intermediate initial disposition.
+        const refreshed = await findNpc(db, input);
+        if (!refreshed) {
+          throw new SocialServiceError(
+            "NPC_NOT_FOUND",
+            "NPC disappeared during first-contact resolution."
+          );
+        }
+        assertNpcReady(refreshed, input.campaignId);
+        npc = refreshed;
+      }
+    }
+  }
+
   assertNpcReady(npc, input.campaignId);
 
   const actor = toAbilityCheckActor(character);

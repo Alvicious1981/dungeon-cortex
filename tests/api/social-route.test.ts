@@ -3,7 +3,6 @@ import { POST } from "@/app/api/campaign/[id]/social/route";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { resolveSocialCheck } from "@/lib/rules/social-service";
-import { generateNPCPersonality } from "@/lib/rules/social-logic";
 
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
@@ -124,7 +123,7 @@ describe("POST /api/campaign/[id]/social", () => {
     expect(resolveSocialCheck).not.toHaveBeenCalled();
   });
 
-  it("establishes first contact before resolving, for an NPC never met", async () => {
+  it("delegates first-contact initialization to the transactional social service", async () => {
     (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "npc_1", campaignId: "camp_1", seed: "gate_guard_north", role: "guard", hasMetPlayer: false,
     });
@@ -132,38 +131,24 @@ describe("POST /api/campaign/[id]/social", () => {
     const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "x" }), { params });
 
     expect(response.status).toBe(200);
-    expect(prisma.nPC.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "npc_1" },
-        data: expect.objectContaining({ hasMetPlayer: true }),
-      })
-    );
+    expect(prisma.nPC.update).not.toHaveBeenCalled();
+    expect(resolveSocialCheck).toHaveBeenCalledWith({
+      campaignId: "camp_1",
+      npcId: "npc_1",
+      approach: "persuade",
+      intent: "x",
+    });
   });
 
-  /**
-   * `NPC.personalityTags` had no producer at all: the column exists, the
-   * formatter reads it, and the secret disclosure gated at disposition 8 hangs
-   * off it — but the only code that ever wrote it was the AI tool that left
-   * the narrator boundary in #97. Without this the secret path can never fire,
-   * because the field is always null.
-   *
-   * First contact is the right moment: it is where the backend already decides
-   * who this NPC is to the party, in the same write.
-   */
-  it("persists the NPC's personality on first contact, deterministically", async () => {
+  it("does not seed first-contact personality in the route", async () => {
     (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "npc_1", campaignId: "camp_1", seed: "gate_guard_north", role: "guard", hasMetPlayer: false,
     });
 
     await POST(request({ npcId: "npc_1", approach: "persuade", intent: "x" }), { params });
 
-    const call = (prisma.nPC.update as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(call.data.personalityTags).toEqual(generateNPCPersonality("gate_guard_north"));
-    expect(call.data.personalityTags).toMatchObject({
-      motivation: expect.any(String),
-      secret: expect.any(String),
-      distinctiveTrait: expect.any(String),
-    });
+    expect(prisma.nPC.update).not.toHaveBeenCalled();
+    expect(resolveSocialCheck).toHaveBeenCalledTimes(1);
   });
 
   it("does not re-establish contact for an NPC already met", async () => {
