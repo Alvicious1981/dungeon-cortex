@@ -1893,23 +1893,27 @@ async function resolveAction(
 
       // The service both resolves and persists, reading the authoritative
       // character row itself rather than trusting the pre-gate snapshot. Run
-      // inside the route's transaction so recovery and persistence stay one
-      // unit, as they were before.
+      // inside the route's transaction so recovery, persistence and the
+      // player's line stay one unit (DC-AUD-023): the line used to be written
+      // after the commit, so a failed write left the rest applied with no
+      // record of the action.
       let rest: Awaited<ReturnType<typeof resolveRest>>;
       try {
-        rest = await prisma.$transaction(async (tx) =>
-          resolveRest({
+        rest = await prisma.$transaction(async (tx) => {
+          const result = await resolveRest({
             campaignId,
             characterId: context.character.id,
             restType: isLongRest ? "long" : "short",
             tx: tx as unknown as Parameters<typeof resolveRest>[0]["tx"],
-          })
-        );
+          });
+          await persistPlayerAction(tx);
+          return result;
+        });
       } catch (error) {
         if (error instanceof RestServiceError) {
-          // A rest now HAS refusal paths, so `persistPlayerAction` moved below
-          // this point: a refused rest must leave no canonical player row
-          // (DC-AUD-001). Status mapping mirrors the dedicated rest route.
+          // A refused rest throws before `persistPlayerAction(tx)` runs, and the
+          // throw rolls the transaction back, so it leaves no canonical player
+          // row (DC-AUD-001). Status mapping mirrors the dedicated rest route.
           const status =
             error.code === "CAMPAIGN_NOT_FOUND" || error.code === "CHARACTER_NOT_FOUND"
               ? 404
@@ -1923,9 +1927,6 @@ async function resolveAction(
         }
         throw error;
       }
-
-      // Resolved and committed, so the action is canonical.
-      await persistPlayerAction();
 
       // The event keeps the keys it always had; nothing downstream has to
       // change. `facts` carries more (the die rolled, the Constitution
@@ -1975,12 +1976,24 @@ async function resolveAction(
 
     // ── Gate: move ──────────────────────────────────────────────────────────────
     if (intent.actionType === "move" && intent.destination) {
+      // The player's line commits with the move or not at all (DC-AUD-023).
+      // It used to be written after this transaction had already committed,
+      // so a failed log write left the party moved with no record of the
+      // action. The travel gate shares its transaction the same way.
+      //
+      // `moveToNode` writes nothing on any of its failure paths, so a refused
+      // move leaves neither state nor history — and only the success it
+      // reports makes the action canonical.
       const moveResult = await prisma.$transaction(async (tx) => {
-        return await moveToNode(
+        const result = await moveToNode(
           tx as Prisma.TransactionClient,
           campaignId,
           intent.destination!
         );
+        if (result.success) {
+          await persistPlayerAction(tx);
+        }
+        return result;
       });
 
       if (!moveResult.success) {
@@ -1989,11 +2002,6 @@ async function resolveAction(
           { status: 400 }
         );
       }
-
-      // `moveToNode` writes nothing on any of its failure paths, so a refused
-      // move leaves neither state nor history — and the success it just
-      // reported is what makes the action canonical.
-      await persistPlayerAction();
 
       gameEvents.push({
         type: "PLAYER_MOVE",

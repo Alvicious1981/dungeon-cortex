@@ -139,7 +139,129 @@ test("@smoke short rest resolves through the action route and real Prisma", asyn
     expect(after.hp).toBeGreaterThanOrEqual(4);
     expect(after.hp).toBeLessThanOrEqual(13);
     expect(frames[0]?.e?.payload?.hpRecovered).toBe(after.hp - before.hp);
+
+    const playerLines = await prisma.gameLog.count({
+      where: {
+        campaignId: created.campaignId,
+        role: "user",
+        content: "short rest",
+      },
+    });
+    expect(playerLines).toBe(1);
   } finally {
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
+
+test("@smoke a failed canonical rest log rolls back the mechanical rest", async ({
+  request,
+}) => {
+  test.setTimeout(90_000);
+  assertSafeE2EDatabase();
+
+  const created: E2ECreatedRecords = {};
+  const prisma = new PrismaClient();
+  const unique = randomUUID().replaceAll("-", "");
+  const requestId = `rest-log-failure-${unique}`;
+  const action = `short rest dc-aud-023-${unique}`;
+  const triggerName = `dc_aud_023_rest_log_${unique}`;
+  const functionName = `dc_aud_023_rest_log_fn_${unique}`;
+  let functionInstalled = false;
+  let triggerInstalled = false;
+
+  try {
+    created.characterId = await createdId(
+      await request.post("/api/character", {
+        data: {
+          name: `Rest rollback ${unique.slice(0, 8)}`,
+          race: "human",
+          class: "fighter",
+          stats: { STR: 14, DEX: 12, CON: 14, INT: 10, WIS: 10, CHA: 10 },
+        },
+      })
+    );
+
+    created.campaignId = await createdId(
+      await request.post("/api/campaign", {
+        data: {
+          characterId: created.characterId,
+          title: `Rest rollback ${unique.slice(0, 8)}`,
+        },
+      })
+    );
+
+    await prisma.character.update({
+      where: { id: created.characterId },
+      data: {
+        hp: 1,
+        maxHp: 20,
+        hitDiceTotal: 2,
+        hitDiceRemaining: 1,
+        exhaustionLevel: 1,
+        spellSlots: { "1": { current: 0, max: 2 } },
+        stats: { STR: 14, DEX: 12, CON: 14, INT: 10, WIS: 10, CHA: 10 },
+      },
+    });
+
+    const before = await prisma.character.findUniqueOrThrow({
+      where: { id: created.characterId },
+      select: {
+        hp: true,
+        hitDiceRemaining: true,
+        exhaustionLevel: true,
+        spellSlots: true,
+      },
+    });
+
+    await prisma.$executeRawUnsafe(`
+      CREATE FUNCTION "${functionName}"() RETURNS trigger AS $dc_aud_023$
+      BEGIN
+        IF NEW."role" = 'user' AND NEW."content" = '${action}' THEN
+          RAISE EXCEPTION 'DC-AUD-023 forced GameLog failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $dc_aud_023$ LANGUAGE plpgsql;
+    `);
+    functionInstalled = true;
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER "${triggerName}"
+      BEFORE INSERT ON "GameLog"
+      FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+    `);
+    triggerInstalled = true;
+
+    const response = await request.post(
+      `/api/campaign/${created.campaignId}/action`,
+      { data: { requestId, action } }
+    );
+    expect(response.status()).toBe(500);
+
+    const after = await prisma.character.findUniqueOrThrow({
+      where: { id: created.characterId },
+      select: {
+        hp: true,
+        hitDiceRemaining: true,
+        exhaustionLevel: true,
+        spellSlots: true,
+      },
+    });
+    expect(after).toEqual(before);
+
+    const playerLines = await prisma.gameLog.count({
+      where: { campaignId: created.campaignId, role: "user", content: action },
+    });
+    expect(playerLines).toBe(0);
+  } finally {
+    if (triggerInstalled) {
+      await prisma.$executeRawUnsafe(
+        `DROP TRIGGER IF EXISTS "${triggerName}" ON "GameLog";`
+      );
+    }
+    if (functionInstalled) {
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${functionName}"();`);
+    }
     await prisma.$disconnect();
     await cleanupE2ERecords(created);
   }
