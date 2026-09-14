@@ -338,6 +338,42 @@ describe("resolveRest service contract", () => {
     ).rejects.toMatchObject({ code: "ACTIVE_ENCOUNTER" });
   });
 
+  it("locks the Character row before reading it", async () => {
+    // DC-AUD-024: a rest writes hp and Hit Dice back as absolute values from
+    // the row it read, so the read must happen under the row lock or a rest
+    // committed in between is erased. The real-PostgreSQL race lives in
+    // tests/e2e/rest-healing-concurrency.spec.ts; this pins the ordering.
+    const { tx } = createTx();
+    const events: string[] = [];
+    const lockSql: string[] = [];
+
+    const queryRaw = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      lockSql.push(strings.join("?"));
+      events.push(`lock ${String(values[0])}`);
+      return [];
+    });
+    const readCharacter = tx.character.findUnique as unknown as (args: {
+      where: { id: string };
+    }) => Promise<unknown>;
+    tx.character.findUnique = vi.fn(async (args: { where: { id: string } }) => {
+      events.push(`read ${args.where.id}`);
+      return readCharacter(args);
+    });
+
+    await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      roll: deterministicRoll(6),
+      tx: Object.assign(tx, { $queryRaw: queryRaw }),
+    });
+
+    expect(events).toEqual(["lock character-1", "read character-1"]);
+    expect(lockSql).toHaveLength(1);
+    expect(lockSql[0]).toContain('FROM "Character"');
+    expect(lockSql[0]).toContain("FOR UPDATE");
+  });
+
   it("short rest recovers HP using spent Hit Dice", async () => {
     const { characters, tx } = createTx();
 

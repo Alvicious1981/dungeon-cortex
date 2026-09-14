@@ -47,6 +47,7 @@ interface RestCharacterRecord {
 
 interface RestDb {
   $transaction?<T>(fn: (tx: RestDb) => Promise<T>): Promise<T>;
+  $queryRaw?<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
   campaign: {
     findUnique(args: {
       where: { id: string };
@@ -198,6 +199,34 @@ async function resolveCampaign(
   return campaign;
 }
 
+/**
+ * Takes the Character row lock before the row is read (DC-AUD-024).
+ *
+ * Both rests compute `hp` and `hitDiceRemaining` as absolute values from the
+ * row they read, then write them back by id. Without this lock a rest that
+ * commits between another rest's read and its write is erased: a healing short
+ * rest resuming from its snapshot overwrote a long rest's full HP and recovered
+ * Hit Die, while the long rest's exhaustion reduction survived — a row no
+ * serial order of the two rests could produce. With it, the second rest waits,
+ * then reads what the first committed.
+ *
+ * This is the only row lock a rest takes, so it cannot join a lock cycle; it is
+ * the same Character-first lock the combat transactions take.
+ *
+ * Reduced test doubles may omit Prisma's raw-query surface. Production
+ * transactions always expose it and therefore always take this lock.
+ */
+async function lockCharacterForRest(db: RestDb, characterId: string): Promise<void> {
+  if (typeof db.$queryRaw !== "function") return;
+
+  await db.$queryRaw`
+    SELECT "id"
+    FROM "Character"
+    WHERE "id" = ${characterId}
+    FOR UPDATE
+  `;
+}
+
 async function resolveCharacter(
   db: RestDb,
   input: ResolveRestInput,
@@ -210,6 +239,8 @@ async function resolveCharacter(
       `Campaign ${input.campaignId} has no character to rest.`
     );
   }
+
+  await lockCharacterForRest(db, characterId);
 
   const character = await db.character.findUnique({
     where: { id: characterId },
