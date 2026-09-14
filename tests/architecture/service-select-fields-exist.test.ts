@@ -9,11 +9,14 @@
  * reject at runtime. That previously allowed both rest-service and
  * magic-service to carry `campaignId`, even though Character has no such field.
  *
- * Scope is deliberately narrow. These two call sites have flat Character
- * selects that this lightweight guard can attribute safely. A repository-wide
- * guard still needs a real parser before it can reason about nested relation
- * selects without false positives; navigation-service remains separate
- * follow-up work.
+ * navigation-service carried the same phantom field. It never surfaced as a
+ * 500 because its only importer is an AI tool builder the narrator cannot
+ * reach — which is exactly how a defect like this stays dormant.
+ *
+ * Scope is deliberately narrow. These call sites have flat Character selects
+ * that this lightweight guard can attribute safely. A repository-wide guard
+ * still needs a real parser before it can reason about nested relation selects
+ * without false positives.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,7 +40,10 @@ function fieldsOf(model: string): Set<string> {
   return fields;
 }
 
-function assertCharacterSelectUsesKnownFields(fileName: string): void {
+function assertCharacterSelectUsesKnownFields(
+  fileName: string,
+  minimumFields: number
+): void {
   const source = readFileSync(
     join(process.cwd(), "lib", "rules", fileName),
     "utf8"
@@ -52,17 +58,23 @@ function assertCharacterSelectUsesKnownFields(fileName: string): void {
     (field) => field[1]!
   );
   // Guards the guard: an empty list would pass the schema assertion forever.
-  expect(selected.length).toBeGreaterThan(3);
+  expect(selected.length).toBeGreaterThanOrEqual(minimumFields);
 
   const known = fieldsOf("Character");
   expect(selected.filter((field) => !known.has(field))).toEqual([]);
 }
 
-describe.each(["rest-service.ts", "magic-service.ts"])(
+describe.each([
+  // [service, fields its Character lookup selects at minimum]
+  ["rest-service.ts", 4],
+  ["magic-service.ts", 4],
+  // Its ownership check only needs the character to exist, so it selects `id`.
+  ["navigation-service.ts", 1],
+] as const)(
   "%s selects only Character fields the schema has",
-  (fileName) => {
+  (fileName, minimumFields) => {
     it("names no field Character lacks", () => {
-      assertCharacterSelectUsesKnownFields(fileName);
+      assertCharacterSelectUsesKnownFields(fileName, minimumFields);
     });
   }
 );
