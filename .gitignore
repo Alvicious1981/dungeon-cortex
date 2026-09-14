@@ -52,5 +52,8 @@ server.log
 /playwright-report/
 /test-results/
 
+# Codex temporary caches (Node compile cache, Playwright transform cache)
+/.codex-tmp-*/
+
 # Stitch generated exports (documentation and metadata remain versioned)
 /.stitch/designs/
