@@ -30,9 +30,12 @@ interface NavigationCampaignRecord {
   currentNodeId?: string | null;
 }
 
+// Deliberately has no `campaignId`. `Character` does not carry one, and
+// declaring it optional here is what let a `select` ask Prisma for it and a
+// guard read it — the first throwing on every call, the second silently
+// always false. Ownership is answered by `Campaign.characterId`.
 interface NavigationCharacterRecord {
   id: string;
-  campaignId?: string | null;
 }
 
 interface NavigationLocationRecord {
@@ -265,9 +268,16 @@ async function assertCharacterOwnership(
   if (db.character) {
     const character = await db.character.findUnique({
       where: { id: input.characterId },
-      select: { id: true, campaignId: true },
+      // No `campaignId`: `Character` has no such scalar — only the
+      // `campaigns Campaign[]` relation — and asking for it makes real Prisma
+      // throw `Unknown field campaignId`.
+      select: { id: true },
     });
-    if (!character || (character.campaignId && character.campaignId !== input.campaignId)) {
+    // Existence is what this call can establish. The clause that used to sit
+    // beside it, `character.campaignId !== input.campaignId`, read a field a
+    // real row never carries, so it was always false and never contributed.
+    // Ownership is settled by the `campaign.characterId` comparison above.
+    if (!character) {
       throw new NavigationServiceError(
         "CHARACTER_OWNERSHIP_MISMATCH",
         `Character ${input.characterId} does not belong to campaign ${input.campaignId}.`
