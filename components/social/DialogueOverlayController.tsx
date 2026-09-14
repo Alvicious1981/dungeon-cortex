@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import DialogueOverlay from "./DialogueOverlay";
 import type { RumorPayload } from "@/lib/rules/social";
 
@@ -69,6 +69,12 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
   const [result, setResult] = useState<SocialCheckDisplay | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rumors, setRumors] = useState<RumorPayload | null>(null);
+  const pendingSocialSubmission = useRef<{
+    requestId: string;
+    npcId: string;
+    approach: "persuade" | "intimidate" | "deceive";
+    intent: string;
+  } | null>(null);
 
   useEffect(() => {
     // 1. Open dialogue when the roster selects an NPC
@@ -134,28 +140,41 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
     intent: string
   ) => {
     if (!npc) return;
+    const previousSubmission = pendingSocialSubmission.current;
+    const isRetry =
+      previousSubmission?.npcId === npc.id &&
+      previousSubmission.approach === approach &&
+      previousSubmission.intent === intent;
+    const requestId = isRetry ? previousSubmission.requestId : crypto.randomUUID();
+    pendingSocialSubmission.current = { requestId, npcId: npc.id, approach, intent };
     setIsLoading(true);
     setError(null);
     try {
       const response = await fetch(`/api/campaign/${campaignId}/social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ npcId: npc.id, approach, intent }),
+        body: JSON.stringify({ npcId: npc.id, approach, intent, requestId }),
       });
       if (!response.ok) {
         let message = "Something went wrong resolving that.";
+        let code: string | undefined;
         try {
           const body = await response.json();
           if (body && typeof body.error === "string") message = body.error;
+          if (body && typeof body.code === "string") code = body.code;
         } catch {
           // Body wasn't JSON, or was empty — keep the generic fallback.
         }
         setError(message);
+        if (code !== "SOCIAL_ACTION_IN_FLIGHT" && code !== "REQUEST_ID_REUSED") {
+          pendingSocialSubmission.current = null;
+        }
         return;
       }
       const facts = (await response.json()) as SocialCheckDisplay;
       setResult(facts);
       setNpc((prev) => (prev ? { ...prev, disposition: facts.dispositionAfter, hasMetPlayer: true } : prev));
+      pendingSocialSubmission.current = null;
     } catch {
       // Network failure, or fetch rejected for any other reason: the player
       // still deserves feedback rather than a click that silently did nothing.

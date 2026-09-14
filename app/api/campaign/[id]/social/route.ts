@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
+import {
+  acquireActionReceipt,
+  completeActionReceiptWithResponse,
+  rejectActionReceipt,
+} from "@/lib/actions/request-receipt";
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
@@ -12,8 +18,13 @@ const BodySchema = z
     npcId: z.string().min(1).max(200),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
     intent: z.string().max(200),
+    requestId: z.string().min(1).max(128).optional(),
   })
   .strict();
+
+function fingerprintSocialSubmission(input: { npcId: string; approach: "persuade" | "intimidate" | "deceive"; intent: string }): string {
+  return createHash("sha256").update(JSON.stringify({ npcId: input.npcId, approach: input.approach, intent: input.intent })).digest("hex");
+}
 
 /**
  * POST /api/campaign/[id]/social
@@ -74,6 +85,19 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "NPC not found." }, { status: 404 });
   }
 
+  let receiptId: string | undefined;
+  if (parsed.data.requestId) {
+    const acquisition = await acquireActionReceipt({ actorUserId: user.id, campaignId, requestId: parsed.data.requestId, requestHash: fingerprintSocialSubmission(parsed.data) });
+    switch (acquisition.outcome) {
+      case "acquired": receiptId = acquisition.receiptId; break;
+      case "completed_replay":
+      case "rejected": return NextResponse.json(acquisition.responseBody, { status: acquisition.responseStatus });
+      case "in_flight": return NextResponse.json({ error: "Social action outcome is not confirmed yet.", code: "SOCIAL_ACTION_IN_FLIGHT" }, { status: 409 });
+      case "reused": return NextResponse.json({ error: "This request id already belongs to another social action.", code: "REQUEST_ID_REUSED" }, { status: 409 });
+      case "completed_stream": return NextResponse.json({ error: "Invalid social receipt state." }, { status: 500 });
+    }
+  }
+
   try {
     const result = await resolveSocialCheck({
       campaignId,
@@ -81,10 +105,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       approach: parsed.data.approach,
       intent: parsed.data.intent,
     });
+    if (receiptId) await completeActionReceiptWithResponse(receiptId, 200, result);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
     if (error instanceof SocialServiceError) {
-      return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
+      const responseBody = { error: error.message, code: error.code };
+      if (receiptId) await rejectActionReceipt(receiptId, 400, responseBody);
+      return NextResponse.json(responseBody, { status: 400 });
     }
     throw error;
   }

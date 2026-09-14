@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/campaign/[id]/social/route";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
-import { resolveSocialCheck } from "@/lib/rules/social-service";
+import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
+import {
+  acquireActionReceipt,
+  completeActionReceiptWithResponse,
+  rejectActionReceipt,
+} from "@/lib/actions/request-receipt";
 
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
@@ -21,6 +26,12 @@ vi.mock("@/lib/rules/social-service", () => ({
   SocialServiceError: class extends Error {
     constructor(public code: string, message: string) { super(message); }
   },
+}));
+
+vi.mock("@/lib/actions/request-receipt", () => ({
+  acquireActionReceipt: vi.fn(),
+  completeActionReceiptWithResponse: vi.fn(),
+  rejectActionReceipt: vi.fn(),
 }));
 
 function request(body: unknown) {
@@ -46,6 +57,10 @@ beforeEach(() => {
     ok: true, approach: "persuade", skill: "Persuasion", roll: 12, dc: 15,
     success: false, attitudeBefore: "Indifferent", attitudeAfter: "Hostile",
     dispositionBefore: 0, dispositionAfter: -4,
+  });
+  (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+    outcome: "acquired",
+    receiptId: "receipt_1",
   });
 });
 
@@ -178,5 +193,98 @@ describe("POST /api/campaign/[id]/social", () => {
 
     expect(response.status).toBe(404);
     expect(resolveSocialCheck).not.toHaveBeenCalled();
+  });
+
+  it("replays a completed social submission without resolving a second check", async () => {
+    const firstResult = {
+      ok: true, approach: "persuade", skill: "Persuasion", roll: 12, dc: 15,
+      success: false, attitudeBefore: "Indifferent", attitudeAfter: "Hostile",
+      dispositionBefore: 0, dispositionAfter: -4,
+    };
+    const laterResult = { ...firstResult, roll: 19, total: 23, dispositionAfter: 4 };
+    (resolveSocialCheck as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(firstResult)
+      .mockResolvedValueOnce(laterResult);
+    (acquireActionReceipt as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ outcome: "acquired", receiptId: "receipt_1" })
+      .mockResolvedValueOnce({
+        outcome: "completed_replay",
+        responseStatus: 200,
+        responseBody: firstResult,
+      });
+
+    const body = { npcId: "npc_1", approach: "persuade", intent: "a room", requestId: "social_1" };
+    const first = await POST(request(body), { params });
+    const retry = await POST(request(body), { params });
+
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual(firstResult);
+    expect(resolveSocialCheck).toHaveBeenCalledTimes(1);
+    expect(completeActionReceiptWithResponse).toHaveBeenCalledWith("receipt_1", 200, firstResult);
+  });
+
+  it.each([
+    ["intent", { npcId: "npc_1", approach: "persuade", intent: "different", requestId: "social_1" }],
+    ["approach", { npcId: "npc_1", approach: "intimidate", intent: "a room", requestId: "social_1" }],
+    ["npcId", { npcId: "npc_2", approach: "persuade", intent: "a room", requestId: "social_1" }],
+  ])("refuses a reused requestId for a different %s without resolving", async (_field, body) => {
+    (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({ outcome: "reused" });
+
+    const response = await POST(request(body), { params });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "REQUEST_ID_REUSED" });
+    expect(resolveSocialCheck).not.toHaveBeenCalled();
+  });
+
+  it("allows two different requestIds to resolve independent social submissions", async () => {
+    (acquireActionReceipt as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ outcome: "acquired", receiptId: "receipt_1" })
+      .mockResolvedValueOnce({ outcome: "acquired", receiptId: "receipt_2" });
+
+    const first = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room", requestId: "social_1" }), { params });
+    const second = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room", requestId: "social_2" }), { params });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(resolveSocialCheck).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves a processing social receipt unknown instead of resolving it again", async () => {
+    (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({ outcome: "in_flight" });
+
+    const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room", requestId: "social_1" }), { params });
+
+    expect(response.status).toBe(409);
+    expect(resolveSocialCheck).not.toHaveBeenCalled();
+  });
+
+  it("replays a terminal social rejection without resolving again", async () => {
+    (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+      outcome: "rejected",
+      responseStatus: 400,
+      responseBody: { error: "The NPC cannot be convinced.", code: "SOCIAL_REFUSED" },
+    });
+
+    const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room", requestId: "social_1" }), { params });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "The NPC cannot be convinced.", code: "SOCIAL_REFUSED" });
+    expect(resolveSocialCheck).not.toHaveBeenCalled();
+  });
+
+  it("settles a terminal social service rejection on the acquired receipt", async () => {
+    (resolveSocialCheck as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new SocialServiceError("SOCIAL_STATE_CONFLICT", "The NPC cannot be convinced.")
+    );
+
+    const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room", requestId: "social_1" }), { params });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "The NPC cannot be convinced.", code: "SOCIAL_STATE_CONFLICT" });
+    expect(rejectActionReceipt).toHaveBeenCalledWith("receipt_1", 400, {
+      error: "The NPC cannot be convinced.", code: "SOCIAL_STATE_CONFLICT",
+    });
   });
 });

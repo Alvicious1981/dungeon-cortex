@@ -37,6 +37,24 @@ function findPersuadeQuickAction() {
   });
 }
 
+function socialBodies(): Array<{
+  npcId: string;
+  approach: string;
+  intent: string;
+  requestId: string;
+}> {
+  return (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map(([, init]) =>
+    JSON.parse((init as RequestInit).body as string)
+  );
+}
+
+function socialError(code: string) {
+  return new Response(JSON.stringify({ error: code, code }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue({
     ok: true,
@@ -130,6 +148,83 @@ describe("DialogueOverlayController", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(unhandled).not.toHaveBeenCalled();
     process.off("unhandledRejection", unhandled);
+  });
+
+  it("reuses the requestId when the same submission is retried after a network failure", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true, approach: "persuade", skill: "Persuasion", roll: 18, dc: 15,
+        total: 20, success: true, attitudeBefore: "Friendly", attitudeAfter: "Friendly",
+        dispositionBefore: 5, dispositionAfter: 9,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+    await screen.findByText(/could not reach the server/i);
+    fireEvent.click(await findPersuadeQuickAction());
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+
+    expect(socialBodies()[1].requestId).toBe(socialBodies()[0].requestId);
+  });
+
+  it("reuses the requestId while the same submission remains in flight", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      socialError("SOCIAL_ACTION_IN_FLIGHT")
+    );
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+    await screen.findByText("SOCIAL_ACTION_IN_FLIGHT");
+    fireEvent.click(await findPersuadeQuickAction());
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+
+    expect(socialBodies()[1].requestId).toBe(socialBodies()[0].requestId);
+  });
+
+  it("generates a new requestId after a terminal response", async () => {
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+    await screen.findByText(/DC 15/i);
+    fireEvent.click(await findPersuadeQuickAction());
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+
+    expect(socialBodies()[1].requestId).not.toBe(socialBodies()[0].requestId);
+  });
+
+  it("generates a new requestId when the player submits a different payload", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+    await screen.findByText(/could not reach the server/i);
+    fireEvent.click(
+      await within(screen.getByRole("group", { name: /quick actions/i })).findByRole(
+        "button",
+        { name: /intimidate/i }
+      )
+    );
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+
+    expect(socialBodies()[1].requestId).not.toBe(socialBodies()[0].requestId);
+  });
+
+  it("does not automatically retry REQUEST_ID_REUSED with a new requestId", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(socialError("REQUEST_ID_REUSED"));
+    render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+    openWith();
+
+    fireEvent.click(await findPersuadeQuickAction());
+    await screen.findByText("REQUEST_ID_REUSED");
+    await act(async () => { await Promise.resolve(); });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
   // The "keeps Gather Rumors disabled" test stood here while no route

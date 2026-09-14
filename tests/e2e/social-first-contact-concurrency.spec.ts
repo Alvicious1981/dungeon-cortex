@@ -42,7 +42,8 @@ async function createdId(response: {
 function socialRequest(
   campaignId: string,
   npcId: string,
-  intent: string
+  intent: string,
+  requestId: string
 ): Request {
   return new Request(
     `http://test/api/campaign/${campaignId}/social`,
@@ -52,6 +53,7 @@ function socialRequest(
         npcId,
         approach: "persuade",
         intent,
+        requestId,
       }),
       headers: { "Content-Type": "application/json" },
     }
@@ -173,7 +175,8 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
         socialRequest(
           created.campaignId,
           npcId,
-          "first concurrent first-contact attempt"
+          "first concurrent first-contact attempt",
+          `social-first-contact-a-${randomUUID()}`
         ) as never,
         { params }
       ),
@@ -181,7 +184,8 @@ test("@smoke concurrent first-contact social actions preserve both accepted disp
         socialRequest(
           created.campaignId,
           npcId,
-          "second concurrent first-contact attempt"
+          "second concurrent first-contact attempt",
+          `social-first-contact-b-${randomUUID()}`
         ) as never,
         { params }
       ),
