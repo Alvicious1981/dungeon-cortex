@@ -57,6 +57,7 @@ const prismaTx = vi.hoisted(() => ({
   campaign: { findUnique: vi.fn() },
   character: { findUnique: vi.fn(), update: vi.fn() },
   encounter: { findFirst: vi.fn() },
+  gameLog: { create: vi.fn() },
 }));
 
 vi.mock("next/server", async (importActual) => {
@@ -178,6 +179,7 @@ function primeAll() {
     status: "active",
   });
   (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  prismaTx.gameLog.create.mockResolvedValue({});
   (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({ actionType: "rest" });
   (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(context());
   prismaTx.campaign.findUnique.mockResolvedValue({ id: campaignId, characterId: "char_1" });
@@ -220,6 +222,7 @@ const characterUpdate = () => prismaTx.character.update.mock.calls[0]?.[0];
 async function shortRestPayload(o: CharOverrides, random: number) {
   prismaTx.character.update.mockClear();
   (prisma.gameLog.create as ReturnType<typeof vi.fn>).mockClear();
+  prismaTx.gameLog.create.mockClear();
   primeAll();
   givenCharacter(o);
   vi.spyOn(Math, "random").mockReturnValue(random);
@@ -227,9 +230,10 @@ async function shortRestPayload(o: CharOverrides, random: number) {
 }
 
 const userLogWrites = () =>
-  (prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls.filter(
-    (args) => args[0]?.data?.role === "user"
-  );
+  [
+    ...(prisma.gameLog.create as ReturnType<typeof vi.fn>).mock.calls,
+    ...prismaTx.gameLog.create.mock.calls,
+  ].filter((args) => args[0]?.data?.role === "user");
 
 /** Every die reads its maximum, so class Hit Die sizes are distinguishable. */
 const MAX_ROLL = 0.99;
@@ -480,5 +484,9 @@ describe("rest gate: what the route still owns", () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prismaTx.character.update).toHaveBeenCalledTimes(1);
+    expect(prismaTx.gameLog.create).toHaveBeenCalledTimes(1);
+    expect(prisma.gameLog.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ role: "user" }) })
+    );
   });
 });
