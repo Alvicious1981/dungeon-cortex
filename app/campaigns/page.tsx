@@ -44,7 +44,7 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
   const { character } = campaign;
   // A dead character's campaign stays "active" in the database but cannot be
   // played (death-saves spec §9).
-  const isDead = character.diedAt !== null;
+  const isDead = Boolean(character.diedAt);
   const isActive = campaign.status === "active" && !isDead;
 
   return (
