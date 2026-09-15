@@ -1,7 +1,8 @@
 # Enemy turns, SRD 2014 — design
 
 **Date:** 2026-09-15
-**Status:** draft, pending maintainer review
+**Status:** approved 2026-09-15; §4 figures and the damage rule corrected
+during planning, from a full measurement against the data
 **Baseline:** `master` at `6487ec8`
 **Sequence:** spec 1 of 2. Spec 2 (death saving throws) builds on this one and
 is written after it lands.
@@ -101,7 +102,8 @@ interface MonsterAttackProfileV1 {
     attackBonus: number;
     melee: { reachFt: number } | null;
     ranged: { normalFt: number; longFt: number | null } | null;
-    /** Every damage entry. One entry without dice or type voids the attack. */
+    /** Every damage entry. `dice` is "XdY±Z" or a flat integer ("1"); a
+     *  choice entry is reduced to its lowest-average option (§4.2). */
     damage: Array<{ dice: string; type: DamageType }>;
   }>;
   /** Resolved plan, or null when the monster falls back to a single attack. */
@@ -138,8 +140,9 @@ Each slot also takes only measured values:
 - `{r}` must be one of 5, 10, 15, 20, 30 or 50. The nine `reach 0 ft.`
   attacks are excluded, because reaching into one's own space cannot happen
   on a grid where footprints never overlap.
-- `{rng}` must be one of the 17 measured forms (`20/60`, `30/120`,
-  `150/600`, …). The table lists them explicitly.
+- `{rng}` must be one of the 15 forms the recognised templates carry:
+  `15/30`, `20/60`, `25/50`, `30/60`, `30/120`, `40/160`, `50/100`, `60/180`,
+  `60/240`, `80/320`, `100/200`, `100/400`, `120`, `150`, `150/600`.
 
 Everything else stays unrecognised on purpose, 35 attacks today:
 
@@ -153,32 +156,46 @@ Everything else stays unrecognised on purpose, 35 attacks today:
 
 An unrecognised attack is simply absent from the profile. It is not an error.
 
-**Damage:** each `damage[]` entry must carry `damage_dice` matching `roll()`'s
-`[N]dF[±M]` and a `damage_type.index` that is a `DamageType`. If any entry
-fails, the whole attack is unrecognised.
+**Damage.** Every `damage[]` entry must resolve to `{ dice, type }`, where
+`type` is a `DamageType`. There are three shapes:
 
-The final recognised count is fixed by the guard test (§9.1), not by this
-document. The 500 above is the header-level measurement before the damage
-rule is applied.
+- **Dice:** `damage_dice` matches `roll()`'s `[N]dF[±M]`.
+- **Flat:** `damage_dice` is a bare integer, as in the badger's bite (`"1"`).
+  The damage is fixed, and a critical hit does not double it. There are 19
+  such entries.
+- **Choice:** `choose: 1` over `from.options`. It resolves to the option with
+  the lowest average damage, with ties broken by type name. For the versatile
+  spears and longswords that means the one-handed option; for the djinni it
+  means lightning over thunder. Choosing the lowest never overstates damage.
+  There are 16 such entries.
+
+If any entry fails, the whole attack is unrecognised. So is an attack with no
+`damage` array: the seven webs, grapples and curses whose only effect is a
+condition.
+
+**Measured with every rule applied:** 496 attacks recognised, 39 unrecognised,
+and 316 of 334 monsters carry a profile. The guard test (§9.1) pins the 39 by
+name.
 
 ### 4.3 Walk speed
 
-`speed.walk` takes 11 values in the data, from `"0 ft."` to `"60 ft."`, and 8
-monsters have no `walk`. The table recognises the 11 strings verbatim. No
-`walk` becomes `walkSpeedFt: 0`, so the enemy cannot move and can only attack
-what is already in reach.
+`speed.walk` takes 10 string values in the data, from `"0 ft."` to
+`"60 ft."`, and 8 monsters have no `walk`. The table recognises the 10 strings
+verbatim. An absent or unrecognised `walk` becomes `walkSpeedFt: 0`, so the
+enemy cannot move and can only attack what is already in reach.
 
 ### 4.4 Multiattack
 
 148 actions are named `Multiattack`. 115 list their parts structurally
 (`actions: [{ action_name, count }]`). A multiattack is recognised only when
-**every** part names a recognised attack of the same monster. That holds for
-89 of them.
+**every** part names a recognised attack of the same monster. With the final
+attack rules, that holds for 85 of them.
 
 Every other monster falls back to one attack per turn: the recognised attack
 with the highest average damage, with ties broken by name. That covers:
 
-- the 26 multiattacks containing a non-attack part, such as Frightful Presence;
+- multiattacks with a part that is not a recognised attack, such as
+  Frightful Presence or an attack left unrecognised;
 - the 33 choice multiattacks (`action_options`);
 - the multiattacks without structured parts.
 
@@ -224,8 +241,9 @@ the player. A candidate must satisfy all of these:
 - inside the grid (`isFootprintWithinCombatGrid`);
 - every square of its footprint free (`isOccupied`).
 
-Ties go to the lowest `y`, then the lowest `x`. The current square is a
-candidate, so standing still wins any tie.
+Ties go to the fewest squares moved, then the lowest `y`, then the lowest
+`x`. The current square is a candidate and moves zero squares, so standing
+still wins any tie it is part of.
 
 These are exactly the checks the player's `Move` applies
 (`route.ts:780-822`). `toSizeCategory`, now local to `route.ts:113`, moves to
@@ -322,7 +340,10 @@ write of the player's HP in combat uses it:
 
 - enemy damage (this design);
 - in-combat healing (`applyCharacterHealing`), which today writes `Character`
-  only;
+  only. Healing keeps its existing compare-and-set on `Character`
+  (DC-PLAN-009) instead of taking the lock, and after a successful claim
+  applies the same Combatant mirror, `mirrorPlayerCombatantHp`, that
+  `setPlayerHp` uses. Its concurrency guarantee is unchanged;
 - self-inflicted area damage, which today writes `Combatant` only.
 
 The two rows can no longer diverge, and `resolveEncounterEnd` reads a true
@@ -429,7 +450,8 @@ does:
 Pure cases, one per rule of §5:
 
 - each step of the plan order;
-- tie-breaks by `y`, then `x`, then name;
+- tie-breaks by squares moved, then `y`, then `x`, and attack choice by
+  average damage, then name;
 - Large and Huge footprints at the grid edge;
 - the skip rules;
 - the adjacent ranged-only limitation.
