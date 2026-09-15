@@ -142,12 +142,22 @@ describe("combat rules", () => {
   });
 
   describe("resolveEncounterEnd", () => {
-    it("returns player_dead if player is dead despite enemy status", () => {
-      const combatants = [
-        { isPlayer: true, hp: 0 },
-        { isPlayer: false, hp: 0 }
-      ];
-      expect(resolveEncounterEnd(combatants)).toEqual({ shouldEnd: true, reason: "player_dead" });
+    it("returns player_dead only for the canonical death marker", () => {
+      expect(
+        resolveEncounterEnd([
+          { isPlayer: true, hp: 0, deathSaveFailures: 3 },
+          { isPlayer: false, hp: 0 },
+        ])
+      ).toEqual({ shouldEnd: true, reason: "player_dead" });
+    });
+
+    it("keeps a downed but living player in the fight", () => {
+      expect(
+        resolveEncounterEnd([
+          { isPlayer: true, hp: 0, deathSaveFailures: 2 },
+          { isPlayer: false, hp: 5 },
+        ])
+      ).toEqual({ shouldEnd: false, reason: "ongoing" });
     });
 
     it("returns all_enemies_dead when all enemies at 0 hp", () => {

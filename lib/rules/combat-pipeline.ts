@@ -35,6 +35,7 @@ import {
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
+import { applyPlayerDowned } from "@/lib/db/player-downed";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { EnemyTurnInvariantError, resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
@@ -759,11 +760,24 @@ export async function executeCombatAction(
       // The player's HP has one source of truth; this Combatant row is its
       // mirror. The spell path took the Character lock at transaction start.
       if (target.isPlayer && playerCharacterId) {
+        const hpBeforeHit = persistedHp + damage;
         newHp = await setPlayerHp(tx, {
           characterId: playerCharacterId,
           encounterId: encounter.id || null,
           hp: newHp,
         });
+        // The player's own area spell can down them too: one rule for the fall
+        // (death-saves spec §6.1).
+        if (newHp === 0 && hpBeforeHit > 0 && encounter.id) {
+          await applyPlayerDowned(tx, {
+            encounterId: encounter.id,
+            hpBefore: hpBeforeHit,
+            damage,
+            maxHp: target.maxHp,
+            collectEvents,
+            events,
+          });
+        }
       }
     }
 
@@ -1037,9 +1051,10 @@ async function runEnemyChain(input: {
     });
     events.push(...outcome.events);
 
-    if (outcome.playerDowned) {
-      // Until death saves land (spec 2), 0 HP is defeat: the same conditional
-      // active → resolved claim as any other ending, bound to this turn.
+    if (outcome.playerDied) {
+      // Massive damage: the same conditional active → resolved claim as any
+      // other ending, bound to this turn (death-saves spec §6.1). A downed but
+      // living player skips this block: the chain runs on and later enemies hold.
       const fresh = await tx.combatant.findMany({ where: { encounterId } });
       const ended = await resolveEncounterIfEnded({
         tx,
@@ -1052,7 +1067,7 @@ async function runEnemyChain(input: {
       });
       if (!ended) {
         throw new EnemyTurnInvariantError(
-          `The player was downed but encounter ${encounterId} did not end.`
+          `The player died but encounter ${encounterId} did not end.`
         );
       }
       return ended;

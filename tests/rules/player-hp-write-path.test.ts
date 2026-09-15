@@ -51,7 +51,7 @@ describe("player HP single write path", () => {
     const newHp = (healed!.payload as { newHp: number }).newHp;
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
       where: { encounterId: "enc-1", isPlayer: true },
-      data: { hp: newHp },
+      data: { hp: newHp, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
     });
   });
 
@@ -88,7 +88,7 @@ describe("player HP single write path", () => {
     expect(casClaim).toHaveBeenCalled();
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
       where: { encounterId: "enc-1", isPlayer: true },
-      data: { hp: newHp },
+      data: { hp: newHp, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
     });
   });
 

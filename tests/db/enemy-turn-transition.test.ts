@@ -77,7 +77,7 @@ describe("resolveEnemyTurn", () => {
     expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 14 } });
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
       where: { encounterId: "enc-1", isPlayer: true },
-      data: { hp: 14 },
+      data: { hp: 14, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
     });
     expect(outcome.playerDowned).toBe(false);
     expect(outcome.events.find((e) => e.type === "COMBAT_CONSEQUENCE")).toMatchObject({
@@ -96,7 +96,7 @@ describe("resolveEnemyTurn", () => {
     });
   });
 
-  it("stops and reports the player downed at 0 HP", async () => {
+  it("reports the player downed and alive at 0 HP", async () => {
     const tx = buildTx();
     (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       hp: 3, maxHp: 20, stats: { DEX: 10 }, inventory: [],
@@ -105,8 +105,30 @@ describe("resolveEnemyTurn", () => {
     const outcome = await resolveEnemyTurn(tx, CTX);
 
     expect(outcome.playerDowned).toBe(true);
+    expect(outcome.playerDied).toBe(false);
     expect(outcome.events.map((e) => e.type)).toContain("PLAYER_DOWNED");
     expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 0 } });
+  });
+
+  it("kills outright when the blow's leftover damage reaches max HP", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 1, maxHp: 5, stats: { DEX: 10 }, inventory: [],
+    });
+    mockRandom([0.75, 0.5, 0.3]); // 6 damage: leftover 5 = max HP
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(outcome).toMatchObject({ playerDowned: true, playerDied: true });
+    expect(outcome.events.map((e) => e.type)).toContain("PLAYER_DIED");
+  });
+
+  it("holds against a player already at 0 HP", async () => {
+    const tx = buildTx(rows().map((r) => (r.isPlayer ? { ...r, hp: 0 } : r)));
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(outcome).toEqual({ events: [], playerDowned: false, playerDied: false });
+    expect(tx.character.update).not.toHaveBeenCalled();
+    expect(tx.gameLog.create).not.toHaveBeenCalled();
   });
 
   it("moves a distant goblin with the movement CAS before attacking", async () => {
@@ -134,7 +156,7 @@ describe("resolveEnemyTurn", () => {
     const tx = buildTx(rows({ attackProfile: null }));
     const outcome = await resolveEnemyTurn(tx, CTX);
 
-    expect(outcome).toEqual({ events: [], playerDowned: false });
+    expect(outcome).toEqual({ events: [], playerDowned: false, playerDied: false });
     expect(tx.character.update).not.toHaveBeenCalled();
     expect(tx.gameLog.create).not.toHaveBeenCalled();
   });
@@ -144,7 +166,7 @@ describe("resolveEnemyTurn", () => {
     delete (withoutField[1] as Record<string, unknown>).attackProfile;
     const tx = buildTx(withoutField);
 
-    await expect(resolveEnemyTurn(tx, CTX)).resolves.toEqual({ events: [], playerDowned: false });
+    await expect(resolveEnemyTurn(tx, CTX)).resolves.toEqual({ events: [], playerDowned: false, playerDied: false });
   });
 
   it("fails closed on a malformed profile", async () => {

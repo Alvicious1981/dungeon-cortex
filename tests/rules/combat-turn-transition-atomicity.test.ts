@@ -52,7 +52,7 @@ const REBASE_READ = expect.objectContaining({
 
 beforeEach(() => {
   vi.mocked(resolveEnemyTurn).mockReset();
-  vi.mocked(resolveEnemyTurn).mockResolvedValue({ events: [], playerDowned: false });
+  vi.mocked(resolveEnemyTurn).mockResolvedValue({ events: [], playerDowned: false, playerDied: false });
 });
 
 describe("finalizeEncounterTurn atomic turn claims", () => {
@@ -240,33 +240,51 @@ describe("finalizeEncounterTurn enemy chain", () => {
     ]);
   });
 
-  it("resolves player_dead when an enemy downs the player", async () => {
+  it("keeps the chain going when an enemy downs the player", async () => {
     const tx = buildCasTx();
     (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
     vi.mocked(resolveEnemyTurn).mockResolvedValueOnce({
       events: [{ type: "PLAYER_DOWNED", payload: {} }],
       playerDowned: true,
+      playerDied: false,
+    });
+
+    const result = await finalizeEncounterTurn({
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 1, failOnStaleTurn: true,
+    });
+
+    expect(result).toMatchObject({ encounterResolved: false, nextTurnIndex: 0, nextRound: 2 });
+    expect(result.events.map((e) => e.type)).toContain("PLAYER_DOWNED");
+    expect(resolveEnemyTurn).toHaveBeenCalledTimes(2);
+    expect(tx.encounter.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "resolved" } }),
+    );
+  });
+
+  it("resolves player_dead when an enemy kills the player outright", async () => {
+    const tx = buildCasTx();
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
+    vi.mocked(resolveEnemyTurn).mockResolvedValueOnce({
+      events: [{ type: "PLAYER_DIED", payload: { cause: "massive_damage" } }],
+      playerDowned: true,
+      playerDied: true,
     });
     (tx.combatant.findMany as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(ongoingCombatants()) // finalizer entry
       .mockResolvedValueOnce(ongoingCombatants()) // chain: slot ownership
       .mockResolvedValue([
-        // after the downing blow
-        { id: "player-1", isPlayer: true, hp: 0 },
+        // after the killing blow
+        { id: "player-1", isPlayer: true, hp: 0, deathSaveFailures: 3 },
         { id: "enemy-1", isPlayer: false, hp: 10 },
         { id: "enemy-2", isPlayer: false, hp: 10 },
       ]);
 
     const result = await finalizeEncounterTurn({
-      tx,
-      encounterId: "enc-1",
-      currentTurnIndex: 0,
-      round: 1,
-      failOnStaleTurn: true,
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 1, failOnStaleTurn: true,
     });
 
     expect(result.encounterResolved).toBe(true);
-    expect(result.events.map((e) => e.type)).toContain("PLAYER_DOWNED");
+    expect(result.events.map((e) => e.type)).toContain("PLAYER_DIED");
     expect(tx.encounter.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({ data: { status: "resolved" } }),
     );

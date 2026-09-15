@@ -238,6 +238,12 @@ export function adaptCombatEventsToNarrativeContext(
         // Not a combat fact. The resolved check reaches the narrator through the
         // system game log written by the action route, in the same way trades do.
         'ABILITY_CHECK_RESOLVED',
+        // Death-save facts arrive with the narration work of death-saves Stage 3.
+        'DEATH_SAVE_ROLLED',
+        'PLAYER_STABILIZED',
+        'PLAYER_REVIVED',
+        'PLAYER_WOKE',
+        'PLAYER_DIED',
         () => undefined
       )
       .exhaustive();

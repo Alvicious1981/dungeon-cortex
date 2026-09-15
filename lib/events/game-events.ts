@@ -36,7 +36,12 @@ export type GameEventType =
   | "REST_COMPLETED"       // Short or long rest completed
   | "EXPLORATION_WARNING"   // Resource depletion or other exploration danger
   | "PLAYER_MOVE"          // Player moved between dungeon nodes
-  | "ABILITY_CHECK_RESOLVED"; // Improvised action settled by an ability check
+  | "ABILITY_CHECK_RESOLVED" // Improvised action settled by an ability check
+  | "DEATH_SAVE_ROLLED"    // One death save: { natural, successes, failures, outcome }
+  | "PLAYER_STABILIZED"    // Third success: the player is stable
+  | "PLAYER_REVIVED"       // Natural 20 on a death save: back at 1 HP
+  | "PLAYER_WOKE"          // A stable player wakes with 1 HP
+  | "PLAYER_DIED";         // { cause: "death_saves" | "massive_damage" }
 
 /**
  * Payload emitted when the `generateLoot` AI tool completes.

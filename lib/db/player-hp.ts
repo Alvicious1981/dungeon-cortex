@@ -1,6 +1,17 @@
 import type { Prisma } from "@prisma/client";
 
 /**
+ * Every player HP write clears the death state: falling to 0 starts a fresh
+ * dying state, and any HP above 0 (a natural 20, waking, healing) ends it
+ * (docs/superpowers/specs/2026-09-15-death-saves-design.md §4).
+ */
+export const DEATH_STATE_RESET = {
+  deathSaveSuccesses: 0,
+  deathSaveFailures: 0,
+  stableWakeRound: null,
+} as const;
+
+/**
  * The player's HP has one source of truth, Character.hp; the player's
  * Combatant row in an active encounter is its mirror. resolveEncounterEnd
  * reads the mirror, so the two must never diverge
@@ -14,7 +25,7 @@ export async function mirrorPlayerCombatantHp(
   if (!encounterId) return;
   await tx.combatant.updateMany({
     where: { encounterId, isPlayer: true },
-    data: { hp },
+    data: { hp, ...DEATH_STATE_RESET },
   });
 }
 

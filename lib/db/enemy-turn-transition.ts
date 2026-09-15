@@ -21,6 +21,7 @@ import {
 import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import { claimMoveTransition, MoveStateConflictError } from "@/lib/db/move-transition";
 import { setPlayerHp } from "@/lib/db/player-hp";
+import { applyPlayerDowned } from "@/lib/db/player-downed";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
 
 /**
@@ -46,7 +47,10 @@ export interface EnemyTurnContext {
 
 export interface EnemyTurnOutcome {
   events: GameEvent[];
+  /** This turn's blow brought the player to 0 HP. */
   playerDowned: boolean;
+  /** ...and killed them outright: massive damage (death-saves spec §6.1). */
+  playerDied: boolean;
 }
 
 interface CombatantRow {
@@ -109,7 +113,11 @@ export async function resolveEnemyTurn(
     },
     player: grid(player),
     others: combatants.filter((c) => c.id !== enemy.id).map(grid),
+    playerDowned: player.hp <= 0,
   });
+  if (player.hp <= 0 && (plan.move !== null || plan.attacks.length > 0)) {
+    throw new EnemyTurnInvariantError(`Enemy ${enemy.id} planned to act against a downed player.`);
+  }
 
   if (plan.move && profile) {
     const distanceFt = chebyshevSquares(enemyGrid, plan.move) * 5;
@@ -157,7 +165,7 @@ export async function resolveEnemyTurn(
     }
   }
 
-  if (plan.attacks.length === 0 || !profile) return { events, playerDowned: false };
+  if (plan.attacks.length === 0 || !profile) return { events, playerDowned: false, playerDied: false };
 
   const character = (await tx.character.findUnique({
     where: { id: ctx.characterId },
@@ -189,6 +197,7 @@ export async function resolveEnemyTurn(
       throw new EnemyTurnInvariantError(`Planned attack ${name} is not in ${enemy.id}'s profile.`);
     }
 
+    const hpBeforeHit = hp;
     const roll = resolveAttackRoll(
       attack.attackBonus,
       playerAC,
@@ -265,10 +274,18 @@ export async function resolveEnemyTurn(
     }
 
     if (hp <= 0) {
-      if (ctx.collectEvents) events.push({ type: "PLAYER_DOWNED", payload: {} });
-      return { events, playerDowned: true };
+      const fall = await applyPlayerDowned(tx, {
+        encounterId: ctx.encounterId,
+        hpBefore: hpBeforeHit,
+        damage,
+        maxHp: character.maxHp,
+        collectEvents: ctx.collectEvents,
+        events,
+      });
+      // The remaining multiattack attacks are not rolled (death-saves spec §6.1).
+      return { events, playerDowned: true, playerDied: fall === "dead" };
     }
   }
 
-  return { events, playerDowned: false };
+  return { events, playerDowned: false, playerDied: false };
 }
