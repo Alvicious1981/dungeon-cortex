@@ -750,6 +750,120 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   // shared double `$queryRaw` and an owner-aware `encounter.findUnique`. The
   // file's beforeEach uses clearAllMocks, which keeps implementations, so both
   // are undone in `finally` rather than leaking into later tests.
+  it("rolls a death save for a dying player and finalizes the turn", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 0, maxHp: 20,
+        initiativeTotal: 20, initiativeOrder: 0,
+        deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null,
+      },
+      {
+        id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10,
+        initiativeTotal: 10, initiativeOrder: 1,
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "char-1", name: "Hero", class: "fighter", level: 1, stats: {}, inventory: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0, round: 2,
+        totalDamageDealt: 0, combatants,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    (prisma.combatant as any).findFirst = vi.fn().mockResolvedValue(combatants[0]);
+    (prisma.combatant as any).updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
+    (prisma as any).$queryRaw = vi.fn(async () => []);
+    (prisma.encounter.findUnique as any).mockImplementation(
+      async (args: { select?: Record<string, unknown> }) =>
+        args?.select?.campaign ? { campaignId, campaign: { characterId: "char-1" } } : null
+    );
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.7); // d20 = 15: a success
+
+    try {
+      const res = await POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "Death Save" }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+
+      expect(res.status).toBe(200);
+      expect((prisma.combatant as any).updateMany).toHaveBeenCalledWith({
+        where: { encounterId: "enc_123", isPlayer: true },
+        data: { deathSaveSuccesses: 1, deathSaveFailures: 0 },
+      });
+      expect(canonicalUserLogWrites()).toHaveLength(1);
+    } finally {
+      random.mockRestore();
+      delete (prisma as any).$queryRaw;
+      delete (prisma.combatant as any).findFirst;
+      delete (prisma.combatant as any).updateMany;
+      (prisma.encounter.findUnique as any).mockReset();
+    }
+  });
+
+  it.each([
+    ["Attack", 0, null, "PLAYER_UNCONSCIOUS"],
+    ["End Turn", 0, null, "PLAYER_UNCONSCIOUS"],
+    ["Death Save", 0, 5, "PLAYER_UNCONSCIOUS"],
+    ["Death Save", 12, null, "PLAYER_CONSCIOUS"],
+    ["Wait", 12, null, "PLAYER_CONSCIOUS"],
+  ])("refuses %s at hp %s (stableWakeRound %s) with %s", async (action, hp, wake, code) => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp, maxHp: 20,
+        initiativeTotal: 20, initiativeOrder: 0,
+        deathSaveSuccesses: wake === null ? 0 : 3, deathSaveFailures: 0, stableWakeRound: wake,
+      },
+      {
+        id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10,
+        initiativeTotal: 10, initiativeOrder: 1,
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "char-1", name: "Hero", class: "fighter", level: 1, stats: {}, inventory: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0, round: 2,
+        totalDamageDealt: 0, combatants,
+      },
+    });
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe(code);
+    expect(canonicalUserLogWrites()).toHaveLength(0);
+  });
+
+  it("refuses Death Save with no active encounter", async () => {
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "char-1", name: "Hero", class: "fighter", level: 1, stats: {}, inventory: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: null,
+    });
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "Death Save" }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("NO_ACTIVE_ENCOUNTER");
+  });
+
   it("resumes enemy turns on End Turn while an enemy owns the initiative slot", async () => {
     const combatants = [
       {
