@@ -311,9 +311,25 @@ Encounter`. It is safe for all seven callers:
 
 Re-locking a row the same transaction already holds does not block.
 
-The item-use transaction also gains `lockCharacterForCombatAction` at its
-start, like every other combat path. §6.3 needs it: `setPlayerHp` requires the
-caller to hold the lock.
+**Item use does not take the lock at transaction start.** An earlier draft of
+this section said it should. Stage 2 (#199) added that lock and CI's E2E smoke
+refuted it:
+
+- It moved the serialization point of `character-healing-concurrency`
+  (DC-PLAN-009) and `consumable-concurrency` (DC-PLAN-008), so neither race
+  could reach the compare-and-set it proves.
+- Item use never calls `setPlayerHp`: healing keeps its own compare-and-set
+  on `Character` (§6.3).
+
+So the item path writes `InventoryItem`, then `Character` through healing's
+compare-and-set, and the finalizer's entry lock is then a re-entrant no-op.
+
+What #199 did add is a `Character` lock before the pipeline decrements a
+damaged *player's* `Combatant` HP. A successful concentration save writes no
+`Character` row first, so without that lock damage would run
+`Combatant → Character` against a concentration replacement's
+`Character → Combatant` and deadlock. `concentration-concurrency` pins both
+interleavings.
 
 ### 6.2 The loop
 
