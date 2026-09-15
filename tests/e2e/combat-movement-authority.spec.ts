@@ -490,8 +490,10 @@ test("End Turn winning the Encounter race makes Move stale and rolls its origin 
       }),
     ]);
     expect(playerAfterRace).toEqual({ x: 1, y: 1 });
+    // End Turn ran the enemy chain: the profile-less observer's turn is
+    // skipped and the pointer is back on the player.
     expect(encounterAfterRace).toEqual({
-      currentTurnIndex: 1,
+      currentTurnIndex: 0,
       currentTurnMovementSpentFt: 0,
     });
     await expect(
@@ -661,22 +663,13 @@ test("split movement exhausts exactly and a genuine new player turn resets the a
     expect(logsAtExhaustion).toBe(4);
 
     // Advance player -> enemy -> player through the production turn finalizer.
-    // No enemy AI is fabricated; this is the deterministic state-machine edge.
+    // One call covers the whole cycle: the enemy chain skips the observer, which
+    // has no attack profile, and claims the edge back to the player.
     await prisma.$transaction((tx) =>
       finalizeEncounterTurn({
         tx,
         encounterId: fixture.encounterId,
         currentTurnIndex: 0,
-        round: 1,
-        collectEvents: false,
-        failOnStaleTurn: true,
-      })
-    );
-    await prisma.$transaction((tx) =>
-      finalizeEncounterTurn({
-        tx,
-        encounterId: fixture.encounterId,
-        currentTurnIndex: 1,
         round: 1,
         collectEvents: false,
         failOnStaleTurn: true,
@@ -785,7 +778,7 @@ test("legacy null fails closed and the next turn transition canonicalizes the bu
         where: { id: fixture.encounterId },
         select: { currentTurnIndex: true, currentTurnMovementSpentFt: true },
       })
-    ).resolves.toEqual({ currentTurnIndex: 1, currentTurnMovementSpentFt: 0 });
+    ).resolves.toEqual({ currentTurnIndex: 0, currentTurnMovementSpentFt: 0 });
   } finally {
     if (encounterId) {
       await prisma.combatant.deleteMany({ where: { encounterId } });
@@ -872,8 +865,8 @@ test("Move winning the Encounter race commits before End Turn resets the next tu
         select: { round: true, currentTurnIndex: true, currentTurnMovementSpentFt: true },
       })
     ).resolves.toEqual({
-      round: 1,
-      currentTurnIndex: 1,
+      round: 2,
+      currentTurnIndex: 0,
       currentTurnMovementSpentFt: 0,
     });
     await expect(

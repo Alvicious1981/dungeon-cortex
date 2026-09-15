@@ -38,9 +38,11 @@ async function waitForBlockedEncounterUpdates(
   minimum: number
 ): Promise<void> {
   // The action route uses Prisma interactive transactions with the default
-  // 5-second timeout. Both requests should reach their conditional Encounter
-  // UPDATE quickly, so release the external lock as soon as both overlapping
-  // transition claims are visible.
+  // 5-second timeout. End Turn takes the Character row lock at the
+  // finalizer's entry and then waits on its conditional Encounter UPDATE; a
+  // contender therefore waits on that Character lock (the enemy-turn chain's
+  // Character → Combatant → Encounter order). Both waits count as a blocked
+  // turn claim, and the external lock is released as soon as both are visible.
   const deadline = Date.now() + 2_000;
 
   while (Date.now() < deadline) {
@@ -50,8 +52,10 @@ async function waitForBlockedEncounterUpdates(
       WHERE datname = current_database()
         AND pid <> pg_backend_pid()
         AND wait_event_type = 'Lock'
-        AND query ILIKE 'UPDATE%'
-        AND query ILIKE '%Encounter%'
+        AND (
+          (query ILIKE 'UPDATE%' AND query ILIKE '%Encounter%')
+          OR (query ILIKE '%Character%' AND query ILIKE '%FOR UPDATE%')
+        )
     `;
 
     if (Number(rows[0]?.count ?? 0) >= minimum) return;
@@ -75,7 +79,7 @@ async function waitForBlockedEncounterUpdates(
   `;
 
   throw new Error(
-    `Timed out waiting for ${minimum} blocked Encounter update(s). Active DB work: ${JSON.stringify(activity)}`
+    `Timed out waiting for ${minimum} blocked turn claim(s). Active DB work: ${JSON.stringify(activity)}`
   );
 }
 
@@ -232,9 +236,11 @@ for (const race of TURN_RACES) {
       });
 
       // Lock only the canonical Encounter row. Both requests first observe the
-      // player at round/index 1/0 under MVCC, then stop at an Encounter UPDATE.
-      // Releasing the lock lets exactly one claim that snapshot; the loser must
-      // roll back its earlier check/attack work instead of rebasing onto 1/1.
+      // player at round/index 1/0 under MVCC. End Turn, queued first, takes the
+      // Character lock and stops at its Encounter UPDATE; the contender stops at
+      // that Character lock. Releasing the Encounter lets End Turn claim the
+      // snapshot and run the enemy chain; the loser must then roll back its
+      // earlier check/attack work instead of rebasing onto a later turn.
       lockTransaction = prisma.$transaction(
         async (tx) => {
           await tx.$queryRaw<Array<{ id: string }>>`
@@ -302,14 +308,20 @@ for (const race of TURN_RACES) {
       expect(typeof conflictBody.error).toBe("string");
 
       const successFrames = parseSseFrames(await successResponse!.text());
-      const turnEvents = successFrames.filter(
-        (frame) => frame.t === "evt" && frame.e?.type === "TURN_ADVANCE"
-      );
-      expect(turnEvents).toHaveLength(1);
-      expect(turnEvents[0]?.e?.payload).toMatchObject({
-        nextTurnIndex: 1,
-        nextRound: 1,
-      });
+      // The player's edge, then one per profile-less enemy the chain skips,
+      // back to the player one round later.
+      const advanceEvents = successFrames
+        .filter(
+          (frame) =>
+            frame.t === "evt" &&
+            (frame.e?.type === "TURN_ADVANCE" || frame.e?.type === "ROUND_ADVANCE")
+        )
+        .map((frame) => ({ type: frame.e?.type, payload: frame.e?.payload }));
+      expect(advanceEvents).toEqual([
+        { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
+        { type: "TURN_ADVANCE", payload: { nextTurnIndex: 2, nextRound: 1 } },
+        { type: "ROUND_ADVANCE", payload: { nextTurnIndex: 0, nextRound: 2 } },
+      ]);
 
       const contenderSucceeded = contenderResponse.status() === 200;
       const checkEvents = successFrames.filter(
@@ -329,8 +341,8 @@ for (const race of TURN_RACES) {
         },
       });
       expect(after.status).toBe("active");
-      expect(after.round).toBe(1);
-      expect(after.currentTurnIndex).toBe(1);
+      expect(after.round).toBe(2);
+      expect(after.currentTurnIndex).toBe(0);
 
       const actionContents = [...new Set([race.action, "End Turn"])];
       const userLogs = await prisma.gameLog.findMany({
