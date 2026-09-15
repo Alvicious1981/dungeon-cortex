@@ -330,6 +330,11 @@ model Combatant {
   /// NULL = no authorized source (unavailable). Distinct from 0, which is a legitimate CR-0 award.
   /// Never populated from the client request or from AI narration.
   xpValue              Int?
+  /// Recognised SRD attacks, walk speed and multiattack plan, snapshotted once
+  /// at encounter creation (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §4).
+  /// NULL = no recognised attack, or a row older than this column: the enemy's
+  /// turn is skipped. Never written from the request body or from narration.
+  attackProfile        Json?
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
 

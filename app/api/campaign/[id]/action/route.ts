@@ -88,6 +88,8 @@ import {
   persistMoveTransition,
 } from "@/lib/db/move-transition";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
+import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import { EnemyTurnInvariantError } from "@/lib/db/enemy-turn-transition";
 
 /**
  * The request body, declared once in `lib/events/action-transport.ts` and
@@ -124,13 +126,6 @@ async function writeSystemLogs(
 ): Promise<void> {
   for (const content of lines) {
     await tx.gameLog.create({ data: { campaignId, role: "system", content } });
-  }
-}
-
-class TurnStateConflictError extends Error {
-  constructor() {
-    super("The encounter turn changed before the action could commit.");
-    this.name = "TurnStateConflictError";
   }
 }
 
@@ -214,7 +209,25 @@ interface ReceiptRef {
  */
 export async function POST(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const receiptRef: ReceiptRef = {};
-  const res = await resolveAction(req, ctx, receiptRef);
+  let res: Response;
+  try {
+    res = await resolveAction(req, ctx, receiptRef);
+  } catch (error) {
+    // A state the enemy-turn chain must never reach; its transaction has rolled
+    // back. Reported, not retried (enemy-turns spec §8). As with any other
+    // server error, a 5xx settles no receipt.
+    if (error instanceof EnemyTurnInvariantError) {
+      console.error("[action] Enemy turn invariant:", error);
+      return NextResponse.json(
+        {
+          error: "Combat reached an impossible state and was rolled back.",
+          code: "ENEMY_TURN_INVARIANT",
+        },
+        { status: 500 }
+      );
+    }
+    throw error;
+  }
 
   // A pre-acquisition failure (bad body, auth, ownership, inactive campaign)
   // holds no receipt id, so it settles nothing — exactly as before.
@@ -508,38 +521,21 @@ async function resolveAction(
       return NextResponse.json({ error: "No active encounter." }, { status: 400 });
     }
 
-    const turnRefusal = playerTurnRefusal(context.activeEncounter);
-    if (turnRefusal) return turnRefusal;
+    // Enemy turns resolve inside the End Turn chain. An encounter parked on an
+    // enemy slot (a save from before the chain, or a fresh encounter whose
+    // initiative put an enemy first) is resumed by End Turn only; every other
+    // action there keeps 409 NOT_PLAYER_TURN (enemy-turns spec §6.6).
+    const turnAuthority = resolveEncounterTurnAuthority(context.activeEncounter);
+    const resumingEnemyTurns =
+      trimmedAction === "End Turn" && turnAuthority.ok && !turnAuthority.playerOwnsTurn;
+    if (!resumingEnemyTurns) {
+      const turnRefusal = playerTurnRefusal(context.activeEncounter);
+      if (turnRefusal) return turnRefusal;
+    }
 
     if (trimmedAction === "End Turn") {
-      const finalizeOutcome = await prisma.$transaction(async (tx) => {
-        const outcome = await finalizeEncounterTurn({
-          tx: tx as Prisma.TransactionClient,
-          encounterId: context.activeEncounter!.id,
-          currentTurnIndex: context.activeEncounter!.currentTurnIndex,
-          round: context.activeEncounter!.round,
-          failOnStaleTurn: true,
-        });
-
-        // A stale request owns no transition and therefore owns no canonical
-        // player-action log row either. Keep the successful transition and its
-        // history entry in the same transaction so a 409 cannot leave fiction
-        // behind in gameLog.
-        if (!outcome.turnAdvanceConflict) {
-          await tx.gameLog.create({
-            data: {
-              campaignId,
-              role: "user",
-              content: trimmedAction,
-            },
-          });
-        }
-
-        return outcome;
-      });
-
-      if (finalizeOutcome.turnAdvanceConflict) {
-        return NextResponse.json(
+      const endTurnConflict = () =>
+        NextResponse.json(
           {
             error:
               "The encounter turn changed before this End Turn could be applied. Refresh state and try again.",
@@ -547,6 +543,44 @@ async function resolveAction(
           },
           { status: 409 }
         );
+
+      let finalizeOutcome: Awaited<ReturnType<typeof finalizeEncounterTurn>>;
+      try {
+        finalizeOutcome = await prisma.$transaction(async (tx) => {
+          const outcome = await finalizeEncounterTurn({
+            tx: tx as Prisma.TransactionClient,
+            encounterId: context.activeEncounter!.id,
+            currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+            round: context.activeEncounter!.round,
+            failOnStaleTurn: true,
+            mode: resumingEnemyTurns ? "resume" : "advance",
+          });
+
+          // A stale request owns no transition and therefore owns no canonical
+          // player-action log row either. Keep the successful transition and its
+          // history entry in the same transaction so a 409 cannot leave fiction
+          // behind in gameLog.
+          if (!outcome.turnAdvanceConflict) {
+            await tx.gameLog.create({
+              data: {
+                campaignId,
+                role: "user",
+                content: trimmedAction,
+              },
+            });
+          }
+
+          return outcome;
+        });
+      } catch (error) {
+        // The enemy chain has already written when a later turn edge is lost,
+        // so it throws to roll the whole transaction back.
+        if (error instanceof TurnStateConflictError) return endTurnConflict();
+        throw error;
+      }
+
+      if (finalizeOutcome.turnAdvanceConflict) {
+        return endTurnConflict();
       }
 
       playerActionLogged = true;
@@ -1640,6 +1674,18 @@ async function resolveAction(
               {
                 error: "The equipment change is unavailable in the current combat state.",
                 code: error.code,
+              },
+              { status: 409 }
+            );
+          }
+          // A turn-ending equip runs the enemy chain; a lost turn edge there
+          // rolls the whole transaction back.
+          if (error instanceof TurnStateConflictError) {
+            return NextResponse.json(
+              {
+                error:
+                  "The encounter turn changed before this equipment change could be applied. Refresh state and try again.",
+                code: "TURN_STATE_CONFLICT",
               },
               { status: 409 }
             );

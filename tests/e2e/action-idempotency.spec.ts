@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-import { advanceTurn } from "../../lib/rules/combat";
+import { turnAfterSkippedEnemies } from "./support/turns";
 import {
   assertSafeE2EDatabase,
   cleanupE2ERecords,
@@ -20,21 +20,26 @@ import {
  * once.
  *
  * `End Turn` is the subject because it is the one deterministic mutation
- * available — no dice, no damage, no model. But the naive assertion
- * `currentTurnIndex === T + 1` is WRONG and is deliberately not used:
+ * available — no dice, no damage, no model. Its enemies are created without an
+ * SRD `monsterIndex`, so they carry no attack profile: the enemy-turn chain
+ * skips each of them and returns the pointer to the player. But the naive
+ * assertion `currentTurnIndex === T + 1` is WRONG and is deliberately not used:
  *
+ *   - the chain claims the player's edge and one edge per skipped enemy, so one
+ *     End Turn lands back on the player's slot, one round later;
  *   - `advanceTurn` (lib/rules/combat.ts) wraps when `currentTurnIndex + 1`
  *     reaches the combatant count, resetting the index to 0 and incrementing
- *     the round.
+ *     the round;
  *   - `finalizeEncounterTurn` evaluates `resolveEncounterEnd` first; if the
  *     encounter should end it claims active → resolved and never touches the
  *     turn index at all.
  *
- * So the expected state is computed by calling the real `advanceTurn` once,
- * and the fixture is asserted to be in the branch where advancement actually
- * happens. Three assertions carry the proof together — see the note at the
- * turn-state check for why the turn index alone is not sufficient under true
- * concurrency, and why the canonical user-log count is what closes it.
+ * So the expected state is computed with `turnAfterSkippedEnemies`, which
+ * applies the real `advanceTurn` once per claim, and the fixture is asserted to
+ * be in the branch where advancement actually happens. Three assertions carry
+ * the proof together — see the note at the turn-state check for why the turn
+ * index alone is not sufficient under true concurrency, and why the canonical
+ * user-log count is what closes it.
  */
 test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola vez", async ({
   request,
@@ -115,11 +120,12 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
     expect(before.combatants.some((c) => c.isPlayer && c.hp > 0)).toBe(true);
     expect(before.combatants.some((c) => !c.isPlayer && c.hp > 0)).toBe(true);
 
-    // The real rule, applied exactly once — wrap-around included.
-    const expected = advanceTurn({
+    // The real rule, applied once per claim of one End Turn — wrap-around
+    // included: the player's edge, then one per skipped enemy.
+    const expected = turnAfterSkippedEnemies({
+      combatants: before.combatants,
       currentTurnIndex: before.currentTurnIndex,
       round: before.round,
-      combatantCount: before.combatants.length,
     });
 
     // ── Two genuinely concurrent requests, identical in every byte ───────────
@@ -141,19 +147,19 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
       where: { id: encounterId },
     });
 
-    // Two SEQUENTIAL advancements always land on a different (index, round)
-    // pair than one — the pair is a bijection with round * C + index, and one
-    // application moves that counter by 1, two by 2 — so this assertion
-    // cannot be satisfied by a doubled execution that saw fresh state.
+    // Two SEQUENTIAL End Turns always land on a different (index, round) pair
+    // than one — the pair is a bijection with round * C + index, and one End
+    // Turn moves that counter by `expected.claims`, two by twice that — so this
+    // assertion cannot be satisfied by a doubled execution that saw fresh state.
     //
     // It is deliberately not the only assertion, because it is not sufficient
     // on its own: two genuinely CONCURRENT executions could each read the same
     // pre-turn snapshot through `buildCampaignContext` and write the same
-    // `nextTurnIndex`, landing on the one-advancement value. The user-log count
-    // below is what closes that hole — two executions mean two canonical
-    // `role:"user"` rows, whatever the turn index ends up saying.
-    expect(after.currentTurnIndex).toBe(expected.nextTurnIndex);
-    expect(after.round).toBe(expected.nextRound);
+    // next turn, landing on the one-End-Turn value. The user-log count below is
+    // what closes that hole — two executions mean two canonical `role:"user"`
+    // rows, whatever the turn index ends up saying.
+    expect(after.currentTurnIndex).toBe(expected.turnIndex);
+    expect(after.round).toBe(expected.round);
     expect(after.status).toBe("active");
 
     const receipts = await prisma.actionRequestReceipt.count({ where: { requestId } });
@@ -165,8 +171,9 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
     expect(playerLines).toBe(1);
 
     // ── DC-AUD-004: the duplicate replays the original events ───────────────
-    // `End Turn` emits exactly one deterministic advancement event — no dice,
-    // no damage — so both what was stored and what is replayed are exact.
+    // `End Turn` emits one deterministic advancement event per claim — no
+    // dice, no damage, and its enemies skip their turns — so both what was
+    // stored and what is replayed are exact.
     const receipt = await prisma.actionRequestReceipt.findFirstOrThrow({
       where: { requestId },
       select: { status: true, replayEvents: true },
@@ -174,8 +181,10 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
     expect(receipt.status).toBe("COMPLETED");
     const storedEvents = receipt.replayEvents as Array<{ type: string }>;
     expect(Array.isArray(storedEvents)).toBe(true);
-    expect(storedEvents).toHaveLength(1);
-    expect(storedEvents[0]!.type).toMatch(/^(TURN|ROUND)_ADVANCE$/);
+    expect(storedEvents).toHaveLength(expected.claims);
+    for (const event of storedEvents) {
+      expect(event.type).toMatch(/^(TURN|ROUND)_ADVANCE$/);
+    }
 
     // A third request, sequential this time: the receipt is settled, so this
     // is unambiguously the duplicate path rather than either side of a race.
@@ -187,15 +196,19 @@ test("@smoke una acción reenviada con el mismo requestId se ejecuta una sola ve
       .filter((chunk) => chunk.startsWith("data: "))
       .map((chunk) => JSON.parse(chunk.slice(6)) as { t: string; e?: unknown });
 
-    expect(frames.map((f) => f.t)).toEqual(["duplicate", "evt", "done"]);
-    expect(frames[1]!.e).toEqual(storedEvents[0]);
+    expect(frames.map((f) => f.t)).toEqual([
+      "duplicate",
+      ...Array<string>(expected.claims).fill("evt"),
+      "done",
+    ]);
+    expect(frames.slice(1, 1 + expected.claims).map((f) => f.e)).toEqual(storedEvents);
 
     // And the replay changed nothing: still one advancement, one player row.
     const afterReplay = await prisma.encounter.findUniqueOrThrow({
       where: { id: encounterId },
     });
-    expect(afterReplay.currentTurnIndex).toBe(expected.nextTurnIndex);
-    expect(afterReplay.round).toBe(expected.nextRound);
+    expect(afterReplay.currentTurnIndex).toBe(expected.turnIndex);
+    expect(afterReplay.round).toBe(expected.round);
     expect(
       await prisma.gameLog.count({
         where: { campaignId: created.campaignId, role: "user", content: "End Turn" },

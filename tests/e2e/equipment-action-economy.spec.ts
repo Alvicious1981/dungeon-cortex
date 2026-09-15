@@ -7,7 +7,6 @@ import {
   type APIResponse,
 } from "@playwright/test";
 
-import { finalizeEncounterTurn } from "../../lib/rules/combat-pipeline";
 import {
   assertSafeE2EDatabase,
   cleanupE2ERecords,
@@ -268,6 +267,35 @@ async function waitForBlockedEncounterUpdates(
   throw new Error(`Timed out waiting for ${minimum} blocked Encounter update(s).`);
 }
 
+/**
+ * A blocked Encounter UPDATE or a blocked Character row lock. The turn
+ * finalizer takes the Character lock at entry (the enemy-turn chain's
+ * Character → Combatant → Encounter order), so a turn-ending request queued
+ * behind a Character-holding equip waits there rather than at the Encounter.
+ */
+async function waitForBlockedTurnClaims(
+  prisma: PrismaClient,
+  minimum: number,
+): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND pid <> pg_backend_pid()
+        AND wait_event_type = 'Lock'
+        AND (
+          (query ILIKE 'UPDATE%' AND query ILIKE '%Encounter%')
+          OR (query ILIKE '%Character%' AND query ILIKE '%FOR UPDATE%')
+        )
+    `;
+    if (Number(rows[0]?.count ?? 0) >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${minimum} blocked turn claim(s).`);
+}
+
 function holdCharacterLock(prisma: PrismaClient, characterId: string) {
   let release!: () => void;
   const released = new Promise<void>((resolve) => {
@@ -364,7 +392,9 @@ test("@smoke first interaction stays on turn and the next eligible equip spends 
       "I equip the Second Interaction Charm",
     );
     expect(second.status()).toBe(200);
-    expect(await eventTypes(second)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE"]);
+    // The action ends the turn; the profile-less enemy's turn is skipped by the
+    // enemy chain, and the pointer returns to the player one round later.
+    expect(await eventTypes(second)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE", "ROUND_ADVANCE"]);
     const afterSecond = await prisma.encounter.findUniqueOrThrow({
       where: { id: fixture.encounterId },
       select: {
@@ -374,8 +404,8 @@ test("@smoke first interaction stays on turn and the next eligible equip spends 
       },
     });
     expect(afterSecond).toEqual({
-      round: 1,
-      currentTurnIndex: 1,
+      round: 2,
+      currentTurnIndex: 0,
       currentTurnObjectInteractionUsed: false,
     });
     const equipped = await prisma.inventoryItem.findMany({
@@ -424,22 +454,14 @@ test("@smoke a complete player-enemy-player cycle restores the free interaction"
       "I equip the Cycle Blade",
     );
     expect(playerAction.status()).toBe(200);
-    expect(await eventTypes(playerAction)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE"]);
-
-    await prisma.encounter.update({
-      where: { id: fixture.encounterId },
-      data: { currentTurnObjectInteractionUsed: true },
-    });
-    const enemyAdvance = await prisma.$transaction((tx) =>
-      finalizeEncounterTurn({
-        tx,
-        encounterId: fixture!.encounterId,
-        currentTurnIndex: 1,
-        round: 1,
-        failOnStaleTurn: true,
-      }),
-    );
-    expect(enemyAdvance.turnAdvanceConflict).toBe(false);
+    // One turn-ending action now runs the whole cycle: the player's edge, the
+    // enemy chain skipping the profile-less enemy, and the edge back to the
+    // player — each edge resetting the free object interaction.
+    expect(await eventTypes(playerAction)).toEqual([
+      "EQUIP_ITEM",
+      "TURN_ADVANCE",
+      "ROUND_ADVANCE",
+    ]);
     const returnedToPlayer = await prisma.encounter.findUniqueOrThrow({
       where: { id: fixture.encounterId },
       select: {
@@ -505,7 +527,7 @@ test("@smoke legacy null fails closed for weapon equipment but permits an empty-
       "I equip the Legacy Budget Shield",
     );
     expect(shield.status()).toBe(200);
-    expect(await eventTypes(shield)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE"]);
+    expect(await eventTypes(shield)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE", "ROUND_ADVANCE"]);
 
     const rows = await prisma.inventoryItem.findMany({
       where: {
@@ -524,7 +546,7 @@ test("@smoke legacy null fails closed for weapon equipment but permits an empty-
       select: { currentTurnIndex: true, currentTurnObjectInteractionUsed: true },
     });
     expect(encounter).toEqual({
-      currentTurnIndex: 1,
+      currentTurnIndex: 0,
       currentTurnObjectInteractionUsed: false,
     });
     expect(
@@ -715,7 +737,7 @@ test("@smoke concurrent free equips in different slots claim the interaction onc
     const eventLists = await Promise.all(responses.map(eventTypes));
     expect(eventLists.map((events) => events.join(",")).sort()).toEqual([
       "EQUIP_ITEM",
-      "EQUIP_ITEM,TURN_ADVANCE",
+      "EQUIP_ITEM,TURN_ADVANCE,ROUND_ADVANCE",
     ]);
     const items = await prisma.inventoryItem.findMany({
       where: {
@@ -734,8 +756,8 @@ test("@smoke concurrent free equips in different slots claim the interaction onc
       select: { round: true, currentTurnIndex: true, currentTurnObjectInteractionUsed: true },
     });
     expect(encounter).toEqual({
-      round: 1,
-      currentTurnIndex: 1,
+      round: 2,
+      currentTurnIndex: 0,
       currentTurnObjectInteractionUsed: false,
     });
     expect(
@@ -841,15 +863,21 @@ test("@smoke concurrent shield equip and End Turn have exactly one turn-ending w
 
     const equip = postAction(request, campaignId, "I equip the Turn Race Shield");
     await waitForBlockedEncounterUpdates(prisma, 1);
+    // The equip holds the Character lock while it waits at the Encounter, so
+    // End Turn queues on the finalizer's entry Character lock.
     const endTurn = postAction(request, campaignId, "End Turn");
-    await waitForBlockedEncounterUpdates(prisma, 2);
+    await waitForBlockedTurnClaims(prisma, 2);
     lock.release();
     await lock.transaction;
     const [equipResponse, endTurnResponse] = await Promise.all([equip, endTurn]);
 
     expect(equipResponse.status()).toBe(200);
     expect(endTurnResponse.status()).toBe(409);
-    expect(await eventTypes(equipResponse)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE"]);
+    expect(await eventTypes(equipResponse)).toEqual([
+      "EQUIP_ITEM",
+      "TURN_ADVANCE",
+      "ROUND_ADVANCE",
+    ]);
     await expectCode(endTurnResponse, "TURN_STATE_CONFLICT");
     const shield = await prisma.inventoryItem.findFirstOrThrow({
       where: { characterId: fixture.created.characterId, name: "Turn Race Shield" },
@@ -861,8 +889,8 @@ test("@smoke concurrent shield equip and End Turn have exactly one turn-ending w
       select: { round: true, currentTurnIndex: true, currentTurnObjectInteractionUsed: true },
     });
     expect(encounter).toEqual({
-      round: 1,
-      currentTurnIndex: 1,
+      round: 2,
+      currentTurnIndex: 0,
       currentTurnObjectInteractionUsed: false,
     });
     expect(
@@ -916,7 +944,11 @@ test("@smoke concurrent action-cost equip and Attack cannot commit two turn endi
 
     expect(equipResponse.status()).toBe(200);
     expect(attackResponse.status()).toBe(409);
-    expect(await eventTypes(equipResponse)).toEqual(["EQUIP_ITEM", "TURN_ADVANCE"]);
+    expect(await eventTypes(equipResponse)).toEqual([
+      "EQUIP_ITEM",
+      "TURN_ADVANCE",
+      "ROUND_ADVANCE",
+    ]);
     await expectCode(attackResponse, "TURN_STATE_CONFLICT");
     const charm = await prisma.inventoryItem.findFirstOrThrow({
       where: { characterId: fixture.created.characterId, name: "Attack Race Charm" },
@@ -933,7 +965,7 @@ test("@smoke concurrent action-cost equip and Attack cannot commit two turn endi
       select: { currentTurnIndex: true, currentTurnObjectInteractionUsed: true },
     });
     expect(encounter).toEqual({
-      currentTurnIndex: 1,
+      currentTurnIndex: 0,
       currentTurnObjectInteractionUsed: false,
     });
     expect(

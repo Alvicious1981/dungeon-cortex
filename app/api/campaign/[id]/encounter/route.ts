@@ -10,6 +10,7 @@ import {
   type MonsterAbilityFields,
 } from "@/lib/rules/encounter-service";
 import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
+import { profileMonster } from "@/lib/rules/monster-attack-profile";
 
 interface EnemyInput {
   name: string;
@@ -109,13 +110,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       // than a partial block. A missing WIS used to leave the creature with no
       // Perception at all, which any contested check reads as "unknown".
       if (!e.monsterIndex) {
-        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null };
+        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null, srdAttackProfile: null };
       }
       const srdMonster = await prisma.srdMonster.findUnique({
         where: { id: e.monsterIndex },
       });
       if (!srdMonster) {
-        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null };
+        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null, srdAttackProfile: null };
       }
       const data = srdMonster.data as Record<string, unknown>;
       // The stored SRD JSON spells ability scores as flat top-level fields
@@ -134,6 +135,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         ac: acFromMonsterData(data),
         stats: abilityScores,
         srdXp: srdMonster.xp ?? null,
+        // Recognised SRD attacks (enemy-turns spec §4), null when none is
+        // recognised. Named `srdAttackProfile`, not `attackProfile`, so the
+        // column's single-reader architecture test sees no second reader here.
+        srdAttackProfile: profileMonster(data),
       };
     })
   );
@@ -246,6 +251,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         y: posY,
         // Backend-authorized snapshot resolved above; never derived from the request body.
         xpValue: enemy.srdXp,
+        // Backend-recognised SRD attacks; omitted — i.e. NULL, which skips the
+        // enemy's turn — when none is recognised. Never from the request body.
+        ...(enemy.srdAttackProfile
+          ? { attackProfile: enemy.srdAttackProfile as unknown as Prisma.InputJsonValue }
+          : {}),
       };
     });
 

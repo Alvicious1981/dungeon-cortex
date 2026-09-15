@@ -184,7 +184,10 @@ beforeEach(() => {
   // throws. Only tests that end an encounter reach this, which is why it went
   // unnoticed until an area spell caught the last living combatant.
   (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
-  (prisma.encounter.findUnique as any).mockResolvedValue({ campaign: { characterId } });
+  // Before any write, the finalizer also reads the encounter's owner
+  // (`campaignId` and `campaign.characterId`) to take the Character lock, and
+  // fails closed without both — as a real row would never lack them.
+  (prisma.encounter.findUnique as any).mockResolvedValue({ campaignId, campaign: { characterId } });
   (buildCampaignContext as any).mockResolvedValue(contextFor());
 });
 
@@ -668,23 +671,24 @@ describe("un conjuro puede alcanzar a varias criaturas", () => {
       { id: "t1", name: "Goblin One", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 0, size: "Medium" },
       { id: "t2", name: "Goblin Two", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10, ac: 12, conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x: 1, y: 1, size: "Medium" },
     ];
+    // Deliberately far from the aim point: this test measures that both
+    // hostiles inside the radius are hit, and a caster caught in their own
+    // blast — correct, and covered separately — would be a second reason
+    // for it to fail.
+    const player = { id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 10, size: "Medium" };
     const base = contextFor();
     (buildCampaignContext as any).mockResolvedValue({
       ...base,
       activeEncounter: {
         id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
-        combatants: [
-          // Deliberately far from the aim point: this test measures that both
-          // hostiles inside the radius are hit, and a caster caught in their own
-          // blast — correct, and covered separately — would be a second reason
-          // for it to fail.
-          { id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14, conditions: [], concentrationSpellId: null, stats: {}, x: 10, y: 10, size: "Medium" },
-          ...hostiles,
-        ],
+        combatants: [player, ...hostiles],
       },
     });
     (prisma.srdSpell.findMany as any).mockResolvedValue([MAGIC_MISSILE]);
-    (prisma.combatant.findMany as any).mockResolvedValue(hostiles);
+    // The whole roster, player included, as the encounter's rows really are:
+    // the finalizer's enemy chain walks initiative order back to the player,
+    // and a roster without one is a state no real encounter can reach.
+    (prisma.combatant.findMany as any).mockResolvedValue([player, ...hostiles]);
 
     const { res, frames } = await post("I cast Magic Missile", {
       targetIds: ["t1", "t2"],

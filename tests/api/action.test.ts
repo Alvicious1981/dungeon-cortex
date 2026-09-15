@@ -741,7 +741,16 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(canonicalUserLogWrites()).toHaveLength(0);
   });
 
-  it("refuses End Turn while an enemy owns the initiative slot", async () => {
+  // Enemy turns resolve inside the End Turn chain, so an encounter parked on an
+  // enemy slot is resumed by End Turn — and only by End Turn; the Attack test
+  // above keeps every other action at 409 NOT_PLAYER_TURN
+  // (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §6.6).
+  //
+  // The chain runs only on a real transaction surface, so these tests give the
+  // shared double `$queryRaw` and an owner-aware `encounter.findUnique`. The
+  // file's beforeEach uses clearAllMocks, which keeps implementations, so both
+  // are undone in `finally` rather than leaking into later tests.
+  it("resumes enemy turns on End Turn while an enemy owns the initiative slot", async () => {
     const combatants = [
       {
         id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false,
@@ -761,21 +770,83 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       },
     });
     (prisma.combatant.findMany as any).mockResolvedValue(combatants);
-
-    const res = await POST(
-      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
-        method: "POST",
-        body: JSON.stringify({ action: "End Turn" }),
-      }),
-      { params: Promise.resolve({ id: campaignId }) }
+    (prisma.encounter.updateMany as any).mockResolvedValue({ count: 1 });
+    (prisma as any).$queryRaw = vi.fn(async () => []);
+    (prisma.encounter.findUnique as any).mockImplementation(
+      async (args: { select?: Record<string, unknown> }) =>
+        args?.select?.campaign ? { campaignId, campaign: { characterId: "char-1" } } : null
     );
 
-    expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toMatchObject({ code: "NOT_PLAYER_TURN" });
-    expect(prisma.encounter.update).not.toHaveBeenCalled();
-    expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
-    expect(prisma.combatant.update).not.toHaveBeenCalled();
-    expect(canonicalUserLogWrites()).toHaveLength(0);
+    try {
+      const res = await POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "End Turn" }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+
+      expect(res.status).toBe(200);
+      // The resume binds to the observed enemy slot before any enemy acts.
+      expect(prisma.encounter.updateMany).toHaveBeenNthCalledWith(1, {
+        where: { id: "enc_123", status: "active", currentTurnIndex: 0, round: 3 },
+        data: { currentTurnMovementSpentFt: 0, currentTurnObjectInteractionUsed: false },
+      });
+      // The goblin has no attack profile, so its turn is skipped and the
+      // pointer returns to the player.
+      expect(prisma.encounter.updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        where: { id: "enc_123", status: "active", currentTurnIndex: 0, round: 3 },
+        data: expect.objectContaining({ currentTurnIndex: 1, round: 3 }),
+      }));
+      expect(canonicalUserLogWrites()).toHaveLength(1);
+    } finally {
+      delete (prisma as any).$queryRaw;
+      (prisma.encounter.findUnique as any).mockReset();
+    }
+  });
+
+  it("maps an enemy-turn invariant to 500 ENEMY_TURN_INVARIANT", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true,
+        hp: 20, maxHp: 20, initiativeTotal: 20, initiativeOrder: 0,
+      },
+      {
+        id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false,
+        hp: 10, maxHp: 10, initiativeTotal: 10, initiativeOrder: 1,
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "char-1", name: "Hero", class: "fighter", level: 1, stats: {}, inventory: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0,
+        round: 3, totalDamageDealt: 0, combatants,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    // A real transaction surface whose encounter has no owning character: the
+    // finalizer fails closed before any write, which no real row can reach.
+    (prisma as any).$queryRaw = vi.fn(async () => []);
+    (prisma.encounter.findUnique as any).mockResolvedValue(null);
+
+    try {
+      const res = await POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "End Turn" }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+
+      expect(res.status).toBe(500);
+      await expect(res.json()).resolves.toMatchObject({ code: "ENEMY_TURN_INVARIANT" });
+      expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+      expect(canonicalUserLogWrites()).toHaveLength(0);
+    } finally {
+      delete (prisma as any).$queryRaw;
+      (prisma.encounter.findUnique as any).mockReset();
+    }
   });
 
   it("handles multi-target Attack via targetIds", async () => {
