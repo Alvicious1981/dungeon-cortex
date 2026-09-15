@@ -31,7 +31,11 @@ vi.mock("@/lib/db/prisma", () => ({
     // `findFirst` is what rest-service asks, inside the rest gate's
     // transaction, to refuse a rest during an active encounter.
     encounter: { update: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
-    combatant: { findMany: vi.fn(() => []), update: vi.fn() },
+    // `updateMany` is how setPlayerHp mirrors Character.hp onto the player's
+    // Combatant row: a caster caught in their own area spell now takes that
+    // path. Real Prisma always exposes it; a double without it is thinner than
+    // the surface it stands for.
+    combatant: { findMany: vi.fn(() => []), update: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) },
     inventoryItem: { delete: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     character: { findUnique: vi.fn(), update: vi.fn() },
     srdSpell: { findUnique: vi.fn(), findMany: vi.fn() },
