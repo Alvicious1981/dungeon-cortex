@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Combatant, Prisma } from "@prisma/client";
 import type {
   CombatConsequenceEvent,
   CombatConsequencePayload,
@@ -834,6 +834,150 @@ export async function executeCombatAction(
   };
 }
 
+/**
+ * The encounter-end half of finalizeEncounterTurn, extracted unchanged so the
+ * enemy-turn chain can reuse it after an enemy downs the player
+ * (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §6.2 step 4).
+ * Returns null while the encounter goes on.
+ */
+async function resolveEncounterIfEnded(input: {
+  tx: Prisma.TransactionClient;
+  encounterId: string;
+  currentTurnIndex: number;
+  round: number;
+  failOnStaleTurn: boolean;
+  events: GameEvent[];
+  allCombatants: Combatant[];
+}): Promise<FinalizeTurnResult | null> {
+  const { tx, encounterId, currentTurnIndex, round, failOnStaleTurn, events, allCombatants } =
+    input;
+  const resolution = resolveEncounterEnd(allCombatants);
+  if (!resolution.shouldEnd) return null;
+
+  // Conditional claim, not a plain update: only a transaction that still finds
+  // this encounter "active" may transition it to "resolved". `updateMany`'s
+  // affected-row count is what makes the claim idempotent — a losing or
+  // duplicate caller matches zero rows and this becomes a no-op instead of a
+  // second transition.
+  const claim = await tx.encounter.updateMany({
+    where: {
+      id: encounterId,
+      status: "active",
+      ...(failOnStaleTurn ? { currentTurnIndex, round } : {}),
+    },
+    data: { status: "resolved" },
+  });
+
+  if (claim.count === 1) {
+    // Winner path: this transaction owns the active → resolved claim and is
+    // the only one with the right to evaluate an XP award
+    // (docs/DECISION_XP_AWARD_AUTHORITY.md §9). Phase 1 pays only on a
+    // certified victory (§2) — player_dead and ongoing never reach this.
+    if (resolution.reason === "all_enemies_dead") {
+      const enemies = allCombatants.filter((c) => !c.isPlayer);
+      // Fail-closed at the encounter level (§6, §11): a single relevant
+      // enemy without an authorized xpValue snapshot zeroes the whole
+      // award — never a partial sum with the missing creature dropped.
+      const combatAward = enemies.some((c) => c.xpValue === null)
+        ? 0
+        : enemies.reduce((total, c) => total + (c.xpValue as number), 0);
+
+      if (combatAward > 0) {
+        // Recipient derived exclusively from persisted state
+        // (Encounter → Campaign → characterId, §4) — never from the
+        // client, the AI, or a combatant id.
+        const encounterCampaign = await tx.encounter.findUnique({
+          where: { id: encounterId },
+          select: { campaign: { select: { characterId: true } } },
+        });
+
+        if (encounterCampaign) {
+          // Atomic increment (§12) — never a value computed from a prior
+          // read. Only Character.xp moves; no level-up is applied here.
+          await tx.character.update({
+            where: { id: encounterCampaign.campaign.characterId },
+            data: { xp: { increment: combatAward } },
+          });
+        }
+      }
+
+      // Loot, on the same certified victory that pays XP.
+      //
+      // The victory prompt has always told the narrator that "Loot, XP, and
+      // state changes are resolved by the backend action pipeline". XP was;
+      // loot was not, and nothing else granted it either — buying was the
+      // only way to gain an item or gold. An instruction about a fact that
+      // never arrives is an invitation to invent one.
+      //
+      // `tensionScore` rather than an explicit gold/items figure: that is
+      // the service's deterministic branch, seeded on the encounter id, so
+      // the same encounter always yields the same loot. Passing numbers
+      // here would be deciding mechanics at the call site.
+      //
+      // The score itself is derived, not read: `Encounter` has no
+      // `tensionScore` column — the field on the memory-context type is
+      // never populated by any query. `seededFloat(id + ":tension")` is the
+      // repository's one live convention for this exact gap (generator.ts,
+      // the treasure branch), and keeps the same encounter paying the same
+      // loot on any replay.
+      //
+      // `grantLoot` has no idempotency guard of its own and does not need
+      // one here: this sits inside `claim.count === 1`, and the conditional
+      // claim above is what makes the whole reward path once-only.
+      //
+      // A loot failure must not undo a resolved encounter. The claim has
+      // already committed the transition, and an unpaid reward is a
+      // recoverable state where an un-resolvable encounter is not.
+      // A lookup of its own rather than widening the XP path's: that one's
+      // exact select shape is pinned by a test asserting the recipient comes
+      // from persisted state, and it sits behind `combatAward > 0` while
+      // loot is owed on any certified victory.
+      const lootEncounter = await tx.encounter.findUnique({
+        where: { id: encounterId },
+        select: { campaignId: true },
+      });
+
+      if (lootEncounter?.campaignId) {
+        try {
+          await grantLoot({
+            campaignId: lootEncounter.campaignId,
+            encounterId,
+            tensionScore: seededFloat(`${encounterId}:tension`),
+            tx: tx as unknown as Parameters<typeof grantLoot>[0]["tx"],
+          });
+        } catch {
+          // Swallowed deliberately — see above.
+        }
+      }
+    }
+
+    return {
+      events,
+      encounterResolved: true,
+      ...(failOnStaleTurn ? { turnAdvanceConflict: false } : {}),
+    };
+  }
+
+  // A player action requesting fail-closed semantics owns no resolved-state
+  // transition when its observed round/index is stale. The caller aborts the
+  // transaction, rolling back the damage/resource changes that preceded this
+  // finalizer as well as every canonical log.
+  if (failOnStaleTurn) {
+    return {
+      events,
+      encounterResolved: true,
+      turnAdvanceConflict: true,
+    };
+  }
+
+  // Legacy bounded behavior: another caller already resolved the encounter,
+  // so this transaction reaches no reward path but observes a resolved fight.
+  return {
+    events,
+    encounterResolved: true,
+  };
+}
+
 export async function finalizeEncounterTurn(
   input: FinalizeEncounterTurnInput
 ): Promise<FinalizeTurnResult> {
@@ -848,131 +992,18 @@ export async function finalizeEncounterTurn(
 
   const events: GameEvent[] = [];
   const allCombatants = await tx.combatant.findMany({ where: { encounterId } });
-  const resolution = resolveEncounterEnd(allCombatants);
+  const ended = await resolveEncounterIfEnded({
+    tx,
+    encounterId,
+    currentTurnIndex,
+    round,
+    failOnStaleTurn,
+    events,
+    allCombatants,
+  });
 
-  if (resolution.shouldEnd) {
-    // Conditional claim, not a plain update: only a transaction that still finds
-    // this encounter "active" may transition it to "resolved". `updateMany`'s
-    // affected-row count is what makes the claim idempotent — a losing or
-    // duplicate caller matches zero rows and this becomes a no-op instead of a
-    // second transition.
-    const claim = await tx.encounter.updateMany({
-      where: {
-        id: encounterId,
-        status: "active",
-        ...(failOnStaleTurn ? { currentTurnIndex, round } : {}),
-      },
-      data: { status: "resolved" },
-    });
-
-    if (claim.count === 1) {
-      // Winner path: this transaction owns the active → resolved claim and is
-      // the only one with the right to evaluate an XP award
-      // (docs/DECISION_XP_AWARD_AUTHORITY.md §9). Phase 1 pays only on a
-      // certified victory (§2) — player_dead and ongoing never reach this.
-      if (resolution.reason === "all_enemies_dead") {
-        const enemies = allCombatants.filter((c) => !c.isPlayer);
-        // Fail-closed at the encounter level (§6, §11): a single relevant
-        // enemy without an authorized xpValue snapshot zeroes the whole
-        // award — never a partial sum with the missing creature dropped.
-        const combatAward = enemies.some((c) => c.xpValue === null)
-          ? 0
-          : enemies.reduce((total, c) => total + (c.xpValue as number), 0);
-
-        if (combatAward > 0) {
-          // Recipient derived exclusively from persisted state
-          // (Encounter → Campaign → characterId, §4) — never from the
-          // client, the AI, or a combatant id.
-          const encounterCampaign = await tx.encounter.findUnique({
-            where: { id: encounterId },
-            select: { campaign: { select: { characterId: true } } },
-          });
-
-          if (encounterCampaign) {
-            // Atomic increment (§12) — never a value computed from a prior
-            // read. Only Character.xp moves; no level-up is applied here.
-            await tx.character.update({
-              where: { id: encounterCampaign.campaign.characterId },
-              data: { xp: { increment: combatAward } },
-            });
-          }
-        }
-
-        // Loot, on the same certified victory that pays XP.
-        //
-        // The victory prompt has always told the narrator that "Loot, XP, and
-        // state changes are resolved by the backend action pipeline". XP was;
-        // loot was not, and nothing else granted it either — buying was the
-        // only way to gain an item or gold. An instruction about a fact that
-        // never arrives is an invitation to invent one.
-        //
-        // `tensionScore` rather than an explicit gold/items figure: that is
-        // the service's deterministic branch, seeded on the encounter id, so
-        // the same encounter always yields the same loot. Passing numbers
-        // here would be deciding mechanics at the call site.
-        //
-        // The score itself is derived, not read: `Encounter` has no
-        // `tensionScore` column — the field on the memory-context type is
-        // never populated by any query. `seededFloat(id + ":tension")` is the
-        // repository's one live convention for this exact gap (generator.ts,
-        // the treasure branch), and keeps the same encounter paying the same
-        // loot on any replay.
-        //
-        // `grantLoot` has no idempotency guard of its own and does not need
-        // one here: this sits inside `claim.count === 1`, and the conditional
-        // claim above is what makes the whole reward path once-only.
-        //
-        // A loot failure must not undo a resolved encounter. The claim has
-        // already committed the transition, and an unpaid reward is a
-        // recoverable state where an un-resolvable encounter is not.
-        // A lookup of its own rather than widening the XP path's: that one's
-        // exact select shape is pinned by a test asserting the recipient comes
-        // from persisted state, and it sits behind `combatAward > 0` while
-        // loot is owed on any certified victory.
-        const lootEncounter = await tx.encounter.findUnique({
-          where: { id: encounterId },
-          select: { campaignId: true },
-        });
-
-        if (lootEncounter?.campaignId) {
-          try {
-            await grantLoot({
-              campaignId: lootEncounter.campaignId,
-              encounterId,
-              tensionScore: seededFloat(`${encounterId}:tension`),
-              tx: tx as unknown as Parameters<typeof grantLoot>[0]["tx"],
-            });
-          } catch {
-            // Swallowed deliberately — see above.
-          }
-        }
-      }
-
-      return {
-        events,
-        encounterResolved: true,
-        ...(failOnStaleTurn ? { turnAdvanceConflict: false } : {}),
-      };
-    }
-
-    // A player action requesting fail-closed semantics owns no resolved-state
-    // transition when its observed round/index is stale. The caller aborts the
-    // transaction, rolling back the damage/resource changes that preceded this
-    // finalizer as well as every canonical log.
-    if (failOnStaleTurn) {
-      return {
-        events,
-        encounterResolved: true,
-        turnAdvanceConflict: true,
-      };
-    }
-
-    // Legacy bounded behavior: another caller already resolved the encounter,
-    // so this transaction reaches no reward path but observes a resolved fight.
-    return {
-      events,
-      encounterResolved: true,
-    };
+  if (ended) {
+    return ended;
   } else {
     // Reduced synthetic transaction doubles used by older unit tests do not
     // expose the full Prisma transaction surface. Keep their historical update
