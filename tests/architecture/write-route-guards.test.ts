@@ -29,3 +29,20 @@ describe("every campaign write route calls the playable guard (death-saves spec 
     expect(readFileSync(join(ROOT, file), "utf8")).toContain("campaignPlayableRefusal(");
   });
 });
+
+describe("every character write route refuses a dead character (death-saves spec §7.2, §9)", () => {
+  const files = [
+    ...routes(join(ROOT, "app", "api", "character", "[id]")),
+    join(ROOT, "app", "api", "campaign", "route.ts"),
+  ]
+    .map((f) => relative(ROOT, f).replace(/\\/g, "/"))
+    .filter((f) => WRITE.test(readFileSync(join(ROOT, f), "utf8")));
+
+  it("finds the write routes", () => {
+    expect(files.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it.each(files)("%s", (file) => {
+    expect(readFileSync(join(ROOT, file), "utf8")).toContain("characterAliveRefusal(");
+  });
+});

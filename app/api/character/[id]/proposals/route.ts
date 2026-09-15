@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/session";
+import { prisma } from "@/lib/db/prisma";
+import { characterAliveRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import {
   characterAiProposalRequestSchema,
   characterChangeSchema,
@@ -36,6 +38,8 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     const [{ id }, user, body] = await Promise.all([params, getAuthUser(), request.json()]);
+    const alive = await characterAliveRefusal(prisma, id, user.id);
+    if (alive) return guardResponse(alive);
     const parsed = characterAiProposalRequestSchema.parse(body);
     const context = await getCharacterProposalContext(id, user.id);
     if (context.snapshot.revision !== parsed.expectedVersion) {

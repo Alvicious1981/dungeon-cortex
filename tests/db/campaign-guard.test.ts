@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { campaignPlayableRefusal } from "@/lib/db/campaign-guard";
+import { campaignPlayableRefusal, characterAliveRefusal } from "@/lib/db/campaign-guard";
+
+describe("characterAliveRefusal (death-saves spec §7.2, §9)", () => {
+  it("refuses a dead character and passes a living one", async () => {
+    const dead = { character: { findUnique: vi.fn().mockResolvedValue({ diedAt: new Date() }) } } as never;
+    const alive = { character: { findUnique: vi.fn().mockResolvedValue({ diedAt: null }) } } as never;
+    const missing = { character: { findUnique: vi.fn().mockResolvedValue(null) } } as never;
+    expect(await characterAliveRefusal(dead, "x")).toMatchObject({ code: "CHARACTER_DEAD" });
+    expect(await characterAliveRefusal(alive, "x")).toBeNull();
+    expect(await characterAliveRefusal(missing, "x")).toBeNull();
+  });
+});
 
 function db(row: unknown) {
   return { campaign: { findUnique: vi.fn().mockResolvedValue(row) } } as never;

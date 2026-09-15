@@ -892,6 +892,22 @@ async function resolveEncounterIfEnded(input: {
   });
 
   if (claim.count === 1) {
+    if (resolution.reason === "player_dead") {
+      // Permanent death (docs/superpowers/specs/2026-09-15-death-saves-design.md §9).
+      // The winner of the active → resolved claim is the only writer, and
+      // `diedAt: null` makes a retry or a losing racer a no-op.
+      const owner = await tx.encounter.findUnique({
+        where: { id: encounterId },
+        select: { campaign: { select: { characterId: true } } },
+      });
+      if (owner) {
+        await tx.character.updateMany({
+          where: { id: owner.campaign.characterId, diedAt: null },
+          data: { diedAt: new Date() },
+        });
+      }
+    }
+
     // Winner path: this transaction owns the active → resolved claim and is
     // the only one with the right to evaluate an XP award
     // (docs/DECISION_XP_AWARD_AUTHORITY.md §9). Phase 1 pays only on a

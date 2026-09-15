@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthUser } from "@/lib/auth/session";
+import { prisma } from "@/lib/db/prisma";
+import { characterAliveRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { importCharacterProfileFromPdf } from "@/lib/character-sheet/pdf";
 import { characterSheetErrorResponse } from "@/lib/character-sheet/http";
 import { createCharacterProposal } from "@/lib/character-sheet/service";
@@ -19,6 +21,8 @@ interface RouteContext {
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     const [{ id }, user, form] = await Promise.all([params, getAuthUser(), request.formData()]);
+    const alive = await characterAliveRefusal(prisma, id, user.id);
+    if (alive) return guardResponse(alive);
     const file = form.get("file");
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Debes adjuntar un archivo PDF." }, { status: 400 });
