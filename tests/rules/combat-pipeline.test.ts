@@ -1126,7 +1126,8 @@ describe("finalizeEncounterTurn", () => {
   it("marks encounter as resolved when the player is dead, and never grants XP even though an enemy carries a positive xpValue", async () => {
     const tx = buildMockTx();
     (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: "player-1", isPlayer: true, hp: 0 },
+      // Dead is the canonical marker, not 0 HP (death-saves spec §6.2).
+      { id: "player-1", isPlayer: true, hp: 0, deathSaveFailures: 3 },
       { id: "enemy-1", isPlayer: false, hp: 10, xpValue: 50 },
     ]);
 
