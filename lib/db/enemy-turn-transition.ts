@@ -282,6 +282,16 @@ export async function resolveEnemyTurn(
         collectEvents: ctx.collectEvents,
         events,
       });
+      await tx.gameLog.create({
+        data: {
+          campaignId: ctx.campaignId,
+          role: "system",
+          content:
+            fall === "dead"
+              ? `${player.name} dies from massive damage.`
+              : `${player.name} falls unconscious and is dying.`,
+        },
+      });
       // The remaining multiattack attacks are not rolled (death-saves spec §6.1).
       return { events, playerDowned: true, playerDied: fall === "dead" };
     }

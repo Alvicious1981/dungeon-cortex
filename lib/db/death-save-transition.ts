@@ -51,6 +51,7 @@ export async function rollPlayerDeathSave(
     where: { encounterId: ctx.encounterId, isPlayer: true },
     select: {
       id: true,
+      name: true,
       hp: true,
       deathSaveSuccesses: true,
       deathSaveFailures: true,
@@ -108,7 +109,16 @@ export async function rollPlayerDeathSave(
     data: {
       campaignId: ctx.campaignId,
       role: "system",
-      content: `Death save: ${natural} — ${verdict} (${successes}/3 successes, ${failures}/3 failures).`,
+      // The counters alone do not tell the player what they mean.
+      content:
+        `Death save: ${natural} — ${verdict} (${successes}/3 successes, ${failures}/3 failures).` +
+        (result.outcome === "stable"
+          ? ` ${player.name} is stable.`
+          : result.outcome === "dead"
+            ? ` ${player.name} dies.`
+            : result.outcome === "revived"
+              ? ` ${player.name} regains consciousness with 1 HP.`
+              : ""),
     },
   });
 

@@ -20,11 +20,14 @@ interface Props {
     conditions: string[];
   }>;
   activeTurnIndex: number;
+  /** The player is at 0 HP (death-saves spec §7.4). */
+  playerDown?: boolean;
 }
 
 export default function CombatHUDController({
   combatants,
   activeTurnIndex,
+  playerDown = false,
 }: Props) {
   const [isPending, setIsPending] = useState(false);
   const [localCombatants, setLocalCombatants] = useState(combatants);
@@ -91,6 +94,7 @@ export default function CombatHUDController({
       activeTurnIndex={localTurnIndex}
       isPending={isPending}
       onActionTrigger={handleAction}
+      playerDown={playerDown}
     />
   );
 }

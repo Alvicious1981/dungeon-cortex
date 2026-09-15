@@ -398,7 +398,7 @@ describe("transición atómica de un chequeo permitido", () => {
       failOnStaleTurn: true,
     });
     expect(tx.gameLog.create).toHaveBeenNthCalledWith(1, {
-      data: { campaignId, role: "user", content: "I inspect the room" },
+      data: { campaignId, role: "user", content: "I inspect the room", createdAt: expect.any(Date) },
     });
     expect(tx.gameLog.create).toHaveBeenNthCalledWith(
       2,
@@ -478,7 +478,7 @@ describe("contrato fail-closed compartido por acciones que terminan turno", () =
         })
       );
       expect(tx.gameLog.create).toHaveBeenCalledWith({
-        data: { campaignId, role: "user", content: action },
+        data: { campaignId, role: "user", content: action, createdAt: expect.any(Date) },
       });
       const globalMechanicalLogs = (prisma.gameLog.create as any).mock.calls.filter(
         ([args]: [{ data?: { role?: string } }]) =>

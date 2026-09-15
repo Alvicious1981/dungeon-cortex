@@ -27,6 +27,8 @@ export interface CombatHUDProps {
   activeTurnIndex: number;
   isPending: boolean;
   onActionTrigger: (action: string) => void;
+  /** The player is at 0 HP: only the death-save action applies (death-saves spec §7.4). */
+  playerDown?: boolean;
 }
 
 interface ActionConfig {
@@ -108,6 +110,7 @@ export default function CombatHUD({
   activeTurnIndex,
   isPending,
   onActionTrigger,
+  playerDown = false,
 }: CombatHUDProps) {
   return (
     <section className="relative h-full w-full text-slate-100">
@@ -166,6 +169,11 @@ export default function CombatHUD({
 
       <div className="absolute bottom-4 left-1/2 w-[min(52rem,92vw)] -translate-x-1/2">
         <div className={`p-3 ${PANEL_CLASS}`}>
+          {playerDown ? (
+            <p role="status" className="px-2 py-3 text-center text-sm text-red-200">
+              Estás inconsciente: usa «Tirada de muerte» o «Esperar» en las acciones de combate.
+            </p>
+          ) : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
             {ACTIONS.map(({ keybind, action, icon: Icon }) => (
               <button
@@ -184,6 +192,7 @@ export default function CombatHUD({
               </button>
             ))}
           </div>
+          )}
         </div>
       </div>
     </section>

@@ -108,6 +108,10 @@ describe("resolveEnemyTurn", () => {
     expect(outcome.playerDied).toBe(false);
     expect(outcome.events.map((e) => e.type)).toContain("PLAYER_DOWNED");
     expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 0 } });
+    // The fall is a line of its own, after the blow that caused it.
+    expect(tx.gameLog.create).toHaveBeenLastCalledWith({
+      data: { campaignId: "camp-1", role: "system", content: "Aldric falls unconscious and is dying." },
+    });
   });
 
   it("kills outright when the blow's leftover damage reaches max HP", async () => {
@@ -120,6 +124,9 @@ describe("resolveEnemyTurn", () => {
 
     expect(outcome).toMatchObject({ playerDowned: true, playerDied: true });
     expect(outcome.events.map((e) => e.type)).toContain("PLAYER_DIED");
+    expect(tx.gameLog.create).toHaveBeenLastCalledWith({
+      data: { campaignId: "camp-1", role: "system", content: "Aldric dies from massive damage." },
+    });
   });
 
   it("holds against a player already at 0 HP", async () => {

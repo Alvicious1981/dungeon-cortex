@@ -368,6 +368,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     // page still renders with the ordinary deck.
     lifeState = undefined;
   }
+  const playerDown = lifeState === "dying" || lifeState === "stable";
 
   const barColor = hpBarColor(character.hp, character.maxHp);
 
@@ -430,6 +431,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       >
         {activeEncounter && (
           <CombatHUDController
+            playerDown={playerDown}
             activeTurnIndex={activeEncounter.currentTurnIndex}
             combatants={activeEncounter.combatants.map((c) => ({
               id: c.id,
@@ -459,7 +461,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               className="mb-1 text-[10px] uppercase tracking-[0.3em]"
               style={{ fontFamily: "var(--font-cinzel)", color: "#C49A2A" }}
             >
-              Campaña activa
+              {character.diedAt ? "Campaña terminada" : "Campaña activa"}
             </p>
             <h1
               className="text-2xl font-bold leading-tight sm:text-3xl"
@@ -477,7 +479,8 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               fontFamily: "var(--font-cinzel)",
             }}
           >
-            {campaign.status}
+            {/* A dead character's campaign stays "active" in the database (death-saves spec §9). */}
+            {character.diedAt ? "Caída" : campaign.status}
           </span>
         </header>
 
@@ -904,6 +907,11 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   />
                   <ActionInput
                     campaignId={campaign.id}
+                    disabledReason={
+                      playerDown
+                        ? "Estás inconsciente: solo puedes usar «Tirada de muerte» o «Esperar»."
+                        : undefined
+                    }
                     selectableTargets={
                       activeEncounter?.combatants.map((c) => ({
                         id: c.id,
@@ -925,6 +933,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           ════════════════════════════════════ */}
           <aside id="journal" aria-label="Combate, misiones, personajes y diario" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
             <InitiativeTracker
+              playerDown={playerDown}
               entries={initiativeEntries}
               activeId={activeCombatantId}
             />
