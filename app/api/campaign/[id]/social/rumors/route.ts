@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { resolveRumors, SocialServiceError } from "@/lib/rules/social-service";
 
 interface RouteContext {
@@ -67,9 +68,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       { status: 403 }
     );
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
-  }
+  const playable = await campaignPlayableRefusal(prisma, campaignId);
+  if (playable) return guardResponse(playable);
 
   const npc = await prisma.nPC.findUnique({
     where: { id: parsed.data.npcId },

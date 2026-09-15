@@ -91,6 +91,7 @@ import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
 import { EnemyTurnInvariantError } from "@/lib/db/enemy-turn-transition";
 import { rollPlayerDeathSave } from "@/lib/db/death-save-transition";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { DeathSaveInvariantError, derivePlayerLifeState } from "@/lib/rules/death-save";
 
 /**
@@ -382,9 +383,10 @@ async function resolveAction(
   if (campaign.userId !== user.id) {
     return NextResponse.json({ error: "Campaign does not belong to this user." }, { status: 403 });
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
-  }
+  // Inactive campaign or dead character (death-saves spec §7.2). 0 HP is
+  // delegated to playerConditionRefusal, which lets Death Save and Wait through.
+  const playable = await campaignPlayableRefusal(prisma, campaignId, { unconscious: "delegate" });
+  if (playable) return guardResponse(playable);
 
   // ── Idempotency acquisition (DC-AUD-003) ─────────────────────────────────────
   // Placed after ownership and campaign state, so an unauthenticated or

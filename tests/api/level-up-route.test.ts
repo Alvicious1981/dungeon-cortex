@@ -9,7 +9,8 @@ import { getAuthUser } from "@/lib/auth/session";
 import { applyLevelUp } from "@/lib/rules/level-up-service";
 
 vi.mock("@/lib/db/prisma", () => ({
-  prisma: { campaign: { findFirst: vi.fn() } },
+  // findUnique serves campaignPlayableRefusal (death-saves spec §7.2).
+  prisma: { campaign: { findFirst: vi.fn(), findUnique: vi.fn() } },
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -78,6 +79,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getAuthUser as any).mockResolvedValue(USER);
   (prisma.campaign.findFirst as any).mockResolvedValue(CAMPAIGN);
+  (prisma.campaign.findUnique as any).mockResolvedValue({ status: "active" });
   (applyLevelUp as any).mockResolvedValue(APPLIED);
 });
 
@@ -312,6 +314,7 @@ describe("POST /api/campaign/[id]/level-up — authority", () => {
       "zod",
       "@/lib/db/prisma",
       "@/lib/auth/session",
+      "@/lib/db/campaign-guard",
       "@/lib/rules/level-up-service",
       "@/lib/rules/progression",
     ]);

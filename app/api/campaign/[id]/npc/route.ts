@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import type { Prisma } from "@prisma/client";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { generateNPC } from "@/lib/rules/npc";
 import type { NPCRole } from "@/lib/rules/npc";
 
@@ -82,9 +83,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (campaign.userId !== user.id) {
     return NextResponse.json({ error: "Campaign does not belong to this user." }, { status: 403 });
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
-  }
+  const playable = await campaignPlayableRefusal(prisma, campaignId);
+  if (playable) return guardResponse(playable);
 
   // Derive the statblock deterministically — values are never trusted from the client.
   const statblock = generateNPC(seed, role);

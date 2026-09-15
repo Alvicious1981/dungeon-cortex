@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
 import {
   acquireActionReceipt,
@@ -73,9 +74,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (campaign.userId !== user.id) {
     return NextResponse.json({ error: "Campaign does not belong to this user." }, { status: 403 });
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
-  }
+  const playable = await campaignPlayableRefusal(prisma, campaignId);
+  if (playable) return guardResponse(playable);
 
   const npc = await prisma.nPC.findUnique({
     where: { id: parsed.data.npcId },

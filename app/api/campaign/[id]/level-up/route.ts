@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import {
   applyLevelUp,
   LevelUpServiceError,
@@ -104,6 +105,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (!campaign?.characterId) {
     return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
   }
+
+  // This route checked no campaign state before (death-saves spec §7.2).
+  const playable = await campaignPlayableRefusal(prisma, campaign.id);
+  if (playable) return guardResponse(playable);
 
   try {
     const result = await applyLevelUp({
