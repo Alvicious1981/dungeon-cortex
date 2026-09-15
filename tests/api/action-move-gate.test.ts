@@ -152,7 +152,7 @@ describe("move gate: the player's line commits with the move", () => {
     expect(moveToNode).toHaveBeenCalledWith(prismaTx, campaignId, "Left Branch");
     expect(writes).toEqual(["move", "player line"]);
     expect(prismaTx.gameLog.create).toHaveBeenCalledWith({
-      data: { campaignId, role: "user", content: action },
+      data: { campaignId, role: "user", content: action, createdAt: expect.any(Date) },
     });
     // Written once: the trailing catch-all must not add a second line.
     expect(userLines()).toHaveLength(1);
