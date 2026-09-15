@@ -11,6 +11,7 @@ import MemoryJournal from "@/components/MemoryJournal";
 import QuestTracker from "@/components/QuestTracker";
 import NPCRoster from "@/components/NPCRoster";
 import type { InitiativeEntry } from "@/lib/rules/combat";
+import { derivePlayerLifeState, type PlayerLifeState } from "@/lib/rules/death-save";
 import type {
   WeaponProperties,
   ArmorProperties,
@@ -343,6 +344,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         dexModifier: 0,
         naturalRoll: c.initiativeTotal,
         initiative: c.initiativeTotal,
+        unconscious: c.isPlayer && c.hp <= 0,
         roll: {
           notation: "1d20",
           dice: [{ faces: 20, result: c.initiativeTotal }],
@@ -355,6 +357,17 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
   const activeCombatantId =
     activeEncounter?.combatants[activeEncounter.currentTurnIndex]?.id;
+
+  // Display only: the action route enforces the same state (death-saves spec §7.1).
+  const playerCombatant = activeEncounter?.combatants.find((c) => c.isPlayer) ?? null;
+  let lifeState: PlayerLifeState | undefined;
+  try {
+    lifeState = playerCombatant ? derivePlayerLifeState(playerCombatant) : undefined;
+  } catch {
+    // An inconsistent row: the backend refuses with DEATH_SAVE_INVARIANT; the
+    // page still renders with the ordinary deck.
+    lifeState = undefined;
+  }
 
   const barColor = hpBarColor(character.hp, character.maxHp);
 
@@ -862,19 +875,47 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             />
 
             <section id="commands" aria-label="Acciones disponibles" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-lg border border-[var(--dc-border-strong)] bg-[var(--dc-canvas-soft)]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
-              <MacroDeck inCombat={!!activeEncounter} />
-              <ActionInput
-                campaignId={campaign.id}
-                selectableTargets={
-                  activeEncounter?.combatants.map((c) => ({
-                    id: c.id,
-                    name: c.name,
-                    hp: c.hp,
-                    maxHp: c.maxHp,
-                    isPlayer: c.isPlayer,
-                  })) ?? []
-                }
-              />
+              {character.diedAt ? (
+                // Permanent death (death-saves spec §9): no action remains.
+                <div role="status" className="space-y-3 py-2 text-center">
+                  <p className="text-lg" style={{ fontFamily: "var(--font-cinzel, serif)", color: "#FCA5A5" }}>
+                    {character.name} ha caído.
+                  </p>
+                  <Link
+                    href="/character/create"
+                    className="inline-flex min-h-[44px] items-center rounded-md border border-amber-700/50 bg-amber-900/20 px-4 text-sm font-semibold text-amber-300 hover:bg-amber-900/40"
+                  >
+                    Crear otro personaje
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <MacroDeck
+                    inCombat={!!activeEncounter}
+                    lifeState={lifeState}
+                    deathSaves={
+                      playerCombatant && lifeState && lifeState !== "conscious"
+                        ? {
+                            successes: playerCombatant.deathSaveSuccesses,
+                            failures: playerCombatant.deathSaveFailures,
+                          }
+                        : undefined
+                    }
+                  />
+                  <ActionInput
+                    campaignId={campaign.id}
+                    selectableTargets={
+                      activeEncounter?.combatants.map((c) => ({
+                        id: c.id,
+                        name: c.name,
+                        hp: c.hp,
+                        maxHp: c.maxHp,
+                        isPlayer: c.isPlayer,
+                      })) ?? []
+                    }
+                  />
+                </>
+              )}
             </section>
 
           </div>

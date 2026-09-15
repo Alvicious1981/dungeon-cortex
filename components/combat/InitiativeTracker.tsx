@@ -120,7 +120,14 @@ export default function InitiativeTracker({ entries, activeId }: Props) {
               />
 
               {/* Name */}
-              <span className="flex-1 truncate font-medium">{entry.name}</span>
+              <span className="flex-1 truncate font-medium">
+                {entry.name}
+                {entry.unconscious && (
+                  <span className="ml-2 rounded border border-red-800/60 bg-red-950/50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-300">
+                    Inconsciente
+                  </span>
+                )}
+              </span>
 
               {/* Roll breakdown: natural + modifier = total */}
               <span className="shrink-0 font-mono text-xs text-neutral-500">

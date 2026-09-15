@@ -12,11 +12,16 @@ import {
   type DungeonActionRequestDetail,
   type DungeonTargetSelectionDetail,
 } from "@/lib/events/action-transport";
+import type { PlayerLifeState } from "@/lib/rules/death-save";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Props {
   inCombat: boolean;
+  /** The player's derived state; a downed player gets only the death-save action. */
+  lifeState?: PlayerLifeState;
+  /** Death-save counters, shown while the player is down (death-saves spec §7.4). */
+  deathSaves?: { successes: number; failures: number };
 }
 
 // ─── Action definitions ───────────────────────────────────────────────────────
@@ -40,6 +45,9 @@ const CANONICAL_ACTION_REQUESTS: Record<string, string> = {
   // Combat — resolved by the authoritative macro path.
   "Atacar con arma": "Attack",
   "Finalizar turno": "End Turn",
+  // A downed player's only actions (death-saves spec §6.3, §6.4).
+  "Tirada de muerte": "Death Save",
+  "Esperar": "Wait",
   // Exploration — resolved as SRD ability checks or a rest.
   "Buscar trampas": "search for traps",
   "Investigar la zona": "investigate the area",
@@ -103,6 +111,25 @@ const ACTION_META: Record<string, ActionMeta> = {
       </SvgIcon>
     ),
   },
+  "Tirada de muerte": {
+    accent: "#FCA5A5",
+    icon: (
+      <SvgIcon>
+        {/* d20 outline */}
+        <path d="M8 1.5 14 5v6l-6 3.5L2 11V5z" />
+        <path d="M8 1.5 5 10h6z" />
+      </SvgIcon>
+    ),
+  },
+  "Esperar": {
+    accent: "#C4B5FD",
+    icon: (
+      <SvgIcon>
+        {/* Hourglass */}
+        <path d="M4 2h8M4 14h8M5 2c0 3 6 3 6 6s-6 3-6 6M11 2c0 3-6 3-6 6s6 3 6 6" />
+      </SvgIcon>
+    ),
+  },
   // ── Exploration ─────────────────────────────────────────────────────────────
   "Buscar trampas": {
     accent: "#FDE68A",
@@ -147,13 +174,22 @@ const ACTION_META: Record<string, ActionMeta> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function MacroDeck({ inCombat }: Props) {
+export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const pendingRequestId = useRef<string | null>(null);
 
-  const actions = inCombat ? COMBAT_ACTIONS : EXPLORATION_ACTIONS;
+  // A downed player acts only through the death-save action; the backend
+  // refuses everything else with 409 PLAYER_UNCONSCIOUS (death-saves spec §7.1).
+  const actions: readonly string[] = !inCombat
+    ? EXPLORATION_ACTIONS
+    : lifeState === "dying"
+      ? ["Tirada de muerte"]
+      : lifeState === "stable"
+        ? ["Esperar"]
+        : COMBAT_ACTIONS;
+  const downed = inCombat && (lifeState === "dying" || lifeState === "stable");
   const isAnyLoading = loadingAction !== null;
 
   useEffect(() => {
@@ -320,6 +356,23 @@ export default function MacroDeck({ inCombat }: Props) {
           );
         })}
       </div>
+
+      {/* Death-save counters while the player is down */}
+      {downed && deathSaves && (
+        <p
+          aria-label={`Éxitos ${deathSaves.successes} de 3, fallos ${deathSaves.failures} de 3`}
+          className="mt-2 flex items-center justify-center gap-4 font-mono text-sm"
+        >
+          <span style={{ color: "#86EFAC" }} aria-hidden="true">
+            {"●".repeat(deathSaves.successes)}
+            {"○".repeat(3 - deathSaves.successes)}
+          </span>
+          <span style={{ color: "#FCA5A5" }} aria-hidden="true">
+            {"✕".repeat(deathSaves.failures)}
+            {"○".repeat(3 - deathSaves.failures)}
+          </span>
+        </p>
+      )}
 
       {/* Error feedback */}
       {error !== null && (

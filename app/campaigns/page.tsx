@@ -22,7 +22,7 @@ interface CampaignSummary {
   title: string;
   status: string;
   updatedAt: Date;
-  character: { name: string; class: string; level: number };
+  character: { name: string; class: string; level: number; diedAt: Date | null };
 }
 
 const SHELL = {
@@ -41,8 +41,11 @@ function formatUpdatedAt(value: Date): string {
 }
 
 function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
-  const isActive = campaign.status === "active";
   const { character } = campaign;
+  // A dead character's campaign stays "active" in the database but cannot be
+  // played (death-saves spec §9).
+  const isDead = character.diedAt !== null;
+  const isActive = campaign.status === "active" && !isDead;
 
   return (
     <Panel as="article" className="flex flex-col gap-4 p-5 sm:p-6">
@@ -68,7 +71,7 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
         {!isActive && (
           <div>
             <dt className="dc-kicker">Estado</dt>
-            <dd className="dc-copy mt-1">{campaign.status}</dd>
+            <dd className="dc-copy mt-1">{isDead ? "Caída" : campaign.status}</dd>
           </div>
         )}
       </dl>
@@ -93,7 +96,9 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
             Continuar campaña
           </span>
           <p className="dc-help">
-            Esta campaña no está activa, así que no puede retomarse.
+            {isDead
+              ? `${character.name} ha caído; esta campaña no puede continuar.`
+              : "Esta campaña no está activa, así que no puede retomarse."}
           </p>
         </div>
       )}
@@ -114,7 +119,7 @@ export default async function CampaignsPage() {
         title: true,
         status: true,
         updatedAt: true,
-        character: { select: { name: true, class: true, level: true } },
+        character: { select: { name: true, class: true, level: true, diedAt: true } },
       },
     });
   } catch (e) {
