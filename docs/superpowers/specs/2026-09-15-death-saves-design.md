@@ -77,8 +77,8 @@ All combat death-save state lives on the player's `Combatant`:
 | Field | Meaning |
 | --- | --- |
 | `hp = 0` | Downed. `Character.hp` stays canonical; `setPlayerHp` mirrors it (enemy-turns spec §6.1). |
-| `conditions` contains `unconscious` | Added on falling, removed on waking. Uses the existing case-insensitive helpers (`lib/rules/combat.ts:177`, `:194`) and `CONDITION_REGISTRY`. |
-| `deathSaveSuccesses`, `deathSaveFailures` | Existing columns, 0..3. Reset to 0 on falling, waking and healing. |
+| unconscious | **Derived from `hp = 0`, never persisted in `conditions`** (corrected during planning): a persisted condition would be a second source of truth that every HP write would have to clear. |
+| `deathSaveSuccesses`, `deathSaveFailures` | Existing columns, 0..3. **Every player HP write resets them** (with `stableWakeRound`) through the mirror in `setPlayerHp`: falling to 0 starts a fresh dying state; any HP above 0 ends it. |
 | **new** `stableWakeRound Int?` | `NULL` while dying. Set to `round + 1d4` on stabilising. |
 | **new** `Character.diedAt DateTime?` | Written only by death (§9). |
 
@@ -126,8 +126,8 @@ player's own area spell — one helper, `applyPlayerDowned`, runs after
 1. `resolveDownedBlow` decides.
    - **instant_death:** write `deathSaveFailures = 3`; the encounter resolves
      `player_dead` (§9) with `PLAYER_DIED { cause: "massive_damage" }`.
-   - **dying:** add `unconscious`, set both counters to 0 and
-     `stableWakeRound` to `NULL`; emit `PLAYER_DOWNED`.
+   - **dying:** emit `PLAYER_DOWNED`; the HP write already reset both
+     counters and `stableWakeRound` (§4).
 2. The downing enemy's remaining multiattack attacks are not rolled.
 3. **The chain continues.** Later enemies plan `noAction()`; the pointer
    returns to the player as usual.
@@ -144,7 +144,7 @@ turn like `End Turn`, rolls 1d20:
 
 | Result | Effect |
 | --- | --- |
-| natural 20 | `setPlayerHp(1)`, remove `unconscious`, counters to 0; emit `PLAYER_REVIVED`. **The player keeps the turn** (the SRD rolls at the start of the turn); no chain runs. |
+| natural 20 | `setPlayerHp(1)`, which resets the counters (§4); emit `PLAYER_REVIVED`. **The player keeps the turn** (the SRD rolls at the start of the turn); no chain runs. |
 | success or failure, no outcome | Persist counters; `finalizeEncounterTurn` advances; the chain returns to the player. |
 | third success | Persist `stableWakeRound = round + 1d4`; emit `PLAYER_STABILIZED`; advance. |
 | third failure (natural 1 counts twice) | `deathSaveFailures = 3`; the encounter resolves `player_dead`; `PLAYER_DIED { cause: "death_saves" }` (§9). |
@@ -159,8 +159,8 @@ Calls `finalizeEncounterTurn` directly.
 ### 6.5 Waking
 
 When the chain ends with the pointer on the player, in the same transaction:
-if `shouldWake`, `setPlayerHp(1)`, remove `unconscious`, clear
-`stableWakeRound` and the counters, emit `PLAYER_WOKE`. The player acts
+if `shouldWake`, `setPlayerHp(1)`, which clears `stableWakeRound` and the
+counters (§4); emit `PLAYER_WOKE`. The player acts
 normally that turn; enemies attack again from the next round.
 
 ### 6.6 Events and narration
@@ -181,9 +181,12 @@ one roll and one 409.
 
 ### 7.1 Action route
 
-`playerConditionRefusal` runs after `playerTurnRefusal`, so enemy slots keep
-409 `NOT_PLAYER_TURN`. It applies to both the macro fast path and the
-standard path, before the receipt is claimed; a refusal writes nothing.
+`playerConditionRefusal` applies to both the macro fast path and the
+standard path. It runs after receipt acquisition, like every refusal in the
+route (corrected during planning): the receipt records the 4xx (DC-AUD-003),
+and no game state or log is written. `End Turn` stays allowed while an enemy
+owns the slot, so a parked encounter can still resume (enemy-turns §6.6);
+`Death Save` on an enemy slot then meets 409 `NOT_PLAYER_TURN`.
 
 | Player | Allowed | Otherwise |
 | --- | --- | --- |
@@ -237,8 +240,9 @@ The backend decides; the UI only reflects it.
 - `InitiativeTracker`: "Inconsciente" badge.
 - Campaign screen when dead: the action bar is replaced by an epitaph
   ("{name} ha caído", cause, round) and a link to create a character.
-- Campaign list: "Caída". Character picker: dead characters shown, not
-  selectable.
+- Campaign list: "Caída". No character picker exists (character creation
+  opens its first campaign), so the API refusal of §7.2 is the whole barrier
+  (corrected during planning).
 
 ## 8. Migration, deployment, existing data
 
