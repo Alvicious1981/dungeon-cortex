@@ -220,3 +220,18 @@ describe("POST /api/campaign/[id]/encounter — Combatant.attackProfile snapshot
     expect(player).not.toHaveProperty("attackProfile");
   });
 });
+
+describe("POST /api/campaign/[id]/encounter — a character at 0 HP (death-saves spec §8.3)", () => {
+  it("refuses to start a fight the character would begin downed", async () => {
+    (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...CAMPAIGN,
+      character: { ...CAMPAIGN.character, hp: 0 },
+    });
+
+    const res = await post({ enemies: [{ name: "Bandit", hp: 11, maxHp: 11, dexModifier: 1 }] });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("CHARACTER_AT_ZERO_HP");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
