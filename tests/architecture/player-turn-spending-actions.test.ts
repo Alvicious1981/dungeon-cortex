@@ -141,4 +141,15 @@ describe("player turn-spending action architecture", () => {
     expect(reviewedCalls).toHaveLength(TURN_ENDING_BRANCHES.length);
     expect(allFailClosedCalls).toHaveLength(TURN_ENDING_BRANCHES.length);
   });
+
+  it("takes the Character lock before resolving a combat item", () => {
+    const source = branchSource(
+      TURN_ENDING_BRANCHES.find((branch) => branch.label === "combat item")!
+    );
+    const lock = source.indexOf("lockCharacterForCombatAction(");
+    const resolve = source.indexOf("executeCombatAction(");
+
+    expect(lock, "combat item must take the Character lock").toBeGreaterThanOrEqual(0);
+    expect(lock).toBeLessThan(resolve);
+  });
 });

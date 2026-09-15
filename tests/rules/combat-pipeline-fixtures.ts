@@ -43,6 +43,7 @@ export function buildMockTx(
     },
     combatant: {
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findMany: vi.fn().mockResolvedValue([]),
     },
     encounter: {
