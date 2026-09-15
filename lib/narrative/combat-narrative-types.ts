@@ -33,7 +33,14 @@ export type NarrativeFactType =
   | 'spell_cast'
   | 'concentration_broken'
   | 'turn_started'
-  | 'turn_ended';
+  | 'turn_ended'
+  // Death saves (docs/superpowers/specs/2026-09-15-death-saves-design.md §6.6).
+  | 'player_downed'
+  | 'death_save_rolled'
+  | 'player_stabilized'
+  | 'player_revived'
+  | 'player_woke'
+  | 'player_died';
 
 export const NarrativeFactTypeSchema = z.enum([
   'attack_hit',
@@ -49,6 +56,12 @@ export const NarrativeFactTypeSchema = z.enum([
   'concentration_broken',
   'turn_started',
   'turn_ended',
+  'player_downed',
+  'death_save_rolled',
+  'player_stabilized',
+  'player_revived',
+  'player_woke',
+  'player_died',
 ]);
 
 /** A single resolved game event from the backend. */

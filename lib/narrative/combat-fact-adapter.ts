@@ -48,6 +48,15 @@ function areFactsEqual(a: NarrativeFact, b: NarrativeFact): boolean {
  * - Does not invent facts, rolls, or outcomes.
  * - Does not infer or calculate hpBefore.
  */
+const DEATH_SAVE_FACTS = {
+  PLAYER_DOWNED: { type: 'player_downed', description: 'The player falls unconscious at 0 HP' },
+  DEATH_SAVE_ROLLED: { type: 'death_save_rolled', description: 'The player rolls a death saving throw' },
+  PLAYER_STABILIZED: { type: 'player_stabilized', description: 'The player is stable but unconscious' },
+  PLAYER_REVIVED: { type: 'player_revived', description: 'The player regains consciousness on a natural 20' },
+  PLAYER_WOKE: { type: 'player_woke', description: 'The stable player regains consciousness' },
+  PLAYER_DIED: { type: 'player_died', description: 'The player dies' },
+} as const satisfies Record<string, { type: NarrativeFact['type']; description: string }>;
+
 export function adaptCombatEventsToNarrativeContext(
   events: GameEvent[]
 ): CombatNarrativeContext {
@@ -223,7 +232,6 @@ export function adaptCombatEventsToNarrativeContext(
       })
       .with(
         'SPELL_CAST',
-        'PLAYER_DOWNED',
         'ENCOUNTER_START',
         'TURN_ADVANCE',
         'ROUND_ADVANCE',
@@ -238,13 +246,22 @@ export function adaptCombatEventsToNarrativeContext(
         // Not a combat fact. The resolved check reaches the narrator through the
         // system game log written by the action route, in the same way trades do.
         'ABILITY_CHECK_RESOLVED',
-        // Death-save facts arrive with the narration work of death-saves Stage 3.
+        () => undefined
+      )
+      // Death saves (docs/superpowers/specs/2026-09-15-death-saves-design.md
+      // §6.6). Each backend event becomes exactly one fact; the narrator may
+      // describe the player's death only when `player_died` is among them.
+      .with(
+        'PLAYER_DOWNED',
         'DEATH_SAVE_ROLLED',
         'PLAYER_STABILIZED',
         'PLAYER_REVIVED',
         'PLAYER_WOKE',
         'PLAYER_DIED',
-        () => undefined
+        (type) => {
+          const fact = DEATH_SAVE_FACTS[type];
+          addFact({ type: fact.type, description: fact.description, payload: { ...(event.payload || {}) } });
+        }
       )
       .exhaustive();
   }
