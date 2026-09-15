@@ -264,6 +264,8 @@ describe("finalizeEncounterTurn enemy chain", () => {
 
   it("resolves player_dead when an enemy kills the player outright", async () => {
     const tx = buildCasTx();
+    const characterUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    (tx as unknown as { character: unknown }).character = { updateMany: characterUpdateMany };
     (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
     vi.mocked(resolveEnemyTurn).mockResolvedValueOnce({
       events: [{ type: "PLAYER_DIED", payload: { cause: "massive_damage" } }],
@@ -286,6 +288,11 @@ describe("finalizeEncounterTurn enemy chain", () => {
 
     expect(result.encounterResolved).toBe(true);
     expect(result.events.map((e) => e.type)).toContain("PLAYER_DIED");
+    // Permanent death: written once, by the claim winner (death-saves spec §9).
+    expect(characterUpdateMany).toHaveBeenCalledWith({
+      where: { id: "char-1", diedAt: null },
+      data: { diedAt: expect.any(Date) },
+    });
     expect(tx.encounter.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({ data: { status: "resolved" } }),
     );

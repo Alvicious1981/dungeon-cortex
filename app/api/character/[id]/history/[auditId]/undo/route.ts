@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth/session";
+import { prisma } from "@/lib/db/prisma";
+import { characterAliveRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { characterUndoRequestSchema } from "@/lib/character-sheet/contracts";
 import { characterSheetErrorResponse } from "@/lib/character-sheet/http";
 import { undoCharacterChange } from "@/lib/character-sheet/service";
@@ -11,6 +13,8 @@ interface RouteContext {
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     const [{ id, auditId }, user, body] = await Promise.all([params, getAuthUser(), request.json()]);
+    const alive = await characterAliveRefusal(prisma, id, user.id);
+    if (alive) return guardResponse(alive);
     const parsed = characterUndoRequestSchema.parse(body);
     return NextResponse.json(
       await undoCharacterChange({

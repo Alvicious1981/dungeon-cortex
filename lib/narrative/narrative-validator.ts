@@ -200,11 +200,26 @@ export function validateNarrativeText(
   const negatedDeathRegex = /\b(?:no\s+one|nobody)\s+(?:dies|is\s+(?:killed|slain))\b|\b(?:does|did)\s+not\s+die\b|\b(?:nadie|ningun[oa])\s+muere\b|\bno\s+muere\b/gi;
   const assertedDeathText = text.replace(negatedDeathRegex, '');
   if (deathWords.test(assertedDeathText)) {
-    const hasDefeatedFact = context?.facts.some(f => f.type === 'enemy_defeated') ?? false;
+    const hasDefeatedFact =
+      context?.facts.some(f => f.type === 'enemy_defeated' || f.type === 'player_died') ?? false;
     if (!hasDefeatedFact) {
       issues.push({
         code: 'unconfirmed_death',
         message: 'Text describes target death, but it is not confirmed by backend consequences.',
+        severity: 'error'
+      });
+    }
+  }
+
+  // 7b. Muerte del jugador no confirmada (death-saves spec §6.6): a caído
+  // tirando salvaciones no está muerto hasta que el backend lo confirma.
+  const playerDeathWords = /\b(?:mueres|has\s+muerto|estás\s+muert[oa]|you\s+die|you\s+are\s+dead)\b/i;
+  if (playerDeathWords.test(assertedDeathText)) {
+    const hasPlayerDied = context?.facts.some(f => f.type === 'player_died') ?? false;
+    if (!hasPlayerDied) {
+      issues.push({
+        code: 'unconfirmed_player_death',
+        message: "Text describes the player's death, but the backend has not confirmed it.",
         severity: 'error'
       });
     }

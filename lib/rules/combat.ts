@@ -41,6 +41,8 @@ export interface InitiativeEntry extends CombatantInput {
   naturalRoll: number;
   /** Final initiative value: naturalRoll + dexModifier. */
   initiative: number;
+  /** Display only: the player is at 0 HP (death-saves spec §7.4). */
+  unconscious?: boolean;
 }
 
 /** Fully ordered initiative result for a combat encounter. */

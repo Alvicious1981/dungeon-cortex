@@ -53,6 +53,25 @@ export async function campaignPlayableRefusal(
   return null;
 }
 
+/**
+ * Refuses every write to a dead character (death-saves spec §7.2, §9). With a
+ * `userId`, a character owned by someone else is not refused here: the route's
+ * own ownership check answers 404, so a dead stranger is never revealed.
+ */
+export async function characterAliveRefusal(
+  db: Db,
+  characterId: string,
+  userId?: string
+): Promise<GuardRefusal | null> {
+  const row = (await db.character.findUnique({
+    where: { id: characterId },
+    select: { diedAt: true, userId: true },
+  })) as { diedAt: Date | null; userId?: string } | null;
+  if (!row?.diedAt) return null;
+  if (userId !== undefined && row.userId !== userId) return null;
+  return { code: "CHARACTER_DEAD", error: "The character is dead." };
+}
+
 export function guardResponse(refusal: GuardRefusal): Response {
   return NextResponse.json({ error: refusal.error, code: refusal.code }, { status: 409 });
 }

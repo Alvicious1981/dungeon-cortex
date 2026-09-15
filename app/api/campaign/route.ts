@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { characterAliveRefusal, guardResponse } from "@/lib/db/campaign-guard";
 
 interface CreateCampaignBody {
   characterId: string;
@@ -45,6 +46,9 @@ export async function POST(req: NextRequest) {
   if (character.userId !== user.id) {
     return NextResponse.json({ error: "Character does not belong to this user." }, { status: 403 });
   }
+  // A dead character cannot start another campaign (death-saves spec §9).
+  const alive = await characterAliveRefusal(prisma, character.id);
+  if (alive) return guardResponse(alive);
 
   const campaign = await prisma.campaign.create({
     data: {

@@ -181,3 +181,40 @@ test("@smoke PostgreSQL rejects an impossible death-save counter", async ({ requ
     await cleanupFixture(prisma, fixture);
   }
 });
+
+test("@smoke a dead character's campaign refuses every write and still reads", async ({
+  request,
+}) => {
+  test.setTimeout(90_000);
+  assertSafeE2EDatabase();
+  const prisma = new PrismaClient();
+  let fixture: GoblinFixture | undefined;
+  try {
+    fixture = await createGoblinFixture(request, prisma, {
+      goblinAt: { x: 5, y: 6 },
+      withProfile: false,
+      currentTurnIndex: 0,
+    });
+    const campaignId = fixture.created.campaignId!;
+    const characterId = fixture.created.characterId!;
+    // The spec's only writer of diedAt is the player_dead claim; the database is
+    // set directly here so the refusals are tested in isolation (spec §9).
+    await prisma.character.update({ where: { id: characterId }, data: { diedAt: new Date() } });
+
+    const writes = await Promise.all([
+      postAction(request, campaignId, "End Turn"),
+      request.post(`/api/campaign/${campaignId}/rest`, { data: { type: "short" } }),
+      request.post("/api/campaign", { data: { characterId, title: "Otra vez" } }),
+      request.patch(`/api/character/${characterId}`, { data: {} }),
+    ]);
+    for (const res of writes) {
+      expect(res.status()).toBe(409);
+      expect(((await res.json()) as { code?: unknown }).code).toBe("CHARACTER_DEAD");
+    }
+    // Reads keep working: the campaign's quests and the character sheet.
+    expect((await request.get(`/api/campaign/${campaignId}/quest`)).status()).toBe(200);
+    expect((await request.get(`/api/character/${characterId}`)).status()).toBe(200);
+  } finally {
+    await cleanupFixture(prisma, fixture);
+  }
+});

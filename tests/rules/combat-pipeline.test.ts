@@ -1125,6 +1125,9 @@ describe("finalizeEncounterTurn", () => {
 
   it("marks encounter as resolved when the player is dead, and never grants XP even though an enemy carries a positive xpValue", async () => {
     const tx = buildMockTx();
+    // The claim winner writes permanent death (death-saves spec §9).
+    const diedAtWrite = vi.fn().mockResolvedValue({ count: 1 });
+    (tx.character as unknown as { updateMany: unknown }).updateMany = diedAtWrite;
     (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
       // Dead is the canonical marker, not 0 HP (death-saves spec §6.2).
       { id: "player-1", isPlayer: true, hp: 0, deathSaveFailures: 3 },
@@ -1139,9 +1142,15 @@ describe("finalizeEncounterTurn", () => {
     });
 
     expect(result.encounterResolved).toBe(true);
-    // player_dead never reaches the award evaluation, regardless of xpValue.
-    expect(tx.encounter.findUnique).not.toHaveBeenCalled();
+    // player_dead never reaches the award evaluation, regardless of xpValue:
+    // no increment. Its only Character write is the idempotent death marker.
     expect(tx.character.update).not.toHaveBeenCalled();
+    expect(diedAtWrite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ diedAt: null }),
+        data: { diedAt: expect.any(Date) },
+      })
+    );
   });
 
   describe("XP award (docs/DECISION_XP_AWARD_AUTHORITY.md)", () => {
