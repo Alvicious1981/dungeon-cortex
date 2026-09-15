@@ -84,7 +84,32 @@ async function waitForBlockedConcentrationWrite(
   );
 }
 
-test("@smoke concentration break and replacement do not deadlock", async ({ request }) => {
+/**
+ * Two interleavings of the same race. Damage rolls 6 and the hit location is
+ * the head in both; only the concentration save differs.
+ *
+ * - A failed save clears concentration, so damage writes Character before its
+ *   Combatant HP decrement.
+ * - A successful save writes no Character row before the decrement. Damage
+ *   still writes Character afterwards, through setPlayerHp, so without the
+ *   up-front Character lock it would run Combatant → Character against the
+ *   replacement's Character → Combatant and deadlock.
+ */
+const SCENARIOS = [
+  {
+    title: "@smoke concentration break and replacement do not deadlock",
+    // Damage=6, hit location=head, CON save=1 (fails).
+    randomValues: [0.99, 0.0, 0.0],
+  },
+  {
+    title: "@smoke damage after a successful concentration save and a replacement do not deadlock",
+    // Damage=6, hit location=head, CON save=20 (succeeds).
+    randomValues: [0.99, 0.0, 0.99],
+  },
+] as const;
+
+for (const scenario of SCENARIOS) {
+test(scenario.title, async ({ request }) => {
   test.setTimeout(90_000);
   assertSafeE2EDatabase();
 
@@ -233,9 +258,9 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
       collectEvents: false,
     };
 
-    // Damage=6, hit location=head, CON save=1. The replacement action rolls
-    // nothing, so this queue is deterministic across the forced interleaving.
-    const randomValues = [0.99, 0.0, 0.0];
+    // The replacement action rolls nothing, so this queue is deterministic
+    // across the forced interleaving.
+    const randomValues: readonly number[] = scenario.randomValues;
     let randomIndex = 0;
     Math.random = () => randomValues[randomIndex++] ?? 0.0;
 
@@ -245,7 +270,15 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
     damageAction = prisma.$transaction(async (realTx) => {
       let paused = false;
       const instrumentedTx = {
+        // The pipeline takes the Character row lock through $queryRaw, and
+        // setPlayerHp mirrors the player's HP with combatant.updateMany. Real
+        // Prisma exposes both, so the double delegates them rather than hiding
+        // the lock order this test exists to prove.
+        $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) =>
+          realTx.$queryRaw(query, ...values),
         combatant: {
+          updateMany: (args: unknown) =>
+            realTx.combatant.updateMany(args as Prisma.CombatantUpdateManyArgs),
           update: async (args: unknown) => {
             const result = await realTx.combatant.update(
               args as Prisma.CombatantUpdateArgs
@@ -331,3 +364,4 @@ test("@smoke concentration break and replacement do not deadlock", async ({ requ
     await cleanupE2ERecords(created);
   }
 });
+}

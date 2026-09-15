@@ -35,6 +35,7 @@ import {
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
+import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 
 export interface PipelineCombatant {
   id: string;
@@ -688,6 +689,16 @@ export async function executeCombatAction(
     }
 
     if (actionType === "attack" || (actionType === "cast_spell" && payload.spellEffect?.type !== "healing")) {
+      // A damaged player's HP is written through setPlayerHp below, and that
+      // writes Character. Take the Character lock before this Combatant row
+      // lock, so the order stays Character → Combatant even when a successful
+      // concentration save above wrote no Character row. Without it, damage
+      // (Combatant → Character) and a concurrent concentration replacement
+      // (Character → Combatant) form a deadlock cycle.
+      if (target.isPlayer && playerCharacterId) {
+        await lockCharacterForCombatAction(tx, playerCharacterId);
+      }
+
       // The first write owns two jobs and does them exactly once: atomically apply
       // damage and acquire PostgreSQL's row lock for this Combatant. Crucially it
       // does not write `conditions`, so a damage-only action can never erase a

@@ -1553,10 +1553,6 @@ async function resolveAction(
       try {
         const committed = await prisma.$transaction(async (tx) => {
           const transactionClient = tx as Prisma.TransactionClient;
-          // Character → Combatant → Encounter, like every other combat path:
-          // healing writes Character, and the finalizer may write Character
-          // again for an XP award after Encounter.
-          await lockCharacterForCombatAction(transactionClient, context.character.id);
           const itemOutcome = await executeCombatAction({
             actionType: "use_item",
             encounter: context.activeEncounter ? {

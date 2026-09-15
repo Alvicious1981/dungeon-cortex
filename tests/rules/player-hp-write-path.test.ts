@@ -121,4 +121,40 @@ describe("player HP single write path", () => {
       data: { hp: hpAfter },
     });
   });
+
+  it("locks Character before the damaged player's Combatant row", async () => {
+    // Real Prisma exposes $queryRaw, so the Character lock is actually taken.
+    // It must come before the HP decrement: setPlayerHp writes Character, and
+    // a Combatant → Character order deadlocks against a concentration
+    // replacement, which writes Character → Combatant.
+    const tx = buildMockTx({ characterHp: 20, characterMaxHp: 20 });
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    (tx as unknown as { $queryRaw: typeof queryRaw }).$queryRaw = queryRaw;
+    mockRandom([0.95, 0.5, 0.5, 0.5]);
+    const player = buildPlayer({ hp: 20 });
+
+    await executeCombatAction(
+      {
+        actionType: "cast_spell",
+        encounter: buildEncounter([player, buildEnemy()]),
+        actorId: "enemy-1",
+        actorName: "Goblin",
+        actorConditions: [],
+        targetCombatants: [player],
+        spellName: "Fire Bolt",
+        spellLevel: 0,
+        spellEffect: { type: "damage", dice: "1d10", damageType: "fire", hasSavingThrow: false },
+        playerCharacterId: "char-1",
+        collectEvents: false,
+      },
+      tx,
+    );
+
+    const lockOrder = queryRaw.mock.invocationCallOrder[0];
+    const decrementOrder = (tx.combatant.update as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    expect(lockOrder).toBeDefined();
+    expect(decrementOrder).toBeDefined();
+    expect(lockOrder!).toBeLessThan(decrementOrder!);
+  });
 });
