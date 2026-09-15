@@ -251,12 +251,14 @@ describe("monster attack profile", () => {
   });
 
   it("resolves multiattack for the measured monsters", () => {
-    // Measured 2026-09-15 as 85 resolvable Multiattack actions. If RED shows
-    // a different monster count, a monster carries two resolvable Multiattack
-    // actions: record the measured number here and in spec §4.4. Do not
-    // loosen the rule to match.
+    // 83, not the 85 first measured: that measurement did not check `count`.
+    // The hydra ("Number of Heads") and the violet fungus ("1d4") attack a
+    // variable number of times, which no fixed plan can represent, so both
+    // fall back to a single attack like any other unresolvable multiattack.
     const withPlan = MONSTERS.filter((m) => profileMonster(m)?.multiattack != null);
-    expect(withPlan).toHaveLength(85);
+    expect(withPlan).toHaveLength(83);
+    expect(profileMonster(monster("hydra"))?.multiattack).toBeNull();
+    expect(profileMonster(monster("violet-fungus"))?.multiattack).toBeNull();
   });
 
   it("holds no range or walk entry the data does not use", () => {
@@ -274,6 +276,20 @@ describe("monster attack profile", () => {
     }
     expect([...RECOGNISED_RANGES.keys()].filter((k) => !usedRanges.has(k))).toEqual([]);
     expect([...RECOGNISED_WALK_SPEEDS.keys()].filter((k) => !usedWalks.has(k))).toEqual([]);
+  });
+
+  it("refuses a reach of 0 even under a clean header", () => {
+    // Every reach-0 attack in the SRD also fails on its header ("in the
+    // swarm's space"), so the data alone never exercises this rule. A synthetic
+    // action keeps it covered: footprints never overlap on the grid.
+    expect(
+      recogniseAttack({
+        name: "Engulf",
+        attack_bonus: 3,
+        desc: "Melee Weapon Attack: +3 to hit, reach 0 ft., one target. Hit: 5 (1d6 + 2) bludgeoning damage.",
+        damage: [{ damage_type: { index: "bludgeoning" }, damage_dice: "1d6+2" }],
+      }),
+    ).toBeNull();
   });
 
   it("averages dice and flat damage", () => {
@@ -360,10 +376,8 @@ export const RECOGNISED_REACH_FT: readonly number[] = [5, 10, 15, 20, 30, 50];
 
 export const RECOGNISED_RANGES: ReadonlyMap<string, { normalFt: number; longFt: number | null }> =
   new Map([
-    ["15/30", { normalFt: 15, longFt: 30 }],
     ["20/60", { normalFt: 20, longFt: 60 }],
     ["25/50", { normalFt: 25, longFt: 50 }],
-    ["30/60", { normalFt: 30, longFt: 60 }],
     ["30/120", { normalFt: 30, longFt: 120 }],
     ["40/160", { normalFt: 40, longFt: 160 }],
     ["50/100", { normalFt: 50, longFt: 100 }],
@@ -543,8 +557,9 @@ export function isMonsterAttackProfile(value: unknown): value is MonsterAttackPr
 - [ ] **Step 4: Run it and confirm it passes**
 
 Run: `pnpm exec vitest run tests/rules/monster-attack-profile.test.ts --maxWorkers=2`
-Expected: PASS. The only acceptable deviation is the multiattack count, and
-only as that test's comment instructs.
+Expected: PASS, 13 tests. Stage 1 was executed on 2026-09-15 and corrected
+two figures against the real module: 13 ranges, not 15, and 83 multiattacks,
+not 85. Both are recorded in the test and in spec §4.
 
 - [ ] **Step 5: Falsify**
 
@@ -552,7 +567,7 @@ Make each change below, run the test, see the named test fail, and restore.
 
 | Change | Test that must fail |
 | --- | --- |
-| Add `0` to `RECOGNISED_REACH_FT` | "leaves exactly the pinned attacks unrecognised" |
+| Add `0` to `RECOGNISED_REACH_FT` | "refuses a reach of 0 even under a clean header" (the data alone never catches it) |
 | Replace the lowest-average sort with `[0]` of `options` unsorted, reversed | the guard spear test |
 | Make `damageEntry` reject `FLAT_DAMAGE` | the flat-damage test and the pinned remainder |
 | Delete the `"150"` range entry | the pinned remainder |

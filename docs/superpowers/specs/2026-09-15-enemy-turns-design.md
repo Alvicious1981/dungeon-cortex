@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-15
 **Status:** approved 2026-09-15; §4 figures and the damage rule corrected
-during planning, from a full measurement against the data
+during planning, and two figures (13 ranges, 83 multiattacks) corrected when
+Stage 1 ran the guard test against the real module
 **Baseline:** `master` at `6487ec8`
 **Sequence:** spec 1 of 2. Spec 2 (death saving throws) builds on this one and
 is written after it lands.
@@ -140,9 +141,12 @@ Each slot also takes only measured values:
 - `{r}` must be one of 5, 10, 15, 20, 30 or 50. The nine `reach 0 ft.`
   attacks are excluded, because reaching into one's own space cannot happen
   on a grid where footprints never overlap.
-- `{rng}` must be one of the 15 forms the recognised templates carry:
-  `15/30`, `20/60`, `25/50`, `30/60`, `30/120`, `40/160`, `50/100`, `60/180`,
-  `60/240`, `80/320`, `100/200`, `100/400`, `120`, `150`, `150/600`.
+- `{rng}` must be one of the 13 forms that recognised attacks carry:
+  `20/60`, `25/50`, `30/120`, `40/160`, `50/100`, `60/180`, `60/240`,
+  `80/320`, `100/200`, `100/400`, `120`, `150`, `150/600`. The headers also
+  carry `15/30` and `30/60`, but only on attacks that deal no damage (the
+  webs and the naga's spit), so the table leaves them out: an entry no
+  recognised attack uses is dead weight, and the guard test refuses it.
 
 Everything else stays unrecognised on purpose, 35 attacks today:
 
@@ -188,14 +192,16 @@ enemy cannot move and can only attack what is already in reach.
 
 148 actions are named `Multiattack`. 115 list their parts structurally
 (`actions: [{ action_name, count }]`). A multiattack is recognised only when
-**every** part names a recognised attack of the same monster. With the final
-attack rules, that holds for 85 of them.
+**every** part names a recognised attack of the same monster, with a fixed
+integer count. With the final attack rules, that holds for 83 of them.
 
 Every other monster falls back to one attack per turn: the recognised attack
 with the highest average damage, with ties broken by name. That covers:
 
 - multiattacks with a part that is not a recognised attack, such as
   Frightful Presence or an attack left unrecognised;
+- multiattacks whose count is variable: the hydra ("Number of Heads") and
+  the violet fungus ("1d4"), which no fixed plan can represent;
 - the 33 choice multiattacks (`action_options`);
 - the multiattacks without structured parts.
 
@@ -444,6 +450,9 @@ does:
 - Reach, range and walk-speed vocabularies are fixed.
 - Multiattack resolves for exactly the measured monsters. Everyone else falls
   back to a single attack.
+- A synthetic action covers the reach-0 exclusion. Every reach-0 attack in
+  the SRD also fails on its header, so the data alone never exercises that
+  rule.
 
 ### 9.2 Planner — `tests/rules/enemy-turn.test.ts`
 
