@@ -12,7 +12,10 @@ describe("combat object-interaction persistence", () => {
     expect(statements).not.toMatch(/\bDEFAULT\b|\bUPDATE\s+"Encounter"/i);
     expect(read("app/api/campaign/[id]/encounter/route.ts")).toContain("currentTurnObjectInteractionUsed: false");
     expect(read("lib/rules/encounter-service.ts")).toContain("currentTurnObjectInteractionUsed: false");
-    expect(read("lib/rules/combat-pipeline.ts").match(/currentTurnObjectInteractionUsed: false/g)).toHaveLength(2);
+    // Every turn edge resets the free object interaction: the reduced-double
+    // update, the player's CAS claim, each enemy-turn claim in the chain, and
+    // the End Turn resume that binds a parked enemy slot (enemy-turns spec §6).
+    expect(read("lib/rules/combat-pipeline.ts").match(/currentTurnObjectInteractionUsed: false/g)).toHaveLength(4);
     expect(read("lib/memory/context.ts")).toContain("currentTurnObjectInteractionUsed: true");
     expect(read("app/api/campaign/[id]/action/route.ts")).toContain("persistEquipmentTransition");
   });

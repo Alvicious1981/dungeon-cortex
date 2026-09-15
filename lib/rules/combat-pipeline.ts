@@ -36,6 +36,9 @@ import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immun
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
+import { EnemyTurnInvariantError, resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
+import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 
 export interface PipelineCombatant {
   id: string;
@@ -350,6 +353,11 @@ export interface FinalizeEncounterTurnInput {
   collectEvents?: boolean;
   /** Turn-spending callers use fail-closed semantics for stale round/index. */
   failOnStaleTurn?: boolean;
+  /**
+   * "resume" starts the enemy chain at the current, enemy-owned slot without a
+   * player claim: End Turn on an encounter parked on an enemy slot (spec §6.6).
+   */
+  mode?: "advance" | "resume";
 }
 
 export interface FinalizeTurnResult {
@@ -978,6 +986,108 @@ async function resolveEncounterIfEnded(input: {
   };
 }
 
+/**
+ * Runs every enemy turn from (turnIndex, round) until the pointer reaches the
+ * player or the encounter ends (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §6.2).
+ *
+ * The caller holds the Character row lock and owns the transaction. Writes have
+ * already happened by the time a turn edge is claimed here, so a lost claim
+ * throws TurnStateConflictError and rolls everything back; there is no stale
+ * return to report. The loop is bounded by one iteration per combatant.
+ */
+async function runEnemyChain(input: {
+  tx: Prisma.TransactionClient;
+  encounterId: string;
+  owner: { campaignId: string; characterId: string };
+  turnIndex: number;
+  round: number;
+  collectEvents: boolean;
+  events: GameEvent[];
+}): Promise<FinalizeTurnResult> {
+  const { tx, encounterId, owner, collectEvents, events } = input;
+  let { turnIndex, round } = input;
+  const ordered = await tx.combatant.findMany({
+    where: { encounterId },
+    orderBy: COMBATANT_INITIATIVE_ORDER,
+    select: { id: true, isPlayer: true },
+  });
+
+  for (let step = 0; step < ordered.length; step++) {
+    const active = ordered[turnIndex];
+    if (!active) {
+      throw new EnemyTurnInvariantError(`Encounter ${encounterId} has no combatant at ${turnIndex}.`);
+    }
+    if (active.isPlayer) {
+      return {
+        events,
+        encounterResolved: false,
+        turnAdvanceConflict: false,
+        nextTurnIndex: turnIndex,
+        nextRound: round,
+      };
+    }
+
+    const outcome = await resolveEnemyTurn(tx, {
+      campaignId: owner.campaignId,
+      encounterId,
+      characterId: owner.characterId,
+      round,
+      turnIndex,
+      collectEvents,
+    });
+    events.push(...outcome.events);
+
+    if (outcome.playerDowned) {
+      // Until death saves land (spec 2), 0 HP is defeat: the same conditional
+      // active → resolved claim as any other ending, bound to this turn.
+      const fresh = await tx.combatant.findMany({ where: { encounterId } });
+      const ended = await resolveEncounterIfEnded({
+        tx,
+        encounterId,
+        currentTurnIndex: turnIndex,
+        round,
+        failOnStaleTurn: true,
+        events,
+        allCombatants: fresh,
+      });
+      if (!ended) {
+        throw new EnemyTurnInvariantError(
+          `The player was downed but encounter ${encounterId} did not end.`
+        );
+      }
+      return ended;
+    }
+
+    const next = advanceTurn({
+      currentTurnIndex: turnIndex,
+      round,
+      combatantCount: ordered.length,
+    });
+    const claim = await tx.encounter.updateMany({
+      where: { id: encounterId, status: "active", currentTurnIndex: turnIndex, round },
+      data: {
+        currentTurnIndex: next.nextTurnIndex,
+        round: next.nextRound,
+        currentTurnMovementSpentFt: 0,
+        currentTurnObjectInteractionUsed: false,
+      },
+    });
+    if (claim.count !== 1) throw new TurnStateConflictError();
+    if (collectEvents) {
+      events.push({
+        type: next.roundAdvanced ? "ROUND_ADVANCE" : "TURN_ADVANCE",
+        payload: { nextTurnIndex: next.nextTurnIndex, nextRound: next.nextRound },
+      });
+    }
+    turnIndex = next.nextTurnIndex;
+    round = next.nextRound;
+  }
+
+  throw new EnemyTurnInvariantError(
+    `Enemy turn chain for ${encounterId} did not return to the player.`
+  );
+}
+
 export async function finalizeEncounterTurn(
   input: FinalizeEncounterTurnInput
 ): Promise<FinalizeTurnResult> {
@@ -988,7 +1098,26 @@ export async function finalizeEncounterTurn(
     round,
     collectEvents = true,
     failOnStaleTurn = false,
+    mode = "advance",
   } = input;
+
+  // Character → Combatant → Encounter (DC-AUD-016 plan): the enemy chain below
+  // writes the player's HP, so the finalizer takes the Character row lock
+  // before any read it acts on or any write. The owner comes from persisted
+  // state, the rule the XP award already follows. Reduced unit-test doubles
+  // without $queryRaw keep their historical path and run no chain.
+  let owner: { campaignId: string; characterId: string } | null = null;
+  if (typeof tx.$queryRaw === "function") {
+    const row = await tx.encounter.findUnique({
+      where: { id: encounterId },
+      select: { campaignId: true, campaign: { select: { characterId: true } } },
+    });
+    if (!row?.campaignId || !row.campaign?.characterId) {
+      throw new EnemyTurnInvariantError(`Encounter ${encounterId} has no owning character.`);
+    }
+    owner = { campaignId: row.campaignId, characterId: row.campaign.characterId };
+    await lockCharacterForCombatAction(tx, owner.characterId);
+  }
 
   const events: GameEvent[] = [];
   const allCombatants = await tx.combatant.findMany({ where: { encounterId } });
@@ -1004,6 +1133,28 @@ export async function finalizeEncounterTurn(
 
   if (ended) {
     return ended;
+  } else if (mode === "resume") {
+    if (!owner) {
+      throw new EnemyTurnInvariantError("Resuming enemy turns needs a real transaction.");
+    }
+    // Bind the resume to the observed enemy slot; this also resets that turn's
+    // budgets. A stale slot owns nothing and has written nothing yet.
+    const touch = await tx.encounter.updateMany({
+      where: { id: encounterId, status: "active", currentTurnIndex, round },
+      data: { currentTurnMovementSpentFt: 0, currentTurnObjectInteractionUsed: false },
+    });
+    if (touch.count !== 1) {
+      return { events, encounterResolved: false, turnAdvanceConflict: true };
+    }
+    return runEnemyChain({
+      tx,
+      encounterId,
+      owner,
+      turnIndex: currentTurnIndex,
+      round,
+      collectEvents,
+      events,
+    });
   } else {
     // Reduced synthetic transaction doubles used by older unit tests do not
     // expose the full Prisma transaction surface. Keep their historical update
@@ -1077,6 +1228,19 @@ export async function finalizeEncounterTurn(
           events.push({
             type: roundAdvanced ? "ROUND_ADVANCE" : "TURN_ADVANCE",
             payload: { nextTurnIndex, nextRound },
+          });
+        }
+
+        // Every enemy acts before the player's turn returns (spec §6.2).
+        if (owner) {
+          return runEnemyChain({
+            tx,
+            encounterId,
+            owner,
+            turnIndex: nextTurnIndex,
+            round: nextRound,
+            collectEvents,
+            events,
           });
         }
 
