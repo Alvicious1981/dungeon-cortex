@@ -34,6 +34,8 @@ import {
 } from "@/lib/rules/damage-modifiers";
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
+import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
+import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 
 export interface PipelineCombatant {
   id: string;
@@ -237,7 +239,11 @@ async function claimConsumableUnit(
 async function applyCharacterHealing(
   tx: Prisma.TransactionClient,
   characterId: string,
-  healed: number
+  healed: number,
+  // The active encounter, whose player Combatant mirrors Character.hp. Healing
+  // keeps its own compare-and-set below instead of taking the Character lock;
+  // only after a successful write does it apply the same mirror setPlayerHp uses.
+  encounterId: string | null
 ): Promise<number | null> {
   const characterDb = tx.character;
 
@@ -250,6 +256,7 @@ async function applyCharacterHealing(
       where: { id: characterId },
       data: { hp: newHp },
     });
+    await mirrorPlayerCombatantHp(tx, encounterId, newHp);
     return newHp;
   }
 
@@ -270,7 +277,10 @@ async function applyCharacterHealing(
       data: { hp: newHp },
     });
 
-    if (claim.count === 1) return newHp;
+    if (claim.count === 1) {
+      await mirrorPlayerCombatantHp(tx, encounterId, newHp);
+      return newHp;
+    }
   }
 
   throw new Error(
@@ -464,7 +474,7 @@ export async function executeCombatAction(
   if (actionType === "cast_spell" && payload.spellEffect?.type === "healing" && payload.spellEffect.dice) {
     const healed = roll(payload.spellEffect.dice).total;
     if (playerCharacterId) {
-      const newHp = await applyCharacterHealing(tx, playerCharacterId, healed);
+      const newHp = await applyCharacterHealing(tx, playerCharacterId, healed, encounter.id || null);
       if (newHp !== null && collectEvents) {
         events.push({
           type: "HEALING_RECEIVED",
@@ -478,7 +488,7 @@ export async function executeCombatAction(
   if (actionType === "use_item" && payload.healingDice && itemConsumed) {
     const healed = roll(payload.healingDice).total + (payload.healingBonus ?? 0);
     if (playerCharacterId) {
-      const newHp = await applyCharacterHealing(tx, playerCharacterId, healed);
+      const newHp = await applyCharacterHealing(tx, playerCharacterId, healed, encounter.id || null);
       if (newHp !== null && collectEvents) {
         events.push({
           type: "HEALING_RECEIVED",
@@ -679,6 +689,16 @@ export async function executeCombatAction(
     }
 
     if (actionType === "attack" || (actionType === "cast_spell" && payload.spellEffect?.type !== "healing")) {
+      // A damaged player's HP is written through setPlayerHp below, and that
+      // writes Character. Take the Character lock before this Combatant row
+      // lock, so the order stays Character → Combatant even when a successful
+      // concentration save above wrote no Character row. Without it, damage
+      // (Combatant → Character) and a concurrent concentration replacement
+      // (Character → Combatant) form a deadlock cycle.
+      if (target.isPlayer && playerCharacterId) {
+        await lockCharacterForCombatAction(tx, playerCharacterId);
+      }
+
       // The first write owns two jobs and does them exactly once: atomically apply
       // damage and acquire PostgreSQL's row lock for this Combatant. Crucially it
       // does not write `conditions`, so a damage-only action can never erase a
@@ -726,6 +746,16 @@ export async function executeCombatAction(
         newHp = typeof clampedTarget?.hp === "number" ? clampedTarget.hp : 0;
       } else {
         newHp = persistedHp;
+      }
+
+      // The player's HP has one source of truth; this Combatant row is its
+      // mirror. The spell path took the Character lock at transaction start.
+      if (target.isPlayer && playerCharacterId) {
+        newHp = await setPlayerHp(tx, {
+          characterId: playerCharacterId,
+          encounterId: encounter.id || null,
+          hp: newHp,
+        });
       }
     }
 

@@ -63,14 +63,24 @@ describe("combat transaction Character → Combatant lock order", () => {
   });
 
   it("takes a PostgreSQL row lock on Character", () => {
-    const helperStart = actionRoute.indexOf(
-      "async function lockCharacterForCombatAction("
+    // The helper moved to lib/db/character-lock.ts so the turn finalizer can
+    // take the same lock (docs/superpowers/specs/2026-09-15-enemy-turns-design.md
+    // §6.1). The route must use that one helper, never a local copy that could
+    // drift into a lock that no longer locks.
+    const helperSource = readFileSync(
+      join(process.cwd(), "lib", "db", "character-lock.ts"),
+      "utf8"
     );
-    const routeHandlerStart = actionRoute.indexOf("// ─── Route handler");
-    const helperSource = actionRoute.slice(helperStart, routeHandlerStart);
+    const helperStart = helperSource.indexOf(
+      "export async function lockCharacterForCombatAction("
+    );
 
     expect(helperStart).toBeGreaterThanOrEqual(0);
-    expect(helperSource).toContain('FROM "Character"');
-    expect(helperSource).toContain("FOR UPDATE");
+    expect(helperSource.slice(helperStart)).toContain('FROM "Character"');
+    expect(helperSource.slice(helperStart)).toContain("FOR UPDATE");
+    expect(actionRoute).toContain(
+      'import { lockCharacterForCombatAction } from "@/lib/db/character-lock";'
+    );
+    expect(actionRoute).not.toContain("async function lockCharacterForCombatAction(");
   });
 });
