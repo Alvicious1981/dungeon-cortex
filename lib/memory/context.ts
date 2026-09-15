@@ -110,6 +110,11 @@ export interface ContextCombatant {
   y: number;
   /** D&D 5e size category — determines footprint for collision detection. */
   size: string;
+  /** Death saves while at 0 HP (death-saves spec §4). */
+  deathSaveSuccesses: number;
+  deathSaveFailures: number;
+  /** Round a stable player wakes; null when not stable. */
+  stableWakeRound: number | null;
 }
 
 export interface ContextLog {
@@ -430,6 +435,9 @@ export async function buildCampaignContext(
             x: true,
             y: true,
             size: true,
+            deathSaveSuccesses: true,
+            deathSaveFailures: true,
+            stableWakeRound: true,
           },
           orderBy: COMBATANT_INITIATIVE_ORDER,
         },

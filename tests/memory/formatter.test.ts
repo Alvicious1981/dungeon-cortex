@@ -80,6 +80,9 @@ const combatEncounter: CampaignContext["activeEncounter"] = {
       x: 0,
       y: 0,
       size: "Medium",
+      deathSaveSuccesses: 0,
+      deathSaveFailures: 0,
+      stableWakeRound: null,
     },
   ],
 };
@@ -489,6 +492,9 @@ describe("formatSystemPrompt — enemy damage and condition constraints", () => 
         x: 1,
         y: 1,
         size: "Medium",
+        deathSaveSuccesses: 0,
+        deathSaveFailures: 0,
+        stableWakeRound: null,
       },
     ],
   };
