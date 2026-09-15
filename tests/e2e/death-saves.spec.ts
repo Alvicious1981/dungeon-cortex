@@ -211,7 +211,9 @@ test("@smoke a dead character's campaign refuses every write and still reads", a
       expect(res.status()).toBe(409);
       expect(((await res.json()) as { code?: unknown }).code).toBe("CHARACTER_DEAD");
     }
-    expect((await request.get(`/api/campaign/${campaignId}/logs`)).status()).toBe(200);
+    // Reads keep working: the campaign's quests and the character sheet.
+    expect((await request.get(`/api/campaign/${campaignId}/quest`)).status()).toBe(200);
+    expect((await request.get(`/api/character/${characterId}`)).status()).toBe(200);
   } finally {
     await cleanupFixture(prisma, fixture);
   }
