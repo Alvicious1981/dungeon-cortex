@@ -279,3 +279,15 @@ export function isUnawareOfSurroundings(conditions: readonly string[]): boolean 
     (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.unawareOfSurroundings === true
   );
 }
+
+/**
+ * Whether any active condition bars the creature from acting — the registry's
+ * `incapacitated` flag. Distinct from isUnawareOfSurroundings: a stunned
+ * creature cannot act but still perceives. An enemy for which this is true
+ * takes no turn (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §5.1).
+ */
+export function isIncapacitated(conditions: readonly string[]): boolean {
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.incapacitated === true
+  );
+}

@@ -58,6 +58,7 @@ import {
   isFootprintWithinCombatGrid,
   isOccupied,
   sizeToSquares,
+  toSizeCategory,
   type GridCombatant,
   type SizeCategory,
 } from "@/lib/rules/geometry";
@@ -99,20 +100,6 @@ interface RouteContext {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Coerces a persisted `Combatant.size` into a SizeCategory.
- *
- * The column is a plain string, so an unrecognised value degrades to Medium
- * rather than throwing: a malformed row should resolve as an ordinary creature,
- * not fail a legal turn. Shared by the movement gate and the spell gate so the
- * two cannot disagree about how big a creature is.
- */
-const VALID_SIZES: SizeCategory[] = ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"];
-
-function toSizeCategory(raw: unknown): SizeCategory {
-  return VALID_SIZES.includes(raw as SizeCategory) ? (raw as SizeCategory) : "Medium";
-}
 
 const encoder = new TextEncoder();
 

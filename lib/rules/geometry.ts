@@ -297,6 +297,29 @@ export function sizeToSquares(size: SizeCategory): number {
   }
 }
 
+const VALID_SIZES: readonly SizeCategory[] = [
+  "Tiny",
+  "Small",
+  "Medium",
+  "Large",
+  "Huge",
+  "Gargantuan",
+]
+
+/**
+ * Coerces a persisted `Combatant.size` into a SizeCategory.
+ *
+ * The column is a plain string, so an unrecognised value degrades to Medium
+ * rather than throwing: a malformed row resolves as an ordinary creature, not
+ * a failed turn. Shared by the Move gate, the spell gate and the enemy-turn
+ * planner so they cannot disagree about how big a creature is.
+ *
+ * @pure — deterministic, no side effects.
+ */
+export function toSizeCategory(raw: unknown): SizeCategory {
+  return VALID_SIZES.includes(raw as SizeCategory) ? (raw as SizeCategory) : "Medium"
+}
+
 /**
  * Returns whether a creature's complete footprint fits on the combat board.
  *
