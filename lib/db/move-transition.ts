@@ -25,7 +25,10 @@ export class MoveStateConflictError extends Error {
   }
 }
 
-function assertMovementTransitionInput(input: MoveTransitionInput): void {
+/** A move claim without the player's canonical log line: enemy turns log as `system`. */
+export type MoveClaimInput = Omit<MoveTransitionInput, "campaignId" | "playerAction">;
+
+function assertMovementTransitionInput(input: MoveClaimInput): void {
   const nonNegativeIntegers = [
     input.expectedRound,
     input.expectedTurnIndex,
@@ -42,17 +45,17 @@ function assertMovementTransitionInput(input: MoveTransitionInput): void {
 }
 
 /**
- * Claims one movement transition from the exact origin and Encounter turn
- * budget observed by the route.
+ * The two conditional writes of one move — the origin CAS on the Combatant,
+ * then the Encounter turn budget — with no history. The player's Move adds its
+ * canonical `user` line in persistMoveTransition; an enemy turn logs its move
+ * as `system` (enemy-turns spec §6.2).
  *
- * The caller owns the transaction. Keeping the conditional coordinate update
- * and the canonical player log on the same transaction client means a stale
- * claim writes no history, while a later log failure rolls the coordinate
- * update back with the transaction.
+ * The caller owns the transaction. A stale origin writes nothing; a lost budget
+ * claim throws, so the transaction rolls the coordinate update back.
  */
-export async function persistMoveTransition(
+export async function claimMoveTransition(
   tx: Prisma.TransactionClient,
-  input: MoveTransitionInput
+  input: MoveClaimInput
 ): Promise<MoveTransitionResult> {
   assertMovementTransitionInput(input);
 
@@ -93,6 +96,25 @@ export async function persistMoveTransition(
   // The Combatant origin was already claimed. Throwing is required here so
   // the caller-owned transaction rolls that coordinate mutation back.
   if (budgetClaim.count !== 1) throw new MoveStateConflictError();
+
+  return "claimed";
+}
+
+/**
+ * Claims one movement transition from the exact origin and Encounter turn
+ * budget observed by the route.
+ *
+ * The caller owns the transaction. Keeping the conditional coordinate update
+ * and the canonical player log on the same transaction client means a stale
+ * claim writes no history, while a later log failure rolls the coordinate
+ * update back with the transaction.
+ */
+export async function persistMoveTransition(
+  tx: Prisma.TransactionClient,
+  input: MoveTransitionInput
+): Promise<MoveTransitionResult> {
+  const result = await claimMoveTransition(tx, input);
+  if (result !== "claimed") return result;
 
   await tx.gameLog.create({
     data: {

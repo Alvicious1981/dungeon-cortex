@@ -88,6 +88,7 @@ import {
   persistMoveTransition,
 } from "@/lib/db/move-transition";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
+import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
 
 /**
  * The request body, declared once in `lib/events/action-transport.ts` and
@@ -124,13 +125,6 @@ async function writeSystemLogs(
 ): Promise<void> {
   for (const content of lines) {
     await tx.gameLog.create({ data: { campaignId, role: "system", content } });
-  }
-}
-
-class TurnStateConflictError extends Error {
-  constructor() {
-    super("The encounter turn changed before the action could commit.");
-    this.name = "TurnStateConflictError";
   }
 }
 
