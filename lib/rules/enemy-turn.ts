@@ -39,6 +39,11 @@ export interface EnemyTurnInput {
   player: GridCombatant;
   /** Every combatant except the acting enemy, the player included. */
   others: readonly GridCombatant[];
+  /**
+   * The player is at 0 HP. A downed player is no threat, so every enemy holds
+   * (docs/superpowers/specs/2026-09-15-death-saves-design.md §1, §5).
+   */
+  playerDowned?: boolean;
 }
 
 export interface EnemyTurnPlan {
@@ -138,6 +143,7 @@ function bestDestination(input: EnemyTurnInput): GridPoint {
 
 /** The enemy's move and attacks this turn. @pure */
 export function planEnemyTurn(input: EnemyTurnInput): EnemyTurnPlan {
+  if (input.playerDowned) return noAction();
   const { enemy, player } = input;
   const profile = enemy.profile;
   if (enemy.hp <= 0 || profile === null || isIncapacitated(enemy.conditions)) return noAction();
