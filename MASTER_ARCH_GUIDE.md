@@ -125,6 +125,23 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - `Encounter.currentTurnObjectInteractionUsed` is the sole persisted free
   object-interaction budget. Null legacy state fails closed, new encounters
   initialize it to false, and every successful turn advance resets it to false.
+- Enemy turns are backend-authoritative and resolve inside the canonical
+  finalizer. After any successful player turn claim, `finalizeEncounterTurn`
+  runs each enemy slot in initiative order in the same transaction: a pure
+  plan (`lib/rules/enemy-turn.ts`), then the move CAS, attack rolls against the
+  player's current AC, and damage, until the pointer returns to the player or
+  the player reaches 0 HP (`player_dead`, no XP) — docs/superpowers/specs/2026-09-15-enemy-turns-design.md.
+- The finalizer takes the Character row lock at entry, preserving
+  Character → Combatant → Encounter. Any chain conflict throws and rolls the
+  whole transaction back (409 `TURN_STATE_CONFLICT`); an impossible state
+  returns 500 `ENEMY_TURN_INVARIANT`.
+- `Combatant.attackProfile` is written once, by the encounter route, from
+  verbatim-recognised SRD attacks; `NULL` means the enemy's turn is skipped.
+- `End Turn` on an enemy-owned slot resumes the chain from that slot; every
+  other action there keeps 409 `NOT_PLAYER_TURN`.
+- The player's HP is written through `setPlayerHp` (Character, then its
+  Combatant mirror); in-combat healing keeps its Character CAS and applies the
+  same mirror.
 
 ## 5. Obsolescence Registry
 
