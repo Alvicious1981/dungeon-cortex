@@ -70,6 +70,13 @@ describe("InitiativeTracker Smoke Test", () => {
     window.removeEventListener(DUNGEON_ACTION_REQUEST, requestListener);
   });
 
+  it("offers no turn advance to a downed player (death-saves spec §7.4)", () => {
+    render(<InitiativeTracker entries={mockEntries} activeId="c1" playerDown />);
+
+    expect(screen.queryByRole("button", { name: "Siguiente turno" })).toBeNull();
+    expect(screen.getByText(/Estás inconsciente/)).toBeInTheDocument();
+  });
+
   it("renders empty state correctly", () => {
     render(<InitiativeTracker entries={[]} />);
 

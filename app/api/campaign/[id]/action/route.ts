@@ -510,6 +510,10 @@ async function resolveAction(
   // lines that answer it. Idempotent because only one gate resolves per
   // request but the trailing call below covers whatever matched no gate; a
   // second call is a no-op, not a duplicate row.
+  // The player's line is written only once a transition is claimed, which is
+  // after the enemy chain has already logged what it caused. Stamping it with
+  // the request's start keeps the log in cause-then-effect order.
+  const requestedAt = new Date();
   let playerActionLogged = false;
   const persistPlayerAction = async (
     tx?: Prisma.TransactionClient
@@ -520,6 +524,7 @@ async function resolveAction(
       campaignId,
       role: "user",
       content: trimmedAction,
+      createdAt: requestedAt,
     };
 
     if (tx) {
@@ -627,6 +632,7 @@ async function resolveAction(
                 campaignId,
                 role: "user",
                 content: trimmedAction,
+                createdAt: requestedAt,
               },
             });
           }
@@ -679,7 +685,7 @@ async function resolveAction(
           }
 
           await tx.gameLog.create({
-            data: { campaignId, role: "user", content: trimmedAction },
+            data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
           });
         });
       } catch (error) {
@@ -797,7 +803,7 @@ async function resolveAction(
           }
 
           await transactionClient.gameLog.create({
-            data: { campaignId, role: "user", content: trimmedAction },
+            data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
           });
           if (categoryLog) {
             await transactionClient.gameLog.create({
@@ -1238,7 +1244,7 @@ async function resolveAction(
             }
 
             await transactionClient.gameLog.create({
-              data: { campaignId, role: "user", content: trimmedAction },
+              data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
             });
             await transactionClient.gameLog.create({
               data: {
@@ -1620,7 +1626,7 @@ async function resolveAction(
           // Only the transaction that owns the turn may publish canonical
           // history for the cast.
           await transactionClient.gameLog.create({
-            data: { campaignId, role: "user", content: trimmedAction },
+            data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
           });
           if (unenforcedRangeLog) {
             await transactionClient.gameLog.create({
@@ -1727,7 +1733,7 @@ async function resolveAction(
           }
 
           await transactionClient.gameLog.create({
-            data: { campaignId, role: "user", content: trimmedAction },
+            data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
           });
           await writeSystemLogs(
             transactionClient,
@@ -1830,7 +1836,7 @@ async function resolveAction(
             data: { equippedSlot: targetSlot },
           });
           await tx.gameLog.create({
-            data: { campaignId, role: "user", content: trimmedAction },
+            data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
           });
         });
         playerActionLogged = true;
@@ -1954,7 +1960,7 @@ async function resolveAction(
           }
 
           await transactionClient.gameLog.create({
-            data: { campaignId, role: "user", content: trimmedAction },
+            data: { campaignId, role: "user", content: trimmedAction, createdAt: requestedAt },
           });
           if (categoryLog) {
             await transactionClient.gameLog.create({

@@ -15,9 +15,11 @@ interface Props {
   entries: InitiativeEntry[];
   /** id of the combatant whose turn it currently is, if combat is active. */
   activeId?: string;
+  /** The player is at 0 HP: turns advance only through the death-save action. */
+  playerDown?: boolean;
 }
 
-export default function InitiativeTracker({ entries, activeId }: Props) {
+export default function InitiativeTracker({ entries, activeId, playerDown = false }: Props) {
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pendingRequestId = useRef<string | null>(null);
@@ -151,6 +153,11 @@ export default function InitiativeTracker({ entries, activeId }: Props) {
 
       {/* Next Turn button */}
       <div className="mt-3 space-y-2">
+        {playerDown ? (
+          <p className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+            Estás inconsciente: el turno avanza con «Tirada de muerte» o «Esperar».
+          </p>
+        ) : (
         <button
           type="button"
           onClick={handleNextTurn}
@@ -159,6 +166,7 @@ export default function InitiativeTracker({ entries, activeId }: Props) {
         >
           {advancing ? "Avanzando…" : "Siguiente turno"}
         </button>
+        )}
 
         {error && (
           <p role="alert" className="text-xs text-red-400 bg-red-950/40 rounded px-2 py-1.5">

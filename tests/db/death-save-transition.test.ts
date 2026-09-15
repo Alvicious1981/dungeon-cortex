@@ -14,7 +14,7 @@ function buildTx(player: Record<string, unknown>, touched = 1) {
     $queryRaw: vi.fn(async () => { order.push("Character"); return []; }),
     combatant: {
       findFirst: vi.fn().mockResolvedValue({
-        id: "p1", hp: 0, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null,
+        id: "p1", name: "Aldric", hp: 0, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null,
         ...player,
       }),
       updateMany: vi.fn(async () => { order.push("Combatant"); return { count: 1 }; }),
@@ -61,6 +61,20 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
       data: { deathSaveSuccesses: 3, deathSaveFailures: 0, stableWakeRound: 7 },
     });
     expect(out.events.map((e) => e.type)).toEqual(["DEATH_SAVE_ROLLED", "PLAYER_STABILIZED"]);
+    // The log says what the counters mean, not only the counters.
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ content: expect.stringContaining("Aldric is stable.") }),
+    });
+  });
+
+  it("logs the revival on a natural 20", async () => {
+    const { tx } = buildTx({});
+    await rollPlayerDeathSave(tx, CTX, dice(20));
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        content: expect.stringContaining("Aldric regains consciousness with 1 HP."),
+      }),
+    });
   });
 
   it("dies on the third failure", async () => {
@@ -72,6 +86,9 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
       data: { deathSaveSuccesses: 0, deathSaveFailures: 3 },
     });
     expect(out.events).toContainEqual({ type: "PLAYER_DIED", payload: { cause: "death_saves" } });
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ content: expect.stringContaining("Aldric dies.") }),
+    });
   });
 
   it("refuses a player who is no longer dying", async () => {

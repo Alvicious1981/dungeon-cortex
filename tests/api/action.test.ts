@@ -750,6 +750,60 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
   // shared double `$queryRaw` and an owner-aware `encounter.findUnique`. The
   // file's beforeEach uses clearAllMocks, which keeps implementations, so both
   // are undone in `finally` rather than leaking into later tests.
+  it("stamps the player's line with the request start, so it precedes the lines it causes", async () => {
+    const combatants = [
+      {
+        id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20,
+        initiativeTotal: 20, initiativeOrder: 0,
+      },
+      {
+        id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 10, maxHp: 10,
+        initiativeTotal: 10, initiativeOrder: 1,
+      },
+    ];
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { id: "char-1", name: "Hero", class: "fighter", level: 1, stats: {}, inventory: [] },
+      relevantMemories: [], recentLogs: [], quests: [], currentExploration: null,
+      activeEncounter: {
+        id: "enc_123", status: "active", currentTurnIndex: 0, round: 1,
+        totalDamageDealt: 0, combatants,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+    // The first turn claim happens before any enemy acts; its time bounds the
+    // player's line from above.
+    let claimedAt = 0;
+    (prisma.encounter.updateMany as any).mockImplementation(async () => {
+      if (!claimedAt) claimedAt = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { count: 1 };
+    });
+    (prisma as any).$queryRaw = vi.fn(async () => []);
+    (prisma.encounter.findUnique as any).mockImplementation(
+      async (args: { select?: Record<string, unknown> }) =>
+        args?.select?.campaign ? { campaignId, campaign: { characterId: "char-1" } } : null
+    );
+
+    try {
+      const res = await POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "End Turn" }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) }
+      );
+
+      expect(res.status).toBe(200);
+      const [[{ data }]] = canonicalUserLogWrites() as Array<[{ data: { createdAt?: Date } }]>;
+      expect(data.createdAt).toBeInstanceOf(Date);
+      expect(data.createdAt!.getTime()).toBeLessThanOrEqual(claimedAt);
+    } finally {
+      delete (prisma as any).$queryRaw;
+      (prisma.encounter.findUnique as any).mockReset();
+      (prisma.encounter.updateMany as any).mockReset();
+    }
+  });
+
   it("rolls a death save for a dying player and finalizes the turn", async () => {
     const combatants = [
       {
@@ -1572,7 +1626,7 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
     expect(res.status).toBe(200);
     expect(userLogWrites()).toHaveLength(1);
     expect(prisma.gameLog.create).toHaveBeenCalledWith({
-      data: { campaignId, role: "user", content: "Attack" },
+      data: { campaignId, role: "user", content: "Attack", createdAt: expect.any(Date) },
     });
 
     // History order: the player's line is written before the narrator is even
@@ -1600,7 +1654,7 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
     expect(res.status).toBe(202);
     expect(userLogWrites()).toHaveLength(1);
     expect(prisma.gameLog.create).toHaveBeenCalledWith({
-      data: { campaignId, role: "user", content: "/roll 1d20+5" },
+      data: { campaignId, role: "user", content: "/roll 1d20+5", createdAt: expect.any(Date) },
     });
     expect(prisma.gameLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1627,7 +1681,7 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
     expect(res.status).toBe(200);
     expect(userLogWrites()).toHaveLength(1);
     expect(prisma.gameLog.create).toHaveBeenCalledWith({
-      data: { campaignId, role: "user", content: "I look around the room" },
+      data: { campaignId, role: "user", content: "I look around the room", createdAt: expect.any(Date) },
     });
     expect(streamNarrative).toHaveBeenCalled();
 
@@ -1746,7 +1800,7 @@ describe("Action Route - requestId transport (DC-AUD-002)", () => {
     // the narrator is handed, nor into canonical history.
     expect((streamNarrative as any).mock.calls.at(-1)?.[1]).toBe("I look around the room");
     expect(prisma.gameLog.create).toHaveBeenCalledWith({
-      data: { campaignId, role: "user", content: "I look around the room" },
+      data: { campaignId, role: "user", content: "I look around the room", createdAt: expect.any(Date) },
     });
   });
 

@@ -41,9 +41,11 @@ interface Props {
     maxHp: number;
     isPlayer: boolean;
   }>;
+  /** Why free-text actions are unavailable, e.g. an unconscious player (death-saves spec §7.4). */
+  disabledReason?: string;
 }
 
-export default function ActionInput({ campaignId, selectableTargets = [] }: Props) {
+export default function ActionInput({ campaignId, selectableTargets = [], disabledReason }: Props) {
   const router = useRouter();
   const [action, setAction] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -434,14 +436,14 @@ export default function ActionInput({ campaignId, selectableTargets = [] }: Prop
             type="text"
             value={action}
             onChange={(e) => setAction(e.target.value)}
-            disabled={submitting}
+            disabled={submitting || Boolean(disabledReason)}
             maxLength={500}
-            placeholder="¿Qué intentas hacer?"
+            placeholder={disabledReason ?? "¿Qué intentas hacer?"}
             className="dc-field min-h-12 flex-1 rounded-sm px-3 py-2 text-sm placeholder:text-[#675c4a] disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={submitting || !action.trim()}
+            disabled={submitting || !action.trim() || Boolean(disabledReason)}
             className="dc-button-primary min-w-20 rounded-sm px-4 py-3 text-sm uppercase tracking-wider"
           >
             {submitting ? "…" : "Actuar"}
