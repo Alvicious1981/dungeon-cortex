@@ -89,6 +89,10 @@ model Character {
   /// trigger was non-canonical and has been retired).
   /// Decremented by 1 on long rest per 5e 2014 rules.
   exhaustionLevel      Int      @default(0)
+  /// When the character died (docs/superpowers/specs/2026-09-15-death-saves-design.md §9).
+  /// NULL = alive. Written once, by the winner of the player_dead encounter
+  /// claim; never cleared. Every write route refuses a character with it set.
+  diedAt               DateTime?
   /// Monotonic revision used for optimistic concurrency on character-sheet writes.
   revision             Int      @default(1)
   createdAt            DateTime @default(now())
@@ -319,6 +323,9 @@ model Combatant {
   deathSaveSuccesses   Int     @default(0)
   /// Failed death saves accumulated while the combatant is at 0 hit points.
   deathSaveFailures    Int     @default(0)
+  /// The round a stabilised player wakes with 1 HP (death-saves spec §4).
+  /// NULL = not stable. Cleared by every player HP write.
+  stableWakeRound      Int?
   /// Per-turn action economy, owned by the combat rules engine.
   /// The column is nullable for pre-action-budget combatants.
   actionBudget         Json?

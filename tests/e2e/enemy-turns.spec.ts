@@ -1,203 +1,22 @@
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { Prisma, PrismaClient } from "@prisma/client";
-import { expect, test, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
+import { expect, test } from "@playwright/test";
 
-import { profileMonster } from "@/lib/rules/monster-attack-profile";
+import { assertSafeE2EDatabase } from "./support/database";
 import {
-  assertSafeE2EDatabase,
-  cleanupE2ERecords,
-  type E2ECreatedRecords,
-} from "./support/database";
+  cleanupFixture,
+  createGoblinFixture,
+  holdCharacterLock,
+  parseSseFrames,
+  postAction,
+  waitForBlockedCharacterLocks,
+  type GoblinFixture,
+} from "./support/combat-fixture";
 
 /**
  * Enemy turns on real PostgreSQL
- * (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §9.5).
- *
- * Every fixture raises the player to 200 HP so a critical hit can never down
- * them and turn a smoke test into a coin flip; the goblin's profile comes from
- * the same SRD file prisma/seed-srd.ts loads, through the production
- * recognizer.
+ * (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §9.5). The shared
+ * fixture lives in tests/e2e/support/combat-fixture.ts.
  */
-const GOBLIN = (
-  JSON.parse(
-    readFileSync(join(process.cwd(), "data", "srd-es", "monsters.json"), "utf8"),
-  ) as Array<Record<string, unknown>>
-).find((m) => m.index === "goblin")!;
-
-interface ActionSseFrame {
-  t: string;
-  e?: { type?: string; payload?: Record<string, unknown> };
-}
-
-function parseSseFrames(body: string): ActionSseFrame[] {
-  return body
-    .split(/\n\n/)
-    .filter((chunk) => chunk.startsWith("data: "))
-    .map((chunk) => JSON.parse(chunk.slice(6)) as ActionSseFrame);
-}
-
-async function createdId(response: APIResponse): Promise<string> {
-  expect(response.status()).toBe(201);
-  const body = (await response.json()) as { id?: unknown };
-  expect(typeof body.id).toBe("string");
-  return body.id as string;
-}
-
-function postAction(
-  request: APIRequestContext,
-  campaignId: string,
-  action: string,
-  extra: Record<string, unknown> = {},
-): Promise<APIResponse> {
-  return request.post(`/api/campaign/${campaignId}/action`, {
-    data: { requestId: `enemy-turns-${randomUUID()}`, action, ...extra },
-  });
-}
-
-interface GoblinFixture {
-  created: E2ECreatedRecords;
-  encounterId: string;
-  playerId: string;
-  goblinId: string;
-}
-
-async function createGoblinFixture(
-  request: APIRequestContext,
-  prisma: PrismaClient,
-  options: { goblinAt: { x: number; y: number }; withProfile: boolean; currentTurnIndex: number },
-): Promise<GoblinFixture> {
-  const created: E2ECreatedRecords = {};
-  const suffix = randomUUID().slice(0, 8);
-  created.characterId = await createdId(
-    await request.post("/api/character", {
-      data: {
-        name: `Enemy turns ${suffix}`,
-        race: "human",
-        class: "fighter",
-        stats: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 8 },
-      },
-    }),
-  );
-  created.campaignId = await createdId(
-    await request.post("/api/campaign", {
-      data: { characterId: created.characterId, title: `Enemy turns ${suffix}` },
-    }),
-  );
-  await prisma.character.update({
-    where: { id: created.characterId },
-    data: { hp: 200, maxHp: 200 },
-  });
-
-  const profile = profileMonster(GOBLIN);
-  expect(profile).not.toBeNull();
-
-  const encounter = await prisma.encounter.create({
-    data: {
-      campaignId: created.campaignId,
-      status: "active",
-      round: 1,
-      currentTurnIndex: options.currentTurnIndex,
-      currentTurnMovementSpentFt: 0,
-      currentTurnObjectInteractionUsed: false,
-      totalDamageDealt: 0,
-      combatants: {
-        create: [
-          {
-            name: "Enemy Turn Hero",
-            isPlayer: true,
-            hp: 200,
-            maxHp: 200,
-            ac: 16,
-            initiativeTotal: 20,
-            initiativeOrder: 0,
-            stats: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 8 },
-            conditions: [],
-            x: 5,
-            y: 5,
-          },
-          {
-            name: "Goblin",
-            isPlayer: false,
-            hp: 7,
-            maxHp: 7,
-            ac: 15,
-            initiativeTotal: 10,
-            initiativeOrder: 1,
-            stats: { STR: 8, DEX: 14, CON: 10, INT: 10, WIS: 8, CHA: 8 },
-            conditions: [],
-            size: "Small",
-            x: options.goblinAt.x,
-            y: options.goblinAt.y,
-            ...(options.withProfile
-              ? { attackProfile: profile as unknown as Prisma.InputJsonValue }
-              : {}),
-          },
-        ],
-      },
-    },
-    include: { combatants: true },
-  });
-
-  return {
-    created,
-    encounterId: encounter.id,
-    playerId: encounter.combatants.find((c) => c.isPlayer)!.id,
-    goblinId: encounter.combatants.find((c) => !c.isPlayer)!.id,
-  };
-}
-
-async function cleanupFixture(prisma: PrismaClient, fixture: GoblinFixture | undefined) {
-  if (fixture) {
-    await prisma.combatant.deleteMany({ where: { encounterId: fixture.encounterId } });
-    await prisma.encounter.deleteMany({ where: { id: fixture.encounterId } });
-  }
-  await prisma.$disconnect();
-  if (fixture) await cleanupE2ERecords(fixture.created);
-}
-
-function holdCharacterLock(prisma: PrismaClient, characterId: string) {
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let held!: () => void;
-  const isHeld = new Promise<void>((resolve) => {
-    held = resolve;
-  });
-  const transaction = prisma.$transaction(
-    async (tx) => {
-      await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "Character" WHERE "id" = ${characterId} FOR UPDATE
-      `;
-      held();
-      await released;
-    },
-    { timeout: 15_000 },
-  );
-  return { release, isHeld, transaction };
-}
-
-async function waitForBlockedCharacterLocks(prisma: PrismaClient, minimum: number) {
-  // Prisma interactive transactions default to 5 seconds; both End Turns reach
-  // the finalizer's Character lock in milliseconds.
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(*)::bigint AS count
-      FROM pg_stat_activity
-      WHERE datname = current_database()
-        AND pid <> pg_backend_pid()
-        AND wait_event_type = 'Lock'
-        AND query ILIKE '%Character%'
-        AND query ILIKE '%FOR UPDATE%'
-    `;
-    if (Number(rows[0]?.count ?? 0) >= minimum) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for ${minimum} blocked Character lock(s).`);
-}
 
 test("@smoke a goblin closes, attacks, and the turn returns to the player", async ({
   request,

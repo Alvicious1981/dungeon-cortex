@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import {
   QuestServiceError,
   VALID_QUEST_STATUSES,
@@ -60,9 +61,8 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
       { status: 403 }
     );
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
-  }
+  const playable = await campaignPlayableRefusal(prisma, campaignId);
+  if (playable) return guardResponse(playable);
 
   try {
     const result = await updateQuestStatus({

@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { rollInitiative, acFromMonsterData } from "@/lib/rules/combat";
 import { armorClassFor } from "@/lib/rules/armor-class";
 import { abilityModifier } from "@/lib/rules/dice";
@@ -87,8 +88,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   if (campaign.userId !== user.id) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
+  const playable = await campaignPlayableRefusal(prisma, campaignId);
+  if (playable) return guardResponse(playable);
+  // A character left at 0 HP by an old defeat would start the fight downed
+  // (death-saves spec §8.3); resting works from 0 HP.
+  if (campaign.character.hp <= 0) {
+    return guardResponse({
+      code: "CHARACTER_AT_ZERO_HP",
+      error: "The character is at 0 HP. Rest before starting an encounter.",
+    });
   }
 
   const existingEncounter = await prisma.encounter.findFirst({

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
 import { evaluateAdvantage, isKnownCondition } from "./conditions";
+import { DEATH_SAVE_LIMIT } from "./death-save";
 
 import {
   applyDamageModifiers,
@@ -811,16 +812,18 @@ export interface EncounterResolution {
 /**
  * Determines whether the encounter should end based on current HP values.
  *
- * Priority: player death is checked before enemy death so a mutual-kill
- * scenario is correctly reported as a player death.
+ * Priority: player death (the canonical marker) is checked before enemy death
+ * so a mutual-kill scenario is correctly reported as a player death.
  *
  * @pure — no side effects, deterministic output.
  */
 export function resolveEncounterEnd(
-  combatants: Array<{ isPlayer: boolean; hp: number }>
+  combatants: Array<{ isPlayer: boolean; hp: number; deathSaveFailures?: number | null }>
 ): EncounterResolution {
   const player = combatants.find((c) => c.isPlayer);
-  if (player && checkDeath(player.hp)) {
+  // 0 HP is dying, not dead: only the canonical marker — three failed saves or
+  // massive damage — ends the encounter (death-saves spec §6.2).
+  if (player && (player.deathSaveFailures ?? 0) >= DEATH_SAVE_LIMIT) {
     return { shouldEnd: true, reason: "player_dead" };
   }
   const allEnemiesDead = combatants

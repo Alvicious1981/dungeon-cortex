@@ -90,6 +90,9 @@ import {
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
 import { EnemyTurnInvariantError } from "@/lib/db/enemy-turn-transition";
+import { rollPlayerDeathSave } from "@/lib/db/death-save-transition";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
+import { DeathSaveInvariantError, derivePlayerLifeState } from "@/lib/rules/death-save";
 
 /**
  * The request body, declared once in `lib/events/action-transport.ts` and
@@ -180,6 +183,44 @@ function playerTurnRefusal(
   return null;
 }
 
+const DEATH_SAVE_ACTION = { dying: "Death Save", stable: "Wait" } as const;
+
+/**
+ * An unconscious player acts only through the death-save actions
+ * (docs/superpowers/specs/2026-09-15-death-saves-design.md §7.1).
+ */
+function playerConditionRefusal(
+  encounter: Awaited<ReturnType<typeof buildCampaignContext>>["activeEncounter"],
+  action: string
+): Response | null {
+  const deathAction = action === "Death Save" || action === "Wait";
+  const refuse = (code: string, error: string, extra: Record<string, unknown> = {}) =>
+    NextResponse.json({ error, code, ...extra }, { status: 409 });
+
+  if (!encounter) {
+    return deathAction ? refuse("NO_ACTIVE_ENCOUNTER", "There is no active encounter.") : null;
+  }
+  const player = encounter.combatants.find((c) => c.isPlayer);
+  if (!player) return null; // playerTurnRefusal reports INVALID_PLAYER_COMBATANT.
+
+  const state = derivePlayerLifeState(player);
+  if (state === "conscious") {
+    return deathAction
+      ? refuse("PLAYER_CONSCIOUS", "Only an unconscious player rolls death saves.")
+      : null;
+  }
+  if (state === "dead") {
+    throw new DeathSaveInvariantError(`Encounter ${encounter.id} is active with a dead player.`);
+  }
+
+  const allowedAction = DEATH_SAVE_ACTION[state];
+  if (action === allowedAction) return null;
+  // End Turn still resumes an encounter parked on an enemy slot (enemy-turns §6.6).
+  const authority = resolveEncounterTurnAuthority(encounter);
+  if (action === "End Turn" && authority.ok && !authority.playerOwnsTurn) return null;
+  return refuse("PLAYER_UNCONSCIOUS", "The player is unconscious.", { allowedAction });
+}
+
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 /**
@@ -216,6 +257,17 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<Respons
     // A state the enemy-turn chain must never reach; its transaction has rolled
     // back. Reported, not retried (enemy-turns spec §8). As with any other
     // server error, a 5xx settles no receipt.
+    // Same contract for the death-save state (death-saves spec §7.3).
+    if (error instanceof DeathSaveInvariantError) {
+      console.error("[action] Death save invariant:", error);
+      return NextResponse.json(
+        {
+          error: "The death-save state is inconsistent and the action was rolled back.",
+          code: "DEATH_SAVE_INVARIANT",
+        },
+        { status: 500 }
+      );
+    }
     if (error instanceof EnemyTurnInvariantError) {
       console.error("[action] Enemy turn invariant:", error);
       return NextResponse.json(
@@ -331,9 +383,10 @@ async function resolveAction(
   if (campaign.userId !== user.id) {
     return NextResponse.json({ error: "Campaign does not belong to this user." }, { status: 403 });
   }
-  if (campaign.status !== "active") {
-    return NextResponse.json({ error: "Campaign is not active." }, { status: 409 });
-  }
+  // Inactive campaign or dead character (death-saves spec §7.2). 0 HP is
+  // delegated to playerConditionRefusal, which lets Death Save and Wait through.
+  const playable = await campaignPlayableRefusal(prisma, campaignId, { unconscious: "delegate" });
+  if (playable) return guardResponse(playable);
 
   // ── Idempotency acquisition (DC-AUD-003) ─────────────────────────────────────
   // Placed after ownership and campaign state, so an unauthenticated or
@@ -512,10 +565,16 @@ async function resolveAction(
   // The narrator does its own context build after the mutations land.
   const context = await buildCampaignContext(campaignId);
 
+  // An unconscious player acts only through the death-save actions (death-saves
+  // spec §7.1). Runs after receipt acquisition like every refusal here: the
+  // receipt records the 4xx and no game state or log is written.
+  const conditionRefusal = playerConditionRefusal(context.activeEncounter, trimmedAction);
+  if (conditionRefusal) return conditionRefusal;
+
   // ── Macro Action Detector (Strategic Gate) ──────────────────────────────────
   // Authoritative "fast-path" for UI-triggered buttons (CombatHUD).
   // This bypasses LLM intent parsing to ensure 100% reliability for core mechanics.
-  const MACRO_ACTIONS = ["Attack", "End Turn", "Move"];
+  const MACRO_ACTIONS = ["Attack", "End Turn", "Wait", "Death Save", "Move"];
   if (MACRO_ACTIONS.includes(trimmedAction)) {
     if (!context.activeEncounter) {
       return NextResponse.json({ error: "No active encounter." }, { status: 400 });
@@ -533,7 +592,9 @@ async function resolveAction(
       if (turnRefusal) return turnRefusal;
     }
 
-    if (trimmedAction === "End Turn") {
+    // Wait is End Turn for a stable player (death-saves spec §6.4): the same
+    // finalizer call, and its canonical user log reads "Wait".
+    if (trimmedAction === "End Turn" || trimmedAction === "Wait") {
       const endTurnConflict = () =>
         NextResponse.json(
           {
@@ -585,6 +646,60 @@ async function resolveAction(
 
       playerActionLogged = true;
       gameEvents.push(...finalizeOutcome.events);
+    }
+
+    if (trimmedAction === "Death Save") {
+      // One death save on the dying player's turn (death-saves spec §6.3). A
+      // natural 20 revives and keeps the turn; every other roll ends it.
+      let finalizeOutcome: Awaited<ReturnType<typeof finalizeEncounterTurn>> | null = null;
+      const saveEvents: GameEvent[] = [];
+      try {
+        await prisma.$transaction(async (tx) => {
+          const save = await rollPlayerDeathSave(tx as Prisma.TransactionClient, {
+            campaignId,
+            encounterId: context.activeEncounter!.id,
+            characterId: context.character.id,
+            round: context.activeEncounter!.round,
+            turnIndex: context.activeEncounter!.currentTurnIndex,
+            collectEvents: true,
+          });
+          saveEvents.push(...save.events);
+
+          if (save.endsTurn) {
+            finalizeOutcome = await finalizeEncounterTurn({
+              tx: tx as Prisma.TransactionClient,
+              encounterId: context.activeEncounter!.id,
+              currentTurnIndex: context.activeEncounter!.currentTurnIndex,
+              round: context.activeEncounter!.round,
+              failOnStaleTurn: true,
+            });
+            if (finalizeOutcome.turnAdvanceConflict) {
+              throw new TurnStateConflictError();
+            }
+          }
+
+          await tx.gameLog.create({
+            data: { campaignId, role: "user", content: trimmedAction },
+          });
+        });
+      } catch (error) {
+        if (error instanceof TurnStateConflictError) {
+          return NextResponse.json(
+            {
+              error:
+                "The encounter turn changed before this death save could be applied. Refresh state and try again.",
+              code: "TURN_STATE_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+        throw error;
+      }
+
+      playerActionLogged = true;
+      gameEvents.push(...saveEvents);
+      const settled = finalizeOutcome as Awaited<ReturnType<typeof finalizeEncounterTurn>> | null;
+      if (settled) gameEvents.push(...settled.events);
     }
 
     if (trimmedAction === "Attack") {

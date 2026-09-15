@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
+import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { createTrackedQuest, QuestServiceError } from "@/lib/rules/quest-service";
 
 interface RouteContext {
@@ -51,6 +52,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
   const err = await validateCampaignOwnership(campaignId, user.id);
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
+  // Writes only: GET keeps reading a dead character's quests (death-saves spec §7.2).
+  const playable = await campaignPlayableRefusal(prisma, campaignId);
+  if (playable) return guardResponse(playable);
 
   try {
     const result = await createTrackedQuest({

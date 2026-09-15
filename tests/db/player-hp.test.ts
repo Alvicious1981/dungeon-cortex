@@ -21,7 +21,8 @@ describe("setPlayerHp", () => {
     });
     expect(t.combatant.updateMany).toHaveBeenCalledWith({
       where: { encounterId: "enc-1", isPlayer: true },
-      data: { hp: 7 },
+      // Every player HP write also resets the death state (death-saves spec §4).
+      data: { hp: 7, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
     });
     const characterOrder = (t.character.update as ReturnType<typeof vi.fn>).mock
       .invocationCallOrder[0]!;

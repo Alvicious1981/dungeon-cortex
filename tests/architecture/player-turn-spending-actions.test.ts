@@ -16,10 +16,16 @@ interface RouteBranch {
 
 const TURN_ENDING_BRANCHES: readonly RouteBranch[] = [
   {
-    label: "End Turn",
-    start: 'if (trimmedAction === "End Turn")',
-    end: 'if (trimmedAction === "Attack")',
+    label: "End Turn / Wait",
+    start: 'if (trimmedAction === "End Turn" || trimmedAction === "Wait")',
+    end: 'if (trimmedAction === "Death Save")',
     abortsTransaction: false,
+  },
+  {
+    label: "Death Save",
+    start: 'if (trimmedAction === "Death Save")',
+    end: 'if (trimmedAction === "Attack")',
+    abortsTransaction: true,
   },
   {
     label: "macro attack",

@@ -84,6 +84,7 @@ beforeEach(() => {
   (prisma.campaign.findUnique as any).mockResolvedValue({
     id: campaignId,
     userId: mockUser.id,
+    status: "active",
     characterId,
     character: { id: characterId },
   });

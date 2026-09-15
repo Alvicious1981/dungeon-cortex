@@ -35,10 +35,12 @@ import {
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
+import { applyPlayerDowned } from "@/lib/db/player-downed";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { EnemyTurnInvariantError, resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
 import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
+import { shouldWake } from "@/lib/rules/death-save";
 
 export interface PipelineCombatant {
   id: string;
@@ -759,11 +761,24 @@ export async function executeCombatAction(
       // The player's HP has one source of truth; this Combatant row is its
       // mirror. The spell path took the Character lock at transaction start.
       if (target.isPlayer && playerCharacterId) {
+        const hpBeforeHit = persistedHp + damage;
         newHp = await setPlayerHp(tx, {
           characterId: playerCharacterId,
           encounterId: encounter.id || null,
           hp: newHp,
         });
+        // The player's own area spell can down them too: one rule for the fall
+        // (death-saves spec §6.1).
+        if (newHp === 0 && hpBeforeHit > 0 && encounter.id) {
+          await applyPlayerDowned(tx, {
+            encounterId: encounter.id,
+            hpBefore: hpBeforeHit,
+            damage,
+            maxHp: target.maxHp,
+            collectEvents,
+            events,
+          });
+        }
       }
     }
 
@@ -1009,7 +1024,10 @@ async function runEnemyChain(input: {
   const ordered = await tx.combatant.findMany({
     where: { encounterId },
     orderBy: COMBATANT_INITIATIVE_ORDER,
-    select: { id: true, isPlayer: true },
+    // hp and stableWakeRound decide the wake below. The snapshot is exact for
+    // that: enemies never act against a downed player, so neither field changes
+    // during the chain (death-saves spec §6.5).
+    select: { id: true, isPlayer: true, hp: true, stableWakeRound: true },
   });
 
   for (let step = 0; step < ordered.length; step++) {
@@ -1018,6 +1036,19 @@ async function runEnemyChain(input: {
       throw new EnemyTurnInvariantError(`Encounter ${encounterId} has no combatant at ${turnIndex}.`);
     }
     if (active.isPlayer) {
+      // The player's turn begins: a stable player wakes on the scheduled round
+      // (death-saves spec §6.5). setPlayerHp's mirror clears the death state.
+      if (shouldWake({ hp: active.hp ?? 1, stableWakeRound: active.stableWakeRound ?? null }, round)) {
+        await setPlayerHp(tx, { characterId: owner.characterId, encounterId, hp: 1 });
+        await tx.gameLog.create({
+          data: {
+            campaignId: owner.campaignId,
+            role: "system",
+            content: "The player regains consciousness with 1 HP.",
+          },
+        });
+        if (collectEvents) events.push({ type: "PLAYER_WOKE", payload: { hp: 1 } });
+      }
       return {
         events,
         encounterResolved: false,
@@ -1037,9 +1068,10 @@ async function runEnemyChain(input: {
     });
     events.push(...outcome.events);
 
-    if (outcome.playerDowned) {
-      // Until death saves land (spec 2), 0 HP is defeat: the same conditional
-      // active → resolved claim as any other ending, bound to this turn.
+    if (outcome.playerDied) {
+      // Massive damage: the same conditional active → resolved claim as any
+      // other ending, bound to this turn (death-saves spec §6.1). A downed but
+      // living player skips this block: the chain runs on and later enemies hold.
       const fresh = await tx.combatant.findMany({ where: { encounterId } });
       const ended = await resolveEncounterIfEnded({
         tx,
@@ -1052,7 +1084,7 @@ async function runEnemyChain(input: {
       });
       if (!ended) {
         throw new EnemyTurnInvariantError(
-          `The player was downed but encounter ${encounterId} did not end.`
+          `The player died but encounter ${encounterId} did not end.`
         );
       }
       return ended;
