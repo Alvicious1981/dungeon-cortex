@@ -142,6 +142,18 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - The player's HP is written through `setPlayerHp` (Character, then its
   Combatant mirror); in-combat healing keeps its Character CAS and applies the
   same mirror.
+- A player at 0 HP is dying, not defeated. `resolveEncounterEnd` decides
+  `player_dead` from `Combatant.deathSaveFailures >= 3` (three failed saves or
+  massive damage), never from HP. Enemies hold against a downed player —
+  docs/superpowers/specs/2026-09-15-death-saves-design.md.
+- Every player HP write (`setPlayerHp`, healing's mirror) resets the death
+  state; `unconscious` is derived from HP 0 and never persisted.
+- A dying player's only action is `Death Save`; a stable one's is `Wait`
+  (409 `PLAYER_UNCONSCIOUS` otherwise). A stable player wakes with 1 HP on
+  `stableWakeRound`.
+- Death is permanent: `Character.diedAt`, written once by the `player_dead`
+  claim winner. Every campaign write route calls `campaignPlayableRefusal`;
+  every character write route calls `characterAliveRefusal`.
 
 ## 5. Obsolescence Registry
 

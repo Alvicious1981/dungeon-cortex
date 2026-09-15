@@ -78,25 +78,28 @@ The following legacy items are considered archived and must NOT be used for grou
 **Score objetivo:** 72 → **79 / 100**  
 **Intervención:** LAW-04 — Death Saving Throws
 
-### Estado post-implementación
+### Corrección del registro (2026-09-16)
 
-| Módulo | Estado |
-|--------|--------|
-| `lib/rules/combat.ts` → `resolveDeathSave` | ✅ Implementado + 8 tests |
-| `lib/rules/combat.ts` → `resolveEncounterEnd` | ✅ Actualizado: jugador a 0 HP ≠ muerte inmediata |
-| `lib/rules/combat-pipeline.ts` → `DEATH_SAVE_REQUIRED` | ✅ Evento emitido en lugar de `ENEMY_DEFEATED` |
-| `lib/events/game-events.ts` | ✅ `DEATH_SAVE_REQUIRED` añadido al catálogo |
-| `app/api/campaign/[id]/action/route.ts` | ✅ Macro-action `"death_save"` en fast-path |
-| `lib/memory/context.ts` | ✅ `ContextCombatant` extendida con campos deathSave |
-| `components/combat/MacroDeck.tsx` | ✅ Botón "Tirada de Muerte" cuando `playerHp === 0` |
-| `components/combat/InitiativeTracker.tsx` | ✅ Badge "Derribado" cuando `hp === 0` |
-| DB Migration | ✅ `deathSaveSuccesses`, `deathSaveFailures` en tabla `Combatant` |
-| Tests | ✅ 1535/1535 en verde, 0 errores TypeScript |
+**Esta entrada describía código que nunca llegó a ninguna rama.** Nada de lo
+que listaba (`resolveDeathSave`, `DEATH_SAVE_REQUIRED`, la macro `death_save`,
+el botón "Tirada de Muerte") existió en `master` ni en otra rama
+(`git log -S resolveDeathSave --all` solo encuentra un registro de agente).
+Solo existían las columnas `Combatant.deathSaveSuccesses` y
+`deathSaveFailures` (migración `20260805090000`), sin lector ni escritor.
+Además, su tabla de reglas era incorrecta: en el SRD 2014 un 20 natural no
+estabiliza, devuelve 1 PG.
 
-### Reglas implementadas (5e 2014 SRD)
-- Nat 1 → 2 fallos (fallo crítico)
-- Nat 20 → estabilizado (éxito crítico)
-- 10–19 → 1 éxito
-- 2–9 → 1 fallo
-- 3 éxitos → estado `stable`
-- 3 fallos → estado `dead` → encounter resuelto
+Las tiradas de muerte se implementaron en septiembre de 2026 según
+`docs/superpowers/specs/2026-09-15-death-saves-design.md`, en tres PRs:
+
+- "docs(spec): design and plan death saves (death saves 0/3)" (#201)
+- "feat(rules): death save rules and the downed-player hold (death saves 1/3)" (#202)
+- "feat(combat): death saving throws (death saves 2/3)" (#203)
+- "feat(combat): permanent death and the death-save UI (death saves 3/3)"
+
+### Reglas vigentes (5e 2014 SRD)
+- A 0 PG el jugador está moribundo e inconsciente; los enemigos no lo rematan.
+- Una salvación por turno (`Death Save`): 20 natural → 1 PG y conserva el turno;
+  1 natural → 2 fallos; 10 o más → 1 éxito; menos de 10 → 1 fallo.
+- 3 éxitos → estable; con `Wait` despierta con 1 PG tras 1d4 rondas.
+- 3 fallos, o daño sobrante ≥ PG máximos → muerte permanente (`Character.diedAt`).
