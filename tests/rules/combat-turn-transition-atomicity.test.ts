@@ -29,6 +29,7 @@ function ongoingCombatants() {
 function buildCasTx(fresh: Record<string, unknown> | null = null) {
   return {
     $queryRaw: vi.fn(),
+    gameLog: { create: vi.fn() },
     combatant: {
       findMany: vi.fn().mockResolvedValue(ongoingCombatants()),
     },
@@ -289,6 +290,43 @@ describe("finalizeEncounterTurn enemy chain", () => {
       expect.objectContaining({ data: { status: "resolved" } }),
     );
     expect(resolveEnemyTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("wakes a stable player when the chain returns on the wake round", async () => {
+    const tx = buildCasTx();
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
+    const characterUpdate = vi.fn();
+    (tx as unknown as { character: unknown }).character = { update: characterUpdate };
+    (tx.combatant as unknown as { updateMany: unknown }).updateMany = vi.fn();
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 0, stableWakeRound: 2 },
+      { id: "enemy-1", isPlayer: false, hp: 10 },
+      { id: "enemy-2", isPlayer: false, hp: 10 },
+    ]);
+
+    const result = await finalizeEncounterTurn({
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 1, failOnStaleTurn: true,
+    });
+
+    expect(result).toMatchObject({ nextTurnIndex: 0, nextRound: 2 });
+    expect(result.events.map((e) => e.type)).toContain("PLAYER_WOKE");
+    expect(characterUpdate).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 1 } });
+  });
+
+  it("does not wake a stable player a round early", async () => {
+    const tx = buildCasTx();
+    (tx.encounter.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
+    (tx.combatant.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "player-1", isPlayer: true, hp: 0, stableWakeRound: 3 },
+      { id: "enemy-1", isPlayer: false, hp: 10 },
+      { id: "enemy-2", isPlayer: false, hp: 10 },
+    ]);
+
+    const result = await finalizeEncounterTurn({
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 1, failOnStaleTurn: true,
+    });
+
+    expect(result.events.map((e) => e.type)).not.toContain("PLAYER_WOKE");
   });
 
   it("resume starts the chain at the enemy slot without a player claim", async () => {
