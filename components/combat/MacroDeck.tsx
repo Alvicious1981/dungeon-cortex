@@ -8,6 +8,7 @@ import {
   createDungeonActionRequestId,
   requestDungeonAttack,
   requestDungeonAction,
+  requestDungeonTargetSelectionSync,
   type DungeonActionErrorDetail,
   type DungeonActionRequestDetail,
   type DungeonTargetSelectionDetail,
@@ -219,6 +220,8 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
       DUNGEON_TARGET_SELECTION_CHANGE,
       handleTargetSelection
     );
+    // ActionInput owns the selection and may already hold one when this mounts.
+    requestDungeonTargetSelectionSync();
     return () => {
       window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
       window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);

@@ -4,6 +4,13 @@ export const DUNGEON_ACTION_END = "dungeon-action-end";
 export const DUNGEON_ACTION_ERROR = "dungeon-action-error";
 export const DUNGEON_TARGET_SELECTION_CHANGE =
   "dungeon-target-selection-change";
+/**
+ * Asks the owner of the target selection (`ActionInput`) to re-broadcast its
+ * current selection, so a listener that mounts after the selection was made
+ * still sees it.
+ */
+export const DUNGEON_TARGET_SELECTION_SYNC_REQUEST =
+  "dungeon-target-selection-sync-request";
 
 export interface DungeonActionRequest {
   action: string;
@@ -132,6 +139,10 @@ export function dispatchDungeonTargetSelection(
       { detail: { targetIds: [...targetIds] } }
     )
   );
+}
+
+export function requestDungeonTargetSelectionSync(): void {
+  window.dispatchEvent(new Event(DUNGEON_TARGET_SELECTION_SYNC_REQUEST));
 }
 
 export function dispatchDungeonActionStart(
