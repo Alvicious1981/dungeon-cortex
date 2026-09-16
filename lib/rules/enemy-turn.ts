@@ -28,7 +28,7 @@ import {
   type ProfiledAttack,
 } from "@/lib/rules/monster-attack-profile";
 
-export type EnemyAttackMode = "melee" | "ranged";
+export type EnemyAttackMode = "melee" | "ranged" | "area-save";
 
 export interface EnemyTurnInput {
   enemy: GridCombatant & {
@@ -44,6 +44,9 @@ export interface EnemyTurnInput {
    * (docs/superpowers/specs/2026-09-15-death-saves-design.md §1, §5).
    */
   playerDowned?: boolean;
+  /** The enemy's areaSaveAttack, if it has one, is off recharge and ready
+   * (docs/superpowers/specs/2026-09-16-area-save-actions-design.md §5, §6.2). */
+  breathAvailable?: boolean;
 }
 
 export interface EnemyTurnPlan {
@@ -51,10 +54,13 @@ export interface EnemyTurnPlan {
   mode: EnemyAttackMode | null;
   /** Attack names in resolution order, multiattack parts expanded by count. */
   attacks: string[];
+  /** The area-save attack's name when the plan uses it; attacks is then
+   * empty — the two are mutually exclusive within a turn. */
+  areaSaveAttack: string | null;
 }
 
 function noAction(): EnemyTurnPlan {
-  return { move: null, mode: null, attacks: [] };
+  return { move: null, mode: null, attacks: [], areaSaveAttack: null };
 }
 
 function usable(
@@ -92,6 +98,14 @@ function chooseAttacks(
     (a, b) => totalAverage(b) - totalAverage(a) || a.name.localeCompare(b.name),
   )[0]!;
   return [best.name];
+}
+
+function withinAreaSaveReach(
+  attack: { reachFt: number },
+  from: GridCombatant,
+  player: GridCombatant,
+): boolean {
+  return minFootprintDistanceFt(from, player) <= attack.reachFt;
 }
 
 type DestinationKey = [distanceFt: number, squaresMoved: number, y: number, x: number];
@@ -148,29 +162,42 @@ export function planEnemyTurn(input: EnemyTurnInput): EnemyTurnPlan {
   const profile = enemy.profile;
   if (enemy.hp <= 0 || profile === null || isIncapacitated(enemy.conditions)) return noAction();
 
-  // 1. Melee from here.
-  const meleeHere = chooseAttacks(profile, enemy, player, "melee");
-  if (meleeHere.length > 0) return { move: null, mode: "melee", attacks: meleeHere };
-
-  // 2. Close and strike.
   const destination = bestDestination(input);
   const moved = destination.x !== enemy.x || destination.y !== enemy.y;
   const atDestination = { ...enemy, x: destination.x, y: destination.y };
+
+  // 0. Breathe from here, if charged and in range (spec §6.2, decision 3:
+  // preferred over multiattack whenever it applies).
+  const areaSave = profile.areaSaveAttack;
+  if (areaSave && input.breathAvailable && withinAreaSaveReach(areaSave, enemy, player)) {
+    return { move: null, mode: "area-save", attacks: [], areaSaveAttack: areaSave.name };
+  }
+
+  // 0a. Move, then breathe, if reach only covers the player after moving.
+  if (areaSave && input.breathAvailable && moved && withinAreaSaveReach(areaSave, atDestination, player)) {
+    return { move: destination, mode: "area-save", attacks: [], areaSaveAttack: areaSave.name };
+  }
+
+  // 1. Melee from here.
+  const meleeHere = chooseAttacks(profile, enemy, player, "melee");
+  if (meleeHere.length > 0) return { move: null, mode: "melee", attacks: meleeHere, areaSaveAttack: null };
+
+  // 2. Close and strike.
   const meleeThere = chooseAttacks(profile, atDestination, player, "melee");
   if (moved && meleeThere.length > 0) {
-    return { move: destination, mode: "melee", attacks: meleeThere };
+    return { move: destination, mode: "melee", attacks: meleeThere, areaSaveAttack: null };
   }
 
   // 3. Shoot from here.
   const rangedHere = chooseAttacks(profile, enemy, player, "ranged");
-  if (rangedHere.length > 0) return { move: null, mode: "ranged", attacks: rangedHere };
+  if (rangedHere.length > 0) return { move: null, mode: "ranged", attacks: rangedHere, areaSaveAttack: null };
 
   // 4. Advance, and shoot if that brings the player into range.
   if (moved) {
     const rangedThere = chooseAttacks(profile, atDestination, player, "ranged");
     return rangedThere.length > 0
-      ? { move: destination, mode: "ranged", attacks: rangedThere }
-      : { move: destination, mode: null, attacks: [] };
+      ? { move: destination, mode: "ranged", attacks: rangedThere, areaSaveAttack: null }
+      : { move: destination, mode: null, attacks: [], areaSaveAttack: null };
   }
 
   // 5. Nothing: a ranged-only enemy adjacent to the player (known limitation).

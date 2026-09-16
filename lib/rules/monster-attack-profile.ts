@@ -15,6 +15,7 @@
  */
 
 import { DAMAGE_TYPES, type DamageType } from "@/lib/rules/damage-modifiers";
+import { ABILITIES, type Ability } from "@/lib/rules/ability-check";
 
 export interface ProfiledDamage {
   /** "XdY±Z" (dice.ts notation) or a bare integer for flat damage. */
@@ -30,6 +31,18 @@ export interface ProfiledAttack {
   damage: ProfiledDamage[];
 }
 
+export interface ProfiledAreaSaveAttack {
+  name: string;
+  /** Reduced from the SRD's cone/line/point shape to a maximum distance — the
+   * grid has one possible target, so no real geometry is modelled (spec §1). */
+  reachFt: number;
+  saveAbility: Ability;
+  saveDC: number;
+  damage: ProfiledDamage[];
+  /** 1d6; this roll or higher recharges the action (spec §2). */
+  rechargeMin: 4 | 5 | 6;
+}
+
 export interface MultiattackPart {
   attack: string;
   count: number;
@@ -40,6 +53,9 @@ export interface MonsterAttackProfileV1 {
   walkSpeedFt: number;
   attacks: ProfiledAttack[];
   multiattack: MultiattackPart[] | null;
+  /** NULL for every monster without a recognised area-save action, and for
+   * any profile persisted before this field existed (spec §4.4). */
+  areaSaveAttack: ProfiledAreaSaveAttack | null;
 }
 
 type HeaderMode = "melee" | "ranged" | "both";
@@ -112,6 +128,50 @@ const HEADERS = RECOGNISED_ATTACK_HEADERS.map((header) => ({
   mode: header.mode,
   pattern: slotPattern(header.template),
 }));
+
+const ABILITY_INDEX: Record<string, Ability> = {
+  str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA",
+};
+const ABILITY_WORD_TO_INDEX: Record<string, string> = {
+  strength: "str", dexterity: "dex", constitution: "con",
+  intelligence: "int", wisdom: "wis", charisma: "cha",
+};
+
+/**
+ * Verbatim, up to numeric and named slots (spec §4.2). Matching alone is not
+ * enough: every slot is cross-checked against the action's own structured
+ * dc/damage fields (decision 6) before any of it is trusted.
+ */
+// Built from a string, not a regex literal: named capturing groups in a
+// literal require targeting ES2018+, and this project targets ES2017.
+const AREA_SAVE_CLAUSE = new RegExp(
+  "must (?:make|succeed on) a DC (?<dc>\\d+) " +
+    "(?<ability>Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) saving throw, " +
+    "taking \\d+ \\((?<dice>[^)]+)\\) (?<type>[a-z]+) damage on a failed save, " +
+    "or half as much damage on a successful one\\.",
+);
+
+/**
+ * The shape/size sentence has no structured counterpart, so it is the one
+ * fact read from prose alone (spec §4.3). `a`/`an` is accepted either way —
+ * the source data has at least one "an 60-foot line" typo.
+ */
+const AREA_SAVE_REACH: readonly RegExp[] = [
+  /in an? (\d+)-foot cone\./,
+  /in an? (\d+)-foot line that is \d+ (?:feet|ft\.) wide\./,
+  /a (\d+)-foot cone of [a-z ]+\./,
+  /spits [a-z ]+ in a line that is (\d+) ft\. long and \d+ ft\. wide/,
+  /exhales a line of [a-z]+ that is (\d+) ft\. long and \d+ ft\. wide/,
+  /within (\d+) feet of it\./,
+];
+
+function recogniseAreaSaveReach(desc: string): number | null {
+  for (const pattern of AREA_SAVE_REACH) {
+    const match = pattern.exec(desc);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -199,6 +259,54 @@ export function recogniseAttack(action: unknown): ProfiledAttack | null {
   return null;
 }
 
+/**
+ * One SRD action as a resolvable area-save attack, or null when it is not
+ * recognised (spec §4). An action with an `attack_bonus` belongs to
+ * recogniseAttack, never to this one, even if it also carries a `dc` (the
+ * aboleth's Tentacle rider).
+ */
+export function recogniseAreaSaveAttack(action: unknown): ProfiledAreaSaveAttack | null {
+  const a = asRecord(action);
+  if (!a || "attack_bonus" in a || typeof a.name !== "string" || typeof a.desc !== "string") {
+    return null;
+  }
+
+  const dc = asRecord(a.dc);
+  const ability = asRecord(dc?.dc_type)?.index;
+  const dcValue = dc?.dc_value;
+  if (typeof ability !== "string" || !(ability in ABILITY_INDEX) || typeof dcValue !== "number") {
+    return null;
+  }
+
+  if (!Array.isArray(a.damage) || a.damage.length === 0) return null;
+  const damage = a.damage.map(damageEntry);
+  if (damage.some((entry) => entry === null)) return null;
+
+  const usage = asRecord(a.usage);
+  if (usage?.type !== "recharge on roll" || usage.dice !== "1d6") return null;
+  const rechargeMin = usage.min_value;
+  if (rechargeMin !== 4 && rechargeMin !== 5 && rechargeMin !== 6) return null;
+
+  const clause = AREA_SAVE_CLAUSE.exec(a.desc)?.groups;
+  if (!clause) return null;
+  if (Number(clause.dc) !== dcValue) return null;
+  if (ABILITY_WORD_TO_INDEX[clause.ability!.toLowerCase()] !== ability) return null;
+  const first = (damage as ProfiledDamage[])[0]!;
+  if (clause.dice !== first.dice || clause.type !== first.type) return null;
+
+  const reachFt = recogniseAreaSaveReach(a.desc);
+  if (reachFt === null) return null;
+
+  return {
+    name: a.name,
+    reachFt,
+    saveAbility: ABILITY_INDEX[ability]!,
+    saveDC: dcValue,
+    damage: damage as ProfiledDamage[],
+    rechargeMin,
+  };
+}
+
 function resolveMultiattack(
   actions: unknown[],
   attacks: ProfiledAttack[],
@@ -240,7 +348,9 @@ export function profileMonster(monster: unknown): MonsterAttackProfileV1 | null 
   const attacks = actions
     .map(recogniseAttack)
     .filter((attack): attack is ProfiledAttack => attack !== null);
-  if (attacks.length === 0) return null;
+  const areaSaveAttack =
+    actions.map(recogniseAreaSaveAttack).find((a): a is ProfiledAreaSaveAttack => a !== null) ?? null;
+  if (attacks.length === 0 && areaSaveAttack === null) return null;
 
   const walk = asRecord(m!.speed)?.walk;
   const walkSpeedFt = typeof walk === "string" ? (RECOGNISED_WALK_SPEEDS.get(walk) ?? 0) : 0;
@@ -250,6 +360,7 @@ export function profileMonster(monster: unknown): MonsterAttackProfileV1 | null 
     walkSpeedFt,
     attacks,
     multiattack: resolveMultiattack(actions, attacks),
+    areaSaveAttack,
   };
 }
 
@@ -271,6 +382,25 @@ function isProfiledAttack(value: unknown): value is ProfiledAttack {
   return melee && ranged && damage && (a.melee !== null || a.ranged !== null);
 }
 
+function isProfiledAreaSaveAttack(value: unknown): value is ProfiledAreaSaveAttack {
+  const a = asRecord(value);
+  if (!a || typeof a.name !== "string" || typeof a.reachFt !== "number") return false;
+  if (typeof a.saveDC !== "number") return false;
+  if (!(ABILITIES as readonly string[]).includes(a.saveAbility as string)) return false;
+  if (a.rechargeMin !== 4 && a.rechargeMin !== 5 && a.rechargeMin !== 6) return false;
+  return (
+    Array.isArray(a.damage) &&
+    a.damage.length > 0 &&
+    a.damage.every((d) => {
+      const entry = asRecord(d);
+      return (
+        typeof entry?.dice === "string" &&
+        (DAMAGE_TYPES as readonly string[]).includes(entry.type as string)
+      );
+    })
+  );
+}
+
 /**
  * Shape guard for the persisted JSON column. A profile that fails it is an
  * invariant failure, not a skipped turn (spec §8).
@@ -278,9 +408,15 @@ function isProfiledAttack(value: unknown): value is ProfiledAttack {
 export function isMonsterAttackProfile(value: unknown): value is MonsterAttackProfileV1 {
   const v = asRecord(value);
   if (!v || v.version !== 1 || typeof v.walkSpeedFt !== "number") return false;
-  if (!Array.isArray(v.attacks) || v.attacks.length === 0 || !v.attacks.every(isProfiledAttack)) {
-    return false;
-  }
+  if (!Array.isArray(v.attacks) || !v.attacks.every(isProfiledAttack)) return false;
+
+  // `!= null` on purpose: a profile persisted before this field existed omits
+  // the key entirely (undefined), which must read exactly like an explicit
+  // null — "no area attack" (spec §4.4).
+  const hasAreaSaveAttack = v.areaSaveAttack != null;
+  if (hasAreaSaveAttack && !isProfiledAreaSaveAttack(v.areaSaveAttack)) return false;
+  if (v.attacks.length === 0 && !hasAreaSaveAttack) return false;
+
   if (v.multiattack === null) return true;
   return (
     Array.isArray(v.multiattack) &&
