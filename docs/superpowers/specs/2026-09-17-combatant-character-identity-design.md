@@ -61,6 +61,9 @@ model Combatant {
   // ...existing encounter relation unchanged...
 
   @@index([characterId])
+  // Combatant_one_player_per_encounter_key: partial unique index, migration-only
+  // (see §3) — Prisma cannot express a filtered @@unique in the schema DSL, same
+  // limitation as PartyMember_one_main_per_campaign_key.
 }
 ```
 
@@ -71,6 +74,15 @@ model Combatant {
   convention in this schema (`RESTRICT`/`CASCADE` per the established pattern) — a `Combatant`
   row is historical combat record; a `Character` being restricted from deletion while referenced
   is consistent with how every other FK to `Character` behaves here.
+- **`Combatant_one_player_per_encounter_key`** — added during design review. The three write
+  paths in §4 only close the landmine at their own call sites; nothing at the database level
+  actually prevented a second `isPlayer: true` row from being created in the first place —
+  `resolveEncounterTurnAuthority` only checks at *action* time, not at *creation* time. A partial
+  unique index closes the gap at its real source, the same way `PartyMember_one_main_per_campaign_key`
+  (DC-PARTY-001) enforces "exactly one MAIN" at the database rather than trusting every future
+  caller to maintain it by convention. This constraint does not depend on `characterId` at all —
+  it targets `isPlayer` directly — but it belongs in this migration because it protects the exact
+  invariant the rest of this design assumes.
 
 ## 3. Migration and the backfill risk
 
@@ -102,6 +114,33 @@ WHERE c."encounterId" = e."id"
 
 This covers historical rows and currently-active-encounter rows in the same atomic step, exactly
 like DC-PARTY-001's `Campaign` backfill.
+
+**`Combatant_one_player_per_encounter_key`** uses the same pre-check-then-constrain shape as
+`20260912220000_enforce_single_active_encounter`'s `Encounter_one_active_per_campaign_key` — fail
+closed if data already violates the invariant, rather than silently repairing or corrupting it:
+
+```sql
+DO $combatant_one_player_per_encounter$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM "Combatant" WHERE "isPlayer" = true
+    GROUP BY "encounterId" HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Cannot enforce single-player-per-encounter invariant: duplicate isPlayer rows already exist';
+  END IF;
+END
+$combatant_one_player_per_encounter$;
+
+CREATE UNIQUE INDEX "Combatant_one_player_per_encounter_key"
+ON "Combatant" ("encounterId")
+WHERE "isPlayer" = true;
+```
+
+This pre-check is also the empirical answer to "does any existing data — including the dormant
+`spawnCombatEncounter` twin's test fixtures — ever transiently violate this": if it does, the
+migration refuses to apply and says so, rather than the question being resolved by code review
+alone.
 
 **Deploy order:** the migration (with this backfill) must be applied before the new application
 code ships. This is enforced structurally, not just by convention — the generated Prisma Client
@@ -138,19 +177,36 @@ the current source, not assumed. No call site needs to *fetch* anything new.
 ## 6. Testing
 
 - **Static schema/migration contract** — same technique as DC-PARTY-001's
-  `party-member-migration-contract.test.ts`: the migration contains the `ADD COLUMN` and the
-  backfill `UPDATE ... FROM`, and does not touch unrelated tables' DDL.
+  `party-member-migration-contract.test.ts`: the migration contains the `ADD COLUMN`, the backfill
+  `UPDATE ... FROM`, and the `Combatant_one_player_per_encounter_key` index, and does not touch
+  unrelated tables' DDL.
 - **Real-disposable-Postgres backfill proof** — create a `Combatant` row directly (bypassing the
   migration's backfill, simulating a pre-existing row), run the backfill `UPDATE` against it,
   confirm `characterId` lands correctly from the `Campaign` chain. Mocks cannot prove this; it
   needs the real join.
-- **The actual safety property, proven directly:** construct an encounter with two Combatant rows
-  that both have `isPlayer: true` but different `characterId` (a state that shouldn't occur in
-  today's product, but is exactly the scenario this design defuses) and confirm
-  `mirrorPlayerCombatantHp` / `applyPlayerDowned` / `rollPlayerDeathSave` only touch the one whose
-  `characterId` matches, not both. This is the one new behavior worth asserting directly, and it's
-  the natural RED/GREEN falsification target: temporarily revert one function's `where` back to
-  `isPlayer: true`, confirm this test goes RED (both rows get written), restore, confirm GREEN.
+- **Real-disposable-Postgres constraint proof** — attempt to create a second `isPlayer: true`
+  Combatant in an encounter that already has one; confirm Postgres rejects it with a Prisma `P2002`.
+  Learned empirically during DC-PARTY-001: Prisma 6.19.2 reports `meta.target` as the raw column
+  name array (here, `["encounterId"]`), not the constraint's name — the detection helper must match
+  on that, not on a `"Combatant_one_player_per_encounter_key"` substring. RED/GREEN falsification:
+  temporarily drop that index, confirm the test goes RED (the insert succeeds instead of throwing),
+  restore, confirm GREEN — same technique as DC-PARTY-001's duplicate-membership falsification.
+- **The write-function safety property — now a unit test, not an integration test.** Design review
+  added `Combatant_one_player_per_encounter_key` (§2), which means two `isPlayer: true` rows with
+  different `characterId` can no longer be constructed in a real database — the constraint itself
+  is the proof that the bad state can't occur. What's left to verify is narrower and more
+  mechanical: a unit test with a fake Prisma `tx` confirming `mirrorPlayerCombatantHp` /
+  `applyPlayerDowned` / `rollPlayerDeathSave` build their `where` clause from `{ encounterId,
+  characterId }`, not `{ encounterId, isPlayer: true }` — i.e., that the code actually uses the
+  identity the database now guarantees is unique, rather than the boolean it no longer needs to
+  trust alone. RED/GREEN: revert one function's `where` back to `isPlayer: true`, confirm the
+  fake-`tx` assertion goes RED (wrong shape), restore, confirm GREEN.
+- **Architecture-fence test** — added during design review to close the residual risk in §7
+  directly instead of only documenting it in prose: a static test (same technique as
+  `rls-deny-by-default.test.ts`) asserting every file that does `tx.combatant.create` /
+  `tx.combatant.createMany` with `isPlayer: true` also sets `characterId` in the same object
+  literal. Catches a future third creation path that forgets, at review time rather than at
+  runtime.
 - **Existing unit tests for the three write functions** (`tests/db/player-hp.test.ts`,
   `tests/db/player-downed.test.ts`, and death-save transition's tests) need their fixtures updated
   to pass `characterId` — expected, mechanical maintenance given the signature change, not new
@@ -165,18 +221,30 @@ the current source, not assumed. No call site needs to *fetch* anything new.
 No new runtime error paths. `characterId` is populated by construction — either backfilled by the
 migration or set at the one remaining creation site (`app/api/campaign/[id]/encounter/route.ts`;
 `encounter-service.ts`'s twin is dormant). If a future code path ever created a player Combatant
-without setting `characterId`, the write functions would silently match zero rows — the same
-failure *mode* this design is fixing, just from a different cause. No speculative runtime guard is
-added for that (nothing today can trigger it, and the two creation sites are both covered by this
-design); it's recorded here as a residual risk for whoever adds a third creation path later.
+without setting `characterId`, the write functions would match zero rows — the same failure *mode*
+this design is fixing, just from a different cause.
+
+Design review closed two thirds of this gap rather than just documenting it:
+`Combatant_one_player_per_encounter_key` (§2/§3) means a second `isPlayer: true` row can never be
+created at all, and the architecture-fence test (§6) catches a future creation site that forgets
+`characterId` at review time. What's left, genuinely residual: a creation path could still set
+`characterId` to the *wrong* Character (not `NULL`, just incorrect) without either safeguard
+noticing — nothing here validates that the `characterId` written at creation actually matches
+`campaign.characterId`. No guard is added for that; it would need the encounter-creation route to
+assert its own input against the campaign it just loaded, which is more than "plumbing" and belongs
+in a future task if it ever proves necessary.
 
 ## 8. Definition of done
 
 - [ ] `Combatant.characterId` in `schema.prisma`, migration with backfill, both committed
       unapplied per `AGENTS.md`.
+- [ ] `Combatant_one_player_per_encounter_key` partial unique index, with its pre-check DO block,
+      in the same migration.
 - [ ] `mirrorPlayerCombatantHp`, `applyPlayerDowned`, `rollPlayerDeathSave` scoped by
       `characterId`; all callers updated.
 - [ ] Both Combatant-creation sites set `characterId`.
-- [ ] Tests per §6, including the two-Combatant safety test and its RED/GREEN falsification.
+- [ ] Tests per §6: migration contract, real-DB backfill proof, real-DB constraint proof with
+      RED/GREEN falsification, the write-function unit test, and the architecture-fence test for
+      creation-site coverage.
 - [ ] Full existing suite (unit + e2e, including against real disposable Postgres) passes
       unmodified.
