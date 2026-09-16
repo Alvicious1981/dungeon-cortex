@@ -12,6 +12,10 @@ export const DUNGEON_TARGET_SELECTION_CHANGE =
 export const DUNGEON_TARGET_SELECTION_SYNC_REQUEST =
   "dungeon-target-selection-sync-request";
 
+/** Shown when a weapon attack is requested without exactly one selected target. */
+export const ATTACK_SINGLE_TARGET_REQUIRED =
+  "Selecciona exactamente un objetivo para atacar.";
+
 export interface DungeonActionRequest {
   action: string;
   targetIds?: string[];

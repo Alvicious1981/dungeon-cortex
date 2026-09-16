@@ -23,6 +23,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
 import {
+  ATTACK_SINGLE_TARGET_REQUIRED,
   DUNGEON_ACTION_REQUEST,
   DUNGEON_TARGET_SELECTION_SYNC_REQUEST,
   createDungeonActionRequestId,
@@ -278,20 +279,27 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
         return;
       }
 
-      const targetAwareDetail =
+      // An Attack without targets (e.g. the HUD's F1 button) takes the Objetivos
+      // selection, which must be exactly one target — the same rule MacroDeck
+      // applies before it builds its own request.
+      if (
         detail.request.action.trim() === "Attack" &&
-        detail.request.targetIds === undefined &&
-        selectedTargetIds.length > 0
-          ? {
-              ...detail,
-              request: {
-                ...detail.request,
-                targetIds: selectedTargetIds,
-              },
-            }
-          : detail;
+        detail.request.targetIds === undefined
+      ) {
+        if (selectedTargetIds.length !== 1) {
+          setError(ATTACK_SINGLE_TARGET_REQUIRED);
+          dispatchDungeonActionError({ ...detail, error: ATTACK_SINGLE_TARGET_REQUIRED });
+          dispatchDungeonActionEnd(detail);
+          return;
+        }
+        void executeAction({
+          ...detail,
+          request: { ...detail.request, targetIds: [...selectedTargetIds] },
+        });
+        return;
+      }
 
-      void executeAction(targetAwareDetail);
+      void executeAction(detail);
     }
 
     window.addEventListener(DUNGEON_ACTION_REQUEST, handleRequestedAction);
