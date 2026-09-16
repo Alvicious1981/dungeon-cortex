@@ -18,7 +18,7 @@
  * file asserting against its own fixture instead of the rule. `Math.random` is
  * pinned instead where an exact string is needed.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 
 vi.mock("next/server", async (importActual) => {
   const actual = await importActual<typeof import("next/server")>();
@@ -277,6 +277,20 @@ describe("resolveRollCommand: parsing of the command text", () => {
 });
 
 describe("the prefix boundary the route still owns", () => {
+  // The action route pulls in the whole combat/rules/db graph on a cold import
+  // (~2s in isolation, far more under full-suite load). Loading it here keeps
+  // that cost out of the test's own timeout. The `vi.mock` calls above are
+  // hoisted, so these are the same mocked instances the test configures.
+  let POST: typeof import("@/app/api/campaign/[id]/action/route").POST;
+  let parseIntent: typeof import("@/lib/ai/intent").parseIntent;
+  let buildCampaignContext: typeof import("@/lib/memory/context").buildCampaignContext;
+
+  beforeAll(async () => {
+    ({ POST } = await import("@/app/api/campaign/[id]/action/route"));
+    ({ parseIntent } = await import("@/lib/ai/intent"));
+    ({ buildCampaignContext } = await import("@/lib/memory/context"));
+  }, 60_000);
+
   it("carries a trailing space, so a bare /roll cannot match it", () => {
     expect(ROLL_COMMAND_PREFIX).toBe("/roll ");
     expect("/roll".toLowerCase().startsWith(ROLL_COMMAND_PREFIX)).toBe(false);
@@ -288,10 +302,6 @@ describe("the prefix boundary the route still owns", () => {
     // The regression this guards: shortening the prefix to "/roll" would route
     // a bare `/roll` into the handler, where `slice(5).trim()` yields "" and
     // the player gets an invalid-notation line instead of narration.
-    const { POST } = await import("@/app/api/campaign/[id]/action/route");
-    const { parseIntent } = await import("@/lib/ai/intent");
-    const { buildCampaignContext } = await import("@/lib/memory/context");
-
     (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: campaignId,
       userId: "user_1",
