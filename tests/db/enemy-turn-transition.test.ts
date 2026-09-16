@@ -182,3 +182,203 @@ describe("resolveEnemyTurn", () => {
     await expect(resolveEnemyTurn(tx, CTX)).rejects.toBeInstanceOf(EnemyTurnInvariantError);
   });
 });
+
+const DRAGON_PROFILE = {
+  version: 1, walkSpeedFt: 40, multiattack: null,
+  attacks: [{
+    name: "Bite", attackBonus: 10, melee: { reachFt: 10 }, ranged: null,
+    damage: [{ dice: "2d10+6", type: "piercing" }],
+  }],
+  areaSaveAttack: {
+    name: "Fire Breath", reachFt: 60, saveAbility: "DEX", saveDC: 21,
+    damage: [{ dice: "18d6", type: "fire" }], rechargeMin: 5,
+  },
+};
+
+function dragonRows(overrides: Partial<Record<string, unknown>> = {}) {
+  return [
+    {
+      id: "p1", name: "Aldric", isPlayer: true, hp: 200, maxHp: 200, x: 5, y: 5,
+      size: "Medium", conditions: [], initiativeOrder: 0, attackProfile: null,
+    },
+    {
+      id: "d1", name: "Adult Red Dragon", isPlayer: false, hp: 256, maxHp: 256,
+      x: 5, y: 5, size: "Huge", conditions: [], initiativeOrder: 1,
+      attackProfile: DRAGON_PROFILE, breathAvailable: true,
+      ...overrides,
+    },
+  ];
+}
+
+function buildDragonTx(combatants = dragonRows()) {
+  return {
+    combatant: {
+      findMany: vi.fn().mockResolvedValue(combatants),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    encounter: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    character: {
+      findUnique: vi.fn().mockResolvedValue({
+        // Rogue: proficient in DEX and INT — Fire Breath's save is DEX, so the
+        // default fixture exercises the proficiency bonus everywhere it isn't
+        // deliberately turned off (the "no proficiency" test below overrides
+        // this with a class NOT proficient in DEX).
+        hp: 200, maxHp: 200, stats: { DEX: 14, CON: 12 }, class: "rogue", level: 5, inventory: [],
+      }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    gameLog: { create: vi.fn().mockResolvedValue({}) },
+  } as unknown as Prisma.TransactionClient;
+}
+
+const DRAGON_CTX = {
+  campaignId: "camp-1", encounterId: "enc-1", characterId: "char-1",
+  round: 1, turnIndex: 1, collectEvents: true,
+};
+
+describe("resolveEnemyTurn — area-save attacks (area-save-actions spec §6)", () => {
+  it("breathes when charged and in range: a failed save takes full damage", async () => {
+    const tx = buildDragonTx();
+    // Rogue DEX 14 (+2) + proficiency (level 5 = +3) = +5. d20 = 15 (0.7) + 5 = 20 vs DC 21: fails.
+    // 18d6 damage: each die 0.5 -> 4, total 72.
+    mockRandom([0.7, ...Array(18).fill(0.5)]);
+    const outcome = await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 128 } });
+    expect(tx.combatant.updateMany).toHaveBeenCalledWith({
+      where: { id: "d1" }, data: { breathAvailable: false },
+    });
+    expect(outcome.playerDowned).toBe(false);
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1", role: "system",
+        content: "Adult Red Dragon — Fire Breath: DC 21 Dexterity save, Aldric rolls 20 — fails, 72 fire damage.",
+      },
+    });
+  });
+
+  it("halves and rounds down on a successful save", async () => {
+    const tx = buildDragonTx();
+    // d20 = 20 (0.95) + 5 = 25 vs DC 21: succeeds. 18d6 average roll -> 72 raw, halved to 36.
+    mockRandom([0.95, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 164 } });
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1", role: "system",
+        content: "Adult Red Dragon — Fire Breath: DC 21 Dexterity save, Aldric rolls 25 — succeeds, 36 fire damage.",
+      },
+    });
+  });
+
+  it("prefers breath over melee when both are usable", async () => {
+    const tx = buildDragonTx();
+    mockRandom([0.7, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    // Bite's attack roll (resolveAttackRoll) is never reached: no "vs AC" log line.
+    const calls = (tx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([{ data }]) => data.content.includes("vs AC"))).toBe(false);
+  });
+
+  it("falls back to melee when breathAvailable is false and stays spent", async () => {
+    const tx = buildDragonTx(dragonRows({ breathAvailable: false }));
+    // A spent breath still rolls to recharge first (1d6 = 4, 0.5 -> fails,
+    // stays false), then the melee attack-roll/damage/hit-location sequence.
+    mockRandom([0.5, 0.75, 0.5, 0.3]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    const calls = (tx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([{ data }]) => data.content.includes("Bite:"))).toBe(true);
+    expect(calls.some(([{ data }]) => data.content.includes("Fire Breath:"))).toBe(false);
+  });
+
+  it("kills outright when a failed save's damage reaches max HP", async () => {
+    const tx = buildDragonTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 10, maxHp: 10, stats: { DEX: 14, CON: 12 }, class: "rogue", level: 5, inventory: [],
+    });
+    mockRandom([0.05, ...Array(18).fill(0.9)]); // a low roll fails; high damage dice
+    const outcome = await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(outcome.playerDied).toBe(true);
+    expect(tx.gameLog.create).toHaveBeenLastCalledWith({
+      data: { campaignId: "camp-1", role: "system", content: "Aldric dies from massive damage." },
+    });
+  });
+
+  it("recharges and immediately breathes that same turn on success", async () => {
+    // A recharge roll that succeeds makes the breath available for THIS
+    // turn's planning, not only from the next turn on — the same real 5e
+    // rule a dragon plays by: roll recharge at the start of your turn, then
+    // take your action, breath included, same turn.
+    const tx = buildDragonTx(dragonRows({ breathAvailable: false }));
+    // Recharge: 1d6 = 5 (0.7), succeeds. Then the save (d20 = 15, 0.7) and
+    // 18 damage dice (all 0.5 -> 4 each = 72), the same sequence as the
+    // "breathes when charged" test above.
+    mockRandom([0.7, 0.7, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.combatant.updateMany).toHaveBeenCalledWith({
+      where: { id: "d1" }, data: { breathAvailable: true },
+    });
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: { campaignId: "camp-1", role: "system", content: "Adult Red Dragon recharges its Fire Breath (5)." },
+    });
+    const calls = (tx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([{ data }]) => data.content.includes("Fire Breath:"))).toBe(true);
+    expect(calls.some(([{ data }]) => data.content.includes("Bite:"))).toBe(false);
+    // Used this turn, so it is spent again by the time the turn ends.
+    expect(tx.combatant.updateMany).toHaveBeenCalledWith({
+      where: { id: "d1" }, data: { breathAvailable: false },
+    });
+  });
+
+  it("logs a failed recharge and does not touch breathAvailable", async () => {
+    const tx = buildDragonTx(dragonRows({ breathAvailable: false }));
+    mockRandom([0.2, 0.75, 0.5, 0.3]); // 1d6 = 2 (0.2 -> 2): fails
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.combatant.updateMany).not.toHaveBeenCalledWith({
+      where: { id: "d1" }, data: { breathAvailable: true },
+    });
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: { campaignId: "camp-1", role: "system", content: "Adult Red Dragon fails to recharge its Fire Breath (2)." },
+    });
+  });
+
+  it("does not roll to recharge an already-available breath", async () => {
+    const tx = buildDragonTx(dragonRows({ breathAvailable: true }));
+    mockRandom([0.7, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    const calls = (tx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([{ data }]) => data.content.includes("recharge"))).toBe(false);
+  });
+
+  it("applies no proficiency bonus for a class not proficient in the save", async () => {
+    const tx = buildDragonTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 200, maxHp: 200, stats: { DEX: 14, CON: 12 }, class: "wizard", level: 5, inventory: [],
+    });
+    // Wizard: DEX +2 only, no proficiency (wizard saves are INT/WIS). d20 = 18 (0.85) + 2 = 20 vs DC 21: fails.
+    mockRandom([0.85, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1", role: "system",
+        content: "Adult Red Dragon — Fire Breath: DC 21 Dexterity save, Aldric rolls 20 — fails, 72 fire damage.",
+      },
+    });
+  });
+
+  it("holds the breath against a downed player", async () => {
+    const tx = buildDragonTx(
+      dragonRows().map((r) => (r.isPlayer ? { ...r, hp: 0 } : r)),
+    );
+    const outcome = await resolveEnemyTurn(tx, DRAGON_CTX);
+    expect(outcome).toEqual({ events: [], playerDowned: false, playerDied: false });
+  });
+});

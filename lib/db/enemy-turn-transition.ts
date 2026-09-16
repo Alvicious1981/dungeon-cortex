@@ -8,16 +8,19 @@ import { armorClassFor, type ArmorInventoryRow } from "@/lib/rules/armor-class";
 import {
   extractConditions,
   resolveAttackRoll,
+  resolveSavingThrow,
   rollDamage,
   rollHitLocation,
 } from "@/lib/rules/combat";
-import { abilityModifier } from "@/lib/rules/dice";
+import { abilityModifier, rollDie } from "@/lib/rules/dice";
 import { planEnemyTurn } from "@/lib/rules/enemy-turn";
 import { chebyshevSquares, toSizeCategory, type GridCombatant } from "@/lib/rules/geometry";
 import {
   isMonsterAttackProfile,
   type MonsterAttackProfileV1,
 } from "@/lib/rules/monster-attack-profile";
+import { proficiencyBonus } from "@/lib/rules/proficiency";
+import { isProficientInSave } from "@/lib/rules/saving-throw-proficiency";
 import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import { claimMoveTransition, MoveStateConflictError } from "@/lib/db/move-transition";
 import { setPlayerHp } from "@/lib/db/player-hp";
@@ -35,6 +38,11 @@ export class EnemyTurnInvariantError extends Error {
     this.name = "EnemyTurnInvariantError";
   }
 }
+
+const ABILITY_FULL_NAME: Record<string, string> = {
+  STR: "Strength", DEX: "Dexterity", CON: "Constitution",
+  INT: "Intelligence", WIS: "Wisdom", CHA: "Charisma",
+};
 
 export interface EnemyTurnContext {
   campaignId: string;
@@ -63,6 +71,7 @@ interface CombatantRow {
   size: string;
   conditions: unknown;
   attackProfile?: unknown;
+  breathAvailable?: boolean | null;
 }
 
 function grid(row: CombatantRow): GridCombatant {
@@ -103,6 +112,30 @@ export async function resolveEnemyTurn(
   }
   const profile = rawProfile as MonsterAttackProfileV1 | null;
 
+  // The recharge roll happens at the start of the turn, whether or not the
+  // action ends up used this turn (spec §6.1).
+  let breathAvailable = enemy.breathAvailable ?? undefined;
+  if (profile?.areaSaveAttack && breathAvailable === false) {
+    const roll = rollDie(6);
+    if (roll >= profile.areaSaveAttack.rechargeMin) {
+      breathAvailable = true;
+      await tx.combatant.updateMany({ where: { id: enemy.id }, data: { breathAvailable: true } });
+      await tx.gameLog.create({
+        data: {
+          campaignId: ctx.campaignId, role: "system",
+          content: `${enemy.name} recharges its ${profile.areaSaveAttack.name} (${roll}).`,
+        },
+      });
+    } else {
+      await tx.gameLog.create({
+        data: {
+          campaignId: ctx.campaignId, role: "system",
+          content: `${enemy.name} fails to recharge its ${profile.areaSaveAttack.name} (${roll}).`,
+        },
+      });
+    }
+  }
+
   const enemyGrid = grid(enemy);
   const plan = planEnemyTurn({
     enemy: {
@@ -114,8 +147,12 @@ export async function resolveEnemyTurn(
     player: grid(player),
     others: combatants.filter((c) => c.id !== enemy.id).map(grid),
     playerDowned: player.hp <= 0,
+    breathAvailable,
   });
-  if (player.hp <= 0 && (plan.move !== null || plan.attacks.length > 0)) {
+  if (
+    player.hp <= 0 &&
+    (plan.move !== null || plan.attacks.length > 0 || plan.areaSaveAttack !== null)
+  ) {
     throw new EnemyTurnInvariantError(`Enemy ${enemy.id} planned to act against a downed player.`);
   }
 
@@ -165,7 +202,9 @@ export async function resolveEnemyTurn(
     }
   }
 
-  if (plan.attacks.length === 0 || !profile) return { events, playerDowned: false, playerDied: false };
+  if ((plan.attacks.length === 0 && plan.areaSaveAttack === null) || !profile) {
+    return { events, playerDowned: false, playerDied: false };
+  }
 
   const character = (await tx.character.findUnique({
     where: { id: ctx.characterId },
@@ -173,9 +212,14 @@ export async function resolveEnemyTurn(
       hp: true,
       maxHp: true,
       stats: true,
+      class: true,
+      level: true,
       inventory: { select: { type: true, equippedSlot: true, properties: true } },
     },
-  })) as { hp: number; maxHp: number; stats: unknown; inventory: ArmorInventoryRow[] } | null;
+  })) as {
+    hp: number; maxHp: number; stats: unknown; class: string; level: number;
+    inventory: ArmorInventoryRow[];
+  } | null;
   if (!character) {
     throw new EnemyTurnInvariantError(`Character ${ctx.characterId} not found.`);
   }
@@ -293,6 +337,69 @@ export async function resolveEnemyTurn(
         },
       });
       // The remaining multiattack attacks are not rolled (death-saves spec §6.1).
+      return { events, playerDowned: true, playerDied: fall === "dead" };
+    }
+  }
+
+  if (plan.areaSaveAttack && profile.areaSaveAttack) {
+    const attack = profile.areaSaveAttack;
+    const saveStats = (character.stats ?? {}) as Record<string, number>;
+    const saveModifier =
+      abilityModifier(saveStats[attack.saveAbility] ?? 10) +
+      (isProficientInSave(character.class, attack.saveAbility) ? proficiencyBonus(character.level) : 0);
+    const save = resolveSavingThrow(saveModifier, attack.saveDC);
+
+    const rolled = attack.damage.reduce(
+      (sum, part) => sum + Math.max(0, rollDamage(part.dice, false).total),
+      0,
+    );
+    const damage = save.success ? Math.floor(rolled / 2) : rolled;
+    const hpBeforeHit = hp;
+    hp = await setPlayerHp(tx, { characterId: ctx.characterId, encounterId: ctx.encounterId, hp: hp - damage });
+
+    await tx.combatant.updateMany({ where: { id: enemy.id }, data: { breathAvailable: false } });
+
+    const abilityName = ABILITY_FULL_NAME[attack.saveAbility];
+    await tx.gameLog.create({
+      data: {
+        campaignId: ctx.campaignId,
+        role: "system",
+        content:
+          `${enemy.name} — ${attack.name}: DC ${attack.saveDC} ${abilityName} save, ${player.name} rolls ` +
+          `${save.total} — ${save.success ? "succeeds" : "fails"}, ${damage} ${attack.damage[0]!.type} damage.`,
+      },
+    });
+
+    if (ctx.collectEvents) {
+      const consequence: SingleTargetConsequence = {
+        targetName: player.name, targetId: player.id, damage,
+        naturalRoll: save.roll, isCrit: false, isFumble: false,
+        hitLocation: "chest", narrativeTags: [], hpAfter: hp,
+        targetMaxHp: character.maxHp, isKill: hp <= 0, conditionsApplied: [],
+      };
+      events.push({
+        type: "COMBAT_CONSEQUENCE",
+        payload: { attackerName: enemy.name, targets: [consequence] },
+      });
+      if (damage > 0) {
+        events.push({ type: "DAMAGE_DEALT", payload: { damage, naturalRoll: save.roll, targetName: player.name } });
+      }
+    }
+
+    if (hp <= 0) {
+      const fall = await applyPlayerDowned(tx, {
+        encounterId: ctx.encounterId, hpBefore: hpBeforeHit, damage,
+        maxHp: character.maxHp, collectEvents: ctx.collectEvents, events,
+      });
+      await tx.gameLog.create({
+        data: {
+          campaignId: ctx.campaignId, role: "system",
+          content:
+            fall === "dead"
+              ? `${player.name} dies from massive damage.`
+              : `${player.name} falls unconscious and is dying.`,
+        },
+      });
       return { events, playerDowned: true, playerDied: fall === "dead" };
     }
   }
