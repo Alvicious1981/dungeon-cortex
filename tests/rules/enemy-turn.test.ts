@@ -18,30 +18,31 @@ const GOBLIN: MonsterAttackProfileV1 = {
     },
   ],
   multiattack: null,
+  areaSaveAttack: null,
 };
 const BITER: MonsterAttackProfileV1 = {
-  version: 1, walkSpeedFt: 30, multiattack: null,
+  version: 1, walkSpeedFt: 30, multiattack: null, areaSaveAttack: null,
   attacks: [{
     name: "Bite", attackBonus: 4, melee: { reachFt: 5 }, ranged: null,
     damage: [{ dice: "2d4+2", type: "piercing" }],
   }],
 };
 const ARCHER: MonsterAttackProfileV1 = {
-  version: 1, walkSpeedFt: 30, multiattack: null,
+  version: 1, walkSpeedFt: 30, multiattack: null, areaSaveAttack: null,
   attacks: [{
     name: "Shortbow", attackBonus: 4, melee: null, ranged: { normalFt: 80, longFt: 320 },
     damage: [{ dice: "1d6+2", type: "piercing" }],
   }],
 };
 const SLINGER: MonsterAttackProfileV1 = {
-  version: 1, walkSpeedFt: 30, multiattack: null,
+  version: 1, walkSpeedFt: 30, multiattack: null, areaSaveAttack: null,
   attacks: [{
     name: "Sling", attackBonus: 3, melee: null, ranged: { normalFt: 20, longFt: 60 },
     damage: [{ dice: "1d4+1", type: "bludgeoning" }],
   }],
 };
 const BEAR: MonsterAttackProfileV1 = {
-  version: 1, walkSpeedFt: 40,
+  version: 1, walkSpeedFt: 40, areaSaveAttack: null,
   attacks: [
     {
       name: "Bite", attackBonus: 5, melee: { reachFt: 5 }, ranged: null,
@@ -55,7 +56,7 @@ const BEAR: MonsterAttackProfileV1 = {
   multiattack: [{ attack: "Bite", count: 1 }, { attack: "Claws", count: 1 }],
 };
 const LASHER: MonsterAttackProfileV1 = {
-  version: 1, walkSpeedFt: 30,
+  version: 1, walkSpeedFt: 30, areaSaveAttack: null,
   attacks: [
     {
       name: "Bite", attackBonus: 5, melee: { reachFt: 5 }, ranged: null,
