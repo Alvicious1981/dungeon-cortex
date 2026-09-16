@@ -24,10 +24,12 @@ import { useRouter } from "next/navigation";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
 import {
   DUNGEON_ACTION_REQUEST,
+  DUNGEON_TARGET_SELECTION_SYNC_REQUEST,
   createDungeonActionRequestId,
   dispatchDungeonActionEnd,
   dispatchDungeonActionError,
   dispatchDungeonActionStart,
+  dispatchDungeonTargetSelection,
   type DungeonActionRequestBody,
   type DungeonActionRequestDetail,
 } from "@/lib/events/action-transport";
@@ -94,6 +96,24 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
       return next.length === current.length ? current : next;
     });
   }, [aliveHostileTargets]);
+
+  // This list is the single source of truth for the selection; broadcast every
+  // change (including pruning) so MacroDeck's one-target Attack guard sees it,
+  // and answer sync requests from listeners that mount later.
+  const selectedTargetIdsRef = useRef(selectedTargetIds);
+  useEffect(() => {
+    selectedTargetIdsRef.current = selectedTargetIds;
+    dispatchDungeonTargetSelection(selectedTargetIds);
+  }, [selectedTargetIds]);
+
+  useEffect(() => {
+    function handleSyncRequest() {
+      dispatchDungeonTargetSelection(selectedTargetIdsRef.current);
+    }
+    window.addEventListener(DUNGEON_TARGET_SELECTION_SYNC_REQUEST, handleSyncRequest);
+    return () =>
+      window.removeEventListener(DUNGEON_TARGET_SELECTION_SYNC_REQUEST, handleSyncRequest);
+  }, []);
 
   function toggleTarget(targetId: string) {
     setSelectedTargetIds((current) =>
