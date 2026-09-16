@@ -154,6 +154,19 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - Death is permanent: `Character.diedAt`, written once by the `player_dead`
   claim winner. Every campaign write route calls `campaignPlayableRefusal`;
   every character write route calls `characterAliveRefusal`.
+- An enemy with a recognised area saving-throw attack (a breath weapon) uses
+  it over its ordinary attacks whenever it is charged and the player is in
+  range, moving first if needed. The action is recognised only when its
+  prose clause and its structured `dc`/`damage`/`usage` fields agree — a
+  mismatch, in either direction, leaves that monster without it —
+  docs/superpowers/specs/2026-09-16-area-save-actions-design.md.
+- `Combatant.breathAvailable` tracks whether that action is off recharge.
+  The enemy-turn chain rolls to recharge a spent one at the start of that
+  enemy's turn, whether or not it is used that turn, and logs the roll
+  either way.
+- The player's saving throw uses `CLASS_SAVING_THROW_PROFICIENCIES`
+  (`lib/rules/saving-throw-proficiency.ts`) — the SRD's fixed, unchosen
+  two-save table — alongside the existing ability modifier.
 
 ## 5. Obsolescence Registry
 
