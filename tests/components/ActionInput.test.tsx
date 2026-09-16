@@ -94,7 +94,7 @@ describe("ActionInput shared SSE transport", () => {
     window.removeEventListener(DUNGEON_ACTION_END, actionEndListener);
   });
 
-  it("adds selected targets to an external Attack request", async () => {
+  it("adds the single selected target to an external Attack request", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(`data: ${JSON.stringify({ t: "done" })}\n\n`, {
         status: 200,
@@ -125,7 +125,6 @@ describe("ActionInput shared SSE transport", () => {
       />
     );
 
-    fireEvent.click(getByRole("checkbox", { name: "Goblin Alpha10/10" }));
     fireEvent.click(getByRole("checkbox", { name: "Goblin Beta10/10" }));
     let requestId = "";
     act(() => {
@@ -139,7 +138,7 @@ describe("ActionInput shared SSE transport", () => {
         method: "POST",
         body: JSON.stringify({
           action: "Attack",
-          targetIds: ["enemy-1", "enemy-2"],
+          targetIds: ["enemy-2"],
           requestId,
         }),
       })
@@ -437,7 +436,7 @@ describe("ActionInput retry identity (DC-AUD-003)", () => {
     );
     const { queryByRole, findByRole } = render(<ActionInput campaignId="campaign-1" />);
 
-    await submitExternal({ action: "Attack" }, "R1");
+    await submitExternal({ action: "Attack", targetIds: ["enemy-1"] }, "R1");
 
     expect(await findByRole("alert")).toHaveTextContent("No active encounter.");
     expect(queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();

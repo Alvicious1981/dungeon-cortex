@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ATTACK_SINGLE_TARGET_REQUIRED,
   DUNGEON_ACTION_END,
   DUNGEON_ACTION_ERROR,
   DUNGEON_TARGET_SELECTION_CHANGE,
@@ -236,7 +237,7 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
     if (isAnyLoading) return;
     const canonicalAction = CANONICAL_ACTION_REQUESTS[actionText] ?? actionText;
     if (canonicalAction === "Attack" && selectedTargetIds.length !== 1) {
-      setError("Selecciona exactamente un objetivo para atacar.");
+      setError(ATTACK_SINGLE_TARGET_REQUIRED);
       return;
     }
 
