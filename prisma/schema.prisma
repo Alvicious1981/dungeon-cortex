@@ -49,6 +49,20 @@ enum ActionRequestStatus {
   REJECTED
 }
 
+/// Party seat classification (DC-PARTY-001). Exactly one MAIN per campaign,
+/// enforced by a partial unique index in that model's migration.
+enum PartyRole {
+  MAIN
+  COMPANION
+}
+
+/// Who currently plays a party seat. Independent of PartyRole by design —
+/// see PartyMember.
+enum PartyControlMode {
+  AI
+  USER
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -98,12 +112,13 @@ model Character {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @default(now()) @updatedAt
 
-  user            User                      @relation(fields: [userId], references: [id])
-  campaigns       Campaign[]
-  inventory       InventoryItem[]
-  profile         CharacterProfile?
-  changeAudits    CharacterChangeAudit[]
-  changeProposals CharacterChangeProposal[]
+  user             User                      @relation(fields: [userId], references: [id])
+  campaigns        Campaign[]
+  inventory        InventoryItem[]
+  profile          CharacterProfile?
+  changeAudits     CharacterChangeAudit[]
+  changeProposals  CharacterChangeProposal[]
+  partyMemberships PartyMember[]
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -200,12 +215,51 @@ model Campaign {
   quests          Quest[]
   npcs            NPC[]
   actionReceipts  ActionRequestReceipt[]
+  partyMembers    PartyMember[]
   locations       Location[]    @relation("CampaignLocations")
   currentLocation Location?     @relation("CampaignCurrentLocation", fields: [currentLocationId, id], references: [id, campaignId], onDelete: Restrict, onUpdate: Cascade)
   currentNode     LocationNode? @relation("CampaignCurrentNode", fields: [currentNodeId, currentLocationId], references: [id, locationId], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([userId], map: "Campaign_userId_idx")
   @@index([characterId], map: "Campaign_characterId_idx")
+}
+
+/// One row per Character currently seated in a Campaign's party (DC-PARTY-001).
+/// Normalized alternative to the scalar Campaign.characterId, which stays
+/// authoritative for "the current main Character" during this compatibility
+/// phase — see docs/PARTY_AND_COMPANIONS.md.
+///
+/// AFFILIATION (this row existing) is deliberately independent of CONTROL
+/// (`control`): a companion's controller can flip AI <-> USER later by
+/// updating this row in place, never by cloning/transforming the Character.
+///
+/// Companions reference real, full Character records — never NPC, never a
+/// parallel statblock, and not a revival of the old wage/loyalty/morale
+/// Retainer concept excluded by migration 20260805090000.
+///
+/// Inert by design: nothing in combat, turn ownership, action routing, AI
+/// narration, or progression reads this table in this PR.
+model PartyMember {
+  id          String           @id @default(cuid())
+  campaignId  String
+  characterId String
+  /// Exactly one MAIN row per campaign — enforced by a partial unique index
+  /// created in this model's migration (Prisma cannot express a filtered
+  /// @@unique in the schema DSL; same limitation as
+  /// Encounter_one_active_per_campaign_key, which is likewise migration-only).
+  role        PartyRole
+  /// Who currently plays this seat. Independent of `role` by design.
+  control     PartyControlMode
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  campaign  Campaign  @relation(fields: [campaignId], references: [id])
+  character Character @relation(fields: [characterId], references: [id])
+
+  /// Invariant: a Character cannot appear twice in the same Party.
+  @@unique([campaignId, characterId])
+  @@index([campaignId], map: "PartyMember_campaignId_idx")
+  @@index([characterId], map: "PartyMember_characterId_idx")
 }
 
 /// Persistent receipt for one submitted player action. Infrastructure, not
