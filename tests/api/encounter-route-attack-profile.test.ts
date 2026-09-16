@@ -221,6 +221,59 @@ describe("POST /api/campaign/[id]/encounter — Combatant.attackProfile snapshot
   });
 });
 
+const ADULT_RED_DRAGON = (
+  JSON.parse(readFileSync(join(process.cwd(), "data", "srd-es", "monsters.json"), "utf8")) as Array<
+    Record<string, unknown>
+  >
+).find((m) => m.index === "adult-red-dragon")!;
+
+describe("POST /api/campaign/[id]/encounter — Combatant.breathAvailable", () => {
+  it("starts true for an enemy with a recognised area-save attack", async () => {
+    const { createMany } = mockTransaction();
+    (prisma.srdMonster.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "srd-dragon", xp: 18000, data: ADULT_RED_DRAGON,
+    });
+
+    const res = await post({
+      enemies: [{ name: "Adult Red Dragon", hp: 256, maxHp: 256, dexModifier: 1, monsterIndex: "srd-dragon" }],
+    });
+
+    expect(res.status).toBe(201);
+    const enemy = persisted(createMany).find((c) => !c.isPlayer)!;
+    expect(enemy.breathAvailable).toBe(true);
+  });
+
+  it("leaves the column unset for an enemy with no area-save attack", async () => {
+    const { createMany } = mockTransaction();
+    (prisma.srdMonster.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "srd-goblin", xp: 50, data: GOBLIN,
+    });
+
+    const res = await post({
+      enemies: [{ name: "Goblin", hp: 7, maxHp: 7, dexModifier: 2, monsterIndex: "srd-goblin" }],
+    });
+
+    expect(res.status).toBe(201);
+    const enemy = persisted(createMany).find((c) => !c.isPlayer)!;
+    expect(enemy).not.toHaveProperty("breathAvailable");
+  });
+
+  it("never gives the player breathAvailable", async () => {
+    const { createMany } = mockTransaction();
+    (prisma.srdMonster.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "srd-dragon", xp: 18000, data: ADULT_RED_DRAGON,
+    });
+
+    const res = await post({
+      enemies: [{ name: "Adult Red Dragon", hp: 256, maxHp: 256, dexModifier: 1, monsterIndex: "srd-dragon" }],
+    });
+
+    expect(res.status).toBe(201);
+    const player = persisted(createMany).find((c) => c.isPlayer)!;
+    expect(player).not.toHaveProperty("breathAvailable");
+  });
+});
+
 describe("POST /api/campaign/[id]/encounter — a character at 0 HP (death-saves spec §8.3)", () => {
   it("refuses to start a fight the character would begin downed", async () => {
     (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({

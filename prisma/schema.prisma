@@ -326,6 +326,12 @@ model Combatant {
   /// The round a stabilised player wakes with 1 HP (death-saves spec §4).
   /// NULL = not stable. Cleared by every player HP write.
   stableWakeRound      Int?
+  /// Whether the monster's areaSaveAttack (if it has one) is off recharge and
+  /// ready (docs/superpowers/specs/2026-09-16-area-save-actions-design.md §5).
+  /// NULL = the monster has no such action. Written true at encounter
+  /// creation when the profile carries one; false after use; true again on a
+  /// successful recharge roll.
+  breathAvailable      Boolean?
   /// Per-turn action economy, owned by the combat rules engine.
   /// The column is nullable for pre-action-budget combatants.
   actionBudget         Json?

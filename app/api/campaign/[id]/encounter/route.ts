@@ -264,6 +264,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         ...(enemy.srdAttackProfile
           ? { attackProfile: enemy.srdAttackProfile as unknown as Prisma.InputJsonValue }
           : {}),
+        ...(enemy.srdAttackProfile?.areaSaveAttack
+          ? { breathAvailable: true }
+          : {}),
       };
     });
 
