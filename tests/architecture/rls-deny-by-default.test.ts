@@ -323,16 +323,16 @@ describe("extractCreatedTables — comillas opcionales y cualificación de esque
     expect(extractCreatedTables(sql)).toEqual([expected]);
   });
 
-  it("sigue reconociendo las 23 tablas reales del historial actual", () => {
+  it("sigue reconociendo las 24 tablas reales del historial actual", () => {
     // No-regresión directa: el cambio de regex no puede perder ni una sola de
     // las tablas que ya detectaba la versión anterior (todas entrecomilladas,
     // sin prefijo de esquema).
     //
-    // 23 desde 20260904120000_add_action_request_receipts, que añade
-    // "ActionRequestReceipt". Este número es inventario, no umbral: al crear una
+    // 24 desde 20260917130000_add_party_members (DC-PARTY-001), que añade
+    // "PartyMember". Este número es inventario, no umbral: al crear una
     // tabla se actualiza aquí, y así el recuento no se queda obsoleto en
     // silencio ni deja de vigilar el extractor.
-    expect(createdTables().size).toBe(23);
+    expect(createdTables().size).toBe(24);
   });
 });
 

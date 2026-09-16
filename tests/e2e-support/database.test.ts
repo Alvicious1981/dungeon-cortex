@@ -7,6 +7,7 @@ const prismaMocks = vi.hoisted(() => ({
   campaignDeleteMany: vi.fn(),
   inventoryItemDeleteMany: vi.fn(),
   characterDeleteMany: vi.fn(),
+  partyMemberDeleteMany: vi.fn(),
   disconnect: vi.fn(),
 }));
 
@@ -54,6 +55,7 @@ describe("cleanupE2ERecords", () => {
         campaign: { deleteMany: prismaMocks.campaignDeleteMany },
         inventoryItem: { deleteMany: prismaMocks.inventoryItemDeleteMany },
         character: { deleteMany: prismaMocks.characterDeleteMany },
+        partyMember: { deleteMany: prismaMocks.partyMemberDeleteMany },
         $disconnect: prismaMocks.disconnect,
       };
     });
@@ -127,6 +129,15 @@ describe("cleanupE2ERecords", () => {
     expect(prismaMocks.gameLogDeleteMany).toHaveBeenCalledTimes(2);
     expect(prismaMocks.campaignDeleteMany).toHaveBeenCalledTimes(2);
     expect(prismaMocks.disconnect).toHaveBeenCalledOnce();
+
+    // DC-PARTY-001: PartyMember.campaignId/characterId are RESTRICT, so both
+    // rows must be cleared before the Campaign/Character deletes above.
+    expect(prismaMocks.partyMemberDeleteMany).toHaveBeenCalledWith({
+      where: { campaignId: targetCampaignId },
+    });
+    expect(prismaMocks.partyMemberDeleteMany).toHaveBeenCalledWith({
+      where: { characterId: targetCharacterId },
+    });
   });
 
   it("bounds the known late-log retry to one extra attempt", async () => {
