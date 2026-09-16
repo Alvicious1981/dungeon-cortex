@@ -2,11 +2,15 @@ import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 
-const playwrightExcludes = [
+// Depth-independent so nested checkouts (e.g. git worktrees under
+// .claude/worktrees/) and Playwright specs are never collected.
+const testExcludes = [
   ...configDefaults.exclude,
-  "tests/e2e/**",
-  "playwright-report/**",
-  "test-results/**",
+  "**/.claude/**",
+  "**/tests/e2e/**",
+  "**/*.spec.?(c|m)[jt]s?(x)",
+  "**/playwright-report/**",
+  "**/test-results/**",
 ];
 
 export default defineConfig({
@@ -14,24 +18,24 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ["./tests/setup.ts"],
-    exclude: playwrightExcludes,
+    exclude: testExcludes,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["tests/**/*.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "components",
+          environment: "jsdom",
+          include: ["tests/**/*.test.tsx"],
+        },
+      },
+    ],
   },
-  projects: [
-    {
-      test: {
-        name: "node",
-        environment: "node",
-        include: ["tests/**/*.test.ts"],
-        exclude: playwrightExcludes,
-      },
-    },
-    {
-      test: {
-        name: "components",
-        environment: "jsdom",
-        include: ["tests/components/**/*.test.tsx"],
-        exclude: playwrightExcludes,
-      },
-    },
-  ],
-} as any);
+});
