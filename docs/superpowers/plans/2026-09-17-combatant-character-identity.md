@@ -490,17 +490,15 @@ describe("todo Combatant isPlayer:true fija characterId en su propia creación",
     expect(window).toContain("characterId");
   });
 
-  it("no hay un tercer sitio de creación de Combatant no cubierto por esta prueba", () => {
-    // grep de baja fidelidad, deliberado: si algún día aparece un tercer
-    // `combatant.create(` o `combatantData` fuera de los dos ficheros de
-    // arriba, esta prueba lo hace visible en vez de dejarlo pasar en silencio.
-    const searched = new Set(CREATION_SITES);
-    const candidates = [
-      join(ROOT, "app", "api", "campaign", "[id]", "encounter", "route.ts"),
-      join(ROOT, "lib", "rules", "encounter-service.ts"),
-    ];
-    for (const c of candidates) expect(searched.has(c)).toBe(true);
-  });
+  // Deliberately no "detect an unknown third creation site" test: a bare
+  // `isPlayer: true` text search matches 42 files (read-side filters like
+  // campaign-guard.ts's `where: { isPlayer: true }`, and legitimate test
+  // fixtures), and a `.combatant.create(Many)?(` call-site search misses
+  // encounter-service.ts entirely — it builds the data object but does not
+  // call .create() itself, its caller does. Both were verified against this
+  // repository (pre-flight scan, DC-PARTY-002) and neither is precise enough
+  // to be worth the false-positive/false-negative risk. CREATION_SITES above
+  // is manually maintained; a third creation path requires adding it here.
 });
 ```
 
