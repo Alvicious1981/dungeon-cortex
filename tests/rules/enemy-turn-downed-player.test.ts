@@ -26,12 +26,12 @@ function input(playerDowned: boolean | undefined, goblinAt = { x: 5, y: 6 }) {
 describe("planEnemyTurn against a downed player (death-saves spec §5)", () => {
   it("holds an adjacent enemy that would otherwise strike", () => {
     expect(planEnemyTurn(input(false)).attacks).not.toHaveLength(0);
-    expect(planEnemyTurn(input(true))).toEqual({ move: null, mode: null, attacks: [] });
+    expect(planEnemyTurn(input(true))).toEqual({ move: null, mode: null, attacks: [], areaSaveAttack: null });
   });
 
   it("holds a distant enemy that would otherwise close", () => {
     expect(planEnemyTurn(input(false, { x: 5, y: 9 })).move).not.toBeNull();
-    expect(planEnemyTurn(input(true, { x: 5, y: 9 }))).toEqual({ move: null, mode: null, attacks: [] });
+    expect(planEnemyTurn(input(true, { x: 5, y: 9 }))).toEqual({ move: null, mode: null, attacks: [], areaSaveAttack: null });
   });
 
   it("keeps today's behaviour when the flag is absent", () => {
