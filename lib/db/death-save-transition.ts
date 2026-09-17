@@ -48,7 +48,7 @@ export async function rollPlayerDeathSave(
   await lockCharacterForCombatAction(tx, ctx.characterId);
 
   const player = await tx.combatant.findFirst({
-    where: { encounterId: ctx.encounterId, isPlayer: true },
+    where: { encounterId: ctx.encounterId, characterId: ctx.characterId },
     select: {
       id: true,
       name: true,
@@ -70,7 +70,7 @@ export async function rollPlayerDeathSave(
     { successes: player.deathSaveSuccesses, failures: player.deathSaveFailures },
     natural
   );
-  const where = { encounterId: ctx.encounterId, isPlayer: true };
+  const where = { encounterId: ctx.encounterId, characterId: ctx.characterId };
 
   if (result.outcome === "revived") {
     // setPlayerHp's mirror resets the counters (spec §4).

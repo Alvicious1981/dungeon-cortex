@@ -33,8 +33,11 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
     const { tx, order } = buildTx({});
     const out = await rollPlayerDeathSave(tx, CTX, dice(14));
     expect(out).toMatchObject({ outcome: "dying", endsTurn: true });
+    expect(tx.combatant.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { encounterId: "enc-1", characterId: "char-1" } })
+    );
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveSuccesses: 1, deathSaveFailures: 0 },
     });
     expect(order).toEqual(["Character", "Combatant", "Encounter"]);
@@ -57,11 +60,10 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
     const out = await rollPlayerDeathSave(tx, CTX, dice(11, 3));
     expect(out.outcome).toBe("stable");
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveSuccesses: 3, deathSaveFailures: 0, stableWakeRound: 7 },
     });
     expect(out.events.map((e) => e.type)).toEqual(["DEATH_SAVE_ROLLED", "PLAYER_STABILIZED"]);
-    // The log says what the counters mean, not only the counters.
     expect(tx.gameLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ content: expect.stringContaining("Aldric is stable.") }),
     });
@@ -82,7 +84,7 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
     const out = await rollPlayerDeathSave(tx, CTX, dice(3));
     expect(out).toMatchObject({ outcome: "dead", endsTurn: true });
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveSuccesses: 0, deathSaveFailures: 3 },
     });
     expect(out.events).toContainEqual({ type: "PLAYER_DIED", payload: { cause: "death_saves" } });
