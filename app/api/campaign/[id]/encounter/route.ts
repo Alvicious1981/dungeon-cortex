@@ -227,6 +227,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           encounterId: e.id,
           name: campaign.character.name,
           isPlayer: true,
+          characterId: campaign.character.id,
           hp: campaign.character.hp,
           maxHp: campaign.character.maxHp,
           ac: playerAC,
