@@ -406,7 +406,7 @@ model Combatant {
   characterId          String?
 
   encounter Encounter  @relation(fields: [encounterId], references: [id])
-  character Character? @relation(fields: [characterId], references: [id])
+  character Character? @relation(fields: [characterId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([encounterId])
   @@index([characterId])

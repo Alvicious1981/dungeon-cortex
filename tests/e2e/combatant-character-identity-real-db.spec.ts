@@ -8,8 +8,6 @@ import {
   type E2ECreatedRecords,
 } from "./support/database";
 
-const PRIVATE_USER_ID = "00000000-0000-0000-0000-000000000000";
-
 async function createdId(response: { status(): number; json(): Promise<unknown> }): Promise<string> {
   expect(response.status()).toBe(201);
   const body = (await response.json()) as { id?: unknown };
@@ -172,12 +170,16 @@ test("a second isPlayer:true Combatant in the same encounter is rejected by the 
 
     expect(isUniqueViolation(error, ["encounterId"])).toBe(true);
   } finally {
+    // Combatant rows first: characterId is now Restrict, so a Combatant
+    // referencing secondCharacterId (which exists whenever the constraint
+    // under test fails to fire) would block the Character delete below.
+    // Same order as the sibling test above.
+    if (encounterId) await prisma.combatant.deleteMany({ where: { encounterId } });
+    if (encounterId) await prisma.encounter.deleteMany({ where: { id: encounterId } });
     if (secondCharacterId) {
       await prisma.inventoryItem.deleteMany({ where: { characterId: secondCharacterId } });
       await prisma.character.deleteMany({ where: { id: secondCharacterId } });
     }
-    if (encounterId) await prisma.combatant.deleteMany({ where: { encounterId } });
-    if (encounterId) await prisma.encounter.deleteMany({ where: { id: encounterId } });
     await prisma.$disconnect();
     await cleanupE2ERecords(created);
   }

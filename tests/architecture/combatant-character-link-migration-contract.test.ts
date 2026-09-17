@@ -35,6 +35,15 @@ describe("migración 20260917140000_add_combatant_character_link", () => {
     expect(code).not.toMatch(/"characterId"[^;]*NOT NULL/);
   });
 
+  it("declara Combatant_characterId_fkey con ON DELETE RESTRICT ON UPDATE CASCADE", () => {
+    // Must match the schema's explicit onDelete/onUpdate on Combatant.character
+    // (Prisma's implicit default for an optional relation is SetNull, which
+    // would silently defeat this constraint on a future `migrate dev`/`db pull`).
+    expect(code).toMatch(
+      /ADD CONSTRAINT "Combatant_characterId_fkey"[\s\S]*?ON DELETE RESTRICT ON UPDATE CASCADE/
+    );
+  });
+
   it("nunca toca la DDL de Campaign, Encounter o Character", () => {
     for (const table of ["Campaign", "Encounter", "Character"]) {
       expect(code).not.toMatch(new RegExp(`ALTER TABLE\\s+(?:"?public"?\\s*\\.\\s*)?"${table}"`));
