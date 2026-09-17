@@ -119,6 +119,7 @@ model Character {
   changeAudits     CharacterChangeAudit[]
   changeProposals  CharacterChangeProposal[]
   partyMemberships PartyMember[]
+  combatants       Combatant[]
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -402,11 +403,18 @@ model Combatant {
   /// NULL = no recognised attack, or a row older than this column: the enemy's
   /// turn is skipped. Never written from the request body or from narration.
   attackProfile        Json?
+  characterId          String?
 
-  encounter Encounter @relation(fields: [encounterId], references: [id])
+  encounter Encounter  @relation(fields: [encounterId], references: [id])
+  character Character? @relation(fields: [characterId], references: [id])
 
   @@index([encounterId])
+  @@index([characterId])
   @@unique([encounterId, initiativeOrder])
+  // Combatant_one_player_per_encounter_key: partial unique index on
+  // (encounterId) WHERE isPlayer = true — migration-only, see
+  // 20260917140000_add_combatant_character_link/migration.sql. Prisma
+  // cannot express a filtered @@unique in the schema DSL.
 }
 
 model InventoryItem {
