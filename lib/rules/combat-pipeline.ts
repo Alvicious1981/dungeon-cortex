@@ -772,6 +772,7 @@ export async function executeCombatAction(
         if (newHp === 0 && hpBeforeHit > 0 && encounter.id) {
           await applyPlayerDowned(tx, {
             encounterId: encounter.id,
+            characterId: playerCharacterId,
             hpBefore: hpBeforeHit,
             damage,
             maxHp: target.maxHp,
