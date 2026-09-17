@@ -261,7 +261,7 @@ async function applyCharacterHealing(
       where: { id: characterId },
       data: { hp: newHp },
     });
-    await mirrorPlayerCombatantHp(tx, encounterId, newHp);
+    await mirrorPlayerCombatantHp(tx, encounterId, characterId, newHp);
     return newHp;
   }
 
@@ -283,7 +283,7 @@ async function applyCharacterHealing(
     });
 
     if (claim.count === 1) {
-      await mirrorPlayerCombatantHp(tx, encounterId, newHp);
+      await mirrorPlayerCombatantHp(tx, encounterId, characterId, newHp);
       return newHp;
     }
   }
