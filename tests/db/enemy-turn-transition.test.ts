@@ -76,7 +76,7 @@ describe("resolveEnemyTurn", () => {
 
     expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 14 } });
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { hp: 14, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
     });
     expect(outcome.playerDowned).toBe(false);
