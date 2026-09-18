@@ -255,4 +255,23 @@ describe("streamNarrative contained tool surface", () => {
     await expect(result.textPromise).resolves.toBe("Narration.");
     expect(prisma.srdMonster.findUnique).toHaveBeenCalledWith({ where: { id: "goblin" } });
   });
+
+  it("propagates validated player input to buildCampaignContext for semantic memory retrieval", async () => {
+    mockStreamText.mockReturnValueOnce({
+      textStream: (async function* () {})(),
+      text: Promise.resolve("Narration."),
+    } as any);
+
+    const result = await streamNarrative(
+      CAMPAIGN_ID,
+      "   I search the sarcophagus for hidden compartments.   ",
+    );
+    await result.textPromise;
+
+    expect(mockBuildCampaignContext).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "I search the sarcophagus for hidden compartments.",
+    );
+  });
 });
+

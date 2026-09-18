@@ -183,7 +183,7 @@ export async function streamNarrative(
     }
   }
 
-  const context = await buildCampaignContext(campaignId);
+  const context = await buildCampaignContext(campaignId, safePlayerInput);
 
   // Stable instructions go to `system`; every variable value — player input,
   // memory, logs, quest/NPC/location text — travels in the JSON data message.
