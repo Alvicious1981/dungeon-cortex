@@ -44,6 +44,7 @@ const baseContext: CampaignContext = {
   quests: [],
   currentExploration: null,
   gold: 0,
+  activeNPCs: [],
   activeNPC: null,
 };
 
@@ -451,6 +452,30 @@ describe("formatSystemPrompt — relevance clipping", () => {
     expect(trustedCombat).toContain("🎭 NPC: Greta the Ironmonger");
     expect(trustedCombat).toContain("Friendly");
     expect(trustedCombat).toContain("owe money to people");
+  });
+
+  it("renders all canonical participants when activeNPCs contains multiple NPCs", () => {
+    const multiNPCState = formatCanonicalState({
+      ...baseContext,
+      activeNPCs: [
+        metNPC,
+        {
+          ...metNPC,
+          name: "Elodie the Archivist",
+          profession: "archivist",
+          disposition: 4,
+          personalityTags: {
+            motivation: "To catalog the archives",
+            secret: "Smuggled royal seals",
+            distinctiveTrait: "Rolls a signet ring",
+          },
+        },
+      ],
+      activeNPC: metNPC,
+    });
+    expect(multiNPCState).toContain("🎭 NPC: Greta the Ironmonger");
+    expect(multiNPCState).toContain("🎭 NPC: Elodie the Archivist");
+    expect(multiNPCState).toContain("archivist");
   });
 });
 

@@ -69,6 +69,7 @@ const baseContext: CampaignContext = {
   quests: [],
   currentExploration: null,
   gold: 0,
+  activeNPCs: [],
   activeNPC: null,
 };
 

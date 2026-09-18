@@ -308,7 +308,11 @@ export function formatShopNode(
  *
  * @pure — no side effects, deterministic output for the same input.
  */
-function formatExploration(exploration: ContextExploration | null, partyGold: number = 0): string {
+function formatExploration(
+  exploration: ContextExploration | null,
+  partyGold: number = 0,
+  activeNPCs?: ContextActiveNPC[]
+): string {
   if (!exploration?.location) {
     return "";
   }
@@ -324,7 +328,13 @@ function formatExploration(exploration: ContextExploration | null, partyGold: nu
     lines.push(`## Current Room: ${currentNode.name}`);
     lines.push(currentNode.description);
     lines.push(`Feature: ${currentNode.feature}`);
-    lines.push(`NPC: ${currentNode.npcSeed ?? "None"}`);
+    const npcText =
+      activeNPCs !== undefined
+        ? activeNPCs.length > 0
+          ? activeNPCs.map((n) => n.name).join(", ")
+          : "None"
+        : currentNode.npcSeed ?? "None";
+    lines.push(`NPC: ${npcText}`);
 
     if (adjacentNodes.length > 0) {
       lines.push("");
@@ -460,11 +470,9 @@ const SECRET_DISCLOSURE_DISPOSITION = 8;
  *
  * - Unmet NPC: identifies that the NPC has not yet met the character.
  * - Met NPC: injects attitude, icon, motivation, and distinctive trait.
- *   The NPC's secret is never included here — `personalityTags.secret`
- *   is campaign data the narrator is not given, at any attitude. Do not
- *   add a note telling the model to "reveal" it: the model was never
- *   handed the secret, so an instruction to reveal it only invites the
- *   model to fabricate one, which breaches Code is Law (no invented facts).
+ *   The NPC's secret is included only when disposition reaches 8
+ *   (SECRET_DISCLOSURE_DISPOSITION), representing high trust. Below that
+ *   threshold, the secret is withheld from the narrator.
  *
  * @pure — no I/O, deterministic output for the same input.
  */
@@ -593,11 +601,20 @@ export function formatCanonicalState(context: FormatterContext): string {
   const hasLocation = Boolean(context.currentExploration?.location);
   const isOverworldScene = locationType === "wilderness" || (!hasLocation && Boolean(context.wildernessHUD));
   const isDungeonScene = hasLocation && locationType !== "wilderness";
-  const shouldShowNPCContext = Boolean(context.activeNPC);
+  const activeNPCs =
+    context.activeNPCs && context.activeNPCs.length > 0
+      ? context.activeNPCs
+      : context.activeNPC
+        ? [context.activeNPC]
+        : [];
+  const npcSections = activeNPCs
+    .filter(Boolean)
+    .map((npc) => formatNPCContext(npc))
+    .filter(Boolean);
 
   const questSection = formatQuests(context.quests);
   const partyGold = context.gold;
-  const explorationSection = formatExploration(context.currentExploration, partyGold);
+  const explorationSection = formatExploration(context.currentExploration, partyGold, activeNPCs);
 
   const sections = [
     "# Current Game State",
@@ -615,10 +632,11 @@ export function formatCanonicalState(context: FormatterContext): string {
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.
     ...(questSection ? [questSection] : []),
-    // NPC social context — injected when an authoritative NPC is in scope for the
-    // scene. Coexists with combat so identity and personality are preserved.
+    // NPC social context — injected when authoritative NPCs are in scope for the
+    // scene. Preserves all canonical participants without arbitrary truncation.
+    // Coexists with combat so identity and personality are preserved.
     // Absent when no NPC is in scope.
-    ...(shouldShowNPCContext && context.activeNPC ? [formatNPCContext(context.activeNPC)] : []),
+    ...npcSections,
   ];
 
   return sections.join("\n\n");

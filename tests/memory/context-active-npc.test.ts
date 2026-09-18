@@ -157,6 +157,7 @@ describe("buildCampaignContext — active NPC", () => {
       personalityTags: PERSONALITY,
       hasMetPlayer: true,
     });
+    expect(context.activeNPCs).toEqual([context.activeNPC]);
   });
 
   it("is null when the party's node names no NPC", async () => {
@@ -165,6 +166,7 @@ describe("buildCampaignContext — active NPC", () => {
     const context = await buildCampaignContext("campaign-1");
 
     expect(context.activeNPC).toBeNull();
+    expect(context.activeNPCs).toEqual([]);
     expect(prismaMock.nPC.findUnique).not.toHaveBeenCalled();
   });
 
@@ -227,5 +229,6 @@ describe("buildCampaignContext — active NPC", () => {
         profession: "blacksmith",
       })
     );
+    expect(context.activeNPCs).toEqual([context.activeNPC]);
   });
 });
