@@ -13,6 +13,7 @@ vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     campaign: { findUnique: vi.fn() },
     nPC: { findUnique: vi.fn(), update: vi.fn() },
+    campaignSceneParticipant: { findUnique: vi.fn() },
   },
 }));
 
@@ -49,10 +50,12 @@ beforeEach(() => {
   (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
     userId: "user_1",
     status: "active",
+    scenePresenceVersion: 0,
   });
   (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
     id: "npc_1", campaignId: "camp_1", seed: "innkeeper_1", role: "commoner", hasMetPlayer: true,
   });
+  (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (resolveSocialCheck as ReturnType<typeof vi.fn>).mockResolvedValue({
     ok: true, approach: "persuade", skill: "Persuasion", roll: 12, dc: 15,
     success: false, attitudeBefore: "Indifferent", attitudeAfter: "Hostile",
@@ -285,6 +288,304 @@ describe("POST /api/campaign/[id]/social", () => {
     await expect(response.json()).resolves.toEqual({ error: "The NPC cannot be convinced.", code: "SOCIAL_STATE_CONFLICT" });
     expect(rejectActionReceipt).toHaveBeenCalledWith("receipt_1", 400, {
       error: "The NPC cannot be convinced.", code: "SOCIAL_STATE_CONFLICT",
+    });
+  });
+
+  describe("DC-NARR-002B scene presence guard", () => {
+    it("TEST A — Legacy compatibility: version 0 allows social check without presence row", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 0,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "hello" }), { params });
+
+      expect(response.status).toBe(200);
+      expect(prisma.campaignSceneParticipant.findUnique).not.toHaveBeenCalled();
+      expect(resolveSocialCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it("TEST B — Canonical present target: version 1 proceeds when participant exists", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        campaignId: "camp_1",
+        npcId: "npc_1",
+      });
+
+      const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "hello" }), { params });
+
+      expect(response.status).toBe(200);
+      expect(prisma.campaignSceneParticipant.findUnique).toHaveBeenCalledWith({
+        where: { campaignId_npcId: { campaignId: "camp_1", npcId: "npc_1" } },
+        select: { npcId: true },
+      });
+      expect(resolveSocialCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it("TEST C — Canonical absent target: version 1 returns 400 NPC_NOT_PRESENT when participant absent", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "hello" }), { params });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      });
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST D — Future canonical version: version 2 enforces the same presence requirement", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 2,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "hello" }), { params });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      });
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST E — Canonical empty scene: zero participants rejects even if NPC exists persistently", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_1", seed: "innkeeper_1", role: "commoner", hasMetPlayer: true,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "talk" }), { params });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      });
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST F — Cross-campaign isolation: NPC belonging to another campaign returns 404 and does not query presence", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_OTHER", seed: "innkeeper_1", role: "commoner", hasMetPlayer: true,
+      });
+
+      const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "talk" }), { params });
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: "NPC not found." });
+      expect(prisma.campaignSceneParticipant.findUnique).not.toHaveBeenCalled();
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST G — Completed replay after NPC leaves scene: replays cached response, does NOT return NPC_NOT_PRESENT", async () => {
+      const cachedResult = {
+        ok: true, approach: "persuade", skill: "Persuasion", roll: 18, dc: 15,
+        success: true, attitudeBefore: "Indifferent", attitudeAfter: "Friendly",
+        dispositionBefore: 0, dispositionAfter: 5,
+      };
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      // Participant is now absent
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "completed_replay",
+        responseStatus: 200,
+        responseBody: cachedResult,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "talk", requestId: "req_completed" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(cachedResult);
+      expect(prisma.campaignSceneParticipant.findUnique).not.toHaveBeenCalled();
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST H — Previously rejected replay: returns cached rejection without reinterpreting presence", async () => {
+      const cachedRejection = { error: "The NPC cannot be convinced.", code: "SOCIAL_REFUSED" };
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "rejected",
+        responseStatus: 400,
+        responseBody: cachedRejection,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "talk", requestId: "req_rejected" }),
+        { params }
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual(cachedRejection);
+      expect(prisma.campaignSceneParticipant.findUnique).not.toHaveBeenCalled();
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST I — Newly acquired request + NPC absent: settles terminal rejection on receipt", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "acquired",
+        receiptId: "receipt_new_absent",
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "talk", requestId: "req_new_absent" }),
+        { params }
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      });
+      expect(rejectActionReceipt).toHaveBeenCalledWith("receipt_new_absent", 400, {
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      });
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST J — Retry canonical absence rejection: replays cached NPC_NOT_PRESENT rejection", async () => {
+      const cachedRejection = {
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      };
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "rejected",
+        responseStatus: 400,
+        responseBody: cachedRejection,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "talk", requestId: "req_absent_retry" }),
+        { params }
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual(cachedRejection);
+      expect(prisma.campaignSceneParticipant.findUnique).not.toHaveBeenCalled();
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST K — Existing in-flight behavior: preserves SOCIAL_ACTION_IN_FLIGHT", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "in_flight",
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "talk", requestId: "req_inflight" }),
+        { params }
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: "Social action outcome is not confirmed yet.",
+        code: "SOCIAL_ACTION_IN_FLIGHT",
+      });
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("TEST L — Existing requestId reuse behavior: preserves REQUEST_ID_REUSED", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "reused",
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "talk", requestId: "req_reused" }),
+        { params }
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: "This request id already belongs to another social action.",
+        code: "REQUEST_ID_REUSED",
+      });
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+    });
+
+    it("First-contact regression: canonical present NPC with hasMetPlayer=false delegates to resolveSocialCheck", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_1", seed: "guard_1", role: "guard", hasMetPlayer: false,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        campaignId: "camp_1",
+        npcId: "npc_1",
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "pass gate" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      expect(prisma.nPC.update).not.toHaveBeenCalled();
+      expect(resolveSocialCheck).toHaveBeenCalledWith({
+        campaignId: "camp_1",
+        npcId: "npc_1",
+        approach: "persuade",
+        intent: "pass gate",
+      });
     });
   });
 });
