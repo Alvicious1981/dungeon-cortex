@@ -337,10 +337,124 @@ describe("DC-NARR-002B PR 3 — Canonical Scene-Presence Reader Activation", () 
     expect(context.activeNPCs).toHaveLength(2);
     expect(context.activeNPCs[0].name).toBe("Elodie");
     expect(context.activeNPCs[1].name).toBe("Greta");
-    // Single-NPC compatibility view exposes the first participant
-    expect(context.activeNPC?.name).toBe("Elodie");
+    // Single-NPC compatibility view resolves to null for multi-NPC scenes (DC-NARR-002B-R2)
+    expect(context.activeNPC).toBeNull();
 
     const prompt = formatCanonicalState(context);
+    expect(prompt).toContain("🎭 NPC: Elodie");
+    expect(prompt).toContain("🎭 NPC: Greta");
+  });
+
+  /**
+   * TEST 4 — Three or more canonical participants
+   * Given three or more canonical scene participants, activeNPC is null
+   * and all canonical participants are preserved in deterministic order.
+   */
+  it("TEST 4: preserves three or more canonical participants in deterministic order with activeNPC null", async () => {
+    primeDatabase({ scenePresenceVersion: 1, hasLegacySeed: false });
+
+    prismaMock.campaignSceneParticipant.findMany.mockResolvedValue([
+      {
+        campaignId: "campaign-1",
+        npcId: "npc-1-elodie",
+        npc: {
+          name: "Elodie",
+          race: "human",
+          profession: "archivist",
+          alignment: "neutral",
+          traits: TRAITS_ELODIE,
+          disposition: 4,
+          personalityTags: PERSONALITY_ELODIE,
+          hasMetPlayer: true,
+        },
+      },
+      {
+        campaignId: "campaign-1",
+        npcId: "npc-2-greta",
+        npc: {
+          name: "Greta",
+          race: "dwarf",
+          profession: "blacksmith",
+          alignment: "lawful neutral",
+          traits: TRAITS_GRETA,
+          disposition: 8,
+          personalityTags: PERSONALITY_GRETA,
+          hasMetPlayer: true,
+        },
+      },
+      {
+        campaignId: "campaign-1",
+        npcId: "npc-3-milo",
+        npc: {
+          name: "Milo",
+          race: "halfling",
+          profession: "scout",
+          alignment: "chaotic good",
+          traits: null,
+          disposition: 5,
+          personalityTags: null,
+          hasMetPlayer: true,
+        },
+      },
+    ]);
+
+    const context = await buildCampaignContext("campaign-1");
+
+    expect(prismaMock.campaignSceneParticipant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { campaignId: "campaign-1" },
+        orderBy: { npcId: "asc" },
+      })
+    );
+    expect(context.activeNPCs).toHaveLength(3);
+    expect(context.activeNPCs.map((n) => n.name)).toEqual(["Elodie", "Greta", "Milo"]);
+    expect(context.activeNPC).toBeNull();
+
+    const prompt = formatCanonicalState(context);
+    expect(prompt).toContain("🎭 NPC: Elodie");
+    expect(prompt).toContain("🎭 NPC: Greta");
+    expect(prompt).toContain("🎭 NPC: Milo");
+  });
+
+  /**
+   * TEST 5 — Formatter renders all canonical participants when activeNPC is null
+   * Given activeNPC = null and activeNPCs = [NPC A, NPC B],
+   * the formatter must still emit all canonical participants.
+   */
+  it("TEST 5: formatter renders all participants from activeNPCs when activeNPC is null", () => {
+    const prompt = formatCanonicalState({
+      character: CHARACTER,
+      activeEncounter: null,
+      recentLogs: [],
+      relevantMemories: [],
+      quests: [],
+      currentExploration: null,
+      gold: 10,
+      activeNPCs: [
+        {
+          name: "Elodie",
+          race: "human",
+          profession: "archivist",
+          alignment: "neutral",
+          traits: TRAITS_ELODIE,
+          disposition: 4,
+          personalityTags: PERSONALITY_ELODIE,
+          hasMetPlayer: true,
+        },
+        {
+          name: "Greta",
+          race: "dwarf",
+          profession: "blacksmith",
+          alignment: "lawful neutral",
+          traits: TRAITS_GRETA,
+          disposition: 8,
+          personalityTags: PERSONALITY_GRETA,
+          hasMetPlayer: true,
+        },
+      ],
+      activeNPC: null,
+    });
+
     expect(prompt).toContain("🎭 NPC: Elodie");
     expect(prompt).toContain("🎭 NPC: Greta");
   });

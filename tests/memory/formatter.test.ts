@@ -471,7 +471,7 @@ describe("formatSystemPrompt — relevance clipping", () => {
           },
         },
       ],
-      activeNPC: metNPC,
+      activeNPC: null,
     });
     expect(multiNPCState).toContain("🎭 NPC: Greta the Ironmonger");
     expect(multiNPCState).toContain("🎭 NPC: Elodie the Archivist");
