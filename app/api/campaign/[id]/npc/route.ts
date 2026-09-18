@@ -94,8 +94,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   const statblock = generateNPC(seed, role);
 
   const executeInTransaction = async (tx: typeof prisma) => {
-    const npcDelegate = tx.nPC ?? (tx as any).npc;
-    const upserted = await npcDelegate.upsert({
+    const upserted = await tx.nPC.upsert({
       where: { campaignId_seed: { campaignId, seed } },
       create: {
         campaignId,

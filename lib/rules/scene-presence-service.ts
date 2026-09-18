@@ -21,12 +21,17 @@ export interface ScenePresenceDb {
   campaign: {
     findUnique(args: {
       where: { id: string };
-      select?: any;
-    }): Promise<any>;
+      select?: Record<string, boolean>;
+    }): Promise<{
+      id?: string;
+      currentNodeId?: string | null;
+      currentLocationId?: string | null;
+      scenePresenceVersion?: number;
+    } | null | undefined>;
     update(args: {
       where: { id: string };
-      data: any;
-    }): Promise<any>;
+      data: Record<string, unknown>;
+    }): Promise<unknown>;
     updateMany?(args: {
       where: { id: string; scenePresenceVersion?: number };
       data: { scenePresenceVersion: number };
@@ -57,7 +62,7 @@ export interface ScenePresenceDb {
       where: {
         campaignId_seed: { campaignId: string; seed: string };
       };
-      select?: any;
+      select?: Record<string, boolean>;
     }): Promise<{ id: string } | null | undefined>;
   };
   npc?: {
@@ -65,13 +70,13 @@ export interface ScenePresenceDb {
       where: {
         campaignId_seed: { campaignId: string; seed: string };
       };
-      select?: any;
+      select?: Record<string, boolean>;
     }): Promise<{ id: string } | null | undefined>;
   };
   locationNode?: {
     findUnique?(args: {
       where: { id: string };
-      select?: any;
+      select?: Record<string, boolean>;
     }): Promise<{ npcSeed?: string | null } | null | undefined>;
   };
 }
