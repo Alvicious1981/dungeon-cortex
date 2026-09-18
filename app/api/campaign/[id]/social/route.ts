@@ -66,7 +66,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { userId: true, status: true },
+    select: { userId: true, status: true, scenePresenceVersion: true },
   });
   if (!campaign) {
     return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
@@ -95,6 +95,29 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       case "in_flight": return NextResponse.json({ error: "Social action outcome is not confirmed yet.", code: "SOCIAL_ACTION_IN_FLIGHT" }, { status: 409 });
       case "reused": return NextResponse.json({ error: "This request id already belongs to another social action.", code: "REQUEST_ID_REUSED" }, { status: 409 });
       case "completed_stream": return NextResponse.json({ error: "Invalid social receipt state." }, { status: 500 });
+    }
+  }
+
+  const scenePresenceVersion = campaign.scenePresenceVersion ?? 0;
+  if (scenePresenceVersion >= 1) {
+    const participant = await prisma.campaignSceneParticipant.findUnique({
+      where: {
+        campaignId_npcId: {
+          campaignId,
+          npcId: npc.id,
+        },
+      },
+      select: { npcId: true },
+    });
+    if (!participant) {
+      const responseBody = {
+        error: "NPC is not present in the current scene.",
+        code: "NPC_NOT_PRESENT",
+      };
+      if (receiptId) {
+        await rejectActionReceipt(receiptId, 400, responseBody);
+      }
+      return NextResponse.json(responseBody, { status: 400 });
     }
   }
 

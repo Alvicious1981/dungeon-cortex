@@ -65,7 +65,105 @@ test("@smoke social submissions are idempotent in PostgreSQL", async ({ request 
     expect(processing.status()).toBe(409);
     expect(await processing.json()).toMatchObject({ code: "SOCIAL_ACTION_IN_FLIGHT" });
   } finally {
-    if (created.campaignId) await prisma.nPC.deleteMany({ where: { campaignId: created.campaignId } });
+    if (created.campaignId) {
+      await prisma.campaignSceneParticipant.deleteMany({ where: { campaignId: created.campaignId } });
+      await prisma.nPC.deleteMany({ where: { campaignId: created.campaignId } });
+    }
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
+
+test("@smoke canonical scene presence guard enforces presence and preserves replay in PostgreSQL", async ({ request }) => {
+  test.setTimeout(90_000);
+  assertSafeE2EDatabase();
+  const created: E2ECreatedRecords = {};
+  const prisma = new PrismaClient();
+  try {
+    created.characterId = await createdId(await request.post("/api/character", { data: {
+      name: `Presence guard ${randomUUID().slice(0, 8)}`,
+      race: "human", class: "bard",
+      stats: { STR: 8, DEX: 14, CON: 12, INT: 10, WIS: 10, CHA: 16 },
+    } }));
+    created.campaignId = await createdId(await request.post("/api/campaign", { data: {
+      characterId: created.characterId, title: `Presence guard ${randomUUID().slice(0, 8)}`,
+    } }));
+    const npcResponse = await request.post(`/api/campaign/${created.campaignId}/npc`, { data: {
+      seed: `presence-guard-${randomUUID()}`, role: "commoner",
+    } });
+    expect(npcResponse.status()).toBe(200);
+    const npcId = (await npcResponse.json() as { id: string }).id;
+
+    await prisma.campaign.update({
+      where: { id: created.campaignId },
+      data: { scenePresenceVersion: 1 },
+    });
+
+    await prisma.campaignSceneParticipant.create({
+      data: {
+        campaignId: created.campaignId,
+        npcId,
+      },
+    });
+
+    const body = { npcId, approach: "persuade", intent: "ask for directions" };
+    const requestIdA = `social-pres-a-${randomUUID()}`;
+
+    const first = await request.post(`/api/campaign/${created.campaignId}/social`, {
+      data: { ...body, requestId: requestIdA },
+    });
+    expect(first.status()).toBe(200);
+    const firstJson = await first.json();
+
+    const dispAfterFirst = (await prisma.nPC.findUniqueOrThrow({
+      where: { id: npcId },
+      select: { disposition: true },
+    })).disposition;
+
+    await prisma.campaignSceneParticipant.delete({
+      where: {
+        campaignId_npcId: {
+          campaignId: created.campaignId,
+          npcId,
+        },
+      },
+    });
+
+    const requestIdB = `social-pres-b-${randomUUID()}`;
+    const second = await request.post(`/api/campaign/${created.campaignId}/social`, {
+      data: { ...body, requestId: requestIdB },
+    });
+    expect(second.status()).toBe(400);
+    expect(await second.json()).toEqual({
+      error: "NPC is not present in the current scene.",
+      code: "NPC_NOT_PRESENT",
+    });
+
+    const dispAfterSecond = (await prisma.nPC.findUniqueOrThrow({
+      where: { id: npcId },
+      select: { disposition: true },
+    })).disposition;
+    expect(dispAfterSecond).toBe(dispAfterFirst);
+
+    const replayA = await request.post(`/api/campaign/${created.campaignId}/social`, {
+      data: { ...body, requestId: requestIdA },
+    });
+    expect(replayA.status()).toBe(200);
+    expect(await replayA.json()).toEqual(firstJson);
+
+    const replayB = await request.post(`/api/campaign/${created.campaignId}/social`, {
+      data: { ...body, requestId: requestIdB },
+    });
+    expect(replayB.status()).toBe(400);
+    expect(await replayB.json()).toEqual({
+      error: "NPC is not present in the current scene.",
+      code: "NPC_NOT_PRESENT",
+    });
+  } finally {
+    if (created.campaignId) {
+      await prisma.campaignSceneParticipant.deleteMany({ where: { campaignId: created.campaignId } });
+      await prisma.nPC.deleteMany({ where: { campaignId: created.campaignId } });
+    }
     await prisma.$disconnect();
     await cleanupE2ERecords(created);
   }
