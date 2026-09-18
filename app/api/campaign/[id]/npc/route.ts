@@ -5,6 +5,10 @@ import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { generateNPC } from "@/lib/rules/npc";
 import type { NPCRole } from "@/lib/rules/npc";
+import {
+  syncSceneParticipants,
+  type ScenePresenceDb,
+} from "@/lib/rules/scene-presence-service";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -89,37 +93,52 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   // Derive the statblock deterministically — values are never trusted from the client.
   const statblock = generateNPC(seed, role);
 
-  const npc = await prisma.nPC.upsert({
-    where: { campaignId_seed: { campaignId, seed } },
-    create: {
+  const executeInTransaction = async (tx: typeof prisma) => {
+    const upserted = await tx.nPC.upsert({
+      where: { campaignId_seed: { campaignId, seed } },
+      create: {
+        campaignId,
+        seed,
+        role,
+        name: statblock.name,
+        maxHp: statblock.maxHp,
+        hp: hpOverride ?? statblock.hp,
+        ac: statblock.ac,
+        notes: notes ?? "",
+        // Identity, derived from the seed like everything else here. The
+        // statblock has always produced these and the schema has always had
+        // columns for them; this route dropped them, so the only writer was a
+        // service no live path called. They belong in `create` alone: a caller
+        // reporting damage must not be able to rewrite who someone is.
+        //
+        // `abilityScores` is deliberately absent. Nothing reads it — no rule
+        // consults an NPC's abilities, and the narrator must not be handed raw
+        // scores it could roll against — so persisting it would open the same
+        // gap this closes.
+        race: statblock.race,
+        profession: statblock.profession,
+        alignment: statblock.alignment,
+        traits: statblock.traits as unknown as Prisma.InputJsonValue,
+      },
+      update: {
+        ...(notes !== undefined && { notes }),
+        ...(hpOverride !== undefined && { hp: hpOverride }),
+      },
+    });
+
+    await syncSceneParticipants(tx as unknown as ScenePresenceDb, {
+      type: "materialize",
       campaignId,
-      seed,
-      role,
-      name: statblock.name,
-      maxHp: statblock.maxHp,
-      hp: hpOverride ?? statblock.hp,
-      ac: statblock.ac,
-      notes: notes ?? "",
-      // Identity, derived from the seed like everything else here. The
-      // statblock has always produced these and the schema has always had
-      // columns for them; this route dropped them, so the only writer was a
-      // service no live path called. They belong in `create` alone: a caller
-      // reporting damage must not be able to rewrite who someone is.
-      //
-      // `abilityScores` is deliberately absent. Nothing reads it — no rule
-      // consults an NPC's abilities, and the narrator must not be handed raw
-      // scores it could roll against — so persisting it would open the same
-      // gap this closes.
-      race: statblock.race,
-      profession: statblock.profession,
-      alignment: statblock.alignment,
-      traits: statblock.traits as unknown as Prisma.InputJsonValue,
-    },
-    update: {
-      ...(notes !== undefined && { notes }),
-      ...(hpOverride !== undefined && { hp: hpOverride }),
-    },
-  });
+      npcId: upserted.id,
+      npcSeed: upserted.seed ?? seed,
+    });
+
+    return upserted;
+  };
+
+  const npc = prisma.$transaction
+    ? await prisma.$transaction((tx) => executeInTransaction(tx as unknown as typeof prisma))
+    : await executeInTransaction(prisma);
 
   return NextResponse.json(npc, { status: 200 });
 }
