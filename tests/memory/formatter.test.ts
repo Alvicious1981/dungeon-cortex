@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import {
   formatSystemPrompt,
+  formatCanonicalState,
   formatNPCContext,
   formatSurvivalHUD,
   formatIronLaws,
@@ -399,24 +400,57 @@ describe("formatSystemPrompt — relevance clipping", () => {
     expect(dungeonPrompt).not.toContain("Wilderness & Travel Status");
   });
 
-  it("injects NPC context only when activeNPC exists and no active encounter", () => {
-    const socialPrompt = formatSystemPrompt({ ...baseContext, activeNPC: metNPC });
-    expect(socialPrompt).toContain("🎭 NPC");
+  it("preserves authoritative NPC context when activeNPC exists, including during active combat", () => {
+    const socialState = formatCanonicalState({ ...baseContext, activeNPC: metNPC });
+    expect(socialState).toContain("🎭 NPC: Greta the Ironmonger");
 
-    const combatPrompt = formatSystemPrompt({
+    const combatState = formatCanonicalState({
       ...baseContext,
       activeNPC: metNPC,
-      activeEncounter: {
-        id: "enc-1",
-        round: 1,
-        currentTurnIndex: 0,
-        currentTurnMovementSpentFt: 0,
-        currentTurnObjectInteractionUsed: false,
-        totalDamageDealt: 0,
-        combatants: [],
-      },
+      activeEncounter: combatEncounter,
     });
-    expect(combatPrompt).not.toContain("🎭 NPC");
+    // Combat context remains present
+    expect(combatState).toContain("## Combat");
+    expect(combatState).toContain("**Round:** 4");
+    // NPC context coexists with combat
+    expect(combatState).toContain("🎭 NPC: Greta the Ironmonger");
+    expect(combatState).toContain("blacksmith");
+    expect(combatState).toContain("Speaks in short, hammered sentences.");
+  });
+
+  it("omits NPC context when activeNPC is null both outside and during combat", () => {
+    const stateWithoutCombat = formatCanonicalState({ ...baseContext, activeNPC: null });
+    expect(stateWithoutCombat).not.toContain("🎭 NPC");
+
+    const stateWithCombat = formatCanonicalState({
+      ...baseContext,
+      activeNPC: null,
+      activeEncounter: combatEncounter,
+    });
+    expect(stateWithCombat).toContain("## Combat");
+    expect(stateWithCombat).not.toContain("🎭 NPC");
+  });
+
+  it("preserves secret withholding rules during combat when disposition is below threshold", () => {
+    const guardedCombat = formatCanonicalState({
+      ...baseContext,
+      activeNPC: { ...metNPC, disposition: 0 },
+      activeEncounter: combatEncounter,
+    });
+    expect(guardedCombat).toContain("## Combat");
+    expect(guardedCombat).toContain("🎭 NPC: Greta the Ironmonger");
+    expect(guardedCombat).toContain("Indifferent");
+    expect(guardedCombat).not.toContain("owe money to people");
+
+    const trustedCombat = formatCanonicalState({
+      ...baseContext,
+      activeNPC: { ...metNPC, disposition: 8 },
+      activeEncounter: combatEncounter,
+    });
+    expect(trustedCombat).toContain("## Combat");
+    expect(trustedCombat).toContain("🎭 NPC: Greta the Ironmonger");
+    expect(trustedCombat).toContain("Friendly");
+    expect(trustedCombat).toContain("owe money to people");
   });
 });
 

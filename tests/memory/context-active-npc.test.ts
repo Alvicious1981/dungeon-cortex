@@ -21,7 +21,7 @@ const prismaMock = vi.hoisted(() => ({
   location: { findUnique: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: prismaMock }));
-vi.mock("@/lib/memory/search", () => ({ searchMemories: vi.fn() }));
+vi.mock("@/lib/memory/search", () => ({ searchMemories: vi.fn().mockResolvedValue("No relevant memories found.") }));
 
 import { buildCampaignContext } from "@/lib/memory/context";
 
@@ -166,5 +166,66 @@ describe("buildCampaignContext — active NPC", () => {
 
     expect(context.activeNPC).toBeNull();
     expect(prismaMock.nPC.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("resolves activeNPC alongside an active encounter without suppression", async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      character: CHARACTER,
+      gold: 25,
+      currentLocationId: "loc-1",
+      currentNodeId: "node-1",
+    });
+    prismaMock.encounter.findFirst.mockResolvedValue({
+      id: "enc-1",
+      round: 2,
+      currentTurnIndex: 0,
+      currentTurnMovementSpentFt: 0,
+      currentTurnObjectInteractionUsed: false,
+      totalDamageDealt: 12,
+      combatants: [],
+    });
+    prismaMock.gameLog.findMany.mockResolvedValue([]);
+    prismaMock.quest.findMany.mockResolvedValue([]);
+    prismaMock.location.findUnique.mockResolvedValue({
+      id: "loc-1",
+      name: "The Gilded Boar",
+      type: "tavern",
+      description: "Smoke and low talk.",
+      nodes: [
+        {
+          id: "node-1",
+          index: 0,
+          name: "The Taproom",
+          description: "Benches, spilled ale.",
+          feature: "npc",
+          npcSeed: "innkeeper_1",
+          x: 0,
+          y: 0,
+        },
+      ],
+      edges: [],
+    });
+    prismaMock.nPC.findUnique.mockResolvedValue({
+      name: "Greta",
+      race: "dwarf",
+      profession: "blacksmith",
+      alignment: "lawful neutral",
+      traits: TRAITS,
+      disposition: 8,
+      personalityTags: PERSONALITY,
+      hasMetPlayer: true,
+    });
+
+    const context = await buildCampaignContext("campaign-1", "I attack the goblin!");
+
+    expect(context.activeEncounter).not.toBeNull();
+    expect(context.activeEncounter?.id).toBe("enc-1");
+    expect(context.activeNPC).toEqual(
+      expect.objectContaining({
+        name: "Greta",
+        race: "dwarf",
+        profession: "blacksmith",
+      })
+    );
   });
 });

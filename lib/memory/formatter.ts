@@ -593,7 +593,7 @@ export function formatCanonicalState(context: FormatterContext): string {
   const hasLocation = Boolean(context.currentExploration?.location);
   const isOverworldScene = locationType === "wilderness" || (!hasLocation && Boolean(context.wildernessHUD));
   const isDungeonScene = hasLocation && locationType !== "wilderness";
-  const shouldShowNPCContext = Boolean(context.activeNPC) && !context.activeEncounter;
+  const shouldShowNPCContext = Boolean(context.activeNPC);
 
   const questSection = formatQuests(context.quests);
   const partyGold = context.gold;
@@ -615,8 +615,9 @@ export function formatCanonicalState(context: FormatterContext): string {
     // Quest state injected after encounter so the model sees live combat first.
     // Empty-string guard: absent from prompt when no quests exist.
     ...(questSection ? [questSection] : []),
-    // NPC social context — injected when the party is actively interacting
-    // with a tracked NPC. Absent when no NPC is in scope.
+    // NPC social context — injected when an authoritative NPC is in scope for the
+    // scene. Coexists with combat so identity and personality are preserved.
+    // Absent when no NPC is in scope.
     ...(shouldShowNPCContext && context.activeNPC ? [formatNPCContext(context.activeNPC)] : []),
   ];
 
