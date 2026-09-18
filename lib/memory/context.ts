@@ -212,8 +212,11 @@ export interface CampaignContext {
    */
   activeNPCs: ContextActiveNPC[];
   /**
-   * Single-NPC compatibility accessor.
-   * Derived strictly from `activeNPCs[0] ?? null` to prevent dual sources of truth.
+   * Single-NPC compatibility accessor (DC-NARR-002B-R2).
+   * - Exactly 1 present NPC -> resolves to that NPC.
+   * - 0 or 2+ present NPCs -> null (in multi-NPC scenes, there is no unambiguous single
+   *   active NPC; resolves to null to avoid arbitrary ordering bias).
+   * For multi-NPC scenes, consumers must read `activeNPCs` instead.
    */
   activeNPC: ContextActiveNPC | null;
 }
@@ -625,7 +628,7 @@ export async function buildCampaignContext(
     character: campaign.character,
     gold: campaign.gold,
     activeNPCs,
-    activeNPC: activeNPCs[0] ?? null,
+    activeNPC: activeNPCs.length === 1 ? activeNPCs[0] : null,
     activeEncounter: activeEncounter ?? null,
     // Reverse so logs are oldest-first (natural reading order for AI context)
     recentLogs: recentLogsDesc.reverse(),
