@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
@@ -97,6 +98,16 @@ function ConditionBadge({ id }: { id: string }) {
   );
 }
 
+/** Keystrokes aimed at a text field (e.g. the action textbox) are the user typing, not shortcuts. */
+function isTextEntryTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const editableHost = target.closest("[contenteditable]");
+  if (editableHost && editableHost.getAttribute("contenteditable") !== "false") return true;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
 function hpColor(percent: number) {
   const t = clamp(percent / 100, 0, 1);
   const r = Math.round(239 + (34 - 239) * t);
@@ -112,6 +123,31 @@ export default function CombatHUD({
   onActionTrigger,
   playerDown = false,
 }: CombatHUDProps) {
+  // Single source of truth for when the action buttons can be used; the
+  // keyboard shortcuts below read the same values.
+  const actionsOffered = !playerDown;
+  const actionsDisabled = isPending;
+  const canTriggerAction = actionsOffered && !actionsDisabled;
+
+  const latest = useRef({ canTriggerAction, onActionTrigger });
+  latest.current = { canTriggerAction, onActionTrigger };
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
+      const config = ACTIONS.find(({ keybind }) => keybind === event.key);
+      if (!config) return;
+      if (isTextEntryTarget(event.target)) return;
+      const { canTriggerAction, onActionTrigger } = latest.current;
+      if (!canTriggerAction) return;
+      event.preventDefault();
+      onActionTrigger(config.action);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <section className="relative h-full w-full text-slate-100">
       <aside
@@ -169,7 +205,7 @@ export default function CombatHUD({
 
       <div className="absolute bottom-4 left-1/2 w-[min(52rem,92vw)] -translate-x-1/2">
         <div className={`p-3 ${PANEL_CLASS}`}>
-          {playerDown ? (
+          {!actionsOffered ? (
             <p role="status" className="px-2 py-3 text-center text-sm text-red-200">
               Estás inconsciente: usa «Tirada de muerte» o «Esperar» en las acciones de combate.
             </p>
@@ -179,7 +215,7 @@ export default function CombatHUD({
               <button
                 key={keybind}
                 type="button"
-                disabled={isPending}
+                disabled={actionsDisabled}
                 onClick={() => onActionTrigger(action)}
                 className="group relative flex h-16 flex-col items-center justify-center rounded-lg border border-white/15 bg-slate-950/50 px-2 text-xs transition hover:border-amber-300/60 hover:bg-slate-900/60 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={`${action} (${keybind})`}
