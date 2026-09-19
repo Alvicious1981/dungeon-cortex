@@ -37,23 +37,134 @@ function renderController(props: { playerDown?: boolean } = {}) {
 }
 
 describe("CombatHUD keyboard shortcuts", () => {
-  it("F1 requests the Attack action", () => {
-    renderController();
-    fireEvent.keyDown(window, { key: "F1" });
-    expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
-  });
-
-  it("F2 requests the End Turn action", () => {
-    renderController();
-    fireEvent.keyDown(window, { key: "F2" });
-    expect(requests.map((r) => r.request)).toEqual([{ action: "End Turn" }]);
-  });
-
-  it("prevents the browser default (F1 help) when it handles the key", () => {
+  it("F1 requests the Attack action exactly once", () => {
     renderController();
     const event = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
     window.dispatchEvent(event);
+    expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("F2 requests the End Turn action exactly once", () => {
+    renderController();
+    const event = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    expect(requests.map((r) => r.request)).toEqual([{ action: "End Turn" }]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("ignores repeated keydown events (event.repeat === true)", () => {
+    renderController();
+    // Initial keydown triggers action exactly once
+    const initial = new KeyboardEvent("keydown", {
+      key: "F1",
+      bubbles: true,
+      cancelable: true,
+      repeat: false,
+    });
+    window.dispatchEvent(initial);
+    expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
+    expect(initial.defaultPrevented).toBe(true);
+
+    // Repeated keydown while holding key does not trigger action or prevent default
+    const repeat1 = new KeyboardEvent("keydown", {
+      key: "F1",
+      bubbles: true,
+      cancelable: true,
+      repeat: true,
+    });
+    window.dispatchEvent(repeat1);
+
+    const repeat2 = new KeyboardEvent("keydown", {
+      key: "F1",
+      bubbles: true,
+      cancelable: true,
+      repeat: true,
+    });
+    window.dispatchEvent(repeat2);
+
+    expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
+    expect(repeat1.defaultPrevented).toBe(false);
+    expect(repeat2.defaultPrevented).toBe(false);
+
+    // Similarly for F2
+    const f2Repeat = new KeyboardEvent("keydown", {
+      key: "F2",
+      bubbles: true,
+      cancelable: true,
+      repeat: true,
+    });
+    window.dispatchEvent(f2Repeat);
+    expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
+    expect(f2Repeat.defaultPrevented).toBe(false);
+  });
+
+  it("ignores F1/F2 originating inside active modal and dialog overlays", () => {
+    renderController();
+
+    // Modal matching project pattern: role="dialog" aria-modal="true"
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.tabIndex = -1;
+
+    const modalButton = document.createElement("button");
+    modalButton.textContent = "Cerrar";
+    dialog.appendChild(modalButton);
+
+    // Native dialog element
+    const nativeDialog = document.createElement("dialog");
+    nativeDialog.open = true;
+    const nativeDialogButton = document.createElement("button");
+    nativeDialogButton.textContent = "Aceptar";
+    nativeDialog.appendChild(nativeDialogButton);
+
+    // Alert dialog matching role="alertdialog"
+    const alertDialog = document.createElement("div");
+    alertDialog.setAttribute("role", "alertdialog");
+    const alertText = document.createElement("span");
+    alertText.textContent = "¿Confirmar acción?";
+    alertDialog.appendChild(alertText);
+
+    document.body.append(dialog, nativeDialog, alertDialog);
+
+    try {
+      // Event on child inside dialog
+      const e1 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      modalButton.dispatchEvent(e1);
+      expect(e1.defaultPrevented).toBe(false);
+
+      // Event on dialog container itself
+      const e2 = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+      dialog.dispatchEvent(e2);
+      expect(e2.defaultPrevented).toBe(false);
+
+      // Event inside native dialog
+      const e3 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      nativeDialogButton.dispatchEvent(e3);
+      expect(e3.defaultPrevented).toBe(false);
+
+      // Event inside alertdialog
+      const e4 = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+      alertText.dispatchEvent(e4);
+      expect(e4.defaultPrevented).toBe(false);
+
+      // No combat actions should have been triggered
+      expect(requests).toEqual([]);
+
+      // Non-modal element outside dialog still triggers action
+      const outsideButton = document.createElement("button");
+      document.body.append(outsideButton);
+      const e5 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      outsideButton.dispatchEvent(e5);
+      expect(e5.defaultPrevented).toBe(true);
+      expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
+      outsideButton.remove();
+    } finally {
+      dialog.remove();
+      nativeDialog.remove();
+      alertDialog.remove();
+    }
   });
 
   it("does nothing while an action is pending (button disabled)", () => {
@@ -71,9 +182,13 @@ describe("CombatHUD keyboard shortcuts", () => {
 
   it("does nothing while the player is down (buttons not offered)", () => {
     renderController({ playerDown: true });
-    fireEvent.keyDown(window, { key: "F1" });
-    fireEvent.keyDown(window, { key: "F2" });
+    const e1 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+    window.dispatchEvent(e1);
+    const e2 = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    window.dispatchEvent(e2);
     expect(requests).toEqual([]);
+    expect(e1.defaultPrevented).toBe(false);
+    expect(e2.defaultPrevented).toBe(false);
   });
 
   it("ignores the keys while typing in a text field", () => {
@@ -84,10 +199,17 @@ describe("CombatHUD keyboard shortcuts", () => {
     editable.setAttribute("contenteditable", "true");
     document.body.append(input, textarea, editable);
     try {
-      fireEvent.keyDown(input, { key: "F1" });
-      fireEvent.keyDown(textarea, { key: "F2" });
-      fireEvent.keyDown(editable, { key: "F1" });
+      const e1 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      input.dispatchEvent(e1);
+      const e2 = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+      textarea.dispatchEvent(e2);
+      const e3 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      editable.dispatchEvent(e3);
+
       expect(requests).toEqual([]);
+      expect(e1.defaultPrevented).toBe(false);
+      expect(e2.defaultPrevented).toBe(false);
+      expect(e3.defaultPrevented).toBe(false);
     } finally {
       input.remove();
       textarea.remove();
@@ -97,11 +219,35 @@ describe("CombatHUD keyboard shortcuts", () => {
 
   it("ignores the keys when a modifier is held", () => {
     renderController();
-    fireEvent.keyDown(window, { key: "F1", ctrlKey: true });
-    fireEvent.keyDown(window, { key: "F1", altKey: true });
-    fireEvent.keyDown(window, { key: "F2", shiftKey: true });
-    fireEvent.keyDown(window, { key: "F2", metaKey: true });
+    const e1 = new KeyboardEvent("keydown", { key: "F1", ctrlKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(e1);
+    const e2 = new KeyboardEvent("keydown", { key: "F1", altKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(e2);
+    const e3 = new KeyboardEvent("keydown", { key: "F2", shiftKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(e3);
+    const e4 = new KeyboardEvent("keydown", { key: "F2", metaKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(e4);
+
     expect(requests).toEqual([]);
+    expect(e1.defaultPrevented).toBe(false);
+    expect(e2.defaultPrevented).toBe(false);
+    expect(e3.defaultPrevented).toBe(false);
+    expect(e4.defaultPrevented).toBe(false);
+  });
+
+  it("ignores unrelated keys without preventing default", () => {
+    renderController();
+    const e1 = new KeyboardEvent("keydown", { key: "F3", bubbles: true, cancelable: true });
+    window.dispatchEvent(e1);
+    const e2 = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    window.dispatchEvent(e2);
+    const e3 = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    window.dispatchEvent(e3);
+
+    expect(requests).toEqual([]);
+    expect(e1.defaultPrevented).toBe(false);
+    expect(e2.defaultPrevented).toBe(false);
+    expect(e3.defaultPrevented).toBe(false);
   });
 
   it("removes the listener on unmount", () => {

@@ -108,6 +108,16 @@ function isTextEntryTarget(target: EventTarget | null) {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/** Keystrokes originating inside an active modal or dialog overlay must not trigger combat actions behind it. */
+function isModalOrDialogTarget(target: EventTarget | null) {
+  if (!(target instanceof Node)) return false;
+  const element = target instanceof Element ? target : target.parentElement;
+  if (!element) return false;
+  return Boolean(
+    element.closest('dialog, [role~="dialog"], [role~="alertdialog"], [aria-modal="true"]')
+  );
+}
+
 function hpColor(percent: number) {
   const t = clamp(percent / 100, 0, 1);
   const r = Math.round(239 + (34 - 239) * t);
@@ -134,10 +144,12 @@ export default function CombatHUD({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.repeat) return;
       if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
       const config = ACTIONS.find(({ keybind }) => keybind === event.key);
       if (!config) return;
       if (isTextEntryTarget(event.target)) return;
+      if (isModalOrDialogTarget(event.target)) return;
       const { canTriggerAction, onActionTrigger } = latest.current;
       if (!canTriggerAction) return;
       event.preventDefault();
