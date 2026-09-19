@@ -108,6 +108,47 @@ function isTextEntryTarget(target: EventTarget | null) {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/** Keystrokes originating inside an active modal or dialog overlay must not trigger combat actions behind it. */
+function isModalOrDialogTarget(target: EventTarget | null) {
+  if (!(target instanceof Node)) return false;
+  const element = target instanceof Element ? target : target.parentElement;
+  if (!element) return false;
+  return Boolean(
+    element.closest('dialog, [role~="dialog"], [role~="alertdialog"], [aria-modal="true"]')
+  );
+}
+
+/** Checks whether a modal candidate is actively displayed and not closed or hidden. */
+function isModalElementActive(element: Element): boolean {
+  if (element.tagName === "DIALOG" && !(element as HTMLDialogElement).open) {
+    return false;
+  }
+  let current: Element | null = element;
+  while (current) {
+    if (current.hasAttribute("hidden")) return false;
+    if (current.getAttribute("aria-hidden") === "true") return false;
+    if (current instanceof HTMLElement) {
+      if (current.style.display === "none" || current.style.visibility === "hidden") {
+        return false;
+      }
+    }
+    current = current.parentElement;
+  }
+  return true;
+}
+
+/** Checks whether any blocking modal overlay is currently active in the document. */
+function hasActiveBlockingModal(): boolean {
+  if (typeof document === "undefined") return false;
+  const candidates = document.querySelectorAll('dialog[open], [aria-modal="true"]');
+  for (const candidate of candidates) {
+    if (isModalElementActive(candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function hpColor(percent: number) {
   const t = clamp(percent / 100, 0, 1);
   const r = Math.round(239 + (34 - 239) * t);
@@ -134,10 +175,13 @@ export default function CombatHUD({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.repeat) return;
       if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
       const config = ACTIONS.find(({ keybind }) => keybind === event.key);
       if (!config) return;
       if (isTextEntryTarget(event.target)) return;
+      if (isModalOrDialogTarget(event.target)) return;
+      if (hasActiveBlockingModal()) return;
       const { canTriggerAction, onActionTrigger } = latest.current;
       if (!canTriggerAction) return;
       event.preventDefault();
