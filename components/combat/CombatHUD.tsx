@@ -118,6 +118,37 @@ function isModalOrDialogTarget(target: EventTarget | null) {
   );
 }
 
+/** Checks whether a modal candidate is actively displayed and not closed or hidden. */
+function isModalElementActive(element: Element): boolean {
+  if (element.tagName === "DIALOG" && !(element as HTMLDialogElement).open) {
+    return false;
+  }
+  let current: Element | null = element;
+  while (current) {
+    if (current.hasAttribute("hidden")) return false;
+    if (current.getAttribute("aria-hidden") === "true") return false;
+    if (current instanceof HTMLElement) {
+      if (current.style.display === "none" || current.style.visibility === "hidden") {
+        return false;
+      }
+    }
+    current = current.parentElement;
+  }
+  return true;
+}
+
+/** Checks whether any blocking modal overlay is currently active in the document. */
+function hasActiveBlockingModal(): boolean {
+  if (typeof document === "undefined") return false;
+  const candidates = document.querySelectorAll('dialog[open], [aria-modal="true"]');
+  for (const candidate of candidates) {
+    if (isModalElementActive(candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function hpColor(percent: number) {
   const t = clamp(percent / 100, 0, 1);
   const r = Math.round(239 + (34 - 239) * t);
@@ -150,6 +181,7 @@ export default function CombatHUD({
       if (!config) return;
       if (isTextEntryTarget(event.target)) return;
       if (isModalOrDialogTarget(event.target)) return;
+      if (hasActiveBlockingModal()) return;
       const { canTriggerAction, onActionTrigger } = latest.current;
       if (!canTriggerAction) return;
       event.preventDefault();

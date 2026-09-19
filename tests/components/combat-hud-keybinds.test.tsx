@@ -151,19 +151,125 @@ describe("CombatHUD keyboard shortcuts", () => {
 
       // No combat actions should have been triggered
       expect(requests).toEqual([]);
-
-      // Non-modal element outside dialog still triggers action
-      const outsideButton = document.createElement("button");
-      document.body.append(outsideButton);
-      const e5 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
-      outsideButton.dispatchEvent(e5);
-      expect(e5.defaultPrevented).toBe(true);
-      expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
-      outsideButton.remove();
     } finally {
       dialog.remove();
       nativeDialog.remove();
       alertDialog.remove();
+    }
+  });
+
+  it("ignores F1 and F2 when an active blocking modal is mounted, even if focus/event.target is outside the modal", () => {
+    renderController();
+
+    // Active blocking modal matching LevelUpDecisionPanel: role="dialog" aria-modal="true"
+    const modal = document.createElement("div");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.className = "fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4";
+
+    const modalButton = document.createElement("button");
+    modalButton.textContent = "Confirmar";
+    modal.appendChild(modalButton);
+
+    // Underlying page element where focus/event target remains
+    const underlyingButton = document.createElement("button");
+    underlyingButton.textContent = "Underlying page button";
+
+    document.body.append(modal, underlyingButton);
+
+    try {
+      // 1. F1 dispatched to underlying element outside modal
+      const e1 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      underlyingButton.dispatchEvent(e1);
+      expect(requests).toEqual([]);
+      expect(e1.defaultPrevented).toBe(false);
+
+      // 2. F2 dispatched to underlying element outside modal
+      const e2 = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+      underlyingButton.dispatchEvent(e2);
+      expect(requests).toEqual([]);
+      expect(e2.defaultPrevented).toBe(false);
+
+      // 3. F1 dispatched to window while active modal is mounted
+      const e3 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      window.dispatchEvent(e3);
+      expect(requests).toEqual([]);
+      expect(e3.defaultPrevented).toBe(false);
+    } finally {
+      modal.remove();
+      underlyingButton.remove();
+    }
+  });
+
+  it("allows F1 and F2 when dialogs/modals in the DOM are closed, inactive, or non-blocking", () => {
+    renderController();
+
+    // Inactive / non-blocking dialogs:
+    // a) Closed native dialog (no open attribute)
+    const closedNativeDialog = document.createElement("dialog");
+
+    // b) Non-modal dialog (role="dialog" with aria-modal="false")
+    const nonModalDialog = document.createElement("div");
+    nonModalDialog.setAttribute("role", "dialog");
+    nonModalDialog.setAttribute("aria-modal", "false");
+
+    // c) Modal with hidden attribute
+    const hiddenModal = document.createElement("div");
+    hiddenModal.setAttribute("role", "dialog");
+    hiddenModal.setAttribute("aria-modal", "true");
+    hiddenModal.setAttribute("hidden", "true");
+
+    // d) Modal with aria-hidden="true"
+    const ariaHiddenModal = document.createElement("div");
+    ariaHiddenModal.setAttribute("role", "dialog");
+    ariaHiddenModal.setAttribute("aria-modal", "true");
+    ariaHiddenModal.setAttribute("aria-hidden", "true");
+
+    // e) Modal with display: none
+    const displayNoneModal = document.createElement("div");
+    displayNoneModal.setAttribute("role", "dialog");
+    displayNoneModal.setAttribute("aria-modal", "true");
+    displayNoneModal.style.display = "none";
+
+    // f) Modal inside a hidden container
+    const hiddenContainer = document.createElement("div");
+    hiddenContainer.hidden = true;
+    const modalInHidden = document.createElement("div");
+    modalInHidden.setAttribute("role", "dialog");
+    modalInHidden.setAttribute("aria-modal", "true");
+    hiddenContainer.appendChild(modalInHidden);
+
+    document.body.append(
+      closedNativeDialog,
+      nonModalDialog,
+      hiddenModal,
+      ariaHiddenModal,
+      displayNoneModal,
+      hiddenContainer,
+    );
+
+    try {
+      // F1 -> Attack executed once, default prevented
+      const e1 = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
+      window.dispatchEvent(e1);
+      expect(requests.map((r) => r.request)).toEqual([{ action: "Attack" }]);
+      expect(e1.defaultPrevented).toBe(true);
+
+      // F2 -> End Turn executed once, default prevented
+      const e2 = new KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+      window.dispatchEvent(e2);
+      expect(requests.map((r) => r.request)).toEqual([
+        { action: "Attack" },
+        { action: "End Turn" },
+      ]);
+      expect(e2.defaultPrevented).toBe(true);
+    } finally {
+      closedNativeDialog.remove();
+      nonModalDialog.remove();
+      hiddenModal.remove();
+      ariaHiddenModal.remove();
+      displayNoneModal.remove();
+      hiddenContainer.remove();
     }
   });
 
