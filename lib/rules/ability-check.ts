@@ -280,7 +280,7 @@ export function resolveAbilityCheck(
     const rollResult = advantage
       ? rollWithAdvantage(20, totalModifier)
       : rollWithDisadvantage(20, totalModifier);
-    natural = rollResult.dice[0]!.result;
+    natural = rollResult.diceTotal;
     total = rollResult.total;
   } else {
     const checkResult = d20Check(totalModifier, dc);

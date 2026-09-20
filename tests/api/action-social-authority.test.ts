@@ -42,6 +42,9 @@ const prismaTx = vi.hoisted(() => ({
   campaign: {
     findUnique: vi.fn(),
   },
+  locationNode: {
+    findUnique: vi.fn(),
+  },
   campaignSceneParticipant: {
     findMany: vi.fn(async () => []),
     findUnique: vi.fn(),
@@ -61,6 +64,7 @@ const prismaTx = vi.hoisted(() => ({
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     campaign: { findUnique: vi.fn() },
+    locationNode: { findUnique: vi.fn() },
     character: { findUnique: vi.fn() },
     nPC: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     campaignSceneParticipant: { findMany: vi.fn(), findUnique: vi.fn() },
@@ -208,6 +212,9 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
     (prismaTx.campaign.findUnique as any).mockImplementation((args: any) =>
       prisma.campaign.findUnique(args)
     );
+    (prismaTx.locationNode.findUnique as any).mockImplementation((args: any) =>
+      prisma.locationNode.findUnique(args)
+    );
     (prismaTx.campaignSceneParticipant.findMany as any).mockImplementation((args: any) =>
       prisma.campaignSceneParticipant.findMany(args)
     );
@@ -223,6 +230,10 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
     (prisma.campaignSceneParticipant.findUnique as any).mockResolvedValue({
       campaignId: "camp_1",
       npcId: "npc_innkeeper",
+    });
+    (prisma.locationNode.findUnique as any).mockResolvedValue({
+      id: "node_1",
+      npcSeed: "innkeeper_1",
     });
 
     (resolveSocialCheck as any).mockResolvedValue({

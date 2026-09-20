@@ -17,6 +17,9 @@ const prismaTx = vi.hoisted(() => ({
   campaign: {
     findUnique: vi.fn(),
   },
+  locationNode: {
+    findUnique: vi.fn(),
+  },
   campaignSceneParticipant: {
     findUnique: vi.fn(),
   },
@@ -853,6 +856,7 @@ describe("POST /api/campaign/[id]/social", () => {
       let txSeenByGameLog: unknown;
 
       const customTx = {
+        ...prismaTx,
         gameLog: {
           create: vi.fn(async () => {
             txSeenByGameLog = customTx;
@@ -896,6 +900,7 @@ describe("POST /api/campaign/[id]/social", () => {
 
     it("atomic transaction contract: failure in log creation rolls back transaction and fails request", async () => {
       const customTx = {
+        ...prismaTx,
         gameLog: {
           create: vi.fn(async () => {
             throw new Error("DB write failure for GameLog");

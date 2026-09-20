@@ -254,16 +254,40 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
   // ("I persuade the innkeeper to open the gate", "I deceive the guard that we are merchants",
   // "persuado al posadero para que abra la puerta"). Stripping the clause isolates
   // the target creature deterministically without invoking an NLP parser.
+  // If the action begins directly with or consists of a purpose/content clause with
+  // no preceding target noun ("I negotiate to lower the price", "I bluff that we are merchants",
+  // "negocio para bajar el precio", "engaño diciendo que somos mercaderes"), it resolves to undefined.
   const cleanSocialTarget = (raw: string | undefined): string | undefined => {
     if (!raw) return undefined;
-    const withoutPrep = stripLeadingPreposition(raw)?.trim();
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+
+    // Check if the input begins directly with or consists of a purpose/content clause
+    // (with no preceding target noun).
+    // In English, "to" can also precede a target NPC ("to the guard", "to a merchant").
+    // If "to" is followed by an article ("the", "a", "an"), it introduces a target noun.
+    const isTargetlessClause =
+      /^(?:that|into|about|para\s+que|para|de\s+que|diciendo\s+que|que|sobre)\b/i.test(trimmed) ||
+      /^to\s+(?!(?:the|a|an)\s+)/i.test(trimmed);
+
+    if (isTargetlessClause) {
+      return undefined;
+    }
+
+    // If an explicit target noun precedes a purpose/content clause:
+    // "the guard to open the gate" -> "the guard"
+    // "the merchant that we are nobles" -> "the merchant"
+    // "con el mercader para bajar el precio" -> "con el mercader"
+    // "al guardia diciendo que somos nobles" -> "al guardia"
+    const match = trimmed.match(
+      /^(.*?)(?:\s+(?:to|that|into|about|para\s+que|para|de\s+que|diciendo\s+que|que|sobre)\s+.+)$/i
+    );
+    const candidate = match ? match[1] : trimmed;
+
+    const withoutPrep = stripLeadingPreposition(candidate)?.trim();
     if (!withoutPrep) return undefined;
 
-    const match = withoutPrep.match(
-      /^(.*?)(?:\s+(?:to|that|into|about|para\s+que|para|de\s+que|que|sobre)\s+.+)$/i
-    );
-    let candidateTarget = (match ? match[1] : withoutPrep).trim();
-    candidateTarget = candidateTarget
+    const candidateTarget = withoutPrep
       .replace(/^[¿¡\s]+/, "")
       .replace(/[.!?\s]+$/, "")
       .trim();

@@ -410,6 +410,11 @@ describe("parseIntent — ambient observation vs mechanical discovery", () => {
       ["persuado al posadero", "Persuasion", "persuade", "posadero"],
       ["engaño al guardia", "Deception", "deceive", "guardia"],
       ["amenazo al mercader", "Intimidation", "intimidate", "mercader"],
+      // Explicit target followed by purpose/content clause
+      ["I bluff the merchant that we are nobles", "Deception", "deceive", "merchant"],
+      ["negocio con el mercader para bajar el precio", "Persuasion", "persuade", "mercader"],
+      ["engaño al guardia diciendo que somos nobles", "Deception", "deceive", "guardia"],
+      ["I persuade the guard to open the gate", "Persuasion", "persuade", "guard"],
       // Terminal punctuation & Spanish inverted marks
       ["I persuade the innkeeper.", "Persuasion", "persuade", "innkeeper"],
       ["I deceive the guard!", "Deception", "deceive", "guard"],
@@ -427,6 +432,24 @@ describe("parseIntent — ambient observation vs mechanical discovery", () => {
           socialApproach: approach,
           targetName,
         });
+      }
+    );
+
+    it.each([
+      ["I negotiate to lower the price", "Persuasion", "persuade"],
+      ["I bluff that we are merchants", "Deception", "deceive"],
+      ["negocio para bajar el precio", "Persuasion", "persuade"],
+      ["engaño diciendo que somos mercaderes", "Deception", "deceive"],
+    ])(
+      "classifies targetless clause '%s' as %s with socialApproach '%s' and undefined targetName",
+      async (input, skill, approach) => {
+        const intent = await parseIntent(input);
+        expect(intent).toMatchObject({
+          actionType: "ability_check",
+          skill,
+          socialApproach: approach,
+        });
+        expect(intent.targetName).toBeUndefined();
       }
     );
 

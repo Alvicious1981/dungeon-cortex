@@ -1320,7 +1320,6 @@ async function resolveAction(
               {
                 campaignId,
                 targetName: intent.targetName,
-                currentNodeNpcSeed: context.currentExploration?.currentNode?.npcSeed ?? null,
               }
             );
 

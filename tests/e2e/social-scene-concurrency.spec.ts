@@ -8,6 +8,7 @@ import {
   assertNpcScenePresenceInTransaction,
   resolveSocialSceneTargetInTransaction,
   SocialScenePresenceError,
+  SocialSceneTargetError,
 } from "@/lib/db/social-scene-target";
 import { resolveSocialCheck } from "@/lib/rules/social-service";
 import {
@@ -249,6 +250,231 @@ test("@smoke social scene presence serializes with movement via Campaign row loc
       });
       await prisma.campaignSceneParticipant.deleteMany({
         where: { campaignId: created.campaignId },
+      });
+      await prisma.gameLog.deleteMany({
+        where: { campaignId: created.campaignId },
+      });
+      await prisma.nPC.deleteMany({
+        where: { campaignId: created.campaignId },
+      });
+      if (locationId) {
+        await prisma.locationEdge.deleteMany({ where: { locationId } });
+        await prisma.locationNode.deleteMany({ where: { locationId } });
+        await prisma.location.deleteMany({ where: { id: locationId } });
+      }
+    }
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
+
+test("@smoke legacy social scene presence serializes with movement via Campaign row lock", async ({
+  request,
+}) => {
+  test.setTimeout(90_000);
+  assertSafeE2EDatabase();
+
+  const created: E2ECreatedRecords = {};
+  const prisma = new PrismaClient();
+
+  let locationId: string | undefined;
+  let originNodeId: string | undefined;
+  let targetNodeId: string | undefined;
+  let npcAId: string | undefined;
+  let npcBId: string | undefined;
+
+  try {
+    created.characterId = await createdId(
+      await request.post("/api/character", {
+        data: {
+          name: `Legacy Scene Race ${randomUUID().slice(0, 8)}`,
+          race: "human",
+          class: "bard",
+          stats: { STR: 10, DEX: 14, CON: 12, INT: 10, WIS: 12, CHA: 16 },
+        },
+      })
+    );
+
+    created.campaignId = await createdId(
+      await request.post("/api/campaign", {
+        data: {
+          characterId: created.characterId,
+          title: `Legacy Scene Race ${randomUUID().slice(0, 8)}`,
+        },
+      })
+    );
+
+    // Set scenePresenceVersion to 0 (legacy mode)
+    await prisma.campaign.update({
+      where: { id: created.campaignId },
+      data: { scenePresenceVersion: 0 },
+    });
+
+    const location = await prisma.location.create({
+      data: {
+        campaignId: created.campaignId,
+        seed: `legacy-scene-loc-${randomUUID()}`,
+        type: "dungeon",
+        name: "Legacy Presence Corridor",
+        description: "Two connected nodes with different NPCs.",
+      },
+    });
+    locationId = location.id;
+
+    const npcASeed = `legacy-npc-a-${randomUUID().slice(0, 8)}`;
+    const npcBSeed = `legacy-npc-b-${randomUUID().slice(0, 8)}`;
+
+    const [originNode, destNode] = await Promise.all([
+      prisma.locationNode.create({
+        data: {
+          locationId,
+          index: 0,
+          name: "Old Tavern Common Room",
+          description: "A common room.",
+          feature: "npc",
+          npcSeed: npcASeed,
+          featureData: { generated: true },
+          x: 0,
+          y: 0,
+        },
+      }),
+      prisma.locationNode.create({
+        data: {
+          locationId,
+          index: 1,
+          name: "Old Cellar",
+          description: "A dark cellar.",
+          feature: "npc",
+          npcSeed: npcBSeed,
+          featureData: { generated: true },
+          x: 1,
+          y: 0,
+        },
+      }),
+    ]);
+
+    originNodeId = originNode.id;
+    targetNodeId = destNode.id;
+
+    await prisma.locationEdge.create({
+      data: {
+        locationId,
+        fromNodeId: originNodeId,
+        toNodeId: targetNodeId,
+        passageType: "open",
+      },
+    });
+
+    // Create the two NPCs
+    const [npcA, npcB] = await Promise.all([
+      prisma.nPC.create({
+        data: {
+          campaignId: created.campaignId,
+          seed: npcASeed,
+          name: "Barnaby the Innkeeper",
+          role: "commoner",
+          maxHp: 10,
+          hp: 10,
+          ac: 10,
+          disposition: 0,
+          hasMetPlayer: true,
+        },
+      }),
+      prisma.nPC.create({
+        data: {
+          campaignId: created.campaignId,
+          seed: npcBSeed,
+          name: "Cellar Rat Catcher",
+          role: "commoner",
+          maxHp: 10,
+          hp: 10,
+          ac: 10,
+          disposition: 0,
+          hasMetPlayer: true,
+        },
+      }),
+    ]);
+
+    npcAId = npcA.id;
+    npcBId = npcB.id;
+
+    // Party starts at origin node
+    await prisma.campaign.update({
+      where: { id: created.campaignId },
+      data: {
+        currentLocationId: locationId,
+        currentNodeId: originNodeId,
+      },
+    });
+
+    // Concurrency test:
+    // Move commits first: moveToNode moves party to destNode.
+    // Under Campaign row lock, social target resolution reads the new currentNodeId (destNode),
+    // finds destNode's seed (npcBSeed), and fails to find NPC A ("innkeeper"),
+    // throwing NPC_NOT_PRESENT without mutating NPC A.
+
+    let moveAcquiredLock!: () => void;
+    const moveLockAcquired = new Promise<void>((resolve) => {
+      moveAcquiredLock = resolve;
+    });
+
+    const movePromise = prisma.$transaction(async (tx) => {
+      const result = await moveToNode(tx, created.campaignId!, targetNodeId!);
+      expect(result.success).toBe(true);
+      moveAcquiredLock();
+      await new Promise((r) => setTimeout(r, 100));
+      return result;
+    });
+
+    await moveLockAcquired;
+
+    // Concurrently attempt social interaction targeting NPC A (now absent from the active node)
+    const socialPromise = prisma.$transaction(async (tx) => {
+      const resolution = await resolveSocialSceneTargetInTransaction(tx, {
+        campaignId: created.campaignId!,
+        targetName: "innkeeper",
+      });
+      if (!resolution.ok) {
+        throw new SocialSceneTargetError(resolution);
+      }
+      return resolution;
+    });
+
+    const [moveResult, socialResult] = await Promise.allSettled([
+      movePromise,
+      socialPromise,
+    ]);
+
+    expect(moveResult.status).toBe("fulfilled");
+    expect(socialResult.status).toBe("rejected");
+    if (socialResult.status === "rejected") {
+      expect(socialResult.reason).toBeInstanceOf(SocialSceneTargetError);
+      expect((socialResult.reason as SocialSceneTargetError).resolution.code).toBe(
+        "NPC_NOT_PRESENT"
+      );
+    }
+
+    // NPC A disposition remains unmutated
+    const npcAAfter = await prisma.nPC.findUniqueOrThrow({
+      where: { id: npcAId },
+      select: { disposition: true },
+    });
+    expect(npcAAfter.disposition).toBe(0);
+
+    // Party is at destination node
+    const campaignAfter = await prisma.campaign.findUniqueOrThrow({
+      where: { id: created.campaignId },
+      select: { currentNodeId: true },
+    });
+    expect(campaignAfter.currentNodeId).toBe(targetNodeId);
+  } finally {
+    if (created.campaignId) {
+      await prisma.campaign.updateMany({
+        where: { id: created.campaignId },
+        data: {
+          currentNodeId: null,
+          currentLocationId: null,
+        },
       });
       await prisma.gameLog.deleteMany({
         where: { campaignId: created.campaignId },

@@ -10,7 +10,6 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db/prisma";
 import {
   type SocialTargetCandidate,
   type SocialTargetResolution,
@@ -34,12 +33,6 @@ export class SocialScenePresenceError extends Error {
   }
 }
 
-interface TxDelegates {
-  campaign?: Prisma.TransactionClient["campaign"];
-  campaignSceneParticipant?: Prisma.TransactionClient["campaignSceneParticipant"];
-  nPC?: Prisma.TransactionClient["nPC"];
-}
-
 /**
  * Acquires an exclusive row lock on the Campaign record for the duration of the transaction.
  * Serializes against moveToNode's campaign update.
@@ -60,22 +53,18 @@ export async function lockCampaignForSocialAction(
 
 /**
  * Loads scene target candidates under the active Campaign lock.
+ * In canonical mode (version >= 1), reads CampaignSceneParticipant.
+ * In legacy mode (version === 0), reads currentNodeId from the locked Campaign row
+ * and queries LocationNode directly under the lock.
  */
 export async function loadSceneTargetCandidates(
   tx: Prisma.TransactionClient,
-  campaignId: string,
-  currentNodeNpcSeed?: string | null
+  campaignId: string
 ): Promise<{
   scenePresenceVersion: number;
   candidates: SocialTargetCandidate[];
 }> {
-  const txDelegates = tx as unknown as TxDelegates;
-  const campaignClient = txDelegates.campaign ?? prisma.campaign;
-  const participantClient =
-    txDelegates.campaignSceneParticipant ?? prisma.campaignSceneParticipant;
-  const npcClient = txDelegates.nPC ?? prisma.nPC;
-
-  const campaign = await campaignClient?.findUnique({
+  const campaign = await tx.campaign.findUnique({
     where: { id: campaignId },
     select: {
       scenePresenceVersion: true,
@@ -87,57 +76,55 @@ export async function loadSceneTargetCandidates(
   let candidates: SocialTargetCandidate[] = [];
 
   if (scenePresenceVersion >= 1) {
-    if (participantClient?.findMany) {
-      const participants = await participantClient.findMany({
-        where: { campaignId },
-        orderBy: { npcId: "asc" },
-        include: {
-          npc: {
-            select: {
-              id: true,
-              name: true,
-              seed: true,
-              campaignId: true,
-            },
+    const participants = await tx.campaignSceneParticipant.findMany({
+      where: { campaignId },
+      orderBy: { npcId: "asc" },
+      include: {
+        npc: {
+          select: {
+            id: true,
+            name: true,
+            seed: true,
+            campaignId: true,
           },
         },
-      });
+      },
+    });
 
-      candidates = participants
-        .map(
-          (p: {
-            npc?: SocialTargetCandidate | null;
-            nPC?: SocialTargetCandidate | null;
-          }) => p.npc ?? p.nPC
-        )
-        .filter(
-          (
-            npc: SocialTargetCandidate | null | undefined
-          ): npc is SocialTargetCandidate =>
-            Boolean(npc && npc.campaignId === campaignId && npc.id)
-        );
-    }
+    candidates = participants
+      .map((p) => p.npc)
+      .filter(
+        (npc): npc is NonNullable<typeof npc> =>
+          Boolean(npc && npc.campaignId === campaignId && npc.id)
+      );
   } else {
     // Legacy mode (scenePresenceVersion === 0)
-    const seed = currentNodeNpcSeed ?? null;
-    if (seed && npcClient?.findUnique) {
-      const legacyNpc = await npcClient.findUnique({
-        where: {
-          campaignId_seed: {
-            campaignId,
-            seed,
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          seed: true,
-          campaignId: true,
-        },
+    // Read the authoritative node under the locked Campaign state.
+    if (campaign?.currentNodeId) {
+      const locationNode = await tx.locationNode.findUnique({
+        where: { id: campaign.currentNodeId },
+        select: { npcSeed: true },
       });
+      const seed = locationNode?.npcSeed ?? null;
+      if (seed) {
+        const legacyNpc = await tx.nPC.findUnique({
+          where: {
+            campaignId_seed: {
+              campaignId,
+              seed,
+            },
+          },
+          select: {
+            id: true,
+            name: true,
+            seed: true,
+            campaignId: true,
+          },
+        });
 
-      if (legacyNpc && legacyNpc.campaignId === campaignId) {
-        candidates = [legacyNpc];
+        if (legacyNpc && legacyNpc.campaignId === campaignId) {
+          candidates = [legacyNpc];
+        }
       }
     }
   }
@@ -153,15 +140,13 @@ export async function resolveSocialSceneTargetInTransaction(
   input: {
     campaignId: string;
     targetName?: string;
-    currentNodeNpcSeed?: string | null;
   }
 ): Promise<SocialTargetResolution> {
   await lockCampaignForSocialAction(tx, input.campaignId);
 
   const { candidates } = await loadSceneTargetCandidates(
     tx,
-    input.campaignId,
-    input.currentNodeNpcSeed
+    input.campaignId
   );
 
   return resolveSocialTargetCandidate(candidates, input.targetName);
@@ -177,19 +162,14 @@ export async function assertNpcScenePresenceInTransaction(
 ): Promise<void> {
   await lockCampaignForSocialAction(tx, campaignId);
 
-  const txDelegates = tx as unknown as TxDelegates;
-  const campaignClient = txDelegates.campaign ?? prisma.campaign;
-  const participantClient =
-    txDelegates.campaignSceneParticipant ?? prisma.campaignSceneParticipant;
-
-  const campaign = await campaignClient?.findUnique({
+  const campaign = await tx.campaign.findUnique({
     where: { id: campaignId },
     select: { scenePresenceVersion: true },
   });
 
   const scenePresenceVersion = campaign?.scenePresenceVersion ?? 0;
-  if (scenePresenceVersion >= 1 && participantClient?.findUnique) {
-    const participant = await participantClient.findUnique({
+  if (scenePresenceVersion >= 1) {
+    const participant = await tx.campaignSceneParticipant.findUnique({
       where: {
         campaignId_npcId: {
           campaignId,

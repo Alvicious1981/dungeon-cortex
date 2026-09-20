@@ -184,4 +184,94 @@ describe("resolveAbilityCheck", () => {
     const smuggled = { skill: "Athletics", band: "medium", dc: 2 } as never;
     expect(resolveAbilityCheck(smuggled, HERO).dc).toBe(15);
   });
+
+  describe("advantage and disadvantage kept d20 reporting", () => {
+    it("advantage: keeps high die when low die is rolled first", () => {
+      vi.spyOn(Math, "random")
+        .mockReturnValueOnce(d20(4))
+        .mockReturnValueOnce(d20(17));
+
+      const result = resolveAbilityCheck(
+        { skill: "Athletics", advantage: true, band: "hard" },
+        HERO
+      );
+
+      expect(result.rollMode).toBe("advantage");
+      expect(result.roll).toBe(17);
+      expect(result.abilityModifier).toBe(3);
+      expect(result.proficiencyApplied).toBe(3);
+      expect(result.total).toBe(23);
+      expect(result.roll + result.abilityModifier + result.proficiencyApplied).toBe(result.total);
+      expect(result.isCriticalSuccess).toBe(false);
+      expect(result.isCriticalFailure).toBe(false);
+      expect(result.success).toBe(true); // 23 >= DC 20
+    });
+
+    it("advantage: keeps high die when high die is rolled first", () => {
+      vi.spyOn(Math, "random")
+        .mockReturnValueOnce(d20(17))
+        .mockReturnValueOnce(d20(4));
+
+      const result = resolveAbilityCheck(
+        { skill: "Athletics", advantage: true, band: "hard" },
+        HERO
+      );
+
+      expect(result.rollMode).toBe("advantage");
+      expect(result.roll).toBe(17);
+      expect(result.total).toBe(23);
+      expect(result.roll + result.abilityModifier + result.proficiencyApplied).toBe(result.total);
+    });
+
+    it("advantage: critical success on second die overrides natural 1 on first die", () => {
+      vi.spyOn(Math, "random")
+        .mockReturnValueOnce(d20(1))
+        .mockReturnValueOnce(d20(20));
+
+      const result = resolveAbilityCheck(
+        { skill: "Athletics", advantage: true, band: "nearly_impossible" },
+        HERO
+      );
+
+      expect(result.roll).toBe(20);
+      expect(result.isCriticalSuccess).toBe(true);
+      expect(result.isCriticalFailure).toBe(false);
+    });
+
+    it("disadvantage: keeps low die when high die is rolled first", () => {
+      vi.spyOn(Math, "random")
+        .mockReturnValueOnce(d20(18))
+        .mockReturnValueOnce(d20(6));
+
+      const result = resolveAbilityCheck(
+        { skill: "Athletics", disadvantage: true, band: "easy" },
+        HERO
+      );
+
+      expect(result.rollMode).toBe("disadvantage");
+      expect(result.roll).toBe(6);
+      expect(result.abilityModifier).toBe(3);
+      expect(result.proficiencyApplied).toBe(3);
+      expect(result.total).toBe(12);
+      expect(result.roll + result.abilityModifier + result.proficiencyApplied).toBe(result.total);
+      expect(result.isCriticalSuccess).toBe(false);
+      expect(result.isCriticalFailure).toBe(false);
+      expect(result.success).toBe(true); // 12 >= DC 10
+    });
+
+    it("disadvantage: critical failure on second die overrides natural 20 on first die", () => {
+      vi.spyOn(Math, "random")
+        .mockReturnValueOnce(d20(20))
+        .mockReturnValueOnce(d20(1));
+
+      const result = resolveAbilityCheck(
+        { skill: "Athletics", disadvantage: true, band: "very_easy" },
+        HERO
+      );
+
+      expect(result.roll).toBe(1);
+      expect(result.isCriticalSuccess).toBe(false);
+      expect(result.isCriticalFailure).toBe(true);
+    });
+  });
 });
