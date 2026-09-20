@@ -336,72 +336,20 @@ describe("una contienda deriva la CD del que se resiste", () => {
     expect(payload.band).toBe("medium");
   });
 
-  it("mentir lo resiste quien escucha, no un hostil ajeno", async () => {
-    withHostiles([
-      { id: "t1", name: "Innkeeper", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 10 } },
-      { id: "t2", name: "Inquisitor", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
-    ]);
-
-    expect((await checkPayload("I lie to the Innkeeper")).dc).toBe(10);
-  });
-
-  it("un objetivo nombrado que no existe cae a la banda, no adivina", async () => {
-    withHostiles([
-      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I lie to the Merchant")).dcSource).toBe("band");
-  });
-
-  it("dos objetivos con el mismo nombre siguen siendo ambiguos", async () => {
-    withHostiles([
-      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
-      { id: "t2", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 6 } },
-    ]);
-
-    expect((await checkPayload("I lie to the Guard")).dcSource).toBe("band");
-  });
-
-  it("sin nombrar objetivo, un único candidato es inequívoco", async () => {
-    withHostiles([
-      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } },
-    ]);
-
-    const payload = await checkPayload("I lie");
-    expect(payload.dcSource).toBe("contest");
-    expect(payload.dc).toBe(14);
-  });
-
-  it("un objetivo inconsciente no opone su Perspicacia", async () => {
-    withHostiles([
-      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["unconscious"], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I lie to the Guard")).dcSource).toBe("band");
-  });
-
-  it("un objetivo aturdido aún opone su Perspicacia", async () => {
-    withHostiles([
-      { id: "t1", name: "Guard", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: ["stunned"], stats: { WIS: 18 } },
-    ]);
-
-    expect((await checkPayload("I lie to the Guard")).dc).toBe(14);
-  });
-
-  it("la línea del registro distingue una contienda de una banda", async () => {
-    withHostiles([{ id: "t1", name: "Sentry", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18 } }]);
-    await post("I lie to the Sentry");
-
-    expect(systemLogs().some((line) => line.includes("(contested)"))).toBe(true);
-  });
-
+  // NARR-FIND-02 / PR 2: Todas las acciones sociales marcadas (persuadir, mentir/engañar,
+  // intimidar) se rechazan en combate con COMBAT_SOCIAL_UNSUPPORTED hasta que PR 3
+  // implemente la autoridad social en combate. Por tanto, 'I lie' no se resuelve como
+  // contienda genérica en combate.
   it.each([
     ["I hide behind the crates", "COMBAT_EFFECT_UNSUPPORTED"],
     ["I pickpocket the Merchant", "COMBAT_EFFECT_UNSUPPORTED"],
     ["I shove the Goblin", "COMBAT_EFFECT_UNSUPPORTED"],
-  ])("%s no conserva una contienda sin efecto mecánico", async (action, code) => {
+    ["I lie to the Innkeeper", "COMBAT_SOCIAL_UNSUPPORTED"],
+    ["I lie", "COMBAT_SOCIAL_UNSUPPORTED"],
+  ])("%s se rechaza en combate al no tener resolución soportada", async (action, code) => {
     withHostiles([
-      { id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 18, STR: 18 } },
+      { id: "t1", name: "Innkeeper", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 10 } },
+      { id: "t2", name: "Inquisitor", ...NO_MODIFIERS, isPlayer: false, hp: 8, maxHp: 8, conditions: [], stats: { WIS: 20 } },
     ]);
 
     const { res } = await post(action);

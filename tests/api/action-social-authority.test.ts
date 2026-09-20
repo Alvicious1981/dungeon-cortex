@@ -14,6 +14,8 @@ import { buildCampaignContext } from "@/lib/memory/context";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
 import { streamNarrative } from "@/lib/ai/narrator";
 import { resolveAbilityCheck } from "@/lib/rules/ability-check";
+import { finalizeEncounterTurn } from "@/lib/rules/combat-pipeline";
+import { parseIntent } from "@/lib/ai/intent";
 
 vi.mock("next/server", async (importActual) => {
   const actual = await importActual<any>();
@@ -103,6 +105,14 @@ vi.mock("@/lib/rules/ability-check", async (importActual) => {
   return {
     ...actual,
     resolveAbilityCheck: vi.fn((input: any, actor: any) => actual.resolveAbilityCheck(input, actor)),
+  };
+});
+
+vi.mock("@/lib/rules/combat-pipeline", async (importActual) => {
+  const actual = await importActual<any>();
+  return {
+    ...actual,
+    finalizeEncounterTurn: vi.fn(),
   };
 });
 
@@ -422,14 +432,14 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
     );
   });
 
-  it("fails closed with COMBAT_SOCIAL_UNSUPPORTED during active combat", async () => {
-    (buildCampaignContext as any).mockResolvedValue({
+  describe("Combat social containment (NARR-FIND-02)", () => {
+    const combatContext = {
       character: {
         id: "char_1",
         class: "bard",
         level: 3,
         stats: { STR: 10, DEX: 14, CON: 12, INT: 10, WIS: 12, CHA: 16 },
-        skillProficiencies: ["Persuasion"],
+        skillProficiencies: ["Persuasion", "Deception", "Intimidation"],
         exhaustionLevel: 0,
         inventory: [],
       },
@@ -449,22 +459,67 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
       quests: [],
       relevantMemories: [],
       currentExploration: null,
+    };
+
+    async function assertCombatSocialRefusal(
+      actionText: string,
+      expectedApproach?: "persuade" | "deceive" | "intimidate"
+    ) {
+      const intent = await parseIntent(actionText);
+      expect(intent.actionType).toBe("ability_check");
+      if (expectedApproach) {
+        expect(intent.socialApproach).toBe(expectedApproach);
+      } else {
+        expect(intent.socialApproach).toBeDefined();
+      }
+
+      (buildCampaignContext as any).mockResolvedValue(combatContext);
+
+      const res = await ACTION_POST(actionRequest({ action: actionText }), { params });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        error: "Social interactions during combat are not supported.",
+        code: "COMBAT_SOCIAL_UNSUPPORTED",
+      });
+
+      // Invariants:
+      // resolveSocialCheck NOT called
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+      // resolveAbilityCheck NOT called
+      expect(resolveAbilityCheck).not.toHaveBeenCalled();
+      // finalizeEncounterTurn NOT called
+      expect(finalizeEncounterTurn).not.toHaveBeenCalled();
+      // no GameLog mutation
+      expect(prisma.gameLog.create).not.toHaveBeenCalled();
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+      // streamNarrative NOT called
+      expect(streamNarrative).not.toHaveBeenCalled();
+    }
+
+    it("fails closed with COMBAT_SOCIAL_UNSUPPORTED for Persuasion ('I persuade the goblin')", async () => {
+      await assertCombatSocialRefusal("I persuade the goblin", "persuade");
     });
 
-    const res = await ACTION_POST(actionRequest({ action: "I persuade the goblin" }), { params });
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toMatchObject({
-      code: "COMBAT_SOCIAL_UNSUPPORTED",
+    it("fails closed with COMBAT_SOCIAL_UNSUPPORTED for Deception ('I deceive the goblin')", async () => {
+      await assertCombatSocialRefusal("I deceive the goblin", "deceive");
     });
 
-    // Invariant: no generic ability check, no social engine check, no turn expenditure, no logs
-    expect(resolveSocialCheck).not.toHaveBeenCalled();
-    expect(resolveAbilityCheck).not.toHaveBeenCalled();
-    expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    it("fails closed with COMBAT_SOCIAL_UNSUPPORTED for opposed Deception vocabulary ('I lie to the goblin')", async () => {
+      await assertCombatSocialRefusal("I lie to the goblin", "deceive");
+    });
+
+    it("fails closed with COMBAT_SOCIAL_UNSUPPORTED for Intimidation ('I intimidate the goblin')", async () => {
+      await assertCombatSocialRefusal("I intimidate the goblin", "intimidate");
+    });
   });
 
   it("keeps non-social Deception ('I disguise myself') on the generic ability-check route", async () => {
+    const intent = await parseIntent("I disguise myself");
+    expect(intent.actionType).toBe("ability_check");
+    expect(intent.skill).toBe("Deception");
+    expect((intent as any).socialApproach).toBeUndefined();
+
     const res = await ACTION_POST(actionRequest({ action: "I disguise myself" }), { params });
     expect(res.status).toBe(200);
 

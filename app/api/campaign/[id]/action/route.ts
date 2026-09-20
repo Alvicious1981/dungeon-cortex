@@ -1083,9 +1083,9 @@ async function resolveAction(
 
       if (context.activeEncounter) {
         // Active combat containment for typed social actions (NARR-FIND-02 / Phase 12).
-        // Marked social actions that lack a dedicated combat contest must not fall through
-        // to a generic static social DC. Fail closed; PR 3 will implement combat-social mechanics.
-        if (intent.socialApproach && !improvisedMatch?.action.opposedBy) {
+        // Any marked social action must fail closed during active combat;
+        // PR 3 will implement combat-social mechanics.
+        if (intent.socialApproach) {
           return NextResponse.json(
             {
               error: "Social interactions during combat are not supported.",
