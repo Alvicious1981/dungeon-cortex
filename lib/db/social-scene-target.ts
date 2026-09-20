@@ -34,6 +34,12 @@ export class SocialScenePresenceError extends Error {
   }
 }
 
+interface TxDelegates {
+  campaign?: Prisma.TransactionClient["campaign"];
+  campaignSceneParticipant?: Prisma.TransactionClient["campaignSceneParticipant"];
+  nPC?: Prisma.TransactionClient["nPC"];
+}
+
 /**
  * Acquires an exclusive row lock on the Campaign record for the duration of the transaction.
  * Serializes against moveToNode's campaign update.
@@ -63,10 +69,11 @@ export async function loadSceneTargetCandidates(
   scenePresenceVersion: number;
   candidates: SocialTargetCandidate[];
 }> {
-  const campaignClient = (tx as any).campaign ?? prisma.campaign;
+  const txDelegates = tx as unknown as TxDelegates;
+  const campaignClient = txDelegates.campaign ?? prisma.campaign;
   const participantClient =
-    (tx as any).campaignSceneParticipant ?? prisma.campaignSceneParticipant;
-  const npcClient = (tx as any).nPC ?? prisma.nPC;
+    txDelegates.campaignSceneParticipant ?? prisma.campaignSceneParticipant;
+  const npcClient = txDelegates.nPC ?? prisma.nPC;
 
   const campaign = await campaignClient?.findUnique({
     where: { id: campaignId },
@@ -97,9 +104,16 @@ export async function loadSceneTargetCandidates(
       });
 
       candidates = participants
-        .map((p: any) => p.npc ?? p.nPC)
+        .map(
+          (p: {
+            npc?: SocialTargetCandidate | null;
+            nPC?: SocialTargetCandidate | null;
+          }) => p.npc ?? p.nPC
+        )
         .filter(
-          (npc: any): npc is SocialTargetCandidate =>
+          (
+            npc: SocialTargetCandidate | null | undefined
+          ): npc is SocialTargetCandidate =>
             Boolean(npc && npc.campaignId === campaignId && npc.id)
         );
     }
@@ -163,9 +177,10 @@ export async function assertNpcScenePresenceInTransaction(
 ): Promise<void> {
   await lockCampaignForSocialAction(tx, campaignId);
 
-  const campaignClient = (tx as any).campaign ?? prisma.campaign;
+  const txDelegates = tx as unknown as TxDelegates;
+  const campaignClient = txDelegates.campaign ?? prisma.campaign;
   const participantClient =
-    (tx as any).campaignSceneParticipant ?? prisma.campaignSceneParticipant;
+    txDelegates.campaignSceneParticipant ?? prisma.campaignSceneParticipant;
 
   const campaign = await campaignClient?.findUnique({
     where: { id: campaignId },
