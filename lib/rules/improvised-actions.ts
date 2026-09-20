@@ -94,6 +94,8 @@ const MOVEMENT_EFFECT_UNSUPPORTED = Object.freeze({
   refusalCode: "COMBAT_EFFECT_UNSUPPORTED",
 } satisfies ImprovisedCombatPolicy);
 
+export type SocialApproach = "persuade" | "deceive" | "intimidate";
+
 export interface ImprovisedAction {
   /** Matches the player's phrasing. Anchored: the verb must open the action. */
   readonly pattern: RegExp;
@@ -111,6 +113,8 @@ export interface ImprovisedAction {
   readonly opposedBy?: ImprovisedOpposition;
   /** Backend-owned legality and cost when the same check is attempted in combat. */
   readonly combat: ImprovisedCombatPolicy;
+  /** Explicit typed social interaction approach when the action targets an NPC. */
+  readonly socialApproach?: SocialApproach;
 }
 
 export interface ImprovisedMatch {
@@ -299,17 +303,19 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
     skill: "Persuasion",
     band: "medium",
     combat: ACTION_CHECK,
+    socialApproach: "persuade",
   },
   {
     // Selling a lie to someone with reason to doubt you.
     pattern:
-      /^(?:i\s+)?(?:lie|deceive|bluff|trick)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir)\b/i,
+      /^(?:i\s+)?(?:lie|deceive|bluff|trick)\b|^(?:miento|mentir|engaño|engañar|finjo|fingir|faroleo|farolear|truco|trucar)\b/i,
     skill: "Deception",
     band: "hard",
     // SRD: contested by the listener's Insight. The lie is told to someone
     // specific; an unrelated creature overhearing it is not the contest.
     opposedBy: { skills: ["Insight"], scope: "target" },
     combat: ACTION_CHECK,
+    socialApproach: "deceive",
   },
   {
     pattern:
@@ -325,6 +331,7 @@ export const IMPROVISED_ACTIONS: readonly ImprovisedAction[] = [
     skill: "Intimidation",
     band: "medium",
     combat: ACTION_CHECK,
+    socialApproach: "intimidate",
   },
 ];
 

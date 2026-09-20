@@ -41,6 +41,9 @@ import { moveToNode } from "@/lib/rules/navigation";
 import { resolveAbilityCheck, type Ability } from "@/lib/rules/ability-check";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
+import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
+import { formatSocialCheckLog } from "@/lib/rules/social-log";
+import { resolveSocialSceneTarget, type SocialTargetDb } from "@/lib/rules/social-target";
 import { checkSpellRange, resolveAreaTargets } from "@/lib/rules/spell-targeting";
 import {
   buildCombatConsequenceEvent,
@@ -1079,6 +1082,19 @@ async function resolveAction(
       const improvisedMatch = matchImprovisedAction(trimmedAction);
 
       if (context.activeEncounter) {
+        // Active combat containment for typed social actions (NARR-FIND-02 / Phase 12).
+        // Marked social actions that lack a dedicated combat contest must not fall through
+        // to a generic static social DC. Fail closed; PR 3 will implement combat-social mechanics.
+        if (intent.socialApproach && !improvisedMatch?.action.opposedBy) {
+          return NextResponse.json(
+            {
+              error: "Social interactions during combat are not supported.",
+              code: "COMBAT_SOCIAL_UNSUPPORTED",
+            },
+            { status: 400 }
+          );
+        }
+
         // A future classifier/table mismatch must not acquire an accidental
         // combat action policy. Refuse the mechanically ambiguous request.
         if (!improvisedMatch) {
@@ -1275,6 +1291,92 @@ async function resolveAction(
           }
           throw error;
         }
+      } else if (intent.socialApproach) {
+        // Authoritative social interaction outside combat (NARR-FIND-02).
+        // Resolves target from authoritative scene presence and delegates to resolveSocialCheck.
+        const campaignRecord = await prisma.campaign.findUnique({
+          where: { id: campaignId },
+          select: { scenePresenceVersion: true },
+        });
+        const scenePresenceVersion = campaignRecord?.scenePresenceVersion ?? 0;
+
+        const targetResolution = await resolveSocialSceneTarget({
+          campaignId,
+          targetName: intent.targetName,
+          scenePresenceVersion,
+          currentNodeNpcSeed: context.currentExploration?.currentNode?.npcSeed ?? null,
+          db: prisma as unknown as SocialTargetDb,
+        });
+
+        if (!targetResolution.ok) {
+          return NextResponse.json(
+            { error: targetResolution.error, code: targetResolution.code },
+            { status: targetResolution.status }
+          );
+        }
+
+        const targetNpc = targetResolution.target;
+
+        let socialResult;
+        try {
+          socialResult = await prisma.$transaction(async (tx) => {
+            const checkResult = await resolveSocialCheck({
+              campaignId,
+              characterId: context.character.id,
+              npcId: targetNpc.id,
+              npcSeed: targetNpc.seed ?? undefined,
+              approach: intent.socialApproach!,
+              intent: trimmedAction,
+              tx: tx as never,
+            });
+
+            await persistPlayerAction(tx as Prisma.TransactionClient);
+
+            const displayName = targetNpc.name?.trim() || targetNpc.seed || "NPC";
+            const logContent = formatSocialCheckLog({
+              npcName: displayName,
+              approach: intent.socialApproach!,
+              intent: trimmedAction,
+              result: checkResult,
+            });
+
+            await tx.gameLog.create({
+              data: {
+                campaignId,
+                role: "system",
+                content: logContent,
+              },
+            });
+
+            return checkResult;
+          });
+        } catch (error) {
+          if (error instanceof SocialServiceError) {
+            return NextResponse.json(
+              { error: error.message, code: error.code },
+              { status: 400 }
+            );
+          }
+          throw error;
+        }
+
+        gameEvents.push({
+          type: "ABILITY_CHECK_RESOLVED",
+          payload: {
+            skill: socialResult.skill,
+            roll: socialResult.roll,
+            abilityModifier: socialResult.abilityModifier,
+            proficiencyApplied: socialResult.proficiencyApplied,
+            total: socialResult.total,
+            dc: socialResult.dc,
+            success: socialResult.success,
+            approach: socialResult.approach,
+            attitudeBefore: socialResult.attitudeBefore,
+            attitudeAfter: socialResult.attitudeAfter,
+            dispositionBefore: socialResult.dispositionBefore,
+            dispositionAfter: socialResult.dispositionAfter,
+          },
+        });
       } else {
         const result = resolveCheck(context.character);
 

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
+import { formatSocialCheckLog } from "@/lib/rules/social-log";
 import {
   acquireActionReceipt,
   completeActionReceiptWithResponse,
@@ -25,39 +26,6 @@ const BodySchema = z
 
 function fingerprintSocialSubmission(input: { npcId: string; approach: "persuade" | "intimidate" | "deceive"; intent: string }): string {
   return createHash("sha256").update(JSON.stringify({ npcId: input.npcId, approach: input.approach, intent: input.intent })).digest("hex");
-}
-
-function formatSocialCheckLog(input: {
-  npcName: string;
-  approach: "persuade" | "intimidate" | "deceive";
-  intent?: string;
-  result: {
-    skill: string;
-    roll: number;
-    abilityModifier: number;
-    proficiencyApplied: number;
-    total: number;
-    dc: number;
-    success: boolean;
-    attitudeBefore: string;
-    attitudeAfter: string;
-    dispositionBefore: number;
-    dispositionAfter: number;
-  };
-}): string {
-  const { npcName, approach, intent, result } = input;
-  const trimmedIntent = intent?.trim();
-  const intentClause = trimmedIntent ? ` with intent "${trimmedIntent}"` : "";
-  const modSign = result.abilityModifier >= 0 ? "+" : "";
-  const profClause = result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : "";
-  const outcome = result.success ? "SUCCESS" : "FAILURE";
-
-  return (
-    `🎲 Social check: ${result.skill} (${approach}) targeting ${npcName}${intentClause}: ` +
-    `rolled ${result.roll}${modSign}${result.abilityModifier}${profClause} = ${result.total} vs DC ${result.dc} → ${outcome}. ` +
-    `Attitude: ${result.attitudeBefore} → ${result.attitudeAfter} ` +
-    `(disposition: ${result.dispositionBefore} → ${result.dispositionAfter}).`
-  );
 }
 
 /**

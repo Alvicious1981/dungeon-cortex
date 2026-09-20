@@ -84,6 +84,13 @@ export const IntentSchema = z.object({
     .optional(),
 
   /**
+   * Explicit typed social interaction approach when an improvised action targets an NPC.
+   * Only present for actual social vocabulary (persuade, deceive, intimidate).
+   * Generic checks like disguise do NOT set this.
+   */
+  socialApproach: z.enum(["persuade", "deceive", "intimidate"]).optional(),
+
+  /**
    * Name of the target (creature, NPC, object) if one is present in the input.
    * Omitted for untargeted or general actions.
    */
@@ -239,9 +246,25 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
   // preposition first so the two compose into a bare name.
   const stripLeadingPreposition = (raw: string | undefined): string | undefined =>
     raw?.replace(
-      /^(?:to|at|on|from|off|against|behind|past|a|al|a\s+la|de|del|contra|hacia|tras|detrás\s+de)\s+/i,
+      /^(?:to|at|on|from|off|against|behind|past|with|a|al|a\s+la|de|del|contra|hacia|tras|detrás\s+de|con)\s+/i,
       ""
     );
+
+  // Social actions frequently attach infinitive or content clauses to the target
+  // ("I persuade the innkeeper to open the gate", "I deceive the guard that we are merchants",
+  // "persuado al posadero para que abra la puerta"). Stripping the clause isolates
+  // the target creature deterministically without invoking an NLP parser.
+  const cleanSocialTarget = (raw: string | undefined): string | undefined => {
+    if (!raw) return undefined;
+    const withoutPrep = stripLeadingPreposition(raw)?.trim();
+    if (!withoutPrep) return undefined;
+
+    const match = withoutPrep.match(
+      /^(.*?)(?:\s+(?:to|that|into|about|para\s+que|para|de\s+que|que|sobre)\s+.+)$/i
+    );
+    const candidateTarget = match ? match[1] : withoutPrep;
+    return cleanName(candidateTarget);
+  };
 
   const prefixedValue = (pattern: RegExp): string | undefined => {
     const match = input.match(pattern);
@@ -391,12 +414,17 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
       // shoving an opponent — need to know which one; without it the backend
       // would have to contest against whoever else happened to be standing
       // there. Absent or unrecognisable, the gate falls back to a band.
-      const targetName = cleanName(stripLeadingPreposition(improvised.rest));
+      const targetName = improvised.action.socialApproach
+        ? cleanSocialTarget(improvised.rest)
+        : cleanName(stripLeadingPreposition(improvised.rest));
 
       intent = {
         actionType: "ability_check",
         skill: improvised.action.skill,
         band: improvised.action.band,
+        ...(improvised.action.socialApproach
+          ? { socialApproach: improvised.action.socialApproach }
+          : {}),
         ...(targetName ? { targetName } : {}),
       };
     }
