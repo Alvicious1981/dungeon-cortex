@@ -26,11 +26,13 @@ vi.mock("next/server", async (importActual) => {
 });
 
 const prismaTx = vi.hoisted(() => ({
+  $queryRaw: vi.fn(async () => [{ id: "camp_1" }]),
   gameLog: {
     create: vi.fn(async (args: unknown) => ({ id: "log_tx", ...(args as object) })),
   },
   nPC: {
     findUnique: vi.fn(),
+    findMany: vi.fn(async () => []),
     update: vi.fn(),
     updateMany: vi.fn(async () => ({ count: 1 })),
   },
@@ -38,6 +40,10 @@ const prismaTx = vi.hoisted(() => ({
     findUnique: vi.fn(),
   },
   campaign: {
+    findUnique: vi.fn(),
+  },
+  campaignSceneParticipant: {
+    findMany: vi.fn(async () => []),
     findUnique: vi.fn(),
   },
   combatant: {
@@ -198,6 +204,27 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
       },
     ]);
 
+    (prismaTx.$queryRaw as any).mockResolvedValue([{ id: "camp_1" }]);
+    (prismaTx.campaign.findUnique as any).mockImplementation((args: any) =>
+      prisma.campaign.findUnique(args)
+    );
+    (prismaTx.campaignSceneParticipant.findMany as any).mockImplementation((args: any) =>
+      prisma.campaignSceneParticipant.findMany(args)
+    );
+    (prismaTx.campaignSceneParticipant.findUnique as any).mockImplementation((args: any) =>
+      prisma.campaignSceneParticipant.findUnique(args)
+    );
+    (prismaTx.nPC.findUnique as any).mockImplementation((args: any) =>
+      prisma.nPC.findUnique(args)
+    );
+    (prismaTx.character.findUnique as any).mockImplementation((args: any) =>
+      prisma.character.findUnique(args)
+    );
+    (prisma.campaignSceneParticipant.findUnique as any).mockResolvedValue({
+      campaignId: "camp_1",
+      npcId: "npc_innkeeper",
+    });
+
     (resolveSocialCheck as any).mockResolvedValue({
       ok: true,
       campaignId: "camp_1",
@@ -260,8 +287,138 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
       })
     );
 
-    // 4. Narration started
+    // 4. Narration started with backend-resolved narrative facts
     expect(streamNarrative).toHaveBeenCalledTimes(1);
+    expect(streamNarrative).toHaveBeenCalledWith(
+      "camp_1",
+      "I persuade the innkeeper",
+      expect.objectContaining({
+        facts: expect.arrayContaining([
+          expect.objectContaining({
+            type: "social_check_resolved",
+            payload: expect.objectContaining({
+              success: true,
+              targetName: "Barnaby the Innkeeper",
+              approach: "persuade",
+              skill: "Persuasion",
+              total: 19,
+              dc: 15,
+              attitudeBefore: "Indifferent",
+              attitudeAfter: "Friendly",
+              dispositionBefore: 0,
+              dispositionAfter: 3,
+            }),
+          }),
+        ]),
+      })
+    );
+  });
+
+  it("delivers social_check_resolved narrative fact with success: false on failed check", async () => {
+    (resolveSocialCheck as any).mockResolvedValue({
+      ok: true,
+      campaignId: "camp_1",
+      characterId: "char_1",
+      npcId: "npc_innkeeper",
+      npcSeed: "innkeeper_1",
+      approach: "persuade",
+      skill: "Persuasion",
+      roll: 8,
+      abilityModifier: 3,
+      proficiencyApplied: 2,
+      total: 13,
+      dc: 15,
+      success: false,
+      attitudeBefore: "Indifferent",
+      attitudeAfter: "Hostile",
+      dispositionBefore: 0,
+      dispositionAfter: -2,
+    });
+
+    const res = await ACTION_POST(actionRequest({ action: "I persuade the innkeeper" }), { params });
+    expect(res.status).toBe(200);
+    expect(streamNarrative).toHaveBeenCalledWith(
+      "camp_1",
+      "I persuade the innkeeper",
+      expect.objectContaining({
+        facts: expect.arrayContaining([
+          expect.objectContaining({
+            type: "social_check_resolved",
+            payload: expect.objectContaining({
+              success: false,
+              targetName: "Barnaby the Innkeeper",
+              approach: "persuade",
+              skill: "Persuasion",
+              total: 13,
+              dc: 15,
+              attitudeBefore: "Indifferent",
+              attitudeAfter: "Hostile",
+              dispositionBefore: 0,
+              dispositionAfter: -2,
+            }),
+          }),
+        ]),
+      })
+    );
+  });
+
+  it("locks the campaign row with FOR UPDATE during scene target resolution in /action", async () => {
+    const res = await ACTION_POST(actionRequest({ action: "I persuade the innkeeper" }), { params });
+    expect(res.status).toBe(200);
+    expect(prismaTx.$queryRaw).toHaveBeenCalled();
+  });
+
+  it("enforces MAX_SOCIAL_INTENT_LENGTH (200 chars) on typed social actions in chat", async () => {
+    const longAction = "I persuade the innkeeper " + "very carefully ".repeat(15);
+    expect(longAction.length).toBeGreaterThan(200);
+
+    const res = await ACTION_POST(actionRequest({ action: longAction }), { params });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      code: "SOCIAL_INTENT_TOO_LONG",
+    });
+
+    expect(resolveSocialCheck).not.toHaveBeenCalled();
+    expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    expect(streamNarrative).not.toHaveBeenCalled();
+  });
+
+  it("accepts typed social action with length <= MAX_SOCIAL_INTENT_LENGTH", async () => {
+    const validAction = "I persuade the innkeeper to open the door for us";
+    expect(validAction.length).toBeLessThanOrEqual(200);
+
+    const res = await ACTION_POST(actionRequest({ action: validAction }), { params });
+    expect(res.status).toBe(200);
+    expect(resolveSocialCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("boundary test: exactly 200 chars accepted, 201 chars refused", async () => {
+    const prefix = "I persuade the innkeeper to ";
+    const action200 = prefix + "a".repeat(200 - prefix.length);
+    expect(action200.length).toBe(200);
+
+    const res200 = await ACTION_POST(actionRequest({ action: action200 }), { params });
+    expect(res200.status).toBe(200);
+
+    const action201 = prefix + "a".repeat(201 - prefix.length);
+    expect(action201.length).toBe(201);
+
+    const res201 = await ACTION_POST(actionRequest({ action: action201 }), { params });
+    expect(res201.status).toBe(400);
+    const body201 = await res201.json();
+    expect(body201).toMatchObject({ code: "SOCIAL_INTENT_TOO_LONG" });
+  });
+
+  it("matches scene candidates when action has terminal punctuation", async () => {
+    const res = await ACTION_POST(actionRequest({ action: "I persuade the innkeeper." }), { params });
+    expect(res.status).toBe(200);
+    expect(resolveSocialCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        npcId: "npc_innkeeper",
+        approach: "persuade",
+      })
+    );
   });
 
   it("handles compound social sentence 'I persuade the innkeeper to open the gate'", async () => {
@@ -622,6 +779,82 @@ describe("NARR-FIND-02: Typed social actions outside combat", () => {
       expect(systemLogs.length).toBe(2);
       expect(systemLogs[0]).toContain("🎲 Social check: Persuasion (persuade) targeting Barnaby the Innkeeper");
       expect(systemLogs[1]).toContain("🎲 Social check: Persuasion (persuade) targeting Barnaby the Innkeeper");
+    });
+
+    it("preserves exhaustion disadvantage parity between /action and /social", async () => {
+      // Character has exhaustionLevel = 1
+      const exhaustedCharacter = {
+        id: "char_1",
+        class: "bard",
+        level: 3,
+        stats: { STR: 10, DEX: 14, CON: 12, INT: 10, WIS: 12, CHA: 16 },
+        skillProficiencies: ["Persuasion"],
+        exhaustionLevel: 1,
+        inventory: [],
+      };
+
+      (prisma.character.findUnique as any).mockResolvedValue(exhaustedCharacter);
+      (buildCampaignContext as any).mockResolvedValue({
+        character: exhaustedCharacter,
+        gold: 50,
+        activeNPCs: [],
+        activeNPC: null,
+        activeEncounter: null,
+        recentLogs: [],
+        quests: [],
+        relevantMemories: [],
+        currentExploration: {
+          currentLocation: { id: "loc_1", name: "Village" },
+          currentNode: { id: "node_1", name: "Tavern", npcSeed: "innkeeper_1" },
+        },
+      });
+
+      // Mock resolveSocialCheck to reflect the disadvantage roll mode
+      (resolveSocialCheck as any).mockImplementation(async (args: any) => {
+        return {
+          ok: true,
+          campaignId: args.campaignId,
+          characterId: "char_1",
+          npcId: args.npcId,
+          npcSeed: "innkeeper_1",
+          approach: args.approach,
+          skill: "Persuasion",
+          roll: 8,
+          abilityModifier: 3,
+          proficiencyApplied: 2,
+          total: 13,
+          dc: 15,
+          success: false,
+          attitudeBefore: "Indifferent",
+          attitudeAfter: "Hostile",
+          dispositionBefore: 0,
+          dispositionAfter: -4,
+          rollMode: "disadvantage",
+        };
+      });
+
+      // 1. Check via /social modal route
+      const socialRes = await SOCIAL_POST(
+        socialRequest({
+          npcId: "npc_innkeeper",
+          approach: "persuade",
+          intent: "I persuade the innkeeper",
+        }),
+        { params }
+      );
+      expect(socialRes.status).toBe(200);
+      const socialJson = await socialRes.json();
+      expect(socialJson.rollMode).toBe("disadvantage");
+
+      // 2. Check via /action natural chat route
+      const actionRes = await ACTION_POST(
+        actionRequest({ action: "I persuade the innkeeper" }),
+        { params }
+      );
+      expect(actionRes.status).toBe(200);
+
+      // Both invoked resolveSocialCheck
+      expect(resolveSocialCheck).toHaveBeenCalledTimes(2);
     });
   });
 });

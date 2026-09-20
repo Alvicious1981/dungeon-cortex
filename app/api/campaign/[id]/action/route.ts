@@ -43,7 +43,11 @@ import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import { matchImprovisedAction } from "@/lib/rules/improvised-actions";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
 import { formatSocialCheckLog } from "@/lib/rules/social-log";
-import { resolveSocialSceneTarget, type SocialTargetDb } from "@/lib/rules/social-target";
+import { MAX_SOCIAL_INTENT_LENGTH } from "@/lib/rules/social";
+import {
+  resolveSocialSceneTargetInTransaction,
+  SocialSceneTargetError,
+} from "@/lib/db/social-scene-target";
 import { checkSpellRange, resolveAreaTargets } from "@/lib/rules/spell-targeting";
 import {
   buildCombatConsequenceEvent,
@@ -1292,34 +1296,40 @@ async function resolveAction(
           throw error;
         }
       } else if (intent.socialApproach) {
-        // Authoritative social interaction outside combat (NARR-FIND-02).
-        // Resolves target from authoritative scene presence and delegates to resolveSocialCheck.
-        const campaignRecord = await prisma.campaign.findUnique({
-          where: { id: campaignId },
-          select: { scenePresenceVersion: true },
-        });
-        const scenePresenceVersion = campaignRecord?.scenePresenceVersion ?? 0;
-
-        const targetResolution = await resolveSocialSceneTarget({
-          campaignId,
-          targetName: intent.targetName,
-          scenePresenceVersion,
-          currentNodeNpcSeed: context.currentExploration?.currentNode?.npcSeed ?? null,
-          db: prisma as unknown as SocialTargetDb,
-        });
-
-        if (!targetResolution.ok) {
+        // Enforce canonical social intent length limit (PR #227 remediation Finding 5).
+        // Must be enforced before target resolution, transaction, roll, mutation, logging, narration.
+        if (trimmedAction.length > MAX_SOCIAL_INTENT_LENGTH) {
           return NextResponse.json(
-            { error: targetResolution.error, code: targetResolution.code },
-            { status: targetResolution.status }
+            {
+              error: `Social action exceeds maximum length of ${MAX_SOCIAL_INTENT_LENGTH} characters.`,
+              code: "SOCIAL_INTENT_TOO_LONG",
+            },
+            { status: 400 }
           );
         }
 
-        const targetNpc = targetResolution.target;
-
-        let socialResult;
+        // Authoritative social interaction outside combat (NARR-FIND-02 / PR #227).
+        // Resolves target under the Campaign lock and delegates to resolveSocialCheck.
+        let committedSocial;
         try {
-          socialResult = await prisma.$transaction(async (tx) => {
+          committedSocial = await prisma.$transaction(async (tx) => {
+            const transactionClient = tx as Prisma.TransactionClient;
+
+            const targetResolution = await resolveSocialSceneTargetInTransaction(
+              transactionClient,
+              {
+                campaignId,
+                targetName: intent.targetName,
+                currentNodeNpcSeed: context.currentExploration?.currentNode?.npcSeed ?? null,
+              }
+            );
+
+            if (!targetResolution.ok) {
+              throw new SocialSceneTargetError(targetResolution);
+            }
+
+            const targetNpc = targetResolution.target;
+
             const checkResult = await resolveSocialCheck({
               campaignId,
               characterId: context.character.id,
@@ -1327,10 +1337,10 @@ async function resolveAction(
               npcSeed: targetNpc.seed ?? undefined,
               approach: intent.socialApproach!,
               intent: trimmedAction,
-              tx: tx as never,
+              tx: transactionClient as never,
             });
 
-            await persistPlayerAction(tx as Prisma.TransactionClient);
+            await persistPlayerAction(transactionClient);
 
             const displayName = targetNpc.name?.trim() || targetNpc.seed || "NPC";
             const logContent = formatSocialCheckLog({
@@ -1340,7 +1350,7 @@ async function resolveAction(
               result: checkResult,
             });
 
-            await tx.gameLog.create({
+            await transactionClient.gameLog.create({
               data: {
                 campaignId,
                 role: "system",
@@ -1348,9 +1358,18 @@ async function resolveAction(
               },
             });
 
-            return checkResult;
+            return {
+              checkResult,
+              targetName: displayName,
+            };
           });
         } catch (error) {
+          if (error instanceof SocialSceneTargetError) {
+            return NextResponse.json(
+              { error: error.resolution.error, code: error.resolution.code },
+              { status: error.resolution.status }
+            );
+          }
           if (error instanceof SocialServiceError) {
             return NextResponse.json(
               { error: error.message, code: error.code },
@@ -1360,6 +1379,9 @@ async function resolveAction(
           throw error;
         }
 
+        playerActionLogged = true;
+
+        const { checkResult: socialResult, targetName: socialTargetName } = committedSocial;
         gameEvents.push({
           type: "ABILITY_CHECK_RESOLVED",
           payload: {
@@ -1375,6 +1397,8 @@ async function resolveAction(
             attitudeAfter: socialResult.attitudeAfter,
             dispositionBefore: socialResult.dispositionBefore,
             dispositionAfter: socialResult.dispositionAfter,
+            targetName: socialTargetName,
+            ...(socialResult.rollMode ? { rollMode: socialResult.rollMode } : {}),
           },
         });
       } else {

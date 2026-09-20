@@ -391,6 +391,7 @@ describe("parseIntent — ambient observation vs mechanical discovery", () => {
     });
   });
 
+
   describe("NARR-FIND-02 / typed social actions contract", () => {
     it.each([
       ["I persuade the innkeeper", "Persuasion", "persuade", "innkeeper"],
@@ -399,24 +400,35 @@ describe("parseIntent — ambient observation vs mechanical discovery", () => {
       ["I deceive the guard that we are merchants", "Deception", "deceive", "guard"],
       ["I lie to the guard", "Deception", "deceive", "guard"],
       ["I intimidate the merchant", "Intimidation", "intimidate", "merchant"],
-      ["persuado al posadero", "Persuasion", "persuade", "posadero"],
-      ["engaño al guardia", "Deception", "deceive", "guardia"],
-      ["amenazo al mercader", "Intimidation", "intimidate", "mercader"],
-      ["I plead with the innkeeper", "Persuasion", "persuade", "innkeeper"],
-      ["I plead with the innkeeper to give us shelter", "Persuasion", "persuade", "innkeeper"],
+      ["I threaten the merchant", "Intimidation", "intimidate", "merchant"],
       ["I negotiate with the merchant", "Persuasion", "persuade", "merchant"],
       ["negocio con el mercader", "Persuasion", "persuade", "mercader"],
       ["I trick the guard", "Deception", "deceive", "guard"],
       ["faroleo al guardia", "Deception", "deceive", "guardia"],
-    ])("extracts skill, socialApproach, and target for %s", async (input, skill, socialApproach, targetName) => {
-      const intent = await parseIntent(input);
-      expect(intent).toMatchObject({
-        actionType: "ability_check",
-        skill,
-        socialApproach,
-        targetName,
-      });
-    });
+      ["I plead with the innkeeper", "Persuasion", "persuade", "innkeeper"],
+      ["I plead with the innkeeper to give us shelter", "Persuasion", "persuade", "innkeeper"],
+      ["persuado al posadero", "Persuasion", "persuade", "posadero"],
+      ["engaño al guardia", "Deception", "deceive", "guardia"],
+      ["amenazo al mercader", "Intimidation", "intimidate", "mercader"],
+      // Terminal punctuation & Spanish inverted marks
+      ["I persuade the innkeeper.", "Persuasion", "persuade", "innkeeper"],
+      ["I deceive the guard!", "Deception", "deceive", "guard"],
+      ["I intimidate the merchant?", "Intimidation", "intimidate", "merchant"],
+      ["¿persuado al posadero?", "Persuasion", "persuade", "posadero"],
+      ["¡engaño al guardia!", "Deception", "deceive", "guardia"],
+      ["¡amenazo al mercader!", "Intimidation", "intimidate", "mercader"],
+    ])(
+      "classifies '%s' as %s with socialApproach '%s' targeting '%s'",
+      async (input, skill, approach, targetName) => {
+        const intent = await parseIntent(input);
+        expect(intent).toMatchObject({
+          actionType: "ability_check",
+          skill,
+          socialApproach: approach,
+          targetName,
+        });
+      }
+    );
 
     it("pins the false-positive hazard: disguise is Deception but has NO socialApproach", async () => {
       const intent = await parseIntent("I disguise myself");

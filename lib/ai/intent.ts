@@ -262,7 +262,12 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
     const match = withoutPrep.match(
       /^(.*?)(?:\s+(?:to|that|into|about|para\s+que|para|de\s+que|que|sobre)\s+.+)$/i
     );
-    const candidateTarget = match ? match[1] : withoutPrep;
+    let candidateTarget = (match ? match[1] : withoutPrep).trim();
+    candidateTarget = candidateTarget
+      .replace(/^[¿¡\s]+/, "")
+      .replace(/[.!?\s]+$/, "")
+      .trim();
+
     return cleanName(candidateTarget);
   };
 

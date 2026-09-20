@@ -359,13 +359,17 @@ export function matchImprovisedAction(input: string): ImprovisedMatch | null {
   // opposition, and the two lookups must not disagree because one of them
   // collapsed runs of whitespace and the other did not.
   const normalised = input.trim().replace(/\s+/g, " ");
-  const attempted = normalised.replace(ATTEMPT_PREFIX, "");
+  const unpunct = normalised.replace(/^[¿¡]+/, "");
+  const attempted = unpunct.replace(ATTEMPT_PREFIX, "");
 
   for (const action of IMPROVISED_ACTIONS) {
     // Both forms are tried, and the remainder is taken from whichever matched,
     // so "I try to shove the goblin" yields the same remainder as "I shove the
     // goblin" instead of one that still carries the attempt framing.
-    const match = action.pattern.exec(normalised) ?? action.pattern.exec(attempted);
+    const match =
+      action.pattern.exec(normalised) ??
+      action.pattern.exec(attempted) ??
+      action.pattern.exec(unpunct);
     if (!match) continue;
 
     const rest = match.input.slice(match.index + match[0].length).trim();

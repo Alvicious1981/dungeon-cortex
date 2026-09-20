@@ -11,6 +11,13 @@ import {
   completeActionReceiptWithResponse,
   rejectActionReceipt,
 } from "@/lib/actions/request-receipt";
+import { MAX_SOCIAL_INTENT_LENGTH } from "@/lib/rules/social";
+import {
+  assertNpcScenePresenceInTransaction,
+  SocialScenePresenceError,
+} from "@/lib/db/social-scene-target";
+import type { Prisma } from "@prisma/client";
+
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
@@ -19,7 +26,7 @@ const BodySchema = z
   .object({
     npcId: z.string().min(1).max(200),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
-    intent: z.string().max(200),
+    intent: z.string().max(MAX_SOCIAL_INTENT_LENGTH),
     requestId: z.string().min(1).max(128).optional(),
   })
   .strict();
@@ -99,37 +106,17 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     }
   }
 
-  const scenePresenceVersion = campaign.scenePresenceVersion ?? 0;
-  if (scenePresenceVersion >= 1) {
-    const participant = await prisma.campaignSceneParticipant.findUnique({
-      where: {
-        campaignId_npcId: {
-          campaignId,
-          npcId: npc.id,
-        },
-      },
-      select: { npcId: true },
-    });
-    if (!participant) {
-      const responseBody = {
-        error: "NPC is not present in the current scene.",
-        code: "NPC_NOT_PRESENT",
-      };
-      if (receiptId) {
-        await rejectActionReceipt(receiptId, 400, responseBody);
-      }
-      return NextResponse.json(responseBody, { status: 400 });
-    }
-  }
-
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const transactionClient = tx as Prisma.TransactionClient;
+      await assertNpcScenePresenceInTransaction(transactionClient, campaignId, npc.id);
+
       const checkResult = await resolveSocialCheck({
         campaignId,
         npcId: npc.id,
         approach: parsed.data.approach,
         intent: parsed.data.intent,
-        tx: tx as never,
+        tx: transactionClient as never,
       });
 
       const targetName = npc.name?.trim() || npc.seed || "NPC";
@@ -140,7 +127,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         result: checkResult,
       });
 
-      await tx.gameLog.create({
+      await transactionClient.gameLog.create({
         data: {
           campaignId,
           role: "system",
@@ -154,6 +141,11 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     if (receiptId) await completeActionReceiptWithResponse(receiptId, 200, result);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SocialScenePresenceError) {
+      const responseBody = { error: error.message, code: error.code };
+      if (receiptId) await rejectActionReceipt(receiptId, 400, responseBody);
+      return NextResponse.json(responseBody, { status: 400 });
+    }
     if (error instanceof SocialServiceError) {
       const responseBody = { error: error.message, code: error.code };
       if (receiptId) await rejectActionReceipt(receiptId, 400, responseBody);
