@@ -27,6 +27,39 @@ function fingerprintSocialSubmission(input: { npcId: string; approach: "persuade
   return createHash("sha256").update(JSON.stringify({ npcId: input.npcId, approach: input.approach, intent: input.intent })).digest("hex");
 }
 
+function formatSocialCheckLog(input: {
+  npcName: string;
+  approach: "persuade" | "intimidate" | "deceive";
+  intent?: string;
+  result: {
+    skill: string;
+    roll: number;
+    abilityModifier: number;
+    proficiencyApplied: number;
+    total: number;
+    dc: number;
+    success: boolean;
+    attitudeBefore: string;
+    attitudeAfter: string;
+    dispositionBefore: number;
+    dispositionAfter: number;
+  };
+}): string {
+  const { npcName, approach, intent, result } = input;
+  const trimmedIntent = intent?.trim();
+  const intentClause = trimmedIntent ? ` with intent "${trimmedIntent}"` : "";
+  const modSign = result.abilityModifier >= 0 ? "+" : "";
+  const profClause = result.proficiencyApplied ? ` +${result.proficiencyApplied} prof` : "";
+  const outcome = result.success ? "SUCCESS" : "FAILURE";
+
+  return (
+    `🎲 Social check: ${result.skill} (${approach}) targeting ${npcName}${intentClause}: ` +
+    `rolled ${result.roll}${modSign}${result.abilityModifier}${profClause} = ${result.total} vs DC ${result.dc} → ${outcome}. ` +
+    `Attitude: ${result.attitudeBefore} → ${result.attitudeAfter} ` +
+    `(disposition: ${result.dispositionBefore} → ${result.dispositionAfter}).`
+  );
+}
+
 /**
  * POST /api/campaign/[id]/social
  *
@@ -79,7 +112,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const npc = await prisma.nPC.findUnique({
     where: { id: parsed.data.npcId },
-    select: { id: true, campaignId: true, seed: true, role: true, hasMetPlayer: true },
+    select: { id: true, name: true, campaignId: true, seed: true, role: true, hasMetPlayer: true },
   });
   if (!npc || npc.campaignId !== campaignId) {
     return NextResponse.json({ error: "NPC not found." }, { status: 404 });
@@ -122,12 +155,34 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   try {
-    const result = await resolveSocialCheck({
-      campaignId,
-      npcId: npc.id,
-      approach: parsed.data.approach,
-      intent: parsed.data.intent,
+    const result = await prisma.$transaction(async (tx) => {
+      const checkResult = await resolveSocialCheck({
+        campaignId,
+        npcId: npc.id,
+        approach: parsed.data.approach,
+        intent: parsed.data.intent,
+        tx: tx as never,
+      });
+
+      const targetName = npc.name?.trim() || npc.seed || "NPC";
+      const logContent = formatSocialCheckLog({
+        npcName: targetName,
+        approach: parsed.data.approach,
+        intent: parsed.data.intent,
+        result: checkResult,
+      });
+
+      await tx.gameLog.create({
+        data: {
+          campaignId,
+          role: "system",
+          content: logContent,
+        },
+      });
+
+      return checkResult;
     });
+
     if (receiptId) await completeActionReceiptWithResponse(receiptId, 200, result);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
