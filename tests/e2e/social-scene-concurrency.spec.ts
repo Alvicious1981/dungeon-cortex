@@ -240,7 +240,17 @@ test("@smoke social scene presence serializes with movement via Campaign row loc
     expect(participantsAfter[0].npcId).toBe(npcBId);
   } finally {
     if (created.campaignId) {
+      await prisma.campaign.updateMany({
+        where: { id: created.campaignId },
+        data: {
+          currentNodeId: null,
+          currentLocationId: null,
+        },
+      });
       await prisma.campaignSceneParticipant.deleteMany({
+        where: { campaignId: created.campaignId },
+      });
+      await prisma.gameLog.deleteMany({
         where: { campaignId: created.campaignId },
       });
       await prisma.nPC.deleteMany({
