@@ -42,10 +42,21 @@ test("@smoke social submissions are idempotent in PostgreSQL", async ({ request 
     expect(first.status()).toBe(200);
     const firstJson = await first.json();
     const afterFirst = await prisma.nPC.findUniqueOrThrow({ where: { id: npcId }, select: { disposition: true } });
+    const logsAfterFirst = await prisma.gameLog.findMany({
+      where: { campaignId: created.campaignId, role: "system" },
+    });
+    expect(logsAfterFirst).toHaveLength(1);
+    expect(logsAfterFirst[0].content).toMatch(/Social check: Persuasion \(persuade\)/);
+    expect(logsAfterFirst[0].content).toContain(body.intent);
+
     const replay = await request.post(`/api/campaign/${created.campaignId}/social`, { data: { ...body, requestId: completedId } });
     expect(replay.status()).toBe(200);
     expect(await replay.json()).toEqual(firstJson);
     expect((await prisma.nPC.findUniqueOrThrow({ where: { id: npcId }, select: { disposition: true } })).disposition).toBe(afterFirst.disposition);
+    const logsAfterReplay = await prisma.gameLog.findMany({
+      where: { campaignId: created.campaignId, role: "system" },
+    });
+    expect(logsAfterReplay).toHaveLength(1);
 
     const reused = await request.post(`/api/campaign/${created.campaignId}/social`, { data: { ...body, intent: "a different request", requestId: completedId } });
     expect(reused.status()).toBe(409);
@@ -54,6 +65,10 @@ test("@smoke social submissions are idempotent in PostgreSQL", async ({ request 
     const second = await request.post(`/api/campaign/${created.campaignId}/social`, { data: { ...body, requestId: `social-${randomUUID()}` } });
     expect(second.status()).toBe(200);
     expect((await prisma.actionRequestReceipt.count({ where: { campaignId: created.campaignId } }))).toBe(2);
+    const logsAfterSecond = await prisma.gameLog.findMany({
+      where: { campaignId: created.campaignId, role: "system" },
+    });
+    expect(logsAfterSecond).toHaveLength(2);
 
     const processingId = `social-${randomUUID()}`;
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: created.campaignId }, select: { userId: true } });
@@ -67,6 +82,7 @@ test("@smoke social submissions are idempotent in PostgreSQL", async ({ request 
   } finally {
     if (created.campaignId) {
       await prisma.campaignSceneParticipant.deleteMany({ where: { campaignId: created.campaignId } });
+      await prisma.gameLog.deleteMany({ where: { campaignId: created.campaignId } });
       await prisma.nPC.deleteMany({ where: { campaignId: created.campaignId } });
     }
     await prisma.$disconnect();
@@ -144,6 +160,10 @@ test("@smoke canonical scene presence guard enforces presence and preserves repl
       select: { disposition: true },
     })).disposition;
     expect(dispAfterSecond).toBe(dispAfterFirst);
+    const logsAfterSecond = await prisma.gameLog.findMany({
+      where: { campaignId: created.campaignId, role: "system" },
+    });
+    expect(logsAfterSecond).toHaveLength(1);
 
     const replayA = await request.post(`/api/campaign/${created.campaignId}/social`, {
       data: { ...body, requestId: requestIdA },
@@ -162,6 +182,7 @@ test("@smoke canonical scene presence guard enforces presence and preserves repl
   } finally {
     if (created.campaignId) {
       await prisma.campaignSceneParticipant.deleteMany({ where: { campaignId: created.campaignId } });
+      await prisma.gameLog.deleteMany({ where: { campaignId: created.campaignId } });
       await prisma.nPC.deleteMany({ where: { campaignId: created.campaignId } });
     }
     await prisma.$disconnect();

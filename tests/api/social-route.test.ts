@@ -9,11 +9,21 @@ import {
   rejectActionReceipt,
 } from "@/lib/actions/request-receipt";
 
+const prismaTx = vi.hoisted(() => ({
+  gameLog: {
+    create: vi.fn(async (args: unknown) => ({ id: "log_1", ...(args as object) })),
+  },
+}));
+
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     campaign: { findUnique: vi.fn() },
     nPC: { findUnique: vi.fn(), update: vi.fn() },
     campaignSceneParticipant: { findUnique: vi.fn() },
+    gameLog: {
+      create: vi.fn(async (args: unknown) => ({ id: "log_global", ...(args as object) })),
+    },
+    $transaction: vi.fn(async (fn: (tx: typeof prismaTx) => Promise<unknown>) => fn(prismaTx)),
   },
 }));
 
@@ -78,8 +88,23 @@ describe("POST /api/campaign/[id]/social", () => {
       npcId: "npc_1",
       approach: "persuade",
       intent: "a room",
+      tx: prismaTx,
     });
     await expect(response.json()).resolves.toMatchObject({ attitudeAfter: "Hostile" });
+  });
+
+  it("writes exactly one canonical system GameLog on successful social check (RED regression)", async () => {
+    const response = await POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room" }), { params });
+
+    expect(response.status).toBe(200);
+    expect(prismaTx.gameLog.create).toHaveBeenCalledTimes(1);
+    expect(prismaTx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp_1",
+        role: "system",
+        content: expect.any(String),
+      },
+    });
   });
 
   it("refuses an unauthenticated request", async () => {
@@ -155,6 +180,7 @@ describe("POST /api/campaign/[id]/social", () => {
       npcId: "npc_1",
       approach: "persuade",
       intent: "x",
+      tx: prismaTx,
     });
   });
 
@@ -585,7 +611,291 @@ describe("POST /api/campaign/[id]/social", () => {
         npcId: "npc_1",
         approach: "persuade",
         intent: "pass gate",
+        tx: prismaTx,
       });
+    });
+  });
+
+  describe("Canonical campaign history persistence (NARR-FIND-02)", () => {
+    it("writes exactly one canonical system GameLog with complete deterministic facts", async () => {
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_1", seed: "guard_captain", name: "Captain Valerie", role: "guard", hasMetPlayer: true,
+      });
+      (resolveSocialCheck as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        approach: "intimidate",
+        skill: "Intimidation",
+        roll: 17,
+        abilityModifier: 3,
+        proficiencyApplied: 2,
+        total: 22,
+        dc: 20,
+        success: true,
+        attitudeBefore: "Hostile",
+        attitudeAfter: "Indifferent",
+        dispositionBefore: -4,
+        dispositionAfter: 0,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "intimidate", intent: "stand down" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      expect(prismaTx.gameLog.create).toHaveBeenCalledTimes(1);
+      expect(prismaTx.gameLog.create).toHaveBeenCalledWith({
+        data: {
+          campaignId: "camp_1",
+          role: "system",
+          content:
+            '🎲 Social check: Intimidation (intimidate) targeting Captain Valerie with intent "stand down": rolled 17+3 +2 prof = 22 vs DC 20 → SUCCESS. Attitude: Hostile → Indifferent (disposition: -4 → 0).',
+        },
+      });
+    });
+
+    it("falls back to NPC seed when name is null, undefined, or whitespace", async () => {
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_1", seed: "innkeeper_seed", name: "   ", role: "commoner", hasMetPlayer: true,
+      });
+      (resolveSocialCheck as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        approach: "persuade",
+        skill: "Persuasion",
+        roll: 10,
+        abilityModifier: 0,
+        proficiencyApplied: 0,
+        total: 10,
+        dc: 15,
+        success: false,
+        attitudeBefore: "Indifferent",
+        attitudeAfter: "Hostile",
+        dispositionBefore: 0,
+        dispositionAfter: -4,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "ask for discount" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      expect(prismaTx.gameLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            content: expect.stringContaining("targeting innkeeper_seed"),
+          }),
+        })
+      );
+    });
+
+    it("omits the intent clause when player intent is empty or whitespace", async () => {
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_1", seed: "merchant_seed", name: "Merchant", role: "commoner", hasMetPlayer: true,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "   " }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      expect(prismaTx.gameLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            content: expect.not.stringContaining("with intent"),
+          }),
+        })
+      );
+    });
+
+    it("formats negative ability modifier without a double sign", async () => {
+      (prisma.nPC.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: "npc_1", campaignId: "camp_1", seed: "innkeeper_1", role: "commoner", hasMetPlayer: true,
+      });
+      (resolveSocialCheck as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        approach: "deceive",
+        skill: "Deception",
+        roll: 8,
+        abilityModifier: -2,
+        proficiencyApplied: 0,
+        total: 6,
+        dc: 15,
+        success: false,
+        attitudeBefore: "Indifferent",
+        attitudeAfter: "Hostile",
+        dispositionBefore: 0,
+        dispositionAfter: -4,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "deceive", intent: "lie about gold" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      expect(prismaTx.gameLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            content: expect.stringContaining("rolled 8-2 = 6 vs DC 15 → FAILURE"),
+          }),
+        })
+      );
+    });
+
+    it("completed replay writes zero new GameLogs", async () => {
+      const cached = {
+        ok: true, approach: "persuade", skill: "Persuasion", roll: 15, dc: 15,
+        success: true, attitudeBefore: "Indifferent", attitudeAfter: "Friendly",
+        dispositionBefore: 0, dispositionAfter: 4,
+      };
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "completed_replay",
+        responseStatus: 200,
+        responseBody: cached,
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "hello", requestId: "req_replay" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(cached);
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    });
+
+    it("in-flight request produces no social resolution and writes zero GameLogs", async () => {
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "in_flight",
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "hello", requestId: "req_inflight" }),
+        { params }
+      );
+
+      expect(response.status).toBe(409);
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    });
+
+    it("reused requestId produces no social resolution and writes zero GameLogs", async () => {
+      (acquireActionReceipt as ReturnType<typeof vi.fn>).mockResolvedValue({
+        outcome: "reused",
+      });
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "hello", requestId: "req_reused" }),
+        { params }
+      );
+
+      expect(response.status).toBe(409);
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    });
+
+    it("absent canonical NPC produces NPC_NOT_PRESENT and writes zero GameLogs", async () => {
+      (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        userId: "user_1",
+        status: "active",
+        scenePresenceVersion: 1,
+      });
+      (prisma.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "hello" }),
+        { params }
+      );
+
+      expect(response.status).toBe(400);
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    });
+
+    it("service rejection (SocialServiceError) rolls back and leaves no success GameLog", async () => {
+      (resolveSocialCheck as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new SocialServiceError("SOCIAL_STATE_CONFLICT", "Conflict detected.")
+      );
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "hello", requestId: "req_err" }),
+        { params }
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ code: "SOCIAL_STATE_CONFLICT" });
+      expect(rejectActionReceipt).toHaveBeenCalledWith("receipt_1", 400, {
+        error: "Conflict detected.",
+        code: "SOCIAL_STATE_CONFLICT",
+      });
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    });
+
+    it("atomic transaction contract: resolveSocialCheck and tx.gameLog.create use the same transaction client", async () => {
+      let txSeenBySocialCheck: unknown;
+      let txSeenByGameLog: unknown;
+
+      const customTx = {
+        gameLog: {
+          create: vi.fn(async () => {
+            txSeenByGameLog = customTx;
+            return { id: "log_custom" };
+          }),
+        },
+      };
+      (prisma.$transaction as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (cb: (tx: unknown) => Promise<unknown>) => cb(customTx)
+      );
+
+      (resolveSocialCheck as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (input: { tx?: unknown }) => {
+          txSeenBySocialCheck = input.tx;
+          return {
+            ok: true,
+            approach: "persuade",
+            skill: "Persuasion",
+            roll: 15,
+            dc: 15,
+            success: true,
+            attitudeBefore: "Indifferent",
+            attitudeAfter: "Friendly",
+            dispositionBefore: 0,
+            dispositionAfter: 4,
+          };
+        }
+      );
+
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "a room" }),
+        { params }
+      );
+
+      expect(response.status).toBe(200);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(txSeenBySocialCheck).toBe(customTx);
+      expect(txSeenByGameLog).toBe(customTx);
+      expect(customTx.gameLog.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("atomic transaction contract: failure in log creation rolls back transaction and fails request", async () => {
+      const customTx = {
+        gameLog: {
+          create: vi.fn(async () => {
+            throw new Error("DB write failure for GameLog");
+          }),
+        },
+      };
+      (prisma.$transaction as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (cb: (tx: unknown) => Promise<unknown>) => cb(customTx)
+      );
+
+      await expect(
+        POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room" }), { params })
+      ).rejects.toThrow("DB write failure for GameLog");
+      expect(completeActionReceiptWithResponse).not.toHaveBeenCalled();
     });
   });
 });
