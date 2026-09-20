@@ -265,4 +265,98 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
     expect(result.issues.some((issue) => issue.code === 'prompt_disclosure')).toBe(true);
   });
 
+  describe('Social outcome contradiction validation (PR #227)', () => {
+    const failedSocialContext: CombatNarrativeContext = {
+      facts: [
+        {
+          type: 'social_check_resolved',
+          description: 'Social check failed: persuade against Guard',
+          payload: {
+            approach: 'persuade',
+            targetName: 'Guard',
+            success: false,
+            total: 10,
+            dc: 15,
+          },
+        },
+      ],
+    };
+
+    const succeededSocialContext: CombatNarrativeContext = {
+      facts: [
+        {
+          type: 'social_check_resolved',
+          description: 'Social check succeeded: persuade against Guard',
+          payload: {
+            approach: 'persuade',
+            targetName: 'Guard',
+            success: true,
+            total: 18,
+            dc: 15,
+          },
+        },
+      ],
+    };
+
+    it('rejects explicit success prose when backend social check failed', () => {
+      const texts = [
+        'The guard is persuaded and agrees to open the gate.',
+        'El guardia es persuadido y acepta abrir la puerta.',
+        'El guardia queda convencido y accede a abrir el portón.',
+        'The merchant accepts your offer.',
+        'The guard falls for the deception and lets you pass.',
+      ];
+
+      for (const text of texts) {
+        const result = validateNarrativeText(text, failedSocialContext);
+        expect(result.ok).toBe(false);
+        expect(result.issues.some((i) => i.code === 'social_outcome_contradiction')).toBe(true);
+      }
+    });
+
+    it('allows neutral or failure prose when backend social check failed', () => {
+      const texts = [
+        'The guard watches you with a stony expression.',
+        'El guardia te mira fijamente sin decir palabra.',
+        'The guard refuses and remains unconvinced.',
+        'El guardia se niega y permanece sin convencer.',
+      ];
+
+      for (const text of texts) {
+        const result = validateNarrativeText(text, failedSocialContext);
+        expect(result.ok).toBe(true);
+      }
+    });
+
+    it('rejects explicit failure/refusal prose when backend social check succeeded', () => {
+      const texts = [
+        'The guard refuses and remains unconvinced.',
+        'El guardia se niega y permanece sin convencer.',
+        'El guardia rehúsa y no cede.',
+        'The guard sees through your deception.',
+        'The merchant rejects your proposal.',
+      ];
+
+      for (const text of texts) {
+        const result = validateNarrativeText(text, succeededSocialContext);
+        expect(result.ok).toBe(false);
+        expect(result.issues.some((i) => i.code === 'social_outcome_contradiction')).toBe(true);
+      }
+    });
+
+    it('allows neutral or success prose when backend social check succeeded', () => {
+      const texts = [
+        'The guard takes a breath and considers your words.',
+        'El guardia asiente despacio mientras reflexiona.',
+        'The guard is persuaded and agrees to open the gate.',
+        'El guardia queda convencido y accede a abrir el portón.',
+      ];
+
+      for (const text of texts) {
+        const result = validateNarrativeText(text, succeededSocialContext);
+        expect(result.ok).toBe(true);
+      }
+    });
+  });
+
 });

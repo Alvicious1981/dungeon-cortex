@@ -47,6 +47,7 @@ interface SocialCharacterRecord {
   stats: unknown;
   level?: number;
   skillProficiencies?: unknown;
+  exhaustionLevel?: number;
 }
 
 interface SocialNpcRecord {
@@ -156,6 +157,7 @@ export interface SocialCheckFacts {
   success: boolean;
   dispositionBefore: number;
   dispositionAfter: number;
+  rollMode?: "normal" | "advantage" | "disadvantage";
 }
 
 export type ResolveSocialCheckResult = SocialCheckResult & {
@@ -373,6 +375,7 @@ function buildSocialCheckResult(
     success: socialResult.success,
     dispositionBefore: socialResult.dispositionBefore,
     dispositionAfter: socialResult.dispositionAfter,
+    ...(socialResult.rollMode ? { rollMode: socialResult.rollMode } : {}),
   };
 
   return {
@@ -410,7 +413,13 @@ async function resolveSocialCheckInTransaction(
 
   const character = await db.character.findUnique({
     where: { id: characterId },
-    select: { id: true, stats: true, level: true, skillProficiencies: true },
+    select: {
+      id: true,
+      stats: true,
+      level: true,
+      skillProficiencies: true,
+      exhaustionLevel: true,
+    },
   });
   if (!character) {
     throw new SocialServiceError(
@@ -517,11 +526,14 @@ async function resolveSocialCheckInTransaction(
   assertNpcReady(npc, input.campaignId);
 
   const actor = toAbilityCheckActor(character);
+  const exhaustionLevel =
+    typeof character.exhaustionLevel === "number" ? character.exhaustionLevel : 0;
   const initialDisposition = npc.disposition ?? null;
   let socialResult = resolveSocialCheckPure(
     { npcSeed: npc.seed ?? input.npcSeed ?? "", approach: input.approach, intent: input.intent ?? "" },
     actor,
-    initialDisposition
+    initialDisposition,
+    { exhaustionLevel }
   );
 
   for (let attempt = 0; attempt < MAX_SOCIAL_CAS_ATTEMPTS; attempt += 1) {

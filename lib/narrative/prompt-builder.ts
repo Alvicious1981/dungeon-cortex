@@ -50,6 +50,14 @@ function getQualitativeDescription(type: string, description: string, payload?: 
       ? normalizeDataText(payload.targetName, 160)
       : '';
     clean = `Healing confirmed${target ? ` for ${target}` : ''}`;
+  } else if (type === 'social_check_resolved') {
+    const target = typeof payload?.targetName === 'string'
+      ? normalizeDataText(payload.targetName, 160)
+      : '';
+    const approach = typeof payload?.approach === 'string' ? payload.approach : '';
+    const success = payload?.success === true;
+    const attitudeAfter = typeof payload?.attitudeAfter === 'string' ? payload.attitudeAfter : '';
+    clean = `Social check ${success ? 'succeeded' : 'failed'}: ${approach}${target ? ` targeting ${target}` : ''}${attitudeAfter ? `, attitude is now ${attitudeAfter}` : ''}`;
   } else {
     // Strip any digits/numbers from fallback description
     clean = clean.replace(/\d+/g, '');

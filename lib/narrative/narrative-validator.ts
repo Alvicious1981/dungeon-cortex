@@ -288,6 +288,42 @@ export function validateNarrativeText(
     }
   }
 
+  // 10. Contradicciones en resultados de interacciones sociales (PR #227)
+  if (context) {
+    const socialFacts = context.facts.filter(f => f.type === 'social_check_resolved');
+    for (const fact of socialFacts) {
+      const payload = fact.payload || {};
+      const success = typeof payload.success === 'boolean' ? payload.success : undefined;
+      if (success === undefined) continue;
+
+      const explicitSuccessRegex = /\b(?:(?:is|was|are|were|been)\s+(?:persuaded|convinced|deceived|tricked|fooled|bluffed|intimidated|cowed|swayed)|(?:agrees?|agreed)\s+to\b|(?:accepts?|accepted)\s+(?:the\s+deal|the\s+offer|your\s+(?:deal|offer|proposal|terms|request))|(?:falls?|fell)\s+for\s+(?:it|the\s+(?:lie|bluff|trick|deception)|your\s+(?:lie|bluff|trick|deception))|(?:yields?|yielded|gives?\s+in|gave\s+in|backs?\s+down|backed\s+down)\b|(?:you\s+(?:persuade|convince|deceive|trick|fool|intimidate))\b|(?:está|queda|quedó|están|quedan|ha\s+sido|es|fue|fueron)\s+(?:convencid[oa]s?|persuadid[oa]s?|engañad[oa]s?|intimidat?d[oa]s?|amedrentad[oa]s?|coaccionad[oa]s?)|(?:acepta|aceptó|acuerda|acordó)\s+(?:abrir|ayudar|la\s+oferta|el\s+trato|tu\s+propuesta|tu\s+oferta|ceder)|(?:accede|accedió)\s+a\b|(?:se\s+traga|cree|creyó)\s+(?:la\s+mentira|el\s+engaño)|(?:cede|cedió)\s+(?:ante|a)\b|(?:persuades|convences|engañas|intimidas)\s+al\b)/i;
+
+      const explicitFailureRegex = /\b(?:(?:remains?|remained)\s+unconvinced|(?:refuses?|refused)\b|(?:unconvinced|unmoved|unimpressed)\b|(?:is|was|are|were|been)\s+(?:not\s+(?:persuaded|convinced|swayed)|unconvinced|unmoved|unimpressed)|(?:does|did|will)\s+not\s+(?:believe|agree|comply|yield|cooperate)|(?:sees?|saw)\s+through\s+(?:the|your)\s+(?:lie|bluff|trick|deception)|(?:rejects?|rejected)\s+(?:the\s+deal|the\s+offer|your\s+(?:deal|offer|proposal|terms|request))|(?:se\s+niega|se\s+negó|rehúsa|rehusó)\b|(?:permanece|sigue|queda|quedó)\s+(?:escéptic[oa]|sin\s+convencer|inmóvil|inflexible|inconmovible)|(?:no\s+(?:se\s+deja\s+engañar|te\s+cree|cree|cede|está\s+convencid[oa]|accede|acepta))|(?:descubre|ve|vio)\s+(?:el\s+engaño|la\s+mentira)|(?:rechaza|rechazó)\s+(?:la\s+oferta|el\s+trato|tu\s+propuesta))/i;
+
+      if (!success) {
+        const match = text.match(explicitSuccessRegex);
+        if (match) {
+          issues.push({
+            code: 'social_outcome_contradiction',
+            message: 'Text describes a successful social outcome, but the backend check failed.',
+            severity: 'error',
+            matchedText: match[0],
+          });
+        }
+      } else {
+        const match = text.match(explicitFailureRegex);
+        if (match) {
+          issues.push({
+            code: 'social_outcome_contradiction',
+            message: 'Text describes a failed social outcome or refusal, but the backend check succeeded.',
+            severity: 'error',
+            matchedText: match[0],
+          });
+        }
+      }
+    }
+  }
+
   return {
     ok: issues.length === 0,
     isValid: issues.length === 0,

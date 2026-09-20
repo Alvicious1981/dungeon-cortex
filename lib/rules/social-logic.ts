@@ -7,6 +7,7 @@
 
 import { pickSeeded } from "@/lib/rules/generators";
 import { type NPCRole } from "@/lib/rules/npc";
+import { evaluateAbilityCheckAdvantage } from "@/lib/rules/conditions";
 import {
   computeAbilityCheckDC,
   resolveAbilityCheck,
@@ -187,16 +188,35 @@ const APPROACH_SKILL = {
  * a natural 20 or 1 has no special effect on an ability check. The natural
  * roll is reported so narration can mention it, but no rule turns on it.
  */
+export interface ResolveSocialCheckOptions {
+  exhaustionLevel?: number;
+  advantage?: boolean;
+  disadvantage?: boolean;
+}
+
 export function resolveSocialCheck(
   input: SocialCheckInput,
   actor: AbilityCheckActor,
-  disposition: number | null
+  disposition: number | null,
+  options?: ResolveSocialCheckOptions
 ): SocialCheckResult {
   const attitudeBefore = attitudeFor(disposition);
   const skill = APPROACH_SKILL[input.approach];
 
+  const exhaustionAdv = options?.exhaustionLevel !== undefined
+    ? evaluateAbilityCheckAdvantage([], options.exhaustionLevel)
+    : { advantage: false, disadvantage: false };
+
+  const advantage = options?.advantage === true || exhaustionAdv.advantage;
+  const disadvantage = options?.disadvantage === true || exhaustionAdv.disadvantage;
+
   const check = resolveAbilityCheck(
-    { skill, band: ATTITUDE_DIFFICULTY[attitudeBefore] },
+    {
+      skill,
+      band: ATTITUDE_DIFFICULTY[attitudeBefore],
+      advantage,
+      disadvantage,
+    },
     actor
   );
 
@@ -216,6 +236,7 @@ export function resolveSocialCheck(
     attitudeAfter: attitudeFor(dispositionAfter),
     dispositionBefore,
     dispositionAfter,
+    rollMode: check.rollMode,
   };
 }
 

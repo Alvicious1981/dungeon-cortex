@@ -390,4 +390,76 @@ describe("parseIntent — ambient observation vs mechanical discovery", () => {
       targetName: "hidden assassin",
     });
   });
+
+
+  describe("NARR-FIND-02 / typed social actions contract", () => {
+    it.each([
+      ["I persuade the innkeeper", "Persuasion", "persuade", "innkeeper"],
+      ["I persuade the innkeeper to open the gate", "Persuasion", "persuade", "innkeeper"],
+      ["I deceive the guard", "Deception", "deceive", "guard"],
+      ["I deceive the guard that we are merchants", "Deception", "deceive", "guard"],
+      ["I lie to the guard", "Deception", "deceive", "guard"],
+      ["I intimidate the merchant", "Intimidation", "intimidate", "merchant"],
+      ["I threaten the merchant", "Intimidation", "intimidate", "merchant"],
+      ["I negotiate with the merchant", "Persuasion", "persuade", "merchant"],
+      ["negocio con el mercader", "Persuasion", "persuade", "mercader"],
+      ["I trick the guard", "Deception", "deceive", "guard"],
+      ["faroleo al guardia", "Deception", "deceive", "guardia"],
+      ["I plead with the innkeeper", "Persuasion", "persuade", "innkeeper"],
+      ["I plead with the innkeeper to give us shelter", "Persuasion", "persuade", "innkeeper"],
+      ["persuado al posadero", "Persuasion", "persuade", "posadero"],
+      ["engaño al guardia", "Deception", "deceive", "guardia"],
+      ["amenazo al mercader", "Intimidation", "intimidate", "mercader"],
+      // Explicit target followed by purpose/content clause
+      ["I bluff the merchant that we are nobles", "Deception", "deceive", "merchant"],
+      ["negocio con el mercader para bajar el precio", "Persuasion", "persuade", "mercader"],
+      ["engaño al guardia diciendo que somos nobles", "Deception", "deceive", "guardia"],
+      ["I persuade the guard to open the gate", "Persuasion", "persuade", "guard"],
+      // Terminal punctuation & Spanish inverted marks
+      ["I persuade the innkeeper.", "Persuasion", "persuade", "innkeeper"],
+      ["I deceive the guard!", "Deception", "deceive", "guard"],
+      ["I intimidate the merchant?", "Intimidation", "intimidate", "merchant"],
+      ["¿persuado al posadero?", "Persuasion", "persuade", "posadero"],
+      ["¡engaño al guardia!", "Deception", "deceive", "guardia"],
+      ["¡amenazo al mercader!", "Intimidation", "intimidate", "mercader"],
+    ])(
+      "classifies '%s' as %s with socialApproach '%s' targeting '%s'",
+      async (input, skill, approach, targetName) => {
+        const intent = await parseIntent(input);
+        expect(intent).toMatchObject({
+          actionType: "ability_check",
+          skill,
+          socialApproach: approach,
+          targetName,
+        });
+      }
+    );
+
+    it.each([
+      ["I negotiate to lower the price", "Persuasion", "persuade"],
+      ["I bluff that we are merchants", "Deception", "deceive"],
+      ["negocio para bajar el precio", "Persuasion", "persuade"],
+      ["engaño diciendo que somos mercaderes", "Deception", "deceive"],
+    ])(
+      "classifies targetless clause '%s' as %s with socialApproach '%s' and undefined targetName",
+      async (input, skill, approach) => {
+        const intent = await parseIntent(input);
+        expect(intent).toMatchObject({
+          actionType: "ability_check",
+          skill,
+          socialApproach: approach,
+        });
+        expect(intent.targetName).toBeUndefined();
+      }
+    );
+
+    it("pins the false-positive hazard: disguise is Deception but has NO socialApproach", async () => {
+      const intent = await parseIntent("I disguise myself");
+      expect(intent).toMatchObject({
+        actionType: "ability_check",
+        skill: "Deception",
+      });
+      expect((intent as any).socialApproach).toBeUndefined();
+    });
+  });
 });

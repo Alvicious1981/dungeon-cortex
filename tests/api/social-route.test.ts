@@ -10,8 +10,18 @@ import {
 } from "@/lib/actions/request-receipt";
 
 const prismaTx = vi.hoisted(() => ({
+  $queryRaw: vi.fn(async () => [{ id: "camp_1" }]),
   gameLog: {
     create: vi.fn(async (args: unknown) => ({ id: "log_1", ...(args as object) })),
+  },
+  campaign: {
+    findUnique: vi.fn(),
+  },
+  locationNode: {
+    findUnique: vi.fn(),
+  },
+  campaignSceneParticipant: {
+    findUnique: vi.fn(),
   },
 }));
 
@@ -56,6 +66,13 @@ const params = Promise.resolve({ id: "camp_1" });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (prismaTx.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: "camp_1" }]);
+  (prismaTx.campaign.findUnique as ReturnType<typeof vi.fn>).mockImplementation(
+    (args: any) => prisma.campaign.findUnique(args)
+  );
+  (prismaTx.campaignSceneParticipant.findUnique as ReturnType<typeof vi.fn>).mockImplementation(
+    (args: any) => prisma.campaignSceneParticipant.findUnique(args)
+  );
   (getAuthUser as never as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "user_1" });
   (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
     userId: "user_1",
@@ -839,6 +856,7 @@ describe("POST /api/campaign/[id]/social", () => {
       let txSeenByGameLog: unknown;
 
       const customTx = {
+        ...prismaTx,
         gameLog: {
           create: vi.fn(async () => {
             txSeenByGameLog = customTx;
@@ -882,6 +900,7 @@ describe("POST /api/campaign/[id]/social", () => {
 
     it("atomic transaction contract: failure in log creation rolls back transaction and fails request", async () => {
       const customTx = {
+        ...prismaTx,
         gameLog: {
           create: vi.fn(async () => {
             throw new Error("DB write failure for GameLog");
@@ -896,6 +915,26 @@ describe("POST /api/campaign/[id]/social", () => {
         POST(request({ npcId: "npc_1", approach: "persuade", intent: "a room" }), { params })
       ).rejects.toThrow("DB write failure for GameLog");
       expect(completeActionReceiptWithResponse).not.toHaveBeenCalled();
+    });
+
+    it("locks the campaign row for update to serialize against node transitions", async () => {
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: "a room" }),
+        { params }
+      );
+      expect(response.status).toBe(200);
+      expect(prismaTx.$queryRaw).toHaveBeenCalled();
+    });
+
+    it("refuses social intent exceeding MAX_SOCIAL_INTENT_LENGTH (200 chars)", async () => {
+      const longIntent = "a".repeat(201);
+      const response = await POST(
+        request({ npcId: "npc_1", approach: "persuade", intent: longIntent }),
+        { params }
+      );
+      expect(response.status).toBe(400);
+      expect(resolveSocialCheck).not.toHaveBeenCalled();
+      expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
     });
   });
 });
