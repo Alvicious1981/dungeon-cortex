@@ -325,3 +325,69 @@ describe("parseIntent — rest", () => {
     expect(intent.actionType).toBe("mechanical_ambiguous");
   });
 });
+
+describe("parseIntent — ambient observation vs mechanical discovery", () => {
+  it.each([
+    "I look around",
+    "I look around.",
+    "I look around the room",
+    "I look around the room.",
+    "What do I see?",
+    "What can I see?",
+    "I look at the room",
+    "I take a look around",
+    "I look around carefully",
+    "I look around carefully.",
+    "miro alrededor",
+    "miro alrededor.",
+    "miro la habitación",
+    "¿Qué veo?",
+    "echo un vistazo alrededor",
+    "¿Qué puedo ver?",
+  ])("classifies ambient observation '%s' as general narration", async (input) => {
+    const intent = await parseIntent(input);
+    expect(intent).toEqual({ actionType: "general" });
+  });
+
+  it.each([
+    ["I search the room", "Investigation", "medium"],
+    ["I search for traps", "Investigation", "medium"],
+    ["I investigate the runes", "Investigation", "medium"],
+    ["I investigate the chest", "Investigation", "medium"],
+    ["I listen at the door", "Perception", "easy"],
+    ["I listen for footsteps", "Perception", "easy"],
+    ["busco trampas", "Investigation", "medium"],
+    ["registro la habitación", "Investigation", "medium"],
+    ["investigo el cofre", "Investigation", "medium"],
+  ])(
+    "preserves mechanical skill check for '%s'",
+    async (input, skill, band) => {
+      const intent = await parseIntent(input);
+      expect(intent).toMatchObject({
+        actionType: "ability_check",
+        skill,
+        band,
+      });
+    }
+  );
+
+  it.each([
+    "I look for traps",
+    "I look for the hidden door",
+    "I look for footprints",
+  ])("never classifies search phrase '%s' as free general narration and fails closed", async (input) => {
+    const intent = await parseIntent(input);
+    expect(intent.actionType).not.toBe("general");
+    expect(intent).toEqual({ actionType: "mechanical_ambiguous" });
+  });
+
+  it("preserves mechanical classification for hidden target discovery", async () => {
+    const intent = await parseIntent("I try to spot the hidden assassin");
+    expect(intent).toMatchObject({
+      actionType: "ability_check",
+      skill: "Perception",
+      band: "easy",
+      targetName: "hidden assassin",
+    });
+  });
+});
