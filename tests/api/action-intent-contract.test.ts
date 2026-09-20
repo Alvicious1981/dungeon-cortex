@@ -230,7 +230,38 @@ describe("una acción de exploración se resuelve con dados, no con prosa", () =
     });
     expect(streamNarrative).not.toHaveBeenCalled();
   });
+
+  it("I look around the room alcanza la ruta narrativa con éxito sin tirada ni evento mecánico", async () => {
+    const { res, frames } = await post("I look around the room");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+    // No emite evento de tirada de habilidad
+    const check = frames.find((f) => f.e?.type === "ABILITY_CHECK_RESOLVED");
+    expect(check).toBeUndefined();
+
+    // Persiste la acción del jugador en el registro ordinario
+    expect((prisma.gameLog.create as any)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          campaignId,
+          role: "user",
+          content: "I look around the room",
+        }),
+      })
+    );
+
+    // Invoca la narración y completa el transporte SSE
+    expect(streamNarrative).toHaveBeenCalledWith(
+      campaignId,
+      "I look around the room",
+      undefined
+    );
+    expect(frames.some((f) => f.t === "done")).toBe(true);
+  });
 });
+
 
 describe("la dificultad depende de la acción, no es una constante", () => {
   /** El evento mecánico que la puerta emite antes del primer token narrativo. */

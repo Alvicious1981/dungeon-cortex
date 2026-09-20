@@ -140,6 +140,78 @@ export interface Intent extends BaseIntent {
 // ---------------------------------------------------------------------------
 
 /**
+ * Distinguishes ambient environmental observation ("What do I see?",
+ * "I look around the room", "miro alrededor") from mechanical discovery
+ * ("I search for traps", "I look for hidden doors", "busco trampas").
+ *
+ * Ambient observation requests narration of what is openly visible in the scene
+ * and carries no mechanical uncertainty, so it resolves as "general" without
+ * rolling dice or invoking rules. Any attempt to find hidden things, search,
+ * or inspect specific mechanisms/clues must NOT match here and must proceed
+ * to backend skill checks or fail closed.
+ */
+function isAmbientObservation(input: string): boolean {
+  const clean = input
+    .trim()
+    .replace(/^[¿¡]/, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+
+  // Search/discovery intent keywords never qualify as ambient observation.
+  // "look for traps" or "mirar si hay" implies searching for hidden information.
+  if (/\b(?:for|para\s+ver|buscando)\b/i.test(clean)) {
+    return false;
+  }
+
+  // English ambient questions: "what do I see?", "what can I see?", "what do we see?", etc.
+  if (
+    /^what\s+(?:do|can)\s+(?:i|we)\s+see(?:\s+(?:around(?:\s+(?:me|us))?|here|in\s+the\s+(?:room|area|chamber|hall|cave|place)))?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  // Spanish ambient questions: "¿qué veo?", "¿qué puedo ver?", "¿qué se ve?", etc.
+  if (
+    /^qu[eé]\s+(?:veo|puedo\s+ver|podemos\s+ver|se\s+ve)(?:\s+(?:aqu[ií]|alrededor|en\s+la\s+(?:habitaci[oó]n|sala|estancia|cueva|zona)))?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  // English ambient observation phrasings:
+  // "I look around", "take a look around", "I look around the room", "I look at the room",
+  // "I look around carefully", etc.
+  if (
+    /^(?:i\s+)?(?:carefully\s+)?(?:look|take\s+a\s+look)\s+around(?:\s+(?:at|in)?\s*(?:the\s+)?(?:room|area|surroundings|chamber|hall|cave|place|scene))?(?:\s+carefully)?$/i.test(
+      clean
+    ) ||
+    /^(?:i\s+)?(?:carefully\s+)?(?:look|take\s+a\s+look)\s+at\s+the\s+(?:room|area|surroundings|chamber|hall|cave|place|scene)(?:\s+carefully)?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  // Spanish ambient observation phrasings:
+  // "miro alrededor", "echo un vistazo alrededor", "miro la habitación", "miro a mi alrededor"
+  if (
+    /^(?:(?:yo\s+)?(?:miro|mirar)|(?:echo|echar)\s+un\s+vistazo)\s+alrededor(?:\s+(?:de\s+la\s+(?:habitaci[oó]n|sala|estancia|cueva|zona)|con\s+cuidado))?$/i.test(
+      clean
+    ) ||
+    /^(?:(?:yo\s+)?(?:miro|mirar)|(?:echo|echar)\s+un\s+vistazo)\s+(?:a\s+mi\s+alrededor|la\s+(?:habitaci[oó]n|sala|estancia|zona|cueva|escena)|el\s+(?:lugar|cuarto|entorno)|a\s+la\s+(?:habitaci[oó]n|sala|estancia|zona|cueva))(?:\s+con\s+cuidado)?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Parses a player's free-text action into a structured Intent.
  *
  * @param playerInput - Raw text the player typed (e.g. "I cast Fireball at level 3 on the orc").
@@ -288,6 +360,8 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
     };
   } else if (lower === "rest" || lower === "descansar" || lower === "descanso") {
     intent = { actionType: "rest", restType: "short" };
+  } else if (isAmbientObservation(input)) {
+    intent = { actionType: "general" };
   } else if (
     /^(?:(?:i\s+)?(?:say|ask|tell|greet|speak|talk|reply|answer|smile|laugh|cry|nod|bow|wave|sing|whisper|shout)|(?:digo|pregunto|saludo|hablo|respondo|sonrío|rio|río|lloro|asiento|me\s+inclino|canto|susurro|grito))\b|^(?:hello|hi|greetings|hola|buenas)\b/i.test(
       input
