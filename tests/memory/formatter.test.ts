@@ -34,6 +34,7 @@ const baseCharacter: CampaignContext["character"] = {
   hitDiceRemaining: 3,
   exhaustionLevel: 0,
   inventory: [],
+  profile: null,
 };
 
 const baseContext: CampaignContext = {
@@ -620,5 +621,512 @@ describe("formatIronLaws — no wilderness watches", () => {
     const laws = formatIronLaws();
     expect(laws).toContain("Code is Law / State is Truth");
     expect(laws).toContain("Tooling Protocol");
+  });
+});
+
+describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State Grounding", () => {
+  it("A. includes character profile appearance and personality traits in canonical state", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        profile: {
+          appearance: "Tall dwarf with a white scar over the left eye.",
+          backstory: "Former city guard who left under suspicious circumstances.",
+          personalityTraits: "Speaks carefully and distrusts reckless promises.",
+          ideals: "Fairness above blind obedience.",
+          bonds: "Guards the last letter of a fallen commander.",
+          flaws: "Holds a grudge against the city magistrate.",
+        },
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    expect(state).toContain("Tall dwarf with a white scar over the left eye.");
+    expect(state).toContain("Speaks carefully and distrusts reckless promises.");
+    expect(state).toContain("**Appearance:**");
+    expect(state).toContain("**Personality:**");
+  });
+
+  it("B. renders canonical ability scores with correct modifiers and distinguishes STR 18 (+4) and INT 8 (-1)", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        stats: { STR: 18, DEX: 10, CON: 14, INT: 8, WIS: 12, CHA: 10 },
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    expect(state).toContain("STR 18 (+4)");
+    expect(state).toContain("INT 8 (-1)");
+    expect(state).toContain(
+      "**Abilities:** STR 18 (+4) | DEX 10 (+0) | CON 14 (+2) | INT 8 (-1) | WIS 12 (+1) | CHA 10 (+0)"
+    );
+  });
+
+  it("C. projects skill proficiencies compactly and fails closed on malformed data", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        skillProficiencies: ["Athletics", "Perception", "Arcana"],
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    expect(state).toContain("**Skill Proficiencies:** Athletics, Perception, Arcana");
+
+    // Malformed data fails closed to omission without dumping raw JSON
+    const malformedContext: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        skillProficiencies: ["NonExistentSkill", 999, { foo: "bar" }],
+      },
+    };
+    const malformedState = formatCanonicalState(malformedContext);
+    expect(malformedState).not.toContain("Skill Proficiencies");
+    expect(malformedState).not.toContain("NonExistentSkill");
+    expect(malformedState).not.toContain("999");
+  });
+
+  it("D. clearly distinguishes equipped/worn/wielded from owned but stowed inventory", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        inventory: [
+          {
+            id: "item-1",
+            name: "Longsword",
+            type: "weapon",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "MAIN_HAND",
+          },
+          {
+            id: "item-2",
+            name: "Shield",
+            type: "armor",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "OFF_HAND",
+          },
+          {
+            id: "item-3",
+            name: "Chain Mail",
+            type: "armor",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "ARMOR",
+          },
+          {
+            id: "item-4",
+            name: "Dagger",
+            type: "weapon",
+            quantity: 1,
+            properties: {},
+            equippedSlot: null,
+          },
+        ],
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    expect(state).toContain("**Equipped:**");
+    expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+    expect(state).toContain("- Off Hand: Shield *(armor)*");
+    expect(state).toContain("- Armor: Chain Mail *(armor)*");
+    expect(state).toContain("**Inventory (Stowed):**");
+    expect(state).toContain("- Dagger *(weapon)*");
+    // Ensure Dagger appears only under stowed, never under equipped
+    const equippedSection = state.split("**Inventory (Stowed):**")[0] ?? "";
+    expect(equippedSection).not.toContain("Dagger");
+    const stowedSection = state.split("**Inventory (Stowed):**")[1] ?? "";
+    expect(stowedSection).toContain("- Dagger *(weapon)*");
+  });
+
+  it("E. renders exhaustion level when > 0 and omits it when 0", () => {
+    const exhaustedContext: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        exhaustionLevel: 2,
+      },
+    };
+    const exhaustedState = formatCanonicalState(exhaustedContext);
+    expect(exhaustedState).toContain("**Exhaustion:** Level 2");
+
+    const normalContext: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        exhaustionLevel: 0,
+      },
+    };
+    const normalState = formatCanonicalState(normalContext);
+    expect(normalState).not.toContain("Exhaustion:");
+  });
+
+  it("F. renders safe qualitative concentration without leaking raw concentrationSpellId, and omits when empty", () => {
+    const concentratingContext: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        concentrationSpellId: "srd_spell_hunter_mark_uuid_987",
+      },
+    };
+    const state = formatCanonicalState(concentratingContext);
+    expect(state).toContain("**Concentration:** Active");
+    expect(state).not.toContain("srd_spell_hunter_mark_uuid_987");
+
+    // Null concentrationSpellId
+    const nullContext: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        concentrationSpellId: null,
+      },
+    };
+    expect(formatCanonicalState(nullContext)).not.toContain("Concentration:");
+
+    // Empty / whitespace concentrationSpellId
+    const emptyContext: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        concentrationSpellId: "   ",
+      },
+    };
+    expect(formatCanonicalState(emptyContext)).not.toContain("Concentration:");
+  });
+
+  it("G. safely handles missing/null profile with no invented defaults or empty headings", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        profile: null,
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    expect(state).not.toContain("undefined");
+    expect(state).not.toContain("**Appearance:**");
+    expect(state).not.toContain("**Background:**");
+    expect(state).not.toContain("**Personality:**");
+    expect(state).not.toContain("**Ideal:**");
+    expect(state).not.toContain("**Bond:**");
+    expect(state).not.toContain("**Flaw:**");
+  });
+
+  it("H. deterministic profile projection bounds with truncation", () => {
+    const longBackstory = "A".repeat(6000);
+    const longAppearance = "B".repeat(400);
+    const longPersonality = "C".repeat(300);
+    const longIdeal = "D".repeat(200);
+    const longBond = "E".repeat(200);
+    const longFlaw = "F".repeat(200);
+
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        profile: {
+          appearance: longAppearance,
+          backstory: longBackstory,
+          personalityTraits: longPersonality,
+          ideals: longIdeal,
+          bonds: longBond,
+          flaws: longFlaw,
+        },
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    // Backstory capped at 500 chars plus label
+    const backstoryMatch = state.match(/\*\*Background:\*\* (.*)/);
+    expect(backstoryMatch).not.toBeNull();
+    expect(backstoryMatch![1].length).toBeLessThanOrEqual(500);
+    expect(backstoryMatch![1]).toMatch(/\.\.\.$/);
+
+    // Appearance capped at 300 chars
+    const appearanceMatch = state.match(/\*\*Appearance:\*\* (.*)/);
+    expect(appearanceMatch).not.toBeNull();
+    expect(appearanceMatch![1].length).toBeLessThanOrEqual(300);
+    expect(appearanceMatch![1]).toMatch(/\.\.\.$/);
+
+    // Personality capped at 250 chars
+    const personalityMatch = state.match(/\*\*Personality:\*\* (.*)/);
+    expect(personalityMatch).not.toBeNull();
+    expect(personalityMatch![1].length).toBeLessThanOrEqual(250);
+    expect(personalityMatch![1]).toMatch(/\.\.\.$/);
+
+    // Ideal capped at 150 chars
+    const idealMatch = state.match(/\*\*Ideal:\*\* (.*)/);
+    expect(idealMatch).not.toBeNull();
+    expect(idealMatch![1].length).toBeLessThanOrEqual(150);
+    expect(idealMatch![1]).toMatch(/\.\.\.$/);
+
+    // Bond capped at 150 chars
+    const bondMatch = state.match(/\*\*Bond:\*\* (.*)/);
+    expect(bondMatch).not.toBeNull();
+    expect(bondMatch![1].length).toBeLessThanOrEqual(150);
+    expect(bondMatch![1]).toMatch(/\.\.\.$/);
+
+    // Flaw capped at 150 chars
+    const flawMatch = state.match(/\*\*Flaw:\*\* (.*)/);
+    expect(flawMatch).not.toBeNull();
+    expect(flawMatch![1].length).toBeLessThanOrEqual(150);
+    expect(flawMatch![1]).toMatch(/\.\.\.$/);
+
+    // Never includes the full 6000 chars
+    expect(state).not.toContain(longBackstory);
+  });
+
+  it("I. normalizes empty/whitespace equippedSlot to stowed and formats non-empty unknown slots as equipped with fallback label", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        inventory: [
+          {
+            id: "item-empty",
+            name: "Empty Slot Herb",
+            type: "consumable",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "",
+          },
+          {
+            id: "item-whitespace",
+            name: "Whitespace Ration",
+            type: "consumable",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "   ",
+          },
+          {
+            id: "item-ring",
+            name: "Ring of Protection",
+            type: "accessory",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "FINGER_RING",
+          },
+        ],
+      },
+    };
+
+    const state = formatCanonicalState(context);
+    expect(state).toContain("**Equipped:**");
+    expect(state).toContain("- Finger Ring: Ring of Protection *(accessory)*");
+    expect(state).toContain("**Inventory (Stowed):**");
+    expect(state).toContain("- Empty Slot Herb *(consumable)*");
+    expect(state).toContain("- Whitespace Ration *(consumable)*");
+  });
+});
+
+describe("NARR-FIND-03 — Explicit Adversarial Falsifications", () => {
+  it("Falsification 1 & 2: profile=null never prints invented content or empty headings", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        profile: null,
+      },
+    };
+    const state = formatCanonicalState(context);
+    expect(state).not.toMatch(/\*\*Appearance:\*\*/i);
+    expect(state).not.toMatch(/\*\*Background:\*\*/i);
+    expect(state).not.toMatch(/\*\*Personality:\*\*/i);
+    expect(state).not.toMatch(/\*\*Ideal:\*\*/i);
+    expect(state).not.toMatch(/\*\*Bond:\*\*/i);
+    expect(state).not.toMatch(/\*\*Flaw:\*\*/i);
+    expect(state).not.toContain("undefined");
+    expect(state).not.toContain("null");
+  });
+
+  it("Falsification 3: STR 8 is rendered as STR 8 (-1), never as STR 18 (+4)", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        stats: { STR: 8 },
+      },
+    };
+    const state = formatCanonicalState(context);
+    expect(state).toContain("STR 8 (-1)");
+    expect(state).not.toContain("STR 18");
+    expect(state).not.toContain("(+4)");
+  });
+
+  it("Falsification 4: malformed stats never crash formatter and fail closed", () => {
+    const malformedCases = [
+      null,
+      "corrupted_string",
+      [],
+      { STR: "NaN", DEX: null, CON: undefined, INT: Infinity },
+      { unknownAbility: 18 },
+      {},
+    ];
+
+    for (const badStats of malformedCases) {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          stats: badStats as unknown as CampaignContext["character"]["stats"],
+        },
+      };
+      expect(() => {
+        const state = formatCanonicalState(context);
+        expect(state).not.toContain("NaN");
+        expect(state).not.toContain("Infinity");
+        expect(state).not.toContain("corrupted_string");
+      }).not.toThrow();
+    }
+  });
+
+  it("Falsification 5 & 6: equipped item never appears as stowed, and stowed item never appears as equipped", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        inventory: [
+          {
+            id: "eq-1",
+            name: "Vorpal Blade",
+            type: "weapon",
+            quantity: 1,
+            properties: { damage: "1d8+3" },
+            equippedSlot: "MAIN_HAND",
+          },
+          {
+            id: "st-1",
+            name: "Spare Rope",
+            type: "misc",
+            quantity: 1,
+            properties: {},
+            equippedSlot: null,
+          },
+          {
+            id: "st-2",
+            name: "Blank Slot Torch",
+            type: "misc",
+            quantity: 2,
+            properties: {},
+            equippedSlot: "   ",
+          },
+        ],
+      },
+    };
+    const state = formatCanonicalState(context);
+    const [equippedSection, stowedSection] = state.split("**Inventory (Stowed):**");
+
+    expect(equippedSection).toContain("Vorpal Blade");
+    expect(equippedSection).not.toContain("Spare Rope");
+    expect(equippedSection).not.toContain("Blank Slot Torch");
+
+    expect(stowedSection).toContain("Spare Rope");
+    expect(stowedSection).toContain("Blank Slot Torch");
+    expect(stowedSection).not.toContain("Vorpal Blade");
+  });
+
+  it("Falsification 7: unknown non-empty equipped slot never becomes stowed and gets fallback title-case label", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        inventory: [
+          {
+            id: "eq-custom",
+            name: "Belt of Giant Strength",
+            type: "accessory",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "WAIST_BELT",
+          },
+        ],
+      },
+    };
+    const state = formatCanonicalState(context);
+    expect(state).toContain("**Equipped:**");
+    expect(state).toContain("- Waist Belt: Belt of Giant Strength *(accessory)*");
+    expect(state).not.toContain("**Inventory (Stowed):**");
+  });
+
+  it("Falsification 8: concentrationSpellId technical identifier never leaks to narrator", () => {
+    const rawTechnicalId = "cuid_raw_9999_spell_haste_internal_secret";
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        concentrationSpellId: rawTechnicalId,
+      },
+    };
+    const state = formatCanonicalState(context);
+    expect(state).toContain("**Concentration:** Active");
+    expect(state).not.toContain(rawTechnicalId);
+  });
+
+  it("Falsification 9: full 6000-character backstory never reaches prompt unchanged and is bounded to 500 chars", () => {
+    const fullBackstory = "Chapter 1: In the beginning of the great realm... ".repeat(150);
+    expect(fullBackstory.length).toBeGreaterThan(6000);
+
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        profile: {
+          appearance: "Normal appearance",
+          backstory: fullBackstory,
+          personalityTraits: "Pensive",
+          ideals: "Honor",
+          bonds: "Family",
+          flaws: "Impatience",
+        },
+      },
+    };
+    const state = formatCanonicalState(context);
+    expect(state).not.toContain(fullBackstory);
+
+    const match = state.match(/\*\*Background:\*\* (.*)/);
+    expect(match).not.toBeNull();
+    expect(match![1].length).toBeLessThanOrEqual(500);
+    expect(match![1].endsWith("...")).toBe(true);
+  });
+
+  it("Falsification 10: raw inventory properties never appear in narrator state", () => {
+    const context: CampaignContext = {
+      ...baseContext,
+      character: {
+        ...baseCharacter,
+        inventory: [
+          {
+            id: "item-props",
+            name: "Flametongue",
+            type: "weapon",
+            quantity: 1,
+            properties: {
+              damageDice: "2d6",
+              secretGmFlag: "INTERNAL_DO_NOT_EXPOSE",
+              formula: "1d20+STR",
+              baseAC: 15,
+            },
+            equippedSlot: "MAIN_HAND",
+          },
+        ],
+      },
+    };
+    const state = formatCanonicalState(context);
+    expect(state).not.toContain("damageDice");
+    expect(state).not.toContain("2d6");
+    expect(state).not.toContain("secretGmFlag");
+    expect(state).not.toContain("INTERNAL_DO_NOT_EXPOSE");
+    expect(state).not.toContain("formula");
+    expect(state).not.toContain("baseAC");
+    expect(state).toContain("- Main Hand: Flametongue *(weapon)*");
   });
 });

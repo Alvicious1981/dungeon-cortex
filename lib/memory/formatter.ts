@@ -21,6 +21,8 @@ import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NpcAttitude } from "@/lib/rules/social";
 import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
+import { abilityModifier } from "@/lib/rules/dice";
+import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,6 +86,68 @@ export function formatIronLaws(): string {
   ].join("\n");
 }
 
+const CANONICAL_ABILITIES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"] as const;
+
+const ESTABLISHED_SLOT_LABELS: Record<string, string> = {
+  MAIN_HAND: "Main Hand",
+  OFF_HAND: "Off Hand",
+  ARMOR: "Armor",
+  ACCESSORY: "Accessory",
+};
+
+/**
+ * Maps an equipped slot string to a human-readable label.
+ * Established slots are mapped directly; unknown slots are title-cased as a fallback.
+ */
+function formatSlotLabel(rawSlot: string): string {
+  const trimmed = rawSlot.trim();
+  if (ESTABLISHED_SLOT_LABELS[trimmed]) {
+    return ESTABLISHED_SLOT_LABELS[trimmed];
+  }
+  return trimmed
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Truncates a character profile field to `max` characters, appending "..." if cut.
+ * Returns null if the value is empty, whitespace-only, or missing.
+ */
+function truncateProfileField(value: string | null | undefined, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
+}
+
+/**
+ * Formats character ability scores into a compact capability line:
+ * `**Abilities:** STR 18 (+4) | DEX 10 (+0) | CON 14 (+2) | INT 8 (-1) | WIS 12 (+1) | CHA 10 (+0)`
+ * Safely ignores missing/malformed ability scores; returns null if no scores are valid.
+ */
+function formatAbilities(rawStats: unknown): string | null {
+  if (!rawStats || typeof rawStats !== "object" || Array.isArray(rawStats)) {
+    return null;
+  }
+  const statsRecord = rawStats as Record<string, unknown>;
+  const parts: string[] = [];
+
+  for (const ability of CANONICAL_ABILITIES) {
+    const score = statsRecord[ability];
+    if (typeof score === "number" && Number.isFinite(score)) {
+      const mod = abilityModifier(score);
+      const sign = mod >= 0 ? `+${mod}` : `${mod}`;
+      parts.push(`${ability} ${score} (${sign})`);
+    }
+  }
+
+  if (parts.length === 0) return null;
+  return `**Abilities:** ${parts.join(" | ")}`;
+}
+
 function formatCharacter(character: CampaignContext["character"]): string {
   const lines: string[] = [];
 
@@ -91,7 +155,39 @@ function formatCharacter(character: CampaignContext["character"]): string {
   lines.push(
     `**${character.name}** — ${character.race} ${character.class}, Level ${character.level}`
   );
+
+  // Character Profile (Phase 3)
+  if (character.profile) {
+    const p = character.profile;
+    const appearance = truncateProfileField(p.appearance, 300);
+    const backstory = truncateProfileField(p.backstory, 500);
+    const personality = truncateProfileField(p.personalityTraits, 250);
+    const ideal = truncateProfileField(p.ideals, 150);
+    const bond = truncateProfileField(p.bonds, 150);
+    const flaw = truncateProfileField(p.flaws, 150);
+
+    if (appearance) lines.push(`**Appearance:** ${appearance}`);
+    if (backstory) lines.push(`**Background:** ${backstory}`);
+    if (personality) lines.push(`**Personality:** ${personality}`);
+    if (ideal) lines.push(`**Ideal:** ${ideal}`);
+    if (bond) lines.push(`**Bond:** ${bond}`);
+    if (flaw) lines.push(`**Flaw:** ${flaw}`);
+  }
+
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
+
+  // Exhaustion (Phase 6)
+  if (typeof character.exhaustionLevel === "number" && character.exhaustionLevel > 0) {
+    lines.push(`**Exhaustion:** Level ${character.exhaustionLevel}`);
+  }
+
+  // Concentration (Phase 7) — Requires non-empty string ID
+  if (
+    typeof character.concentrationSpellId === "string" &&
+    character.concentrationSpellId.trim().length > 0
+  ) {
+    lines.push("**Concentration:** Active");
+  }
 
   // XP progress. `character.level` is the last MECHANICALLY APPLIED level;
   // `targetLevel` is what the XP already supports. When they differ the
@@ -120,6 +216,18 @@ function formatCharacter(character: CampaignContext["character"]): string {
     `**Hit Dice:** ${character.hitDiceRemaining}/${character.hitDiceTotal} d${hitDieSize}`
   );
 
+  // Abilities (Phase 4)
+  const abilitiesLine = formatAbilities(character.stats);
+  if (abilitiesLine) {
+    lines.push(abilitiesLine);
+  }
+
+  // Skill Proficiencies (Phase 5)
+  const skills = parseSkillProficiencies(character.skillProficiencies);
+  if (skills.length > 0) {
+    lines.push(`**Skill Proficiencies:** ${skills.join(", ")}`);
+  }
+
   // Spell slots — only shown for characters with spellcasting ability
   const slots = character.spellSlots;
   if (isSpellSlots(slots)) {
@@ -130,14 +238,38 @@ function formatCharacter(character: CampaignContext["character"]): string {
     lines.push(`**Spell Slots:** ${slotSummary}`);
   }
 
-  // Inventory
+  // Inventory (Phase 8) — Equipped vs Stowed
   if (character.inventory.length === 0) {
     lines.push("**Inventory:** (empty)");
   } else {
-    lines.push("**Inventory:**");
+    const equippedItems: typeof character.inventory = [];
+    const stowedItems: typeof character.inventory = [];
+
     for (const item of character.inventory) {
-      const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
-      lines.push(`- ${item.name}${qty} *(${item.type})*`);
+      const equippedSlot =
+        typeof item.equippedSlot === "string" ? item.equippedSlot.trim() : "";
+      if (equippedSlot.length > 0) {
+        equippedItems.push(item);
+      } else {
+        stowedItems.push(item);
+      }
+    }
+
+    if (equippedItems.length > 0) {
+      lines.push("**Equipped:**");
+      for (const item of equippedItems) {
+        const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
+        const slotLabel = formatSlotLabel(item.equippedSlot!);
+        lines.push(`- ${slotLabel}: ${item.name}${qty} *(${item.type})*`);
+      }
+    }
+
+    if (stowedItems.length > 0) {
+      lines.push("**Inventory (Stowed):**");
+      for (const item of stowedItems) {
+        const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
+        lines.push(`- ${item.name}${qty} *(${item.type})*`);
+      }
     }
   }
 

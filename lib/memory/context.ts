@@ -19,6 +19,7 @@ import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import { searchMemories } from "@/lib/memory/search";
 import type { NPCPersonality } from "@/lib/rules/social";
 import type { NPCTraits } from "@/lib/rules/npc";
+import type { CharacterNarrativeProfile } from "@/lib/character-sheet/contracts";
 
 // ---------------------------------------------------------------------------
 // Return types
@@ -49,6 +50,8 @@ export interface ContextCharacter {
   /** D&D 5e exhaustion level (0-6). */
   exhaustionLevel: number;
   inventory: ContextInventoryItem[];
+  /** Player-authored narrative profile, or null if none exists. Required field, never optional. */
+  profile: CharacterNarrativeProfile | null;
 }
 
 export interface ContextInventoryItem {
@@ -512,6 +515,16 @@ export async function buildCampaignContext(
             hitDiceTotal: true,
             hitDiceRemaining: true,
             exhaustionLevel: true,
+            profile: {
+              select: {
+                appearance: true,
+                backstory: true,
+                personalityTraits: true,
+                ideals: true,
+                bonds: true,
+                flaws: true,
+              },
+            },
             inventory: {
               select: {
                 id: true,
@@ -625,7 +638,10 @@ export async function buildCampaignContext(
   }
 
   return {
-    character: campaign.character,
+    character: {
+      ...campaign.character,
+      profile: campaign.character.profile ?? null,
+    },
     gold: campaign.gold,
     activeNPCs,
     activeNPC: activeNPCs.length === 1 ? activeNPCs[0] : null,
