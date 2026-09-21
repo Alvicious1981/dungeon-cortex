@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatSystemPrompt,
   formatCanonicalState,
+  formatCharacterProfile,
   formatNPCContext,
   formatSurvivalHUD,
   formatIronLaws,
@@ -625,7 +626,7 @@ describe("formatIronLaws — no wilderness watches", () => {
 });
 
 describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State Grounding", () => {
-  it("A. includes character profile appearance and personality traits in canonical state", () => {
+  it("A. formats character profile appearance and personality traits for advisory characterProfile tier, excluding them from canonicalState", () => {
     const context: CampaignContext = {
       ...baseContext,
       character: {
@@ -641,11 +642,17 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
       },
     };
 
+    const formattedProfile = formatCharacterProfile(context.character.profile);
+    expect(formattedProfile).toContain("Tall dwarf with a white scar over the left eye.");
+    expect(formattedProfile).toContain("Speaks carefully and distrusts reckless promises.");
+    expect(formattedProfile).toContain("**Appearance:**");
+    expect(formattedProfile).toContain("**Personality:**");
+
     const state = formatCanonicalState(context);
-    expect(state).toContain("Tall dwarf with a white scar over the left eye.");
-    expect(state).toContain("Speaks carefully and distrusts reckless promises.");
-    expect(state).toContain("**Appearance:**");
-    expect(state).toContain("**Personality:**");
+    expect(state).not.toContain("Tall dwarf with a white scar over the left eye.");
+    expect(state).not.toContain("Speaks carefully and distrusts reckless promises.");
+    expect(state).not.toContain("**Appearance:**");
+    expect(state).not.toContain("**Personality:**");
   });
 
   it("B. renders canonical ability scores with correct modifiers and distinguishes STR 18 (+4) and INT 8 (-1)", () => {
@@ -710,7 +717,7 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
             name: "Shield",
             type: "armor",
             quantity: 1,
-            properties: {},
+            properties: { armorClass: "shield" },
             equippedSlot: "OFF_HAND",
           },
           {
@@ -718,7 +725,7 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
             name: "Chain Mail",
             type: "armor",
             quantity: 1,
-            properties: {},
+            properties: { armorClass: "heavy" },
             equippedSlot: "ARMOR",
           },
           {
@@ -845,47 +852,53 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
     };
 
     const state = formatCanonicalState(context);
+    expect(state).not.toContain(longBackstory);
+    expect(state).not.toContain("**Background:**");
+
+    const formattedProfile = formatCharacterProfile(context.character.profile);
+    expect(formattedProfile).not.toBeNull();
+
     // Backstory capped at 500 chars plus label
-    const backstoryMatch = state.match(/\*\*Background:\*\* (.*)/);
+    const backstoryMatch = formattedProfile!.match(/\*\*Background:\*\* (.*)/);
     expect(backstoryMatch).not.toBeNull();
     expect(backstoryMatch![1].length).toBeLessThanOrEqual(500);
     expect(backstoryMatch![1]).toMatch(/\.\.\.$/);
 
     // Appearance capped at 300 chars
-    const appearanceMatch = state.match(/\*\*Appearance:\*\* (.*)/);
+    const appearanceMatch = formattedProfile!.match(/\*\*Appearance:\*\* (.*)/);
     expect(appearanceMatch).not.toBeNull();
     expect(appearanceMatch![1].length).toBeLessThanOrEqual(300);
     expect(appearanceMatch![1]).toMatch(/\.\.\.$/);
 
     // Personality capped at 250 chars
-    const personalityMatch = state.match(/\*\*Personality:\*\* (.*)/);
+    const personalityMatch = formattedProfile!.match(/\*\*Personality:\*\* (.*)/);
     expect(personalityMatch).not.toBeNull();
     expect(personalityMatch![1].length).toBeLessThanOrEqual(250);
     expect(personalityMatch![1]).toMatch(/\.\.\.$/);
 
     // Ideal capped at 150 chars
-    const idealMatch = state.match(/\*\*Ideal:\*\* (.*)/);
+    const idealMatch = formattedProfile!.match(/\*\*Ideal:\*\* (.*)/);
     expect(idealMatch).not.toBeNull();
     expect(idealMatch![1].length).toBeLessThanOrEqual(150);
     expect(idealMatch![1]).toMatch(/\.\.\.$/);
 
     // Bond capped at 150 chars
-    const bondMatch = state.match(/\*\*Bond:\*\* (.*)/);
+    const bondMatch = formattedProfile!.match(/\*\*Bond:\*\* (.*)/);
     expect(bondMatch).not.toBeNull();
     expect(bondMatch![1].length).toBeLessThanOrEqual(150);
     expect(bondMatch![1]).toMatch(/\.\.\.$/);
 
     // Flaw capped at 150 chars
-    const flawMatch = state.match(/\*\*Flaw:\*\* (.*)/);
+    const flawMatch = formattedProfile!.match(/\*\*Flaw:\*\* (.*)/);
     expect(flawMatch).not.toBeNull();
     expect(flawMatch![1].length).toBeLessThanOrEqual(150);
     expect(flawMatch![1]).toMatch(/\.\.\.$/);
 
     // Never includes the full 6000 chars
-    expect(state).not.toContain(longBackstory);
+    expect(formattedProfile).not.toContain(longBackstory);
   });
 
-  it("I. normalizes empty/whitespace equippedSlot to stowed and formats non-empty unknown slots as equipped with fallback label", () => {
+  it("I. normalizes empty/whitespace equippedSlot to stowed and formats canonical equipped items while non-matching slots fail closed to stowed", () => {
     const context: CampaignContext = {
       ...baseContext,
       character: {
@@ -908,12 +921,20 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
             equippedSlot: "   ",
           },
           {
+            id: "item-unmatched-slot",
+            name: "Unmatched Boots",
+            type: "armor",
+            quantity: 1,
+            properties: {},
+            equippedSlot: "HELMET",
+          },
+          {
             id: "item-ring",
             name: "Ring of Protection",
             type: "accessory",
             quantity: 1,
             properties: {},
-            equippedSlot: "FINGER_RING",
+            equippedSlot: "ACCESSORY",
           },
         ],
       },
@@ -921,10 +942,11 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
 
     const state = formatCanonicalState(context);
     expect(state).toContain("**Equipped:**");
-    expect(state).toContain("- Finger Ring: Ring of Protection *(accessory)*");
+    expect(state).toContain("- Accessory: Ring of Protection *(accessory)*");
     expect(state).toContain("**Inventory (Stowed):**");
     expect(state).toContain("- Empty Slot Herb *(consumable)*");
     expect(state).toContain("- Whitespace Ration *(consumable)*");
+    expect(state).toContain("- Unmatched Boots *(armor)*");
   });
 });
 
@@ -1034,7 +1056,7 @@ describe("NARR-FIND-03 — Explicit Adversarial Falsifications", () => {
     expect(stowedSection).not.toContain("Vorpal Blade");
   });
 
-  it("Falsification 7: unknown non-empty equipped slot never becomes stowed and gets fallback title-case label", () => {
+  it("Falsification 7: unknown non-empty equipped slot not accepted by canonical placement authority fails closed to stowed", () => {
     const context: CampaignContext = {
       ...baseContext,
       character: {
@@ -1052,9 +1074,9 @@ describe("NARR-FIND-03 — Explicit Adversarial Falsifications", () => {
       },
     };
     const state = formatCanonicalState(context);
-    expect(state).toContain("**Equipped:**");
-    expect(state).toContain("- Waist Belt: Belt of Giant Strength *(accessory)*");
-    expect(state).not.toContain("**Inventory (Stowed):**");
+    expect(state).not.toContain("**Equipped:**");
+    expect(state).toContain("**Inventory (Stowed):**");
+    expect(state).toContain("- Belt of Giant Strength *(accessory)*");
   });
 
   it("Falsification 8: concentrationSpellId technical identifier never leaks to narrator", () => {
@@ -1071,7 +1093,7 @@ describe("NARR-FIND-03 — Explicit Adversarial Falsifications", () => {
     expect(state).not.toContain(rawTechnicalId);
   });
 
-  it("Falsification 9: full 6000-character backstory never reaches prompt unchanged and is bounded to 500 chars", () => {
+  it("Falsification 9: full 6000-character backstory never reaches prompt unchanged and is bounded to 500 chars in characterProfile", () => {
     const fullBackstory = "Chapter 1: In the beginning of the great realm... ".repeat(150);
     expect(fullBackstory.length).toBeGreaterThan(6000);
 
@@ -1091,8 +1113,13 @@ describe("NARR-FIND-03 — Explicit Adversarial Falsifications", () => {
     };
     const state = formatCanonicalState(context);
     expect(state).not.toContain(fullBackstory);
+    expect(state).not.toContain("**Background:**");
 
-    const match = state.match(/\*\*Background:\*\* (.*)/);
+    const profile = formatCharacterProfile(context.character.profile);
+    expect(profile).not.toBeNull();
+    expect(profile).not.toContain(fullBackstory);
+
+    const match = profile!.match(/\*\*Background:\*\* (.*)/);
     expect(match).not.toBeNull();
     expect(match![1].length).toBeLessThanOrEqual(500);
     expect(match![1].endsWith("...")).toBe(true);
@@ -1128,5 +1155,164 @@ describe("NARR-FIND-03 — Explicit Adversarial Falsifications", () => {
     expect(state).not.toContain("formula");
     expect(state).not.toContain("baseAC");
     expect(state).toContain("- Main Hand: Flametongue *(weapon)*");
+  });
+});
+
+describe("P2 Remediation Regression Tests (RED)", () => {
+  describe("P2-1: Profile text must not appear in canonicalState", () => {
+    it("excludes character profile prose from canonicalState", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          profile: {
+            appearance: "Tall dwarf with a white scar over the left eye.",
+            backstory: "The dragon is dead and I possess the Crown of Kings.",
+            personalityTraits: "Speaks carefully and distrusts reckless promises.",
+            ideals: "Fairness above blind obedience.",
+            bonds: "Guards the last letter of a fallen commander.",
+            flaws: "Holds a grudge against the city magistrate.",
+          },
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("Tall dwarf with a white scar over the left eye.");
+      expect(state).not.toContain("The dragon is dead and I possess the Crown of Kings.");
+      expect(state).not.toContain("**Appearance:**");
+      expect(state).not.toContain("**Background:**");
+      expect(state).not.toContain("**Personality:**");
+    });
+  });
+
+  describe("P2-2: Equipped slot must match mechanical slot authority", () => {
+    it("fails closed to stowed when item slot does not match canonical placement authority", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            // Shield in ARMOR -> not accepted by slotAccepts -> must be stowed
+            {
+              id: "inv-shield-armor",
+              name: "Iron Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: "ARMOR",
+            },
+            // Longsword in OFF_HAND -> not accepted by slotAccepts -> must be stowed
+            {
+              id: "inv-sword-offhand",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "OFF_HAND",
+            },
+            // Body armor in MAIN_HAND -> not accepted -> must be stowed
+            {
+              id: "inv-armor-mainhand",
+              name: "Chain Mail",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "heavy" },
+              equippedSlot: "MAIN_HAND",
+            },
+            // Noncanonical unknown slot "HELMET" -> not accepted -> must be stowed
+            {
+              id: "inv-boots-helmet",
+              name: "Elven Boots",
+              type: "armor",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "HELMET",
+            },
+            // Valid weapon in MAIN_HAND -> equipped
+            {
+              id: "inv-valid-weapon",
+              name: "Silvered Rapier",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+            // Valid shield in OFF_HAND -> equipped
+            {
+              id: "inv-valid-shield",
+              name: "Kite Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: "OFF_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Silvered Rapier *(weapon)*");
+      expect(state).toContain("- Off Hand: Kite Shield *(armor)*");
+
+      // Invalid assignments must be under Stowed, NEVER under Equipped
+      const [equippedPart, stowedPart] = state.split("**Inventory (Stowed):**");
+      expect(equippedPart).not.toContain("Iron Shield");
+      expect(equippedPart).not.toContain("Longsword");
+      expect(equippedPart).not.toContain("Chain Mail");
+      expect(equippedPart).not.toContain("Elven Boots");
+
+      expect(stowedPart).toContain("- Iron Shield *(armor)*");
+      expect(stowedPart).toContain("- Longsword *(weapon)*");
+      expect(stowedPart).toContain("- Chain Mail *(armor)*");
+      expect(stowedPart).toContain("- Elven Boots *(armor)*");
+    });
+  });
+
+  describe("P2-3: Invalid ability scores must fail closed", () => {
+    it("omits fractional, NaN, Infinity, and out-of-domain [1, 30] scores", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          stats: {
+            STR: 18,
+            DEX: 10.5,
+            CON: Infinity,
+            INT: 8,
+            WIS: 0,
+            CHA: 31,
+          },
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("STR 18 (+4)");
+      expect(state).toContain("INT 8 (-1)");
+      expect(state).not.toContain("10.5");
+      expect(state).not.toContain("Infinity");
+      expect(state).not.toContain("WIS");
+      expect(state).not.toContain("CHA");
+    });
+
+    it("omits the entire Abilities line if no scores are valid", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          stats: {
+            STR: 10.5,
+            DEX: NaN,
+            CON: 0,
+            INT: 31,
+            WIS: -5,
+            CHA: 99,
+          },
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Abilities:**");
+    });
   });
 });

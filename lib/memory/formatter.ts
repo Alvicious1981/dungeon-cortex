@@ -23,6 +23,8 @@ import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
 import { abilityModifier } from "@/lib/rules/dice";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
+import type { CharacterNarrativeProfile } from "@/lib/character-sheet/contracts";
+import { slotAccepts } from "@/lib/rules/equipment-slot";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,9 +126,39 @@ function truncateProfileField(value: string | null | undefined, max: number): st
 }
 
 /**
+ * Formats a character's narrative profile for the lower-authority `characterProfile` tier.
+ * Deterministically bounded and truncated with an ellipsis.
+ * Returns null if the profile is null/undefined or contains no non-empty fields.
+ */
+export function formatCharacterProfile(
+  profile: CharacterNarrativeProfile | null | undefined
+): string | null {
+  if (!profile) return null;
+
+  const lines: string[] = [];
+  const appearance = truncateProfileField(profile.appearance, 300);
+  const backstory = truncateProfileField(profile.backstory, 500);
+  const personality = truncateProfileField(profile.personalityTraits, 250);
+  const ideal = truncateProfileField(profile.ideals, 150);
+  const bond = truncateProfileField(profile.bonds, 150);
+  const flaw = truncateProfileField(profile.flaws, 150);
+
+  if (appearance) lines.push(`**Appearance:** ${appearance}`);
+  if (backstory) lines.push(`**Background:** ${backstory}`);
+  if (personality) lines.push(`**Personality:** ${personality}`);
+  if (ideal) lines.push(`**Ideal:** ${ideal}`);
+  if (bond) lines.push(`**Bond:** ${bond}`);
+  if (flaw) lines.push(`**Flaw:** ${flaw}`);
+
+  if (lines.length === 0) return null;
+  return lines.join("\n");
+}
+
+/**
  * Formats character ability scores into a compact capability line:
  * `**Abilities:** STR 18 (+4) | DEX 10 (+0) | CON 14 (+2) | INT 8 (-1) | WIS 12 (+1) | CHA 10 (+0)`
  * Safely ignores missing/malformed ability scores; returns null if no scores are valid.
+ * Fails closed: accepts only integer scores between 1 and 30 inclusive.
  */
 function formatAbilities(rawStats: unknown): string | null {
   if (!rawStats || typeof rawStats !== "object" || Array.isArray(rawStats)) {
@@ -137,7 +169,12 @@ function formatAbilities(rawStats: unknown): string | null {
 
   for (const ability of CANONICAL_ABILITIES) {
     const score = statsRecord[ability];
-    if (typeof score === "number" && Number.isFinite(score)) {
+    if (
+      typeof score === "number" &&
+      Number.isInteger(score) &&
+      score >= 1 &&
+      score <= 30
+    ) {
       const mod = abilityModifier(score);
       const sign = mod >= 0 ? `+${mod}` : `${mod}`;
       parts.push(`${ability} ${score} (${sign})`);
@@ -155,24 +192,6 @@ function formatCharacter(character: CampaignContext["character"]): string {
   lines.push(
     `**${character.name}** — ${character.race} ${character.class}, Level ${character.level}`
   );
-
-  // Character Profile (Phase 3)
-  if (character.profile) {
-    const p = character.profile;
-    const appearance = truncateProfileField(p.appearance, 300);
-    const backstory = truncateProfileField(p.backstory, 500);
-    const personality = truncateProfileField(p.personalityTraits, 250);
-    const ideal = truncateProfileField(p.ideals, 150);
-    const bond = truncateProfileField(p.bonds, 150);
-    const flaw = truncateProfileField(p.flaws, 150);
-
-    if (appearance) lines.push(`**Appearance:** ${appearance}`);
-    if (backstory) lines.push(`**Background:** ${backstory}`);
-    if (personality) lines.push(`**Personality:** ${personality}`);
-    if (ideal) lines.push(`**Ideal:** ${ideal}`);
-    if (bond) lines.push(`**Bond:** ${bond}`);
-    if (flaw) lines.push(`**Flaw:** ${flaw}`);
-  }
 
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
 
@@ -246,9 +265,9 @@ function formatCharacter(character: CampaignContext["character"]): string {
     const stowedItems: typeof character.inventory = [];
 
     for (const item of character.inventory) {
-      const equippedSlot =
+      const trimmedSlot =
         typeof item.equippedSlot === "string" ? item.equippedSlot.trim() : "";
-      if (equippedSlot.length > 0) {
+      if (trimmedSlot.length > 0 && slotAccepts(item, trimmedSlot)) {
         equippedItems.push(item);
       } else {
         stowedItems.push(item);
@@ -259,7 +278,7 @@ function formatCharacter(character: CampaignContext["character"]): string {
       lines.push("**Equipped:**");
       for (const item of equippedItems) {
         const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
-        const slotLabel = formatSlotLabel(item.equippedSlot!);
+        const slotLabel = formatSlotLabel(item.equippedSlot!.trim());
         lines.push(`- ${slotLabel}: ${item.name}${qty} *(${item.type})*`);
       }
     }

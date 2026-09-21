@@ -19,6 +19,7 @@ vi.mock("@/lib/memory/context", () => ({ buildCampaignContext: vi.fn() }));
 vi.mock("@/lib/memory/formatter", () => ({
   formatIronLaws: vi.fn().mockReturnValue("## Iron Laws"),
   formatCanonicalState: vi.fn().mockReturnValue("# Current Game State"),
+  formatCharacterProfile: vi.fn().mockReturnValue(null),
 }));
 vi.mock("@/lib/memory/search", () => ({ searchMemories: vi.fn() }));
 
