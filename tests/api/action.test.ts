@@ -238,6 +238,9 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     const resolvedWeaponName = () =>
       (computeConsequences as any).mock.calls.at(-1)?.[0]?.weapon;
 
+    const resolvedDamageType = () =>
+      (computeConsequences as any).mock.calls.at(-1)?.[0]?.damageType;
+
     it("uses the first non-depleted main-hand weapon for a macro Attack", async () => {
       const res = await macroAttackWith([
         { id: "broken-bow", name: "Broken Bow", type: "weapon", quantity: 0, equippedSlot: "MAIN_HAND", properties: {} },
@@ -285,12 +288,36 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     });
 
     it("resolves a punch unarmed with no weapons", async () => {
-      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], []));
+      const resilientHostile = { ...hostile, hp: 100, maxHp: 100 };
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resilientHostile], []));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, resilientHostile]);
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.45);
 
-      const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+      try {
+        const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+        expect(res.status).toBe(200);
+        expect(resolvedWeaponName()).toBe("Unarmed");
+        expect(resolvedDamageType()).toBe("bludgeoning");
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
+    it("keeps the slashing fallback for an equipped weapon with no resolved damage type", async () => {
+      const inventory = [
+        { id: "unknown-weapon", name: "Unknown Weapon", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
+      ];
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], inventory));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+      (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+      (prisma.srdItem.findMany as any).mockResolvedValue([]);
+
+      const res = await attackWith({ targetName: "Goblin" });
 
       expect(res.status).toBe(200);
-      expect(resolvedWeaponName()).toBe("Unarmed");
+      expect(resolvedWeaponName()).toBe("Unknown Weapon");
+      expect(resolvedDamageType()).toBe("slashing");
     });
 
     it("keeps macro Attacks unarmed when no usable main-hand weapon exists", async () => {

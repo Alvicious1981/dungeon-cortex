@@ -2037,7 +2037,7 @@ async function resolveAction(
         stats: charStats,
         characterClass: context.character.class,
         level: context.character.level,
-        fallbackDamageType: "slashing",
+        fallbackDamageType: foundWeapon ? "slashing" : "bludgeoning",
       });
 
       const categoryLog = foundWeapon
