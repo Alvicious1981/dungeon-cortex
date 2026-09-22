@@ -107,7 +107,7 @@ export function validateNarrativeText(
   // 2. Reject prompt-policy disclosure or boundary markup in model output.
   const promptLeakRegex = /\b(?:system\s+prompt|developer\s+(?:message|instructions?)|hidden\s+(?:prompt|instructions?|context)|(?:ignore|disregard|reveal|quote|repeat)\s+(?:the\s+)?previous\s+instructions?|mensaje\s+del\s+sistema|prompt\s+del\s+sistema|contexto\s+oculto|(?:ignora|descarta|revela|cita|repite)\s+las?\s+instrucciones\s+(?:previas|anteriores)|instrucciones\s+(?:previas|anteriores)\s+(?:del\s+sistema|del\s+desarrollador|ocultas)|instrucciones\s+del\s+desarrollador)\b/i;
   const boundaryMarkupRegex = /<\/?(?:campaign_state|untrusted_context|player_action|resolved_facts|event_logs)\b/i;
-  const jsonBoundaryRegex = /\b(?:GAME_DATA|canonicalState|recentDialogue|playerAction|backendResolvedFacts)\b/i;
+  const jsonBoundaryRegex = /\b(?:GAME_DATA|canonicalState|characterProfile|recentDialogue|playerAction|backendResolvedFacts)\b/i;
   const promptLeakMatch = text.match(promptLeakRegex)
     ?? text.match(boundaryMarkupRegex)
     ?? text.match(jsonBoundaryRegex);

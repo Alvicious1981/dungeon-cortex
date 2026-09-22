@@ -347,8 +347,14 @@ describe("selectBodyArmor", () => {
 function inSlot(
   slot: string,
   properties: Record<string, unknown>,
+  quantity?: number,
 ): ArmorInventoryRow {
-  return { type: "armor", equippedSlot: slot, properties };
+  return {
+    type: "armor",
+    equippedSlot: slot,
+    properties,
+    ...(quantity === undefined ? {} : { quantity }),
+  };
 }
 
 const CUIRASS = { baseAC: 14, armorClass: "medium", addDexModifier: true, maxDexBonus: 2 };
@@ -392,6 +398,15 @@ describe("selectShield", () => {
   it("never returns body armour", () => {
     expect(selectShield([inSlot("OFF_HAND", CUIRASS)])).toBeNull();
   });
+
+  it("ignores depleted and malformed quantities while preserving reduced legacy rows", () => {
+    expect(selectShield([inSlot("OFF_HAND", SHIELD)])?.baseAC).toBe(2);
+    expect(selectShield([inSlot("OFF_HAND", SHIELD, 1)])?.baseAC).toBe(2);
+
+    for (const quantity of [0, -1, 1.5, NaN, Infinity]) {
+      expect(selectShield([inSlot("OFF_HAND", SHIELD, quantity)])).toBeNull();
+    }
+  });
 });
 
 describe("armorClassFor — additive terms", () => {
@@ -409,6 +424,25 @@ describe("armorClassFor — additive terms", () => {
     expect(
       armorClassFor({ inventory: [inSlot("OFF_HAND", SHIELD)], dexModifier: 1 }).armorClass,
     ).toBe(13);
+  });
+
+  it("does not grant a depleted shield's AC, but grants a usable shield's AC", () => {
+    expect(
+      armorClassFor({ inventory: [inSlot("OFF_HAND", SHIELD, 0)], dexModifier: 1 }).armorClass,
+    ).toBe(11);
+    expect(
+      armorClassFor({ inventory: [inSlot("OFF_HAND", SHIELD, 1)], dexModifier: 1 }).armorClass,
+    ).toBe(13);
+  });
+
+  it("does not select depleted or malformed body armour", () => {
+    expect(selectBodyArmor([inSlot("ARMOR", CUIRASS, 1)])?.baseAC).toBe(14);
+
+    for (const quantity of [0, -1, 1.5, NaN, Infinity]) {
+      const inventory = [inSlot("ARMOR", CUIRASS, quantity)];
+      expect(selectBodyArmor(inventory)).toBeNull();
+      expect(armorClassFor({ inventory, dexModifier: 2 }).armorClass).toBe(12);
+    }
   });
 
   it("sums ac_bonus across every equipped slot", () => {
@@ -442,6 +476,24 @@ describe("armorClassFor — additive terms", () => {
       armorClassFor({ inventory: [inSlot("ACCESSORY", { ac_bonus: 1 })], dexModifier: 2 })
         .armorClass,
     ).toBe(13);
+  });
+
+  it("does not grant additive AC from depleted or malformed quantities", () => {
+    expect(
+      armorClassFor({
+        inventory: [inSlot("ACCESSORY", { ac_bonus: 2 }, 1)],
+        dexModifier: 0,
+      }).armorClass,
+    ).toBe(12);
+
+    for (const quantity of [0, -1, 1.5, NaN, Infinity]) {
+      expect(
+        armorClassFor({
+          inventory: [inSlot("ACCESSORY", { ac_bonus: 2 }, quantity)],
+          dexModifier: 0,
+        }).armorClass,
+      ).toBe(10);
+    }
   });
 
   it("still reports armored false when only a bonus applies", () => {

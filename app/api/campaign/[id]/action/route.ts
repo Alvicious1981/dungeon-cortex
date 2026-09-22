@@ -116,6 +116,16 @@ interface RouteContext {
 
 const encoder = new TextEncoder();
 
+function findUsableMainHandWeapon(inventory: ContextCharacter["inventory"]) {
+  return inventory.find(
+    (item) =>
+      item.type === "weapon" &&
+      Number.isInteger(item.quantity) &&
+      item.quantity > 0 &&
+      item.equippedSlot === "MAIN_HAND",
+  );
+}
+
 function sseFrame(frame: ActionStreamFrame): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
 }
@@ -739,9 +749,7 @@ async function resolveAction(
         targets = [autoTarget];
       }
 
-      const foundWeapon = context.character.inventory.find(
-        (i) => i.type === "weapon" && i.equippedSlot === "MAIN_HAND"
-      );
+      const foundWeapon = findUsableMainHandWeapon(context.character.inventory);
 
       const charStats = context.character.stats as Record<string, number>;
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
@@ -2017,27 +2025,24 @@ async function resolveAction(
         );
       }
 
-      const foundWeapon = context.character.inventory.find(item => item.type === "weapon");
-      if (!foundWeapon) {
-        return NextResponse.json({ error: "No weapon found." }, { status: 400 });
-      }
-
+      const foundWeapon = findUsableMainHandWeapon(context.character.inventory);
       const charStats = context.character.stats as Record<string, number>;
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
       const attack = await resolveWeaponAttack({
-        weapon: { name: foundWeapon.name, properties: foundWeapon.properties },
+        weapon: foundWeapon
+          ? { name: foundWeapon.name, properties: foundWeapon.properties }
+          : null,
         stats: charStats,
         characterClass: context.character.class,
         level: context.character.level,
-        fallbackDamageType: "slashing",
+        fallbackDamageType: foundWeapon ? "slashing" : "bludgeoning",
       });
 
-      const categoryLog = unresolvedCategoryLog({
-        weaponName: foundWeapon.name,
-        attack,
-      });
+      const categoryLog = foundWeapon
+        ? unresolvedCategoryLog({ weaponName: foundWeapon.name, attack })
+        : null;
 
       try {
         const committed = await prisma.$transaction(async (tx) => {
@@ -2064,7 +2069,7 @@ async function resolveAction(
               characterClass: context.character.class,
             }).applies,
             targetCombatants: targets,
-            weaponName: foundWeapon.name,
+            weaponName: foundWeapon?.name || "Unarmed",
             weaponDice: attack.weaponDice,
             damageType: attack.damageType as DamageType,
             attackModifier: attack.attackModifier,

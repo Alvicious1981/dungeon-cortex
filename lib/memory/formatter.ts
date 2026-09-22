@@ -21,6 +21,10 @@ import type { CharacterClass } from "@/lib/rules/proficiency";
 import { type NpcAttitude } from "@/lib/rules/social";
 import { attitudeFor } from "@/lib/rules/social-logic";
 import { TURNS_PER_HOUR } from "@/lib/rules/exploration";
+import { abilityModifier } from "@/lib/rules/dice";
+import { parseSkillProficiencies } from "@/lib/rules/class-skills";
+import type { CharacterNarrativeProfile } from "@/lib/character-sheet/contracts";
+import { slotAccepts } from "@/lib/rules/equipment-slot";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,6 +88,103 @@ export function formatIronLaws(): string {
   ].join("\n");
 }
 
+const CANONICAL_ABILITIES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"] as const;
+
+const ESTABLISHED_SLOT_LABELS: Record<string, string> = {
+  MAIN_HAND: "Main Hand",
+  OFF_HAND: "Off Hand",
+  ARMOR: "Armor",
+  ACCESSORY: "Accessory",
+};
+
+/**
+ * Maps an equipped slot string to a human-readable label.
+ * Established slots are mapped directly; unknown slots are title-cased as a fallback.
+ */
+function formatSlotLabel(rawSlot: string): string {
+  const trimmed = rawSlot.trim();
+  if (ESTABLISHED_SLOT_LABELS[trimmed]) {
+    return ESTABLISHED_SLOT_LABELS[trimmed];
+  }
+  return trimmed
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Truncates a character profile field to `max` characters, appending "..." if cut.
+ * Returns null if the value is empty, whitespace-only, or missing.
+ */
+function truncateProfileField(value: string | null | undefined, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
+}
+
+/**
+ * Formats a character's narrative profile for the lower-authority `characterProfile` tier.
+ * Deterministically bounded and truncated with an ellipsis.
+ * Returns null if the profile is null/undefined or contains no non-empty fields.
+ */
+export function formatCharacterProfile(
+  profile: CharacterNarrativeProfile | null | undefined
+): string | null {
+  if (!profile) return null;
+
+  const lines: string[] = [];
+  const appearance = truncateProfileField(profile.appearance, 300);
+  const backstory = truncateProfileField(profile.backstory, 500);
+  const personality = truncateProfileField(profile.personalityTraits, 250);
+  const ideal = truncateProfileField(profile.ideals, 150);
+  const bond = truncateProfileField(profile.bonds, 150);
+  const flaw = truncateProfileField(profile.flaws, 150);
+
+  if (appearance) lines.push(`**Appearance:** ${appearance}`);
+  if (backstory) lines.push(`**Background:** ${backstory}`);
+  if (personality) lines.push(`**Personality:** ${personality}`);
+  if (ideal) lines.push(`**Ideal:** ${ideal}`);
+  if (bond) lines.push(`**Bond:** ${bond}`);
+  if (flaw) lines.push(`**Flaw:** ${flaw}`);
+
+  if (lines.length === 0) return null;
+  return lines.join("\n");
+}
+
+/**
+ * Formats character ability scores into a compact capability line:
+ * `**Abilities:** STR 18 (+4) | DEX 10 (+0) | CON 14 (+2) | INT 8 (-1) | WIS 12 (+1) | CHA 10 (+0)`
+ * Safely ignores missing/malformed ability scores; returns null if no scores are valid.
+ * Fails closed: accepts only integer scores between 1 and 30 inclusive.
+ */
+function formatAbilities(rawStats: unknown): string | null {
+  if (!rawStats || typeof rawStats !== "object" || Array.isArray(rawStats)) {
+    return null;
+  }
+  const statsRecord = rawStats as Record<string, unknown>;
+  const parts: string[] = [];
+
+  for (const ability of CANONICAL_ABILITIES) {
+    const score = statsRecord[ability];
+    if (
+      typeof score === "number" &&
+      Number.isInteger(score) &&
+      score >= 1 &&
+      score <= 30
+    ) {
+      const mod = abilityModifier(score);
+      const sign = mod >= 0 ? `+${mod}` : `${mod}`;
+      parts.push(`${ability} ${score} (${sign})`);
+    }
+  }
+
+  if (parts.length === 0) return null;
+  return `**Abilities:** ${parts.join(" | ")}`;
+}
+
 function formatCharacter(character: CampaignContext["character"]): string {
   const lines: string[] = [];
 
@@ -91,7 +192,18 @@ function formatCharacter(character: CampaignContext["character"]): string {
   lines.push(
     `**${character.name}** — ${character.race} ${character.class}, Level ${character.level}`
   );
+
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
+
+  // Exhaustion (Phase 6) — Expose only backend-supported mechanical semantics (no unsupported tiers)
+  if (typeof character.exhaustionLevel === "number" && character.exhaustionLevel >= 1) {
+    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
+  }
+
+  // Concentration (Phase 7) — Raw truthiness mirrors backend presence
+  if (character.concentrationSpellId) {
+    lines.push("**Concentration:** Active");
+  }
 
   // XP progress. `character.level` is the last MECHANICALLY APPLIED level;
   // `targetLevel` is what the XP already supports. When they differ the
@@ -120,6 +232,18 @@ function formatCharacter(character: CampaignContext["character"]): string {
     `**Hit Dice:** ${character.hitDiceRemaining}/${character.hitDiceTotal} d${hitDieSize}`
   );
 
+  // Abilities (Phase 4)
+  const abilitiesLine = formatAbilities(character.stats);
+  if (abilitiesLine) {
+    lines.push(abilitiesLine);
+  }
+
+  // Skill Proficiencies (Phase 5)
+  const skills = parseSkillProficiencies(character.skillProficiencies);
+  if (skills.length > 0) {
+    lines.push(`**Skill Proficiencies:** ${skills.join(", ")}`);
+  }
+
   // Spell slots — only shown for characters with spellcasting ability
   const slots = character.spellSlots;
   if (isSpellSlots(slots)) {
@@ -130,14 +254,89 @@ function formatCharacter(character: CampaignContext["character"]): string {
     lines.push(`**Spell Slots:** ${slotSummary}`);
   }
 
-  // Inventory
-  if (character.inventory.length === 0) {
+  // Inventory (Phase 8) — Equipped vs Unconfirmed vs Stowed
+  // Rows with zero or negative quantities represent depleted/invalid items and are omitted from projection.
+  const activeInventory = character.inventory.filter(
+    (item) => typeof item.quantity !== "number" || item.quantity > 0
+  );
+
+  if (activeInventory.length === 0) {
     lines.push("**Inventory:** (empty)");
   } else {
-    lines.push("**Inventory:**");
-    for (const item of character.inventory) {
-      const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
-      lines.push(`- ${item.name}${qty} *(${item.type})*`);
+    // 1. Group valid equipment candidates by exact canonical slot.
+    const slotCandidates = new Map<string, typeof character.inventory>();
+    for (const item of activeInventory) {
+      const rawSlot = item.equippedSlot;
+      if (
+        typeof rawSlot === "string" &&
+        rawSlot.length > 0 &&
+        slotAccepts(item, rawSlot)
+      ) {
+        const list = slotCandidates.get(rawSlot);
+        if (list) {
+          list.push(item);
+        } else {
+          slotCandidates.set(rawSlot, [item]);
+        }
+      }
+    }
+
+    const equippedItems: Array<{ slot: string; item: (typeof character.inventory)[number] }> = [];
+    const unconfirmedItems: typeof character.inventory = [];
+    const stowedItems: typeof character.inventory = [];
+
+    for (const item of activeInventory) {
+      const rawSlot = item.equippedSlot;
+      const isCandidate =
+        typeof rawSlot === "string" &&
+        rawSlot.length > 0 &&
+        slotAccepts(item, rawSlot);
+
+      if (!isCandidate) {
+        stowedItems.push(item);
+        continue;
+      }
+
+      const candidates = slotCandidates.get(rawSlot!)!;
+      if (candidates.length === 1) {
+        // Slot is uniquely occupied: exactly 1 unit is equipped.
+        equippedItems.push({ slot: rawSlot!, item });
+        // Any remaining quantity (quantity - 1) is stowed.
+        if (item.quantity > 1) {
+          stowedItems.push({
+            ...item,
+            quantity: item.quantity - 1,
+          });
+        }
+      } else {
+        // Ambiguous duplicate occupants of the same slot: fail closed.
+        // Published under unconfirmed equipment status; preserves full owned quantity.
+        unconfirmedItems.push(item);
+      }
+    }
+
+    if (equippedItems.length > 0) {
+      lines.push("**Equipped:**");
+      for (const { slot, item } of equippedItems) {
+        const slotLabel = formatSlotLabel(slot);
+        lines.push(`- ${slotLabel}: ${item.name} *(${item.type})*`);
+      }
+    }
+
+    if (unconfirmedItems.length > 0) {
+      lines.push("**Inventory (Equipment Status Unconfirmed):**");
+      for (const item of unconfirmedItems) {
+        const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
+        lines.push(`- ${item.name}${qty} *(${item.type})*`);
+      }
+    }
+
+    if (stowedItems.length > 0) {
+      lines.push("**Inventory (Stowed):**");
+      for (const item of stowedItems) {
+        const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
+        lines.push(`- ${item.name}${qty} *(${item.type})*`);
+      }
     }
   }
 
@@ -416,9 +615,9 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   // report it as a plain fact, identically at every value.
   lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
 
-  // Exhaustion
-  if (hud.exhaustionLevel > 0) {
-    lines.push(`**Exhaustion:** Level ${hud.exhaustionLevel}/6 ⚠️`);
+  // Exhaustion — Expose only backend-supported mechanical semantics (no unsupported tiers)
+  if (hud.exhaustionLevel >= 1) {
+    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
   }
 
   // Light source

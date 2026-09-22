@@ -51,6 +51,7 @@ const CHARACTER = {
   hitDiceRemaining: 3,
   exhaustionLevel: 0,
   inventory: [],
+  profile: null,
 };
 
 const TRAITS_GRETA = {
