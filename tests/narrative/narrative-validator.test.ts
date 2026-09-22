@@ -255,6 +255,7 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
   it.each([
     'GAME_DATA',
     'canonicalState',
+    'characterProfile',
     'recentDialogue',
     'playerAction',
     'backendResolvedFacts',
@@ -263,6 +264,23 @@ describe('Narrative Validator Tests (Fase 5A/5B.1)', () => {
 
     expect(result.ok).toBe(false);
     expect(result.issues.some((issue) => issue.code === 'prompt_disclosure')).toBe(true);
+  });
+
+  it('rejects characterProfile boundary disclosure while allowing normal descriptive prose', () => {
+    const disclosedTexts = [
+      'The characterProfile field says he is a veteran.',
+      'According to characterProfile, she has a scar.',
+    ];
+
+    for (const text of disclosedTexts) {
+      const result = validateNarrativeText(text);
+      expect(result.ok).toBe(false);
+      expect(result.issues.some((issue) => issue.code === 'prompt_disclosure')).toBe(true);
+    }
+
+    const allowedText = 'The scar crosses his left cheek.';
+    const allowedResult = validateNarrativeText(allowedText);
+    expect(allowedResult.ok).toBe(true);
   });
 
   describe('Social outcome contradiction validation (PR #227)', () => {

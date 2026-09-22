@@ -689,12 +689,14 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
       ...baseContext,
       character: {
         ...baseCharacter,
-        skillProficiencies: ["NonExistentSkill", 999, { foo: "bar" }],
+        skillProficiencies: ["NonExistentSkill", "constructor", "toString", 999, { foo: "bar" }],
       },
     };
     const malformedState = formatCanonicalState(malformedContext);
     expect(malformedState).not.toContain("Skill Proficiencies");
     expect(malformedState).not.toContain("NonExistentSkill");
+    expect(malformedState).not.toContain("constructor");
+    expect(malformedState).not.toContain("toString");
     expect(malformedState).not.toContain("999");
   });
 
@@ -1313,6 +1315,141 @@ describe("P2 Remediation Regression Tests (RED)", () => {
 
       const state = formatCanonicalState(context);
       expect(state).not.toContain("**Abilities:**");
+    });
+  });
+
+  describe("P2-6: Equipment slot authority must reject malformed/padded slot strings without normalization", () => {
+    it("mirrors backend equipment authority: only exact canonical slots are equipped, padded slots are stowed", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            // Longsword + "MAIN_HAND" -> equipped
+            {
+              id: "item-sword-valid",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+            // Longsword + " MAIN_HAND " -> stowed
+            {
+              id: "item-sword-padded-both",
+              name: "Padded Longsword A",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: " MAIN_HAND ",
+            },
+            // Longsword + "MAIN_HAND " -> stowed
+            {
+              id: "item-sword-padded-trailing",
+              name: "Padded Longsword B",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND ",
+            },
+            // Shield + "OFF_HAND" -> equipped
+            {
+              id: "item-shield-valid",
+              name: "Steel Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: "OFF_HAND",
+            },
+            // Shield + " OFF_HAND " -> stowed
+            {
+              id: "item-shield-padded",
+              name: "Padded Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: " OFF_HAND ",
+            },
+            // Longsword + " MAIN_HAND" -> stowed
+            {
+              id: "item-sword-padded-leading",
+              name: "Padded Longsword C",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: " MAIN_HAND",
+            },
+            // Weapon + "" -> stowed
+            {
+              id: "item-dagger-empty",
+              name: "Empty Slot Dagger",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "",
+            },
+            // Weapon + "   " -> stowed
+            {
+              id: "item-mace-whitespace",
+              name: "Whitespace Slot Mace",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "   ",
+            },
+            // Weapon + null -> stowed
+            {
+              id: "item-club-null",
+              name: "Null Slot Club",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: null,
+            },
+            // Shield + "ARMOR" -> stowed
+            {
+              id: "item-shield-wrong",
+              name: "Misplaced Shield",
+              type: "armor",
+              properties: { armorClass: "shield" },
+              quantity: 1,
+              equippedSlot: "ARMOR",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+      expect(state).toContain("- Off Hand: Steel Shield *(armor)*");
+
+      const [equippedPart, stowedPart] = state.split("**Inventory (Stowed):**");
+      expect(equippedPart).toBeDefined();
+      expect(stowedPart).toBeDefined();
+
+      // Only valid exact slots in equippedPart
+      expect(equippedPart).toContain("Longsword");
+      expect(equippedPart).toContain("Steel Shield");
+      expect(equippedPart).not.toContain("Padded Longsword A");
+      expect(equippedPart).not.toContain("Padded Longsword B");
+      expect(equippedPart).not.toContain("Padded Longsword C");
+      expect(equippedPart).not.toContain("Padded Shield");
+      expect(equippedPart).not.toContain("Misplaced Shield");
+      expect(equippedPart).not.toContain("Empty Slot Dagger");
+      expect(equippedPart).not.toContain("Whitespace Slot Mace");
+      expect(equippedPart).not.toContain("Null Slot Club");
+
+      // Malformed/padded/illegal slots must be in stowedPart
+      expect(stowedPart).toContain("- Padded Longsword A *(weapon)*");
+      expect(stowedPart).toContain("- Padded Longsword B *(weapon)*");
+      expect(stowedPart).toContain("- Padded Longsword C *(weapon)*");
+      expect(stowedPart).toContain("- Padded Shield *(armor)*");
+      expect(stowedPart).toContain("- Misplaced Shield *(armor)*");
+      expect(stowedPart).toContain("- Empty Slot Dagger *(weapon)*");
+      expect(stowedPart).toContain("- Whitespace Slot Mace *(weapon)*");
+      expect(stowedPart).toContain("- Null Slot Club *(weapon)*");
     });
   });
 });

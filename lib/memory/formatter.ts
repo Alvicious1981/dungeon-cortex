@@ -265,9 +265,12 @@ function formatCharacter(character: CampaignContext["character"]): string {
     const stowedItems: typeof character.inventory = [];
 
     for (const item of character.inventory) {
-      const trimmedSlot =
-        typeof item.equippedSlot === "string" ? item.equippedSlot.trim() : "";
-      if (trimmedSlot.length > 0 && slotAccepts(item, trimmedSlot)) {
+      const rawSlot = item.equippedSlot;
+      if (
+        typeof rawSlot === "string" &&
+        rawSlot.length > 0 &&
+        slotAccepts(item, rawSlot)
+      ) {
         equippedItems.push(item);
       } else {
         stowedItems.push(item);
@@ -278,7 +281,7 @@ function formatCharacter(character: CampaignContext["character"]): string {
       lines.push("**Equipped:**");
       for (const item of equippedItems) {
         const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
-        const slotLabel = formatSlotLabel(item.equippedSlot!.trim());
+        const slotLabel = formatSlotLabel(item.equippedSlot!);
         lines.push(`- ${slotLabel}: ${item.name}${qty} *(${item.type})*`);
       }
     }
