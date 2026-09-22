@@ -116,6 +116,16 @@ interface RouteContext {
 
 const encoder = new TextEncoder();
 
+function findUsableMainHandWeapon(inventory: ContextCharacter["inventory"]) {
+  return inventory.find(
+    (item) =>
+      item.type === "weapon" &&
+      Number.isInteger(item.quantity) &&
+      item.quantity > 0 &&
+      item.equippedSlot === "MAIN_HAND",
+  );
+}
+
 function sseFrame(frame: ActionStreamFrame): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(frame)}\n\n`);
 }
@@ -739,9 +749,7 @@ async function resolveAction(
         targets = [autoTarget];
       }
 
-      const foundWeapon = context.character.inventory.find(
-        (i) => i.type === "weapon" && i.equippedSlot === "MAIN_HAND"
-      );
+      const foundWeapon = findUsableMainHandWeapon(context.character.inventory);
 
       const charStats = context.character.stats as Record<string, number>;
       const playerCombatant = activeEncounter.combatants.find(c => c.isPlayer);
@@ -2017,7 +2025,7 @@ async function resolveAction(
         );
       }
 
-      const foundWeapon = context.character.inventory.find(item => item.type === "weapon");
+      const foundWeapon = findUsableMainHandWeapon(context.character.inventory);
       if (!foundWeapon) {
         return NextResponse.json({ error: "No weapon found." }, { status: 400 });
       }
