@@ -195,16 +195,13 @@ function formatCharacter(character: CampaignContext["character"]): string {
 
   lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
 
-  // Exhaustion (Phase 6)
-  if (typeof character.exhaustionLevel === "number" && character.exhaustionLevel > 0) {
-    lines.push(`**Exhaustion:** Level ${character.exhaustionLevel}`);
+  // Exhaustion (Phase 6) — Expose only backend-supported mechanical semantics (no unsupported tiers)
+  if (typeof character.exhaustionLevel === "number" && character.exhaustionLevel >= 1) {
+    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
   }
 
-  // Concentration (Phase 7) — Requires non-empty string ID
-  if (
-    typeof character.concentrationSpellId === "string" &&
-    character.concentrationSpellId.trim().length > 0
-  ) {
+  // Concentration (Phase 7) — Raw truthiness mirrors backend presence
+  if (character.concentrationSpellId) {
     lines.push("**Concentration:** Active");
   }
 
@@ -257,32 +254,80 @@ function formatCharacter(character: CampaignContext["character"]): string {
     lines.push(`**Spell Slots:** ${slotSummary}`);
   }
 
-  // Inventory (Phase 8) — Equipped vs Stowed
-  if (character.inventory.length === 0) {
+  // Inventory (Phase 8) — Equipped vs Unconfirmed vs Stowed
+  // Rows with zero or negative quantities represent depleted/invalid items and are omitted from projection.
+  const activeInventory = character.inventory.filter(
+    (item) => typeof item.quantity !== "number" || item.quantity > 0
+  );
+
+  if (activeInventory.length === 0) {
     lines.push("**Inventory:** (empty)");
   } else {
-    const equippedItems: typeof character.inventory = [];
-    const stowedItems: typeof character.inventory = [];
-
-    for (const item of character.inventory) {
+    // 1. Group valid equipment candidates by exact canonical slot.
+    const slotCandidates = new Map<string, typeof character.inventory>();
+    for (const item of activeInventory) {
       const rawSlot = item.equippedSlot;
       if (
         typeof rawSlot === "string" &&
         rawSlot.length > 0 &&
         slotAccepts(item, rawSlot)
       ) {
-        equippedItems.push(item);
-      } else {
+        const list = slotCandidates.get(rawSlot);
+        if (list) {
+          list.push(item);
+        } else {
+          slotCandidates.set(rawSlot, [item]);
+        }
+      }
+    }
+
+    const equippedItems: Array<{ slot: string; item: (typeof character.inventory)[number] }> = [];
+    const unconfirmedItems: typeof character.inventory = [];
+    const stowedItems: typeof character.inventory = [];
+
+    for (const item of activeInventory) {
+      const rawSlot = item.equippedSlot;
+      const isCandidate =
+        typeof rawSlot === "string" &&
+        rawSlot.length > 0 &&
+        slotAccepts(item, rawSlot);
+
+      if (!isCandidate) {
         stowedItems.push(item);
+        continue;
+      }
+
+      const candidates = slotCandidates.get(rawSlot!)!;
+      if (candidates.length === 1) {
+        // Slot is uniquely occupied: exactly 1 unit is equipped.
+        equippedItems.push({ slot: rawSlot!, item });
+        // Any remaining quantity (quantity - 1) is stowed.
+        if (item.quantity > 1) {
+          stowedItems.push({
+            ...item,
+            quantity: item.quantity - 1,
+          });
+        }
+      } else {
+        // Ambiguous duplicate occupants of the same slot: fail closed.
+        // Published under unconfirmed equipment status; preserves full owned quantity.
+        unconfirmedItems.push(item);
       }
     }
 
     if (equippedItems.length > 0) {
       lines.push("**Equipped:**");
-      for (const item of equippedItems) {
+      for (const { slot, item } of equippedItems) {
+        const slotLabel = formatSlotLabel(slot);
+        lines.push(`- ${slotLabel}: ${item.name} *(${item.type})*`);
+      }
+    }
+
+    if (unconfirmedItems.length > 0) {
+      lines.push("**Inventory (Equipment Status Unconfirmed):**");
+      for (const item of unconfirmedItems) {
         const qty = item.quantity > 1 ? ` ×${item.quantity}` : "";
-        const slotLabel = formatSlotLabel(item.equippedSlot!);
-        lines.push(`- ${slotLabel}: ${item.name}${qty} *(${item.type})*`);
+        lines.push(`- ${item.name}${qty} *(${item.type})*`);
       }
     }
 
@@ -570,9 +615,9 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   // report it as a plain fact, identically at every value.
   lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
 
-  // Exhaustion
-  if (hud.exhaustionLevel > 0) {
-    lines.push(`**Exhaustion:** Level ${hud.exhaustionLevel}/6 ⚠️`);
+  // Exhaustion — Expose only backend-supported mechanical semantics (no unsupported tiers)
+  if (hud.exhaustionLevel >= 1) {
+    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
   }
 
   // Light source

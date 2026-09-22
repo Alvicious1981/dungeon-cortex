@@ -756,7 +756,7 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
     expect(stowedSection).toContain("- Dagger *(weapon)*");
   });
 
-  it("E. renders exhaustion level when > 0 and omits it when 0", () => {
+  it("E. renders supported exhaustion effect when >= 1 and omits it when 0", () => {
     const exhaustedContext: CampaignContext = {
       ...baseContext,
       character: {
@@ -765,7 +765,8 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
       },
     };
     const exhaustedState = formatCanonicalState(exhaustedContext);
-    expect(exhaustedState).toContain("**Exhaustion:** Level 2");
+    expect(exhaustedState).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
+    expect(exhaustedState).not.toContain("Level 2");
 
     const normalContext: CampaignContext = {
       ...baseContext,
@@ -800,12 +801,12 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
     };
     expect(formatCanonicalState(nullContext)).not.toContain("Concentration:");
 
-    // Empty / whitespace concentrationSpellId
+    // Empty concentrationSpellId
     const emptyContext: CampaignContext = {
       ...baseContext,
       character: {
         ...baseCharacter,
-        concentrationSpellId: "   ",
+        concentrationSpellId: "",
       },
     };
     expect(formatCanonicalState(emptyContext)).not.toContain("Concentration:");
@@ -1435,7 +1436,6 @@ describe("P2 Remediation Regression Tests (RED)", () => {
       expect(equippedPart).not.toContain("Padded Longsword A");
       expect(equippedPart).not.toContain("Padded Longsword B");
       expect(equippedPart).not.toContain("Padded Longsword C");
-      expect(equippedPart).not.toContain("Padded Shield");
       expect(equippedPart).not.toContain("Misplaced Shield");
       expect(equippedPart).not.toContain("Empty Slot Dagger");
       expect(equippedPart).not.toContain("Whitespace Slot Mace");
@@ -1450,6 +1450,534 @@ describe("P2 Remediation Regression Tests (RED)", () => {
       expect(stowedPart).toContain("- Empty Slot Dagger *(weapon)*");
       expect(stowedPart).toContain("- Whitespace Slot Mace *(weapon)*");
       expect(stowedPart).toContain("- Null Slot Club *(weapon)*");
+    });
+  });
+
+  describe("P2-7: Stacked equipped row must not narrate entire quantity as equipped", () => {
+    it("Longsword quantity 1 + MAIN_HAND -> 1 equipped, no stowed copy", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-sword-1",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+      expect(state).not.toContain("×");
+      expect(state).not.toContain("**Inventory (Stowed):**");
+    });
+
+    it("Longsword quantity 2 + MAIN_HAND -> 1 equipped, 1 stowed", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-sword-2",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 2,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+      expect(state).not.toContain("Main Hand: Longsword ×");
+      expect(state).toContain("**Inventory (Stowed):**");
+      expect(state).toContain("- Longsword *(weapon)*");
+      const [equippedPart, stowedPart] = state.split("**Inventory (Stowed):**");
+      expect(equippedPart).not.toContain("×");
+      expect(stowedPart).not.toContain("×1");
+    });
+
+    it("Longsword quantity 5 + MAIN_HAND -> 1 equipped, 4 stowed", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-sword-5",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 5,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+      expect(state).not.toContain("Main Hand: Longsword ×5");
+      expect(state).toContain("**Inventory (Stowed):**");
+      expect(state).toContain("- Longsword ×4 *(weapon)*");
+    });
+
+    it("Shield quantity 2 + OFF_HAND -> 1 equipped, 1 stowed", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-shield-2",
+              name: "Steel Shield",
+              type: "armor",
+              quantity: 2,
+              properties: { armorClass: "shield" },
+              equippedSlot: "OFF_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Off Hand: Steel Shield *(armor)*");
+      expect(state).not.toContain("Off Hand: Steel Shield ×");
+      expect(state).toContain("**Inventory (Stowed):**");
+      expect(state).toContain("- Steel Shield *(armor)*");
+    });
+  });
+
+  describe("P2-8: Duplicate occupants of the same slot must fail closed", () => {
+    it("one MAIN_HAND candidate -> equipped", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "sword-1",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+      expect(state).not.toContain("Equipment Status Unconfirmed");
+    });
+
+    it("two MAIN_HAND candidates -> neither published as equipped -> both published as unconfirmed", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "sword-1",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+            {
+              id: "rapier-1",
+              name: "Rapier",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Equipped:**");
+      expect(state).toContain("**Inventory (Equipment Status Unconfirmed):**");
+      expect(state).toContain("- Longsword *(weapon)*");
+      expect(state).toContain("- Rapier *(weapon)*");
+      expect(state).not.toContain("**Inventory (Stowed):**");
+    });
+
+    it("two OFF_HAND shield candidates -> neither published as equipped", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "shield-1",
+              name: "Steel Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: "OFF_HAND",
+            },
+            {
+              id: "shield-2",
+              name: "Wooden Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: "OFF_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Equipped:**");
+      expect(state).toContain("**Inventory (Equipment Status Unconfirmed):**");
+      expect(state).toContain("- Steel Shield *(armor)*");
+      expect(state).toContain("- Wooden Shield *(armor)*");
+    });
+
+    it("one MAIN_HAND + one OFF_HAND -> both independently equipped", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "sword-1",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+            {
+              id: "shield-1",
+              name: "Steel Shield",
+              type: "armor",
+              quantity: 1,
+              properties: { armorClass: "shield" },
+              equippedSlot: "OFF_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Longsword *(weapon)*");
+      expect(state).toContain("- Off Hand: Steel Shield *(armor)*");
+      expect(state).not.toContain("Equipment Status Unconfirmed");
+    });
+
+    it("duplicate malformed slot rows -> never promoted to equipped", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-1",
+              name: "Invalid Weapon 1",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "ARMOR",
+            },
+            {
+              id: "item-2",
+              name: "Invalid Weapon 2",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "ARMOR",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Equipped:**");
+      expect(state).not.toContain("Equipment Status Unconfirmed");
+      expect(state).toContain("**Inventory (Stowed):**");
+      expect(state).toContain("- Invalid Weapon 1 *(weapon)*");
+      expect(state).toContain("- Invalid Weapon 2 *(weapon)*");
+    });
+
+    it("quantity splitting only occurs after slot is proven uniquely occupied", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "sword-1",
+              name: "Longsword",
+              type: "weapon",
+              quantity: 3,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+            {
+              id: "rapier-1",
+              name: "Rapier",
+              type: "weapon",
+              quantity: 2,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Equipped:**");
+      expect(state).toContain("**Inventory (Equipment Status Unconfirmed):**");
+      expect(state).toContain("- Longsword ×3 *(weapon)*");
+      expect(state).toContain("- Rapier ×2 *(weapon)*");
+      expect(state).not.toContain("**Inventory (Stowed):**");
+    });
+
+    it("zero-quantity item in MAIN_HAND is not equipped and does not cause false ambiguity", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-depleted",
+              name: "Broken Bow",
+              type: "weapon",
+              quantity: 0,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+            {
+              id: "item-valid",
+              name: "Rapier",
+              type: "weapon",
+              quantity: 1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Equipped:**");
+      expect(state).toContain("- Main Hand: Rapier *(weapon)*");
+      expect(state).not.toContain("Equipment Status Unconfirmed");
+      expect(state).not.toContain("Broken Bow");
+    });
+
+    it("sole inventory item with zero quantity is not equipped and results in empty inventory", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-depleted-only",
+              name: "Ghost Blade",
+              type: "weapon",
+              quantity: 0,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Equipped:**");
+      expect(state).not.toContain("Ghost Blade");
+      expect(state).toContain("**Inventory:** (empty)");
+    });
+
+    it("zero-quantity unequipped item in bag is omitted from stowed inventory", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-stowed-depleted",
+              name: "Spent Wand",
+              type: "misc",
+              quantity: 0,
+              properties: {},
+              equippedSlot: null,
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("Spent Wand");
+      expect(state).toContain("**Inventory:** (empty)");
+    });
+
+    it("negative quantity equipped item is ignored and not equipped", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          inventory: [
+            {
+              id: "item-negative",
+              name: "Corrupt Item",
+              type: "weapon",
+              quantity: -1,
+              properties: {},
+              equippedSlot: "MAIN_HAND",
+            },
+          ],
+        },
+      };
+
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("**Equipped:**");
+      expect(state).not.toContain("Corrupt Item");
+      expect(state).toContain("**Inventory:** (empty)");
+    });
+  });
+
+  describe("P2-9: Concentration presence must mirror backend truthiness", () => {
+    it("omits concentration line when null", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          concentrationSpellId: null,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("Concentration");
+    });
+
+    it("omits concentration line when empty string", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          concentrationSpellId: "",
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("Concentration");
+    });
+
+    it("renders Active and hides raw ID when concentrationSpellId is a UUID", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          concentrationSpellId: "spell_uuid_123",
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Concentration:** Active");
+      expect(state).not.toContain("spell_uuid_123");
+    });
+
+    it("renders Active and hides raw value when concentrationSpellId is whitespace-only", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          concentrationSpellId: "   ",
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Concentration:** Active");
+    });
+  });
+
+  describe("P2-10: Do not expose unsupported exhaustion tiers as canonical mechanics", () => {
+    it("omits active exhaustion line when level 0", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          exhaustionLevel: 0,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).not.toContain("Exhaustion");
+    });
+
+    it("renders supported backend effect without numeric level when level 1", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          exhaustionLevel: 1,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
+      expect(state).not.toContain("Level 1");
+    });
+
+    it("renders same supported effect wording without numeric level when level 2", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          exhaustionLevel: 2,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
+      expect(state).not.toContain("Level 2");
+    });
+
+    it("renders same supported effect wording without numeric level when level 6", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          exhaustionLevel: 6,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
+      expect(state).not.toContain("Level 6");
+    });
+
+    it("formatSurvivalHUD renders only supported backend effect and no numeric tier for exhaustionLevel 3", () => {
+      const hud = formatSurvivalHUD({
+        ...baseHUD,
+        exhaustionLevel: 3,
+      });
+      expect(hud).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
+      expect(hud).not.toContain("Level 3");
+      expect(hud).not.toContain("3/6");
+    });
+
+    it("formatSurvivalHUD omits exhaustion line when level 0", () => {
+      const hud = formatSurvivalHUD({
+        ...baseHUD,
+        exhaustionLevel: 0,
+      });
+      expect(hud).not.toContain("Exhaustion");
     });
   });
 });
