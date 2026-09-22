@@ -214,7 +214,7 @@ export async function resolveEnemyTurn(
       stats: true,
       class: true,
       level: true,
-      inventory: { select: { type: true, equippedSlot: true, properties: true } },
+      inventory: { select: { type: true, quantity: true, equippedSlot: true, properties: true } },
     },
   })) as {
     hp: number; maxHp: number; stats: unknown; class: string; level: number;
