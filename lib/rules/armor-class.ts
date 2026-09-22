@@ -24,6 +24,7 @@
  * is not rediscovered as a bug.
  */
 
+import { hasUsableQuantity } from "@/lib/rules/inventory-quantity";
 import type { ArmorCategory } from "@/lib/rules/proficiency";
 
 const UNARMORED_BASE = 10;
@@ -34,6 +35,7 @@ const CATEGORIES: ArmorCategory[] = ["light", "medium", "heavy", "shield"];
 export interface ArmorInventoryRow {
   type: string;
   equippedSlot?: string | null;
+  quantity?: number;
   properties: unknown;
 }
 
@@ -129,7 +131,13 @@ export function selectShield(
   inventory: readonly ArmorInventoryRow[],
 ): ArmorProfile | null {
   for (const row of inventory) {
-    if (row.type !== "armor" || row.equippedSlot !== "OFF_HAND") continue;
+    if (
+      row.type !== "armor" ||
+      !hasUsableQuantity(row) ||
+      row.equippedSlot !== "OFF_HAND"
+    ) {
+      continue;
+    }
 
     const profile = readArmorProfile(row.properties);
     if (profile.category !== "shield") continue;
@@ -164,7 +172,7 @@ function bonusACFrom(inventory: readonly ArmorInventoryRow[]): number {
   let total = 0;
 
   for (const row of inventory) {
-    if (row.type !== "armor") continue;
+    if (row.type !== "armor" || !hasUsableQuantity(row)) continue;
 
     const { category, bonusAC } = readArmorProfile(row.properties);
     if (bonusAC === null || !Number.isInteger(bonusAC)) continue;
@@ -225,7 +233,13 @@ export function selectBodyArmor(
   inventory: readonly ArmorInventoryRow[],
 ): ArmorProfile | null {
   for (const row of inventory) {
-    if (row.type !== "armor" || row.equippedSlot !== "ARMOR") continue;
+    if (
+      row.type !== "armor" ||
+      !hasUsableQuantity(row) ||
+      row.equippedSlot !== "ARMOR"
+    ) {
+      continue;
+    }
 
     const profile = readArmorProfile(row.properties);
     if (profile.category === "shield") continue;

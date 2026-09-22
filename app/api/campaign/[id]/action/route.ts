@@ -2026,26 +2026,23 @@ async function resolveAction(
       }
 
       const foundWeapon = findUsableMainHandWeapon(context.character.inventory);
-      if (!foundWeapon) {
-        return NextResponse.json({ error: "No weapon found." }, { status: 400 });
-      }
-
       const charStats = context.character.stats as Record<string, number>;
       const playerCombatant = context.activeEncounter.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
       const attack = await resolveWeaponAttack({
-        weapon: { name: foundWeapon.name, properties: foundWeapon.properties },
+        weapon: foundWeapon
+          ? { name: foundWeapon.name, properties: foundWeapon.properties }
+          : null,
         stats: charStats,
         characterClass: context.character.class,
         level: context.character.level,
         fallbackDamageType: "slashing",
       });
 
-      const categoryLog = unresolvedCategoryLog({
-        weaponName: foundWeapon.name,
-        attack,
-      });
+      const categoryLog = foundWeapon
+        ? unresolvedCategoryLog({ weaponName: foundWeapon.name, attack })
+        : null;
 
       try {
         const committed = await prisma.$transaction(async (tx) => {
@@ -2072,7 +2069,7 @@ async function resolveAction(
               characterClass: context.character.class,
             }).applies,
             targetCombatants: targets,
-            weaponName: foundWeapon.name,
+            weaponName: foundWeapon?.name || "Unarmed",
             weaponDice: attack.weaponDice,
             damageType: attack.damageType as DamageType,
             attackModifier: attack.attackModifier,

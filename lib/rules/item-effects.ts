@@ -28,11 +28,13 @@
 
 import { SKILL_ABILITY, type Skill } from "@/lib/rules/ability-check";
 import { slotFor } from "@/lib/rules/equipment-slot";
+import { hasUsableQuantity } from "@/lib/rules/inventory-quantity";
 
 /** The least of an inventory row this module needs to judge it. */
 export interface EffectInventoryRow {
   type: string;
   equippedSlot?: string | null;
+  quantity?: number;
   properties: unknown;
 }
 
@@ -116,6 +118,7 @@ export function abilityCheckAdvantageFrom(input: {
   skill: Skill;
 }): boolean {
   return input.inventory.some((row) => {
+    if (!hasUsableQuantity(row)) return false;
     if (!row.equippedSlot) return false;
     if (row.equippedSlot !== slotFor(row).slot) return false;
 

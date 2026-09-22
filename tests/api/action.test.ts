@@ -206,12 +206,16 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       },
     });
 
-    const attackWith = async (intent: Record<string, unknown>, body: Record<string, unknown> = {}) => {
+    const attackWith = async (
+      intent: Record<string, unknown>,
+      body: Record<string, unknown> = {},
+      action = "I swing at it",
+    ) => {
       (parseIntent as any).mockResolvedValue({ actionType: "attack", ...intent });
       return POST(
         new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
           method: "POST",
-          body: JSON.stringify({ action: "I swing at it", ...body }),
+          body: JSON.stringify({ action, ...body }),
         }),
         { params: Promise.resolve({ id: campaignId }) }
       );
@@ -251,33 +255,48 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       ]));
       (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
 
-      const res = await attackWith({ targetName: "Goblin" });
+      const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
 
       expect(res.status).toBe(200);
       expect(resolvedWeaponName()).toBe("Longsword");
     });
 
-    it("refuses a free-text attack when its only weapon is stowed", async () => {
+    it("resolves a punch unarmed when its only weapon is stowed", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], [
         { id: "dagger", name: "Dagger", type: "weapon", quantity: 1, equippedSlot: null, properties: {} },
       ]));
 
-      const res = await attackWith({ targetName: "Goblin" });
+      const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
 
-      expect(res.status).toBe(400);
-      expect(resolvedWeaponName()).toBeUndefined();
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
     });
 
-    it("refuses a depleted main-hand weapon for free-text attacks and falls back to unarmed for macro Attacks", async () => {
+    it("resolves a punch unarmed when its main-hand weapon is depleted", async () => {
       const inventory = [
         { id: "broken-sword", name: "Broken Sword", type: "weapon", quantity: 0, equippedSlot: "MAIN_HAND", properties: {} },
       ];
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], inventory));
 
-      const freeText = await attackWith({ targetName: "Goblin" });
+      const freeText = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
 
-      expect(freeText.status).toBe(400);
-      expect(resolvedWeaponName()).toBeUndefined();
+      expect(freeText.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+    });
+
+    it("resolves a punch unarmed with no weapons", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], []));
+
+      const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+    });
+
+    it("keeps macro Attacks unarmed when no usable main-hand weapon exists", async () => {
+      const inventory = [
+        { id: "broken-sword", name: "Broken Sword", type: "weapon", quantity: 0, equippedSlot: "MAIN_HAND", properties: {} },
+      ];
 
       vi.clearAllMocks();
       (getAuthUser as any).mockResolvedValue(mockUser);
@@ -298,10 +317,10 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], inventory));
       (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
 
-      const freeText = await attackWith({ targetName: "Goblin" });
+      const freeText = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
 
-      expect(freeText.status).toBe(400);
-      expect(resolvedWeaponName()).toBeUndefined();
+      expect(freeText.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
 
       vi.clearAllMocks();
       (getAuthUser as any).mockResolvedValue(mockUser);
