@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/session";
 import { NextRequest } from "next/server";
 import { buildCampaignContext } from "@/lib/memory/context";
+import type { ContextCharacter } from "@/lib/memory/context";
 import { computeConsequences } from "@/lib/rules/combat";
 import { parseIntent } from "@/lib/ai/intent";
 import { streamNarrative } from "@/lib/ai/narrator";
@@ -173,7 +174,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
     const contextWith = (
       combatants: unknown[],
-      inventory = [
+      inventory: ContextCharacter["inventory"] = [
         {
           id: "w1",
           name: "Longsword",
@@ -216,7 +217,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       );
     };
 
-    const macroAttackWith = async (inventory: unknown[]) => {
+    const macroAttackWith = async (inventory: ContextCharacter["inventory"]) => {
       const combatants = [hero, hostile];
       (buildCampaignContext as any).mockResolvedValue(contextWith(combatants, inventory));
       (prisma.combatant.findMany as any).mockResolvedValue(combatants);
