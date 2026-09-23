@@ -140,6 +140,7 @@ test("@smoke concurrent combat conditions preserve both accepted effects", async
             {
               name: "Concurrency Caster",
               isPlayer: true,
+              characterId: created.characterId,
               hp: 20,
               maxHp: 20,
               ac: 12,

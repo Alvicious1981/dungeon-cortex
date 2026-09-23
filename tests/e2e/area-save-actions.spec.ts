@@ -60,6 +60,7 @@ async function createDragonFixture(request: import("@playwright/test").APIReques
         create: [
           {
             name: "Breath E2E Hero", isPlayer: true, hp: 200, maxHp: 200, ac: 16,
+            characterId: created.characterId,
             initiativeTotal: 20, initiativeOrder: 0,
             stats: { STR: 16, DEX: 12, CON: 14, INT: 10, WIS: 12, CHA: 8 },
             conditions: [], x: 5, y: 5,

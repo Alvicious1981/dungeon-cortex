@@ -79,6 +79,7 @@ async function createMoveFixture(
         encounterId: encounter.id,
         name: "Move Racer",
         isPlayer: true,
+        characterId: created.characterId,
         hp: 20,
         maxHp: 20,
         ac: 16,
