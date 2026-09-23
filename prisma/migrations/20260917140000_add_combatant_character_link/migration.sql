@@ -28,6 +28,19 @@ WHERE c."encounterId" = e."id"
   AND c."isPlayer" = true
   AND c."characterId" IS NULL;
 
+-- Every isPlayer:true Combatant carries the characterId the three player
+-- write paths scope by. mirrorPlayerCombatantHp and applyPlayerDowned do not
+-- check their updateMany count, so a player row without it would make them
+-- silently write nothing; this CHECK turns that into a loud failure at insert
+-- time instead — for any creation path, including old code still serving
+-- requests between `migrate deploy` and the new code going live (design spec
+-- §3). Must stay AFTER the backfill above: Postgres validates a new CHECK
+-- against every existing row, and before the backfill the pre-existing player
+-- rows still have a NULL characterId, which would fail the whole migration.
+ALTER TABLE "Combatant"
+  ADD CONSTRAINT "Combatant_player_has_character_id"
+  CHECK (NOT "isPlayer" OR "characterId" IS NOT NULL);
+
 -- Exactly one isPlayer:true Combatant per encounter, enforced at the
 -- database instead of trusted by convention. resolveEncounterTurnAuthority
 -- only checked this at action time, not at creation time — nothing

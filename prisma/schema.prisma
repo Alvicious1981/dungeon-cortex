@@ -403,6 +403,11 @@ model Combatant {
   /// NULL = no recognised attack, or a row older than this column: the enemy's
   /// turn is skipped. Never written from the request body or from narration.
   attackProfile        Json?
+  /// The Character this Combatant represents (DC-PARTY-002); the player's HP,
+  /// death-save and downed-state writes are scoped by it, not by isPlayer.
+  /// NULL = not a player-controlled Character: enemies and NPC-derived
+  /// combatants never have one. Never NULL on an isPlayer row — the
+  /// Combatant_player_has_character_id CHECK below enforces that.
   characterId          String?
 
   encounter Encounter  @relation(fields: [encounterId], references: [id])
@@ -415,6 +420,9 @@ model Combatant {
   // (encounterId) WHERE isPlayer = true — migration-only, see
   // 20260917140000_add_combatant_character_link/migration.sql. Prisma
   // cannot express a filtered @@unique in the schema DSL.
+  // Combatant_player_has_character_id: CHECK (NOT "isPlayer" OR
+  // "characterId" IS NOT NULL) — migration-only, same migration; the schema
+  // DSL has no CHECK constraints.
 }
 
 model InventoryItem {

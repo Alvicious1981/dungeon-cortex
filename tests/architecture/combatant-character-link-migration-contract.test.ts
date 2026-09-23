@@ -32,7 +32,11 @@ describe("migración 20260917140000_add_combatant_character_link", () => {
   it("añade characterId como columna nullable, sin default", () => {
     expect(code).toMatch(/ADD COLUMN(?:\s+IF NOT EXISTS)?\s+"characterId"\s+TEXT\s*;/);
     expect(code).not.toMatch(/"characterId"[^;]*DEFAULT/);
-    expect(code).not.toMatch(/"characterId"[^;]*NOT NULL/);
+    // Ningún NOT NULL de columna (en el ADD COLUMN ni en un SET NOT NULL
+    // posterior). El predicado `"characterId" IS NOT NULL` del CHECK
+    // Combatant_player_has_character_id no lo es: solo obliga a las filas
+    // isPlayer, y las de enemigos siguen en NULL.
+    expect(code).not.toMatch(/"characterId"[^;]*(?<!IS\s)NOT NULL/);
   });
 
   it("declara Combatant_characterId_fkey con ON DELETE RESTRICT ON UPDATE CASCADE", () => {
@@ -57,6 +61,26 @@ describe("migración 20260917140000_add_combatant_character_link", () => {
     expect(code).toMatch(/JOIN\s+"Campaign"/);
     expect(code).toMatch(/"isPlayer"\s*=\s*true/);
     expect(code).toMatch(/"characterId"\s+IS\s+NULL/);
+  });
+
+  it("exige characterId en toda fila isPlayer con el CHECK Combatant_player_has_character_id", () => {
+    // Sin él, mirrorPlayerCombatantHp y applyPlayerDowned (que no comprueban
+    // el count de su updateMany) escribirían cero filas en silencio para un
+    // jugador sin characterId.
+    expect(code).toMatch(
+      /ALTER TABLE "Combatant"\s+ADD CONSTRAINT "Combatant_player_has_character_id"\s+CHECK \(NOT "isPlayer" OR "characterId" IS NOT NULL\);/
+    );
+  });
+
+  it("añade ese CHECK DESPUÉS del backfill, nunca antes", () => {
+    // Postgres valida un CHECK nuevo contra todas las filas existentes: antes
+    // del backfill, las filas isPlayer previas aún tienen characterId NULL y
+    // la migración entera fallaría.
+    const backfill = code.search(/UPDATE\s+"Combatant"/);
+    const check = code.search(/ADD CONSTRAINT "Combatant_player_has_character_id"/);
+    expect(backfill).toBeGreaterThan(-1);
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeGreaterThan(backfill);
   });
 
   it("añade Combatant_one_player_per_encounter_key como índice único parcial, con guarda previa", () => {
