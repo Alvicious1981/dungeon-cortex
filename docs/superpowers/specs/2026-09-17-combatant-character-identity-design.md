@@ -61,9 +61,12 @@ model Combatant {
   // ...existing encounter relation unchanged...
 
   @@index([characterId])
+  @@unique([encounterId, characterId])
   // Combatant_one_player_per_encounter_key: partial unique index, migration-only
   // (see §3) — Prisma cannot express a filtered @@unique in the schema DSL, same
   // limitation as PartyMember_one_main_per_campaign_key.
+  // Combatant_player_has_character_id: CHECK, migration-only — the schema DSL
+  // has no CHECK constraints.
 }
 ```
 
@@ -83,6 +86,19 @@ model Combatant {
   caller to maintain it by convention. This constraint does not depend on `characterId` at all —
   it targets `isPlayer` directly — but it belongs in this migration because it protects the exact
   invariant the rest of this design assumes.
+- **`Combatant_player_has_character_id`** — added in the final whole-branch review. A CHECK,
+  `NOT "isPlayer" OR "characterId" IS NOT NULL`: a player Combatant without its link cannot exist.
+  `rollPlayerDeathSave` fails loudly when its `findFirst` finds no row, but
+  `mirrorPlayerCombatantHp` and `applyPlayerDowned` do not check their `updateMany` count, so a
+  player row with a `NULL` `characterId` would make them silently write nothing. The CHECK closes
+  that at the database for every creation path at once, instead of patching each call site. It
+  must be added after the §3 backfill (see §3).
+- **`@@unique([encounterId, characterId])`** (`Combatant_encounterId_characterId_key`) — also
+  added in the final review. The three write paths key on `(encounterId, characterId)`, which
+  `Combatant_one_player_per_encounter_key` makes unique only indirectly (today only player rows
+  carry a `characterId`, by convention). Unlike that filtered index, Prisma expresses this one
+  natively. Postgres treats `NULL`s as distinct in a unique index, so enemy rows (`characterId`
+  `NULL`) are not constrained by it.
 
 ## 3. Migration and the backfill risk
 
@@ -148,6 +164,18 @@ will not expose `characterId` on `Combatant` at all until the schema and a match
 exist together, so the new code literally cannot run against the old schema. Per `AGENTS.md`, the
 migration is written and committed but left unapplied against the real save; the maintainer
 applies it, same as DC-PARTY-001.
+
+**Deploy order, the reverse direction** (added in the final whole-branch review). The paragraph
+above covers new code meeting the old schema. The opposite window exists too: between
+`migrate deploy` and the new application code going live, the *old* code keeps serving requests
+and does not know `characterId` exists. An encounter it created in that window would get an
+`isPlayer: true` Combatant with `characterId = NULL` *after* the backfill had already run — a row
+nothing would ever repair, invisible to the new code's `characterId`-scoped writes. The
+`Combatant_player_has_character_id` CHECK constraint (§2) closes this structurally: the old code's
+insert fails loudly at the database, rolling back its encounter-creation transaction, rather than
+silently orphaning a row. The same constraint fixes an order inside the migration: it is added
+*after* the backfill `UPDATE`, because adding it first would validate it against the pre-existing
+player rows the backfill has not filled yet, and fail the migration.
 
 ## 4. Code changes
 
@@ -220,9 +248,11 @@ the current source, not assumed. No call site needs to *fetch* anything new.
 
 No new runtime error paths. `characterId` is populated by construction — either backfilled by the
 migration or set at the one remaining creation site (`app/api/campaign/[id]/encounter/route.ts`;
-`encounter-service.ts`'s twin is dormant). If a future code path ever created a player Combatant
-without setting `characterId`, the write functions would match zero rows — the same failure *mode*
-this design is fixing, just from a different cause.
+`encounter-service.ts`'s twin is dormant). If a future code path ever tries to create a player
+Combatant without setting `characterId`, the insert itself now fails
+(`Combatant_player_has_character_id`, §2, added in the final whole-branch review). Before that
+constraint, the write functions would have matched zero rows — the same failure *mode* this design
+is fixing, just from a different cause.
 
 Design review closed two thirds of this gap rather than just documenting it:
 `Combatant_one_player_per_encounter_key` (§2/§3) means a second `isPlayer: true` row can never be

@@ -160,8 +160,10 @@ can have, not additional human players. This decision does not conflict with tha
 
 **Combat** — `Combatant.isPlayer` semantics, the enemy-turn chain (`resolveEnemyTurn`,
 `finalizeEncounterTurn`), initiative, action economy, target selection, encounter-turn ownership,
-death saves, HP combat authority. `Combatant` has no `characterId` FK at all today; `PartyMember`
-introduces none. Nothing in combat reads this table.
+death saves, HP combat authority. `PartyMember` introduces no link from `Combatant`, and nothing in
+combat reads this table. (`Combatant` had no `characterId` FK when this decision was written;
+DC-PARTY-002 has since added one — `Combatant.characterId`, a nullable FK to `Character` set on the
+player's row — see `docs/superpowers/specs/2026-09-17-combatant-character-identity-design.md`.)
 
 **Companion AI** — LLM companion agents, prompts, autonomous tactical decisions, automatic spell
 selection or movement, AI personalities, AI tool calling.
@@ -185,8 +187,9 @@ of an encounter are authoritative for an XP award and how it splits among them.
 ## 11. Future work not authorized by this decision
 
 Control routing (switching a companion between AI and USER control in a live session), companion AI
-behavior, recruitment/dismissal flows, party UI, combat integration (`Combatant` gaining a reference
-to the `Character`/`PartyMember` it represents, multi-Combatant turn ownership), and rest/magic/XP
+behavior, recruitment/dismissal flows, party UI, combat integration (multi-Combatant turn
+ownership, and `Combatant` gaining a reference to the `PartyMember` it represents — its reference
+to the `Character` it represents has since landed, in DC-PARTY-002), and rest/magic/XP
 guards becoming party-aware (`lib/rules/rest-service.ts` and `lib/rules/magic-service.ts` already
 accept an optional `characterId`, but their membership guard only accepts `campaign.characterId` —
 extending it to "any party member" is future work, not this decision).
