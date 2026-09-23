@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { rollPlayerDeathSave } from "@/lib/db/death-save-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import { DeathSaveInvariantError } from "@/lib/rules/death-save";
 
 const CTX = {
   campaignId: "camp-1", encounterId: "enc-1", characterId: "char-1",
@@ -64,6 +65,7 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
       data: { deathSaveSuccesses: 3, deathSaveFailures: 0, stableWakeRound: 7 },
     });
     expect(out.events.map((e) => e.type)).toEqual(["DEATH_SAVE_ROLLED", "PLAYER_STABILIZED"]);
+    // The log says what the counters mean, not only the counters.
     expect(tx.gameLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ content: expect.stringContaining("Aldric is stable.") }),
     });
@@ -96,6 +98,18 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
   it("refuses a player who is no longer dying", async () => {
     const { tx } = buildTx({ hp: 1 });
     await expect(rollPlayerDeathSave(tx, CTX, dice(14))).rejects.toBeInstanceOf(TurnStateConflictError);
+    expect(tx.combatant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("names the encounter and the character when no Combatant carries that link", async () => {
+    // The lookup is by (encounterId, characterId), so a miss means no Combatant
+    // in this encounter is linked to this character — not necessarily that
+    // the encounter has no player at all.
+    const { tx } = buildTx({});
+    (tx.combatant.findFirst as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    const attempt = rollPlayerDeathSave(tx, CTX, dice(14));
+    await expect(attempt).rejects.toBeInstanceOf(DeathSaveInvariantError);
+    await expect(attempt).rejects.toThrow("Encounter enc-1 has no Combatant linked to character char-1.");
     expect(tx.combatant.updateMany).not.toHaveBeenCalled();
   });
 

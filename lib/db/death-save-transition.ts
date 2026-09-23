@@ -35,6 +35,12 @@ const LIVE_DICE: DeathSaveDice = { d20: () => rollDie(20), d4: () => rollDie(4) 
  * Combatant write, then the conditional touch that binds the save to the
  * observed turn. Any lost race throws and rolls the whole transaction back.
  * The caller finalizes the turn when `endsTurn` is true.
+ *
+ * Scoped by characterId, not isPlayer:true alone (DC-PARTY-002): the findFirst
+ * and both updateMany branches target the Combatant linked to ctx.characterId
+ * — see lib/db/player-hp.ts's mirrorPlayerCombatantHp for the same reasoning.
+ * Unlike that function, a miss here is loud: no linked Combatant throws
+ * DeathSaveInvariantError rather than writing nothing.
  */
 export async function rollPlayerDeathSave(
   tx: Prisma.TransactionClient,
@@ -59,7 +65,12 @@ export async function rollPlayerDeathSave(
     },
   });
   if (!player) {
-    throw new DeathSaveInvariantError(`Encounter ${ctx.encounterId} has no player combatant.`);
+    // Looked up by (encounterId, characterId), so a miss means no Combatant in
+    // this encounter is linked to this character — not necessarily that the
+    // encounter has no player row at all.
+    throw new DeathSaveInvariantError(
+      `Encounter ${ctx.encounterId} has no Combatant linked to character ${ctx.characterId}.`
+    );
   }
   // Under the lock: a concurrent save that already revived, stabilised or
   // killed the player owns this turn.
