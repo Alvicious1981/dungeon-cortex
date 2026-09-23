@@ -5,11 +5,19 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { campaignPlayableRefusal, guardResponse } from "@/lib/db/campaign-guard";
 import { resolveSocialCheck, SocialServiceError } from "@/lib/rules/social-service";
+import { formatSocialCheckLog } from "@/lib/rules/social-log";
 import {
   acquireActionReceipt,
   completeActionReceiptWithResponse,
   rejectActionReceipt,
 } from "@/lib/actions/request-receipt";
+import { MAX_SOCIAL_INTENT_LENGTH } from "@/lib/rules/social";
+import {
+  assertNpcScenePresenceInTransaction,
+  SocialScenePresenceError,
+} from "@/lib/db/social-scene-target";
+import type { Prisma } from "@prisma/client";
+
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
@@ -18,7 +26,7 @@ const BodySchema = z
   .object({
     npcId: z.string().min(1).max(200),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
-    intent: z.string().max(200),
+    intent: z.string().max(MAX_SOCIAL_INTENT_LENGTH),
     requestId: z.string().min(1).max(128).optional(),
   })
   .strict();
@@ -66,7 +74,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { userId: true, status: true },
+    select: { userId: true, status: true, scenePresenceVersion: true },
   });
   if (!campaign) {
     return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
@@ -79,7 +87,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
   const npc = await prisma.nPC.findUnique({
     where: { id: parsed.data.npcId },
-    select: { id: true, campaignId: true, seed: true, role: true, hasMetPlayer: true },
+    select: { id: true, name: true, campaignId: true, seed: true, role: true, hasMetPlayer: true },
   });
   if (!npc || npc.campaignId !== campaignId) {
     return NextResponse.json({ error: "NPC not found." }, { status: 404 });
@@ -99,15 +107,45 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
   }
 
   try {
-    const result = await resolveSocialCheck({
-      campaignId,
-      npcId: npc.id,
-      approach: parsed.data.approach,
-      intent: parsed.data.intent,
+    const result = await prisma.$transaction(async (tx) => {
+      const transactionClient = tx as Prisma.TransactionClient;
+      await assertNpcScenePresenceInTransaction(transactionClient, campaignId, npc.id);
+
+      const checkResult = await resolveSocialCheck({
+        campaignId,
+        npcId: npc.id,
+        approach: parsed.data.approach,
+        intent: parsed.data.intent,
+        tx: transactionClient as never,
+      });
+
+      const targetName = npc.name?.trim() || npc.seed || "NPC";
+      const logContent = formatSocialCheckLog({
+        npcName: targetName,
+        approach: parsed.data.approach,
+        intent: parsed.data.intent,
+        result: checkResult,
+      });
+
+      await transactionClient.gameLog.create({
+        data: {
+          campaignId,
+          role: "system",
+          content: logContent,
+        },
+      });
+
+      return checkResult;
     });
+
     if (receiptId) await completeActionReceiptWithResponse(receiptId, 200, result);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    if (error instanceof SocialScenePresenceError) {
+      const responseBody = { error: error.message, code: error.code };
+      if (receiptId) await rejectActionReceipt(receiptId, 400, responseBody);
+      return NextResponse.json(responseBody, { status: 400 });
+    }
     if (error instanceof SocialServiceError) {
       const responseBody = { error: error.message, code: error.code };
       if (receiptId) await rejectActionReceipt(receiptId, 400, responseBody);

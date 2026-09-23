@@ -133,7 +133,20 @@ export function generateFallbackProse(
     parts.push('La criatura cae derrotada.');
   }
 
-  // 10. Default neutral statement
+  // 10. Social check resolved
+  const socialFact = facts.find(f => f.type === 'social_check_resolved');
+  if (socialFact) {
+    const payload = socialFact.payload || {};
+    const success = payload.success === true;
+    const targetName = typeof payload.targetName === 'string' && payload.targetName ? payload.targetName : 'el interlocutor';
+    if (success) {
+      parts.push(`La interacción social tiene éxito frente a ${targetName}.`);
+    } else {
+      parts.push(`La interacción social fracasa frente a ${targetName}.`);
+    }
+  }
+
+  // 11. Default neutral statement
   if (parts.length === 0) {
     parts.push('La escena continúa.');
   }

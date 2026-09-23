@@ -109,11 +109,13 @@ export type InitialDispositionResult = z.infer<typeof InitialDispositionResultSc
 
 // --- SocialCheck ---
 
+export const MAX_SOCIAL_INTENT_LENGTH = 200;
+
 export const SocialCheckInputSchema = z
   .object({
     npcSeed: z.string().min(1).max(100),
     approach: z.enum(["persuade", "intimidate", "deceive"]),
-    intent: z.string().max(200),
+    intent: z.string().max(MAX_SOCIAL_INTENT_LENGTH),
   })
   .strict();
 
@@ -132,6 +134,7 @@ export const SocialCheckResultSchema = z.object({
   attitudeAfter: NpcAttitudeSchema,
   dispositionBefore: z.number().int().min(-10).max(10),
   dispositionAfter: z.number().int().min(-10).max(10),
+  rollMode: z.enum(["normal", "advantage", "disadvantage"]).optional(),
 });
 
 export type SocialCheckResult = z.infer<typeof SocialCheckResultSchema>;

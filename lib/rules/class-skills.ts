@@ -59,7 +59,9 @@ export function defaultSkillProficiencies(characterClass: string): Skill[] {
 export function parseSkillProficiencies(raw: unknown): Skill[] {
   if (!Array.isArray(raw)) return [];
   const valid = raw.filter(
-    (entry): entry is Skill => typeof entry === "string" && entry in SKILL_ABILITY
+    (entry): entry is Skill =>
+      typeof entry === "string" &&
+      Object.prototype.hasOwnProperty.call(SKILL_ABILITY, entry)
   );
   return [...new Set(valid)];
 }

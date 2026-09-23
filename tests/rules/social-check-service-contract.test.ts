@@ -11,6 +11,7 @@ type CharacterFixture = {
   stats: Record<string, number>;
   level?: number;
   skillProficiencies?: string[];
+  exhaustionLevel?: number;
 };
 
 type NpcFixture = {
@@ -285,7 +286,7 @@ function expectNoForbiddenRetroTerms(result: unknown) {
  * model with no such scalar — and why the ownership check reading it has
  * never once fired.
  */
-const CHARACTER_FIELDS = ["id", "stats", "level", "skillProficiencies"] as const;
+const CHARACTER_FIELDS = ["id", "stats", "level", "skillProficiencies", "exhaustionLevel"] as const;
 const NPC_FIELDS = ["id", "campaignId", "seed", "name", "disposition", "hasMetPlayer"] as const;
 const CAMPAIGN_FIELDS = ["id", "characterId", "userId", "status"] as const;
 
@@ -644,6 +645,42 @@ describe("social-service resolveSocialCheck contract", () => {
 
     const facts = (result.facts ?? result) as { proficiencyApplied?: number };
     expect(facts.proficiencyApplied).toBeGreaterThan(0);
+  });
+
+  it("applies disadvantage to the social check when character has exhaustionLevel >= 1", async () => {
+    const { tx } = createTx({
+      characters: [
+        {
+          id: "character-1",
+          campaignId: "campaign-1",
+          stats: { CHA: 14 },
+          exhaustionLevel: 1,
+        },
+      ],
+    });
+    mockNaturalRoll(15);
+
+    const result = await resolveSocialCheck(input(tx, { approach: "persuade" }));
+    const facts = (result.facts ?? result) as { rollMode?: string };
+    expect(facts.rollMode).toBe("disadvantage");
+  });
+
+  it("applies normal roll mode when character has exhaustionLevel === 0", async () => {
+    const { tx } = createTx({
+      characters: [
+        {
+          id: "character-1",
+          campaignId: "campaign-1",
+          stats: { CHA: 14 },
+          exhaustionLevel: 0,
+        },
+      ],
+    });
+    mockNaturalRoll(15);
+
+    const result = await resolveSocialCheck(input(tx, { approach: "persuade" }));
+    const facts = (result.facts ?? result) as { rollMode?: string };
+    expect(facts.rollMode).toBe("normal");
   });
 
   it("rejects a character that does not belong to the campaign", async () => {

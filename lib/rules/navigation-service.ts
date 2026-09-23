@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { EXPLORATION_XP } from "@/lib/rules/progression";
+import { syncSceneParticipants } from "@/lib/rules/scene-presence-service";
 
 export type NavigationServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
@@ -28,6 +29,7 @@ interface NavigationCampaignRecord {
   characterId?: string;
   currentLocationId?: string | null;
   currentNodeId?: string | null;
+  scenePresenceVersion?: number;
 }
 
 // Deliberately has no `campaignId`. `Character` does not carry one, and
@@ -73,8 +75,12 @@ interface NavigationDb {
     }): Promise<NavigationCampaignRecord | null | undefined>;
     update(args: {
       where: { id: string };
-      data: { currentNodeId: string };
+      data: { currentNodeId?: string; scenePresenceVersion?: number };
     }): Promise<NavigationCampaignRecord>;
+    updateMany?(args: {
+      where: { id: string; scenePresenceVersion?: number };
+      data: { scenePresenceVersion: number };
+    }): Promise<{ count: number }>;
   };
   character?: {
     findUnique(args: {
@@ -101,6 +107,30 @@ interface NavigationDb {
       where: { locationId: string };
       select?: Record<string, boolean>;
     }): Promise<NavigationEdgeRecord[]>;
+  };
+  campaignSceneParticipant?: {
+    deleteMany(args: {
+      where: { campaignId: string };
+    }): Promise<{ count: number }>;
+    create(args: {
+      data: { campaignId: string; npcId: string };
+    }): Promise<unknown>;
+  };
+  nPC?: {
+    findUnique(args: {
+      where: {
+        campaignId_seed: { campaignId: string; seed: string };
+      };
+      select?: { id?: boolean };
+    }): Promise<{ id: string } | null | undefined>;
+  };
+  npc?: {
+    findUnique(args: {
+      where: {
+        campaignId_seed: { campaignId: string; seed: string };
+      };
+      select?: { id?: boolean };
+    }): Promise<{ id: string } | null | undefined>;
   };
 }
 
@@ -471,6 +501,11 @@ async function moveCampaignToNodeInTransaction(
   await db.campaign.update({
     where: { id: input.campaignId },
     data: { currentNodeId: targetNode.id },
+  });
+
+  await syncSceneParticipants(db, {
+    campaignId: input.campaignId,
+    targetNodeNpcSeed: targetNode.npcSeed,
   });
 
   const adjacentNodes = await buildAdjacentNodes(

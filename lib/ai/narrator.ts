@@ -20,7 +20,7 @@ import { streamText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { buildCampaignContext } from "@/lib/memory/context";
-import { formatIronLaws, formatCanonicalState } from "@/lib/memory/formatter";
+import { formatIronLaws, formatCanonicalState, formatCharacterProfile } from "@/lib/memory/formatter";
 import { buildNarratorRequest, NARRATOR_DATA_LIMITS } from "@/lib/ai/trust-boundary";
 import type { AsyncIterableStream } from "ai";
 import { buildSrdTools } from "@/lib/ai/tools/srd-lookup";
@@ -183,7 +183,7 @@ export async function streamNarrative(
     }
   }
 
-  const context = await buildCampaignContext(campaignId);
+  const context = await buildCampaignContext(campaignId, safePlayerInput);
 
   // Stable instructions go to `system`; every variable value — player input,
   // memory, logs, quest/NPC/location text — travels in the JSON data message.
@@ -191,6 +191,7 @@ export async function streamNarrative(
     personaInstructions: formatIronLaws(),
     extraInstructions: safetyPrompt?.system ?? null,
     canonicalState: formatCanonicalState(context),
+    characterProfile: formatCharacterProfile(context.character.profile),
     memory: context.relevantMemories,
     recentDialogue: context.recentLogs.map((log) => ({
       role: log.role,

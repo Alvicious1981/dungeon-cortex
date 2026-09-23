@@ -36,9 +36,14 @@ function rowNamed(name: string): Record<string, unknown> {
   return found;
 }
 
-function equipped(name: string, slot: string): EffectInventoryRow {
+function equipped(name: string, slot: string, quantity?: number): EffectInventoryRow {
   const row = rowNamed(name);
-  return { type: String(row.type), equippedSlot: slot, properties: row.properties };
+  return {
+    type: String(row.type),
+    equippedSlot: slot,
+    properties: row.properties,
+    ...(quantity === undefined ? {} : { quantity }),
+  };
 }
 
 describe("the registry and the data agree", () => {
@@ -119,6 +124,24 @@ describe("abilityCheckAdvantageFrom", () => {
         skill: "Athletics",
       }),
     ).toBe(false);
+  });
+
+  it("does not grant effects from depleted or malformed quantities", () => {
+    expect(
+      abilityCheckAdvantageFrom({
+        inventory: [equipped(GLOVES, "ACCESSORY", 1)],
+        skill: "Athletics",
+      }),
+    ).toBe(true);
+
+    for (const quantity of [0, -1, 1.5, NaN, Infinity]) {
+      expect(
+        abilityCheckAdvantageFrom({
+          inventory: [equipped(GLOVES, "ACCESSORY", quantity)],
+          skill: "Athletics",
+        }),
+      ).toBe(false);
+    }
   });
 
   it("grants nothing from an item in a slot the rule would not choose", () => {

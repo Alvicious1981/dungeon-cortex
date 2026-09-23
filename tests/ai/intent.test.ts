@@ -325,3 +325,141 @@ describe("parseIntent — rest", () => {
     expect(intent.actionType).toBe("mechanical_ambiguous");
   });
 });
+
+describe("parseIntent — ambient observation vs mechanical discovery", () => {
+  it.each([
+    "I look around",
+    "I look around.",
+    "I look around the room",
+    "I look around the room.",
+    "What do I see?",
+    "What can I see?",
+    "I look at the room",
+    "I take a look around",
+    "I look around carefully",
+    "I look around carefully.",
+    "miro alrededor",
+    "miro alrededor.",
+    "miro la habitación",
+    "¿Qué veo?",
+    "echo un vistazo alrededor",
+    "¿Qué puedo ver?",
+  ])("classifies ambient observation '%s' as general narration", async (input) => {
+    const intent = await parseIntent(input);
+    expect(intent).toEqual({ actionType: "general" });
+  });
+
+  it.each([
+    ["I search the room", "Investigation", "medium"],
+    ["I search for traps", "Investigation", "medium"],
+    ["I investigate the runes", "Investigation", "medium"],
+    ["I investigate the chest", "Investigation", "medium"],
+    ["I listen at the door", "Perception", "easy"],
+    ["I listen for footsteps", "Perception", "easy"],
+    ["busco trampas", "Investigation", "medium"],
+    ["registro la habitación", "Investigation", "medium"],
+    ["investigo el cofre", "Investigation", "medium"],
+  ])(
+    "preserves mechanical skill check for '%s'",
+    async (input, skill, band) => {
+      const intent = await parseIntent(input);
+      expect(intent).toMatchObject({
+        actionType: "ability_check",
+        skill,
+        band,
+      });
+    }
+  );
+
+  it.each([
+    "I look for traps",
+    "I look for the hidden door",
+    "I look for footprints",
+  ])("never classifies search phrase '%s' as free general narration and fails closed", async (input) => {
+    const intent = await parseIntent(input);
+    expect(intent.actionType).not.toBe("general");
+    expect(intent).toEqual({ actionType: "mechanical_ambiguous" });
+  });
+
+  it("preserves mechanical classification for hidden target discovery", async () => {
+    const intent = await parseIntent("I try to spot the hidden assassin");
+    expect(intent).toMatchObject({
+      actionType: "ability_check",
+      skill: "Perception",
+      band: "easy",
+      targetName: "hidden assassin",
+    });
+  });
+
+
+  describe("NARR-FIND-02 / typed social actions contract", () => {
+    it.each([
+      ["I persuade the innkeeper", "Persuasion", "persuade", "innkeeper"],
+      ["I persuade the innkeeper to open the gate", "Persuasion", "persuade", "innkeeper"],
+      ["I deceive the guard", "Deception", "deceive", "guard"],
+      ["I deceive the guard that we are merchants", "Deception", "deceive", "guard"],
+      ["I lie to the guard", "Deception", "deceive", "guard"],
+      ["I intimidate the merchant", "Intimidation", "intimidate", "merchant"],
+      ["I threaten the merchant", "Intimidation", "intimidate", "merchant"],
+      ["I negotiate with the merchant", "Persuasion", "persuade", "merchant"],
+      ["negocio con el mercader", "Persuasion", "persuade", "mercader"],
+      ["I trick the guard", "Deception", "deceive", "guard"],
+      ["faroleo al guardia", "Deception", "deceive", "guardia"],
+      ["I plead with the innkeeper", "Persuasion", "persuade", "innkeeper"],
+      ["I plead with the innkeeper to give us shelter", "Persuasion", "persuade", "innkeeper"],
+      ["persuado al posadero", "Persuasion", "persuade", "posadero"],
+      ["engaño al guardia", "Deception", "deceive", "guardia"],
+      ["amenazo al mercader", "Intimidation", "intimidate", "mercader"],
+      // Explicit target followed by purpose/content clause
+      ["I bluff the merchant that we are nobles", "Deception", "deceive", "merchant"],
+      ["negocio con el mercader para bajar el precio", "Persuasion", "persuade", "mercader"],
+      ["engaño al guardia diciendo que somos nobles", "Deception", "deceive", "guardia"],
+      ["I persuade the guard to open the gate", "Persuasion", "persuade", "guard"],
+      // Terminal punctuation & Spanish inverted marks
+      ["I persuade the innkeeper.", "Persuasion", "persuade", "innkeeper"],
+      ["I deceive the guard!", "Deception", "deceive", "guard"],
+      ["I intimidate the merchant?", "Intimidation", "intimidate", "merchant"],
+      ["¿persuado al posadero?", "Persuasion", "persuade", "posadero"],
+      ["¡engaño al guardia!", "Deception", "deceive", "guardia"],
+      ["¡amenazo al mercader!", "Intimidation", "intimidate", "mercader"],
+    ])(
+      "classifies '%s' as %s with socialApproach '%s' targeting '%s'",
+      async (input, skill, approach, targetName) => {
+        const intent = await parseIntent(input);
+        expect(intent).toMatchObject({
+          actionType: "ability_check",
+          skill,
+          socialApproach: approach,
+          targetName,
+        });
+      }
+    );
+
+    it.each([
+      ["I negotiate to lower the price", "Persuasion", "persuade"],
+      ["I bluff that we are merchants", "Deception", "deceive"],
+      ["negocio para bajar el precio", "Persuasion", "persuade"],
+      ["engaño diciendo que somos mercaderes", "Deception", "deceive"],
+    ])(
+      "classifies targetless clause '%s' as %s with socialApproach '%s' and undefined targetName",
+      async (input, skill, approach) => {
+        const intent = await parseIntent(input);
+        expect(intent).toMatchObject({
+          actionType: "ability_check",
+          skill,
+          socialApproach: approach,
+        });
+        expect(intent.targetName).toBeUndefined();
+      }
+    );
+
+    it("pins the false-positive hazard: disguise is Deception but has NO socialApproach", async () => {
+      const intent = await parseIntent("I disguise myself");
+      expect(intent).toMatchObject({
+        actionType: "ability_check",
+        skill: "Deception",
+      });
+      expect((intent as any).socialApproach).toBeUndefined();
+    });
+  });
+});

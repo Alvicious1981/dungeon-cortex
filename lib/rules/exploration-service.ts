@@ -9,6 +9,7 @@ import {
 } from "@/lib/rules/exploration";
 import { seededFloat } from "@/lib/rules/generators";
 import { generateDungeon } from "@/lib/rules/dungeon";
+import { syncSceneParticipants } from "@/lib/rules/scene-presence-service";
 
 export type ExplorationServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
@@ -34,6 +35,7 @@ interface ExplorationCampaignRecord {
   characterId?: string | null;
   currentLocationId?: string | null;
   currentNodeId?: string | null;
+  scenePresenceVersion?: number;
 }
 
 interface ExplorationLocationRecord {
@@ -77,8 +79,16 @@ interface ExplorationDb {
     }): Promise<ExplorationCampaignRecord | null | undefined>;
     update(args: {
       where: { id: string };
-      data: { currentLocationId: string; currentNodeId: string };
+      data: {
+        currentLocationId?: string;
+        currentNodeId?: string;
+        scenePresenceVersion?: number;
+      };
     }): Promise<ExplorationCampaignRecord>;
+    updateMany?(args: {
+      where: { id: string; scenePresenceVersion?: number };
+      data: { scenePresenceVersion: number };
+    }): Promise<{ count: number }>;
   };
   location: {
     findUnique(args: {
@@ -113,6 +123,10 @@ interface ExplorationDb {
         y: number;
       };
     }): Promise<ExplorationNodeRecord>;
+    findUnique?(args: {
+      where: { id: string };
+      select?: Record<string, boolean>;
+    }): Promise<ExplorationNodeRecord | null | undefined>;
   };
   locationEdge: {
     create(args: {
@@ -123,6 +137,30 @@ interface ExplorationDb {
         passageType: string;
       };
     }): Promise<ExplorationEdgeRecord>;
+  };
+  campaignSceneParticipant?: {
+    deleteMany(args: {
+      where: { campaignId: string };
+    }): Promise<{ count: number }>;
+    create(args: {
+      data: { campaignId: string; npcId: string };
+    }): Promise<unknown>;
+  };
+  nPC?: {
+    findUnique(args: {
+      where: {
+        campaignId_seed: { campaignId: string; seed: string };
+      };
+      select?: { id?: boolean };
+    }): Promise<{ id: string } | null | undefined>;
+  };
+  npc?: {
+    findUnique(args: {
+      where: {
+        campaignId_seed: { campaignId: string; seed: string };
+      };
+      select?: { id?: boolean };
+    }): Promise<{ id: string } | null | undefined>;
   };
 }
 
@@ -350,6 +388,14 @@ async function generateExplorationLocationInTransaction(
           currentNodeId: existingResult.initialNodeId,
         },
       });
+
+      const initialNode = existing.nodes?.find(
+        (n) => n.id === existingResult.initialNodeId
+      );
+      await syncSceneParticipants(db, {
+        campaignId: input.campaignId,
+        targetNodeNpcSeed: initialNode?.npcSeed,
+      });
     }
     return existingResult;
   }
@@ -422,6 +468,14 @@ async function generateExplorationLocationInTransaction(
       currentLocationId: location.id,
       currentNodeId: initialNodeId,
     },
+  });
+
+  const entryNodePayload = payload.nodes.find(
+    (n) => n.index === payload.entryNodeIndex
+  );
+  await syncSceneParticipants(db, {
+    campaignId: input.campaignId,
+    targetNodeNpcSeed: entryNodePayload?.npcSeed,
   });
 
   const nodeIds = createdNodes.map((node) => node.id);

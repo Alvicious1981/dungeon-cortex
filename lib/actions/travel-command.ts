@@ -32,6 +32,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier } from "@/lib/rules/dice";
 import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
+import { syncSceneParticipants } from "@/lib/rules/scene-presence-service";
 
 export interface TravelGateInput {
   campaignId: string;
@@ -137,7 +138,7 @@ export async function resolveTravelGate({
   const entryNode = await prisma.locationNode.findFirst({
     where: { locationId: destination.id },
     orderBy: { index: "asc" },
-    select: { id: true },
+    select: { id: true, npcSeed: true },
   });
   if (!entryNode) {
     return NextResponse.json(
@@ -207,6 +208,13 @@ export async function resolveTravelGate({
       if (campaignClaim.count !== 1) {
         throw new TravelStateConflictError();
       }
+
+      // Synchronize scene presence for the destination entry node atomically with travel.
+      // Stale participants from origin are cleared and entry scene presence is established.
+      await syncSceneParticipants(tx, {
+        campaignId,
+        targetNodeNpcSeed: entryNode.npcSeed,
+      });
 
       // The journey was resolved from this exact exhaustion snapshot. If the
       // snapshot changed concurrently, fail closed and roll back the campaign
