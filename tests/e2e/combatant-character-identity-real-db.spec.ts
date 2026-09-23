@@ -330,6 +330,90 @@ test("a second isPlayer:true Combatant in the same encounter is rejected by the 
   }
 });
 
+test("one encounter cannot link the same characterId twice, while unlinked enemies and later encounters are unconstrained", async ({
+  request,
+}) => {
+  test.setTimeout(60_000);
+  assertSafeE2EDatabase();
+
+  const created: E2ECreatedRecords = {};
+  const prisma = new PrismaClient();
+  const unique = randomUUID().slice(0, 8);
+  const encounterIds: string[] = [];
+
+  try {
+    await createCharacterAndCampaign(request, created, `Combatant link pair ${unique}`);
+
+    const encounter = await prisma.encounter.create({
+      data: { campaignId: created.campaignId! },
+    });
+    encounterIds.push(encounter.id);
+    const shared = { encounterId: encounter.id, hp: 10, maxHp: 10, initiativeTotal: 15 };
+
+    await prisma.combatant.create({
+      data: {
+        ...shared,
+        name: "Player",
+        isPlayer: true,
+        initiativeOrder: 0,
+        characterId: created.characterId,
+      },
+    });
+    // NULLs are distinct in a Postgres unique index: unlinked enemies never collide.
+    await prisma.combatant.create({
+      data: { ...shared, name: "Goblin A", isPlayer: false, initiativeOrder: 1 },
+    });
+    await prisma.combatant.create({
+      data: { ...shared, name: "Goblin B", isPlayer: false, initiativeOrder: 2 },
+    });
+
+    // A second row linked to the same Character. isPlayer:false, so neither
+    // Combatant_one_player_per_encounter_key nor the CHECK can see it — the
+    // shape a future companion path could produce by mistake, which would
+    // make the player's (encounterId, characterId)-scoped writes hit two rows.
+    const duplicate = await prisma.combatant
+      .create({
+        data: {
+          ...shared,
+          name: "Same character again",
+          isPlayer: false,
+          initiativeOrder: 3,
+          characterId: created.characterId,
+        },
+      })
+      .catch((e: unknown) => e);
+    expect(isUniqueViolation(duplicate, ["encounterId", "characterId"]), describeError(duplicate)).toBe(
+      true
+    );
+    expect(await prisma.combatant.count({ where: { encounterId: encounter.id } })).toBe(3);
+
+    // The pair is per encounter: the same Character is linked again in its
+    // next one (resolved here, since a campaign has at most one active).
+    const later = await prisma.encounter.create({
+      data: { campaignId: created.campaignId!, status: "resolved" },
+    });
+    encounterIds.push(later.id);
+    await prisma.combatant.create({
+      data: {
+        encounterId: later.id,
+        name: "Player",
+        isPlayer: true,
+        hp: 10,
+        maxHp: 10,
+        initiativeTotal: 15,
+        initiativeOrder: 0,
+        characterId: created.characterId,
+      },
+    });
+    expect(await prisma.combatant.count({ where: { characterId: created.characterId } })).toBe(2);
+  } finally {
+    await prisma.combatant.deleteMany({ where: { encounterId: { in: encounterIds } } });
+    await prisma.encounter.deleteMany({ where: { id: { in: encounterIds } } });
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
+
 test("an isPlayer:true Combatant without a characterId is rejected by the database", async ({
   request,
 }) => {

@@ -64,3 +64,15 @@ $combatant_one_player_per_encounter$;
 CREATE UNIQUE INDEX "Combatant_one_player_per_encounter_key"
 ON "Combatant" ("encounterId")
 WHERE "isPlayer" = true;
+
+-- Schema's @@unique([encounterId, characterId]): the pair the three player
+-- write paths scope by is unique by declaration, not only because today just
+-- the player row carries a characterId. NULLs are distinct in a Postgres
+-- unique index, so enemy rows (characterId NULL) are not constrained by it.
+-- Placed after the single-player guard on purpose: the backfill copies one
+-- characterId into every player row of an encounter, so pre-existing
+-- duplicate player rows would also collide here — the guard reports that
+-- case first, with its own message. Once the guard passes, at most one row
+-- per encounter has a characterId, so this index cannot fail.
+CREATE UNIQUE INDEX "Combatant_encounterId_characterId_key"
+  ON "Combatant"("encounterId", "characterId");

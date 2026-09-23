@@ -416,6 +416,9 @@ model Combatant {
   @@index([encounterId])
   @@index([characterId])
   @@unique([encounterId, initiativeOrder])
+  // The pair the player write paths scope by. NULLs are distinct in a
+  // Postgres unique index, so it never constrains enemy rows.
+  @@unique([encounterId, characterId])
   // Combatant_one_player_per_encounter_key: partial unique index on
   // (encounterId) WHERE isPlayer = true — migration-only, see
   // 20260917140000_add_combatant_character_link/migration.sql. Prisma

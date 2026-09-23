@@ -13,6 +13,7 @@ import { join } from "node:path";
 const ROOT = join(__dirname, "..", "..");
 const MIGRATION_DIR = "20260917140000_add_combatant_character_link";
 const MIGRATION_PATH = join(ROOT, "prisma", "migrations", MIGRATION_DIR, "migration.sql");
+const SCHEMA_PATH = join(ROOT, "prisma", "schema.prisma");
 
 function executable(sql: string): string {
   return sql
@@ -94,6 +95,27 @@ describe("migración 20260917140000_add_combatant_character_link", () => {
     expect(code).toMatch(
       /CREATE UNIQUE INDEX "Combatant_one_player_per_encounter_key"[\s\S]*?ON "Combatant"\s*\("encounterId"\)[\s\S]*?WHERE "isPlayer" = true/
     );
+  });
+
+  it("crea Combatant_encounterId_characterId_key, el @@unique([encounterId, characterId]) del schema", () => {
+    // El par por el que filtran las tres escrituras del jugador es único por
+    // declaración. El nombre es el que Prisma deriva de ese @@unique; índice
+    // completo, sin WHERE: los NULL de los enemigos son distintos entre sí.
+    const combatantModel = readFileSync(SCHEMA_PATH, "utf8").match(/^model Combatant \{[\s\S]*?^\}/m)?.[0];
+    expect(combatantModel).toMatch(/^\s*@@unique\(\[encounterId, characterId\]\)\s*$/m);
+    expect(code).toMatch(
+      /CREATE UNIQUE INDEX "Combatant_encounterId_characterId_key"\s+ON "Combatant"\("encounterId", "characterId"\);/
+    );
+  });
+
+  it("crea ese índice después de la guarda de un solo jugador", () => {
+    // El backfill copia el mismo characterId a todas las filas isPlayer de un
+    // encuentro: si hubiera duplicadas, también chocarían aquí. La guarda
+    // debe informar primero, con su propio mensaje.
+    const guard = code.search(/DO \$combatant_one_player_per_encounter\$/);
+    const index = code.search(/CREATE UNIQUE INDEX "Combatant_encounterId_characterId_key"/);
+    expect(guard).toBeGreaterThan(-1);
+    expect(index).toBeGreaterThan(guard);
   });
 
   it("no repara datos preexistentes de ninguna otra tabla", () => {
