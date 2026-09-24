@@ -443,6 +443,36 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(call?.[2]?.facts.length).toBeGreaterThan(0);
     });
 
+    /**
+     * Who the narrator is told is the player, per attack gate. Each gate builds
+     * its own COMBAT_CONSEQUENCE and states `attackerIsPlayer` at its own call
+     * site, so a test through one gate leaves the other free to drop or flip it.
+     */
+    it("tells the narrator the player is the attacker and the hostile is not, on the free-text attack gate", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+      expect(narrative?.actor).toMatchObject({ name: "Hero", isPlayer: true });
+      expect(narrative?.targets).toEqual([
+        expect.objectContaining({ id: "t1", name: "Goblin", isPlayer: false }),
+      ]);
+    });
+
+    it("tells the narrator the player is the attacker and the hostile is not, on the macro Attack gate", async () => {
+      const res = await macroAttackWith([]);
+
+      expect(res.status).toBe(200);
+      const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+      expect(narrative?.actor).toMatchObject({ name: "Hero", isPlayer: true });
+      expect(narrative?.targets).toEqual([
+        expect.objectContaining({ id: "t1", name: "Goblin", isPlayer: false }),
+      ]);
+    });
+
     it("rolls the attack at the proficient modifier the weapon earns", async () => {
       // The fixture's Longsword row carries damage and no category — the legacy
       // shape every existing character has. The route must fill it from the SRD
@@ -2306,7 +2336,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     // its ordinary refresh.
     const stored = [
       { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
-      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", targets: [] } },
+      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", attackerIsPlayer: true, targets: [] } },
       { type: "ROUND_ADVANCE", payload: { nextTurnIndex: 0, nextRound: 2 } },
     ];
     receiptAlreadyExists({ status: ActionRequestStatus.COMPLETED, replayEvents: stored });

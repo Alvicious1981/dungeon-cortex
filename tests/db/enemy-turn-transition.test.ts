@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { EnemyTurnInvariantError, resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import type { GameEvent } from "@/lib/events/game-events";
+import { adaptCombatEventsToNarrativeContext } from "@/lib/narrative/combat-fact-adapter";
+import { buildNarrativePrompt } from "@/lib/narrative/prompt-builder";
 
 const GOBLIN_PROFILE = {
   version: 1,
@@ -84,7 +87,8 @@ describe("resolveEnemyTurn", () => {
       type: "COMBAT_CONSEQUENCE",
       payload: {
         attackerName: "Goblin",
-        targets: [{ targetId: "p1", damage: 6, hpAfter: 14, isKill: false }],
+        attackerIsPlayer: false,
+        targets: [{ targetId: "p1", targetIsPlayer: true, damage: 6, hpAfter: 14, isKill: false }],
       },
     });
     expect(tx.gameLog.create).toHaveBeenCalledWith({
@@ -467,5 +471,40 @@ describe("resolveEnemyTurn — area-save attacks (area-save-actions spec §6)", 
     );
     const outcome = await resolveEnemyTurn(tx, DRAGON_CTX);
     expect(outcome).toEqual({ events: [], playerDowned: false, playerDied: false });
+  });
+});
+
+/**
+ * The narrator is handed `role` for every creature it is told about. An enemy
+ * turn has two producers of COMBAT_CONSEQUENCE (the weapon attack and the area
+ * save), each with its own literal, so each gets its own chain: real rows ->
+ * real resolveEnemyTurn -> real adapter -> real prompt builder. Only the
+ * database is faked, and its `isPlayer` column is the only source of the roles.
+ */
+describe("resolveEnemyTurn — who the narrator is told is the player", () => {
+  interface PromptCreature { name: string; role: string }
+  function promptCreatures(events: GameEvent[]): { actor: PromptCreature | null; targets: PromptCreature[] } {
+    const prompt = buildNarrativePrompt(adaptCombatEventsToNarrativeContext(events));
+    return JSON.parse(prompt.user.split("\n")[1]!);
+  }
+
+  it("tells the narrator a goblin's scimitar hit came from a non-player character and landed on the player character", async () => {
+    const tx = buildTx();
+    mockRandom([0.75, 0.5, 0.3]); // the hit sequence of the first test in this file
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    const { actor, targets } = promptCreatures(outcome.events);
+    expect(actor).toEqual({ name: "Goblin", role: "non_player_character" });
+    expect(targets).toEqual([{ ref: "target_1", name: "Aldric", role: "player_character" }]);
+  });
+
+  it("tells the narrator a dragon's breath came from a non-player character and landed on the player character", async () => {
+    const tx = buildDragonTx();
+    mockRandom([0.7, ...Array(18).fill(0.5)]); // the failed-save sequence above
+    const outcome = await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    const { actor, targets } = promptCreatures(outcome.events);
+    expect(actor).toEqual({ name: "Adult Red Dragon", role: "non_player_character" });
+    expect(targets).toEqual([{ ref: "target_1", name: "Aldric", role: "player_character" }]);
   });
 });

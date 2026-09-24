@@ -75,6 +75,12 @@ export interface LootGeneratedPayload {
 export interface SingleTargetConsequence {
   targetName: string;
   targetId: string;
+  /**
+   * Whether the target is the player character: the target's own
+   * `Combatant.isPlayer`, read by the code that builds the consequence. The
+   * narrator adapter copies it and never infers a role.
+   */
+  targetIsPlayer: boolean;
   damage: number;
   naturalRoll: number;
   isCrit: boolean;
@@ -89,6 +95,13 @@ export interface SingleTargetConsequence {
 
 export interface CombatConsequencePayload {
   attackerName: string;
+  /**
+   * Whether the attacker is the player character, stated by the code that
+   * builds the event: the player's action gates say `true`, the enemy-turn
+   * chain reads its own Combatant row. Identity, not consequence — what
+   * happened lives in `targets[]` (LAW-01).
+   */
+  attackerIsPlayer: boolean;
   targets: SingleTargetConsequence[];
 }
 

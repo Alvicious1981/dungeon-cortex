@@ -280,6 +280,7 @@ export async function resolveEnemyTurn(
       const consequence: SingleTargetConsequence = {
         targetName: player.name,
         targetId: player.id,
+        targetIsPlayer: player.isPlayer,
         damage,
         naturalRoll: roll.roll,
         isCrit: roll.critical,
@@ -295,7 +296,11 @@ export async function resolveEnemyTurn(
       // combat-pipeline.ts, which imports this module.
       const consequenceEvent: CombatConsequenceEvent = {
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: enemy.name, targets: [consequence] },
+        payload: {
+          attackerName: enemy.name,
+          attackerIsPlayer: enemy.isPlayer,
+          targets: [consequence],
+        },
       };
       events.push(consequenceEvent);
       // The same per-hit companions executeCombatAction emits for a player attack.
@@ -372,14 +377,18 @@ export async function resolveEnemyTurn(
 
     if (ctx.collectEvents) {
       const consequence: SingleTargetConsequence = {
-        targetName: player.name, targetId: player.id, damage,
+        targetName: player.name, targetId: player.id, targetIsPlayer: player.isPlayer, damage,
         naturalRoll: save.roll, isCrit: false, isFumble: false,
         hitLocation: "chest", narrativeTags: [], hpAfter: hp,
         targetMaxHp: character.maxHp, isKill: hp <= 0, conditionsApplied: [],
       };
       events.push({
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: enemy.name, targets: [consequence] },
+        payload: {
+          attackerName: enemy.name,
+          attackerIsPlayer: enemy.isPlayer,
+          targets: [consequence],
+        },
       });
       if (damage > 0) {
         events.push({ type: "DAMAGE_DEALT", payload: { damage, naturalRoll: save.roll, targetName: player.name } });
