@@ -75,4 +75,30 @@ describe("lectura de la columna persistida", () => {
     const resultado: Skill[] = parseSkillProficiencies(corrupto);
     expect(resultado).toEqual([]);
   });
+
+  it("acepta habilidades SRD válidas", () => {
+    expect(parseSkillProficiencies(["Athletics", "Perception", "Arcana"])).toEqual([
+      "Athletics",
+      "Perception",
+      "Arcana",
+    ]);
+  });
+
+  it("rechaza nombres de propiedades del prototipo de Object", () => {
+    expect(
+      parseSkillProficiencies([
+        "toString",
+        "constructor",
+        "__proto__",
+        "valueOf",
+        "hasOwnProperty",
+      ])
+    ).toEqual([]);
+  });
+
+  it("en entradas mixtas conserva únicamente habilidades SRD válidas", () => {
+    expect(
+      parseSkillProficiencies(["Arcana", "constructor", "Perception"])
+    ).toEqual(["Arcana", "Perception"]);
+  });
 });

@@ -10,6 +10,7 @@
 
 import { Prisma } from "@prisma/client";
 import { generateNodeContent } from "@/lib/rules/generator";
+import { syncSceneParticipants } from "@/lib/rules/scene-presence-service";
 
 export interface NavigationResult {
   success: boolean;
@@ -114,6 +115,13 @@ export async function moveToNode(
   // remains inside the same transaction, so a losing move cannot mutate its
   // target node.
   await generateNodeContent(tx, targetNode.id);
+
+  // Authoritative scene-presence synchronization commits atomically with the move.
+  // Stale participants from the previous scene are cleared and new presence established.
+  await syncSceneParticipants(tx, {
+    campaignId,
+    targetNodeNpcSeed: targetNode.npcSeed,
+  });
 
   return { 
     success: true, 

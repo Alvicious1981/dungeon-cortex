@@ -243,11 +243,53 @@ export function adaptCombatEventsToNarrativeContext(
         'REST_COMPLETED',
         'EXPLORATION_WARNING',
         'PLAYER_MOVE',
-        // Not a combat fact. The resolved check reaches the narrator through the
-        // system game log written by the action route, in the same way trades do.
-        'ABILITY_CHECK_RESOLVED',
         () => undefined
       )
+      .with('ABILITY_CHECK_RESOLVED', () => {
+        const payload = event.payload || {};
+        const isSocial =
+          typeof payload.approach === 'string' &&
+          typeof payload.success === 'boolean' &&
+          typeof payload.attitudeBefore === 'string' &&
+          typeof payload.attitudeAfter === 'string' &&
+          typeof payload.dispositionBefore === 'number' &&
+          typeof payload.dispositionAfter === 'number';
+
+        if (isSocial) {
+          const rawTargetName = typeof payload.targetName === 'string' ? payload.targetName : '';
+          const targetName = boundedNarrativeName(rawTargetName);
+          const approach = payload.approach as string;
+          const skill = typeof payload.skill === 'string' ? payload.skill : '';
+          const success = payload.success as boolean;
+          const total = typeof payload.total === 'number' ? payload.total : 0;
+          const dc = typeof payload.dc === 'number' ? payload.dc : 0;
+          const attitudeBefore = payload.attitudeBefore as string;
+          const attitudeAfter = payload.attitudeAfter as string;
+          const dispositionBefore = payload.dispositionBefore as number;
+          const dispositionAfter = payload.dispositionAfter as number;
+
+          const desc = success
+            ? `Social check succeeded: ${approach}${skill ? ` (${skill})` : ''}${targetName ? ` against ${targetName}` : ''}`
+            : `Social check failed: ${approach}${skill ? ` (${skill})` : ''}${targetName ? ` against ${targetName}` : ''}`;
+
+          addFact({
+            type: 'social_check_resolved',
+            description: desc,
+            payload: {
+              ...(targetName ? { targetName } : {}),
+              approach,
+              skill,
+              success,
+              total,
+              dc,
+              attitudeBefore,
+              attitudeAfter,
+              dispositionBefore,
+              dispositionAfter,
+            },
+          });
+        }
+      })
       // Death saves (docs/superpowers/specs/2026-09-15-death-saves-design.md
       // §6.6). Each backend event becomes exactly one fact; the narrator may
       // describe the player's death only when `player_died` is among them.

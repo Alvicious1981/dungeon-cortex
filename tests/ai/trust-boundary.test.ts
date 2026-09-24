@@ -104,16 +104,18 @@ describe("buildNarratorRequest — normal context", () => {
       "backendResolvedFacts",
       "canonicalState",
       "derivedData",
+      "characterProfile",
       "memory",
       "recentDialogue",
       "playerAction",
     ]);
 
-    // Backend facts outrank canonical state, which outranks memory, dialogue
+    // Backend facts outrank canonical state, which outranks profile, memory, dialogue
     // and the player's own text.
     const order = NARRATOR_AUTHORITY_ORDER;
     expect(order.indexOf("backendResolvedFacts")).toBeLessThan(order.indexOf("canonicalState"));
-    expect(order.indexOf("canonicalState")).toBeLessThan(order.indexOf("memory"));
+    expect(order.indexOf("canonicalState")).toBeLessThan(order.indexOf("characterProfile"));
+    expect(order.indexOf("characterProfile")).toBeLessThan(order.indexOf("memory"));
     expect(order.indexOf("memory")).toBeLessThan(order.indexOf("recentDialogue"));
     expect(order.indexOf("recentDialogue")).toBeLessThan(order.indexOf("playerAction"));
   });

@@ -205,6 +205,10 @@ model Campaign {
   currentLocationId String?
   /// The specific node within the location the party occupies. Null = not in a location.
   currentNodeId     String?
+  /// Scene-presence architecture version.
+  /// 0 = legacy LocationNode.npcSeed resolution.
+  /// 1+ = CampaignSceneParticipant is authoritative.
+  scenePresenceVersion Int   @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -220,6 +224,7 @@ model Campaign {
   locations       Location[]    @relation("CampaignLocations")
   currentLocation Location?     @relation("CampaignCurrentLocation", fields: [currentLocationId, id], references: [id, campaignId], onDelete: Restrict, onUpdate: Cascade)
   currentNode     LocationNode? @relation("CampaignCurrentNode", fields: [currentNodeId, currentLocationId], references: [id, locationId], onDelete: Restrict, onUpdate: Cascade)
+  sceneParticipants CampaignSceneParticipant[]
 
   @@index([userId], map: "Campaign_userId_idx")
   @@index([characterId], map: "Campaign_characterId_idx")
@@ -542,10 +547,22 @@ model NPC {
   updatedAt            DateTime @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id])
+  sceneParticipants CampaignSceneParticipant[]
 
   /// One NPC seed is unique per campaign — UPSERT key.
   @@unique([campaignId, seed])
+  @@unique([id, campaignId], map: "NPC_id_campaignId_key")
   @@index([campaignId])
+}
+
+model CampaignSceneParticipant {
+  campaignId String
+  npcId      String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  npc      NPC      @relation(fields: [npcId, campaignId], references: [id, campaignId], onDelete: Cascade)
+
+  @@id([campaignId, npcId])
 }
 
 model SrdMonster {

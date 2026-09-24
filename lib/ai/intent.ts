@@ -84,6 +84,13 @@ export const IntentSchema = z.object({
     .optional(),
 
   /**
+   * Explicit typed social interaction approach when an improvised action targets an NPC.
+   * Only present for actual social vocabulary (persuade, deceive, intimidate).
+   * Generic checks like disguise do NOT set this.
+   */
+  socialApproach: z.enum(["persuade", "deceive", "intimidate"]).optional(),
+
+  /**
    * Name of the target (creature, NPC, object) if one is present in the input.
    * Omitted for untargeted or general actions.
    */
@@ -140,6 +147,78 @@ export interface Intent extends BaseIntent {
 // ---------------------------------------------------------------------------
 
 /**
+ * Distinguishes ambient environmental observation ("What do I see?",
+ * "I look around the room", "miro alrededor") from mechanical discovery
+ * ("I search for traps", "I look for hidden doors", "busco trampas").
+ *
+ * Ambient observation requests narration of what is openly visible in the scene
+ * and carries no mechanical uncertainty, so it resolves as "general" without
+ * rolling dice or invoking rules. Any attempt to find hidden things, search,
+ * or inspect specific mechanisms/clues must NOT match here and must proceed
+ * to backend skill checks or fail closed.
+ */
+function isAmbientObservation(input: string): boolean {
+  const clean = input
+    .trim()
+    .replace(/^[¿¡]/, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+
+  // Search/discovery intent keywords never qualify as ambient observation.
+  // "look for traps" or "mirar si hay" implies searching for hidden information.
+  if (/\b(?:for|para\s+ver|buscando)\b/i.test(clean)) {
+    return false;
+  }
+
+  // English ambient questions: "what do I see?", "what can I see?", "what do we see?", etc.
+  if (
+    /^what\s+(?:do|can)\s+(?:i|we)\s+see(?:\s+(?:around(?:\s+(?:me|us))?|here|in\s+the\s+(?:room|area|chamber|hall|cave|place)))?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  // Spanish ambient questions: "¿qué veo?", "¿qué puedo ver?", "¿qué se ve?", etc.
+  if (
+    /^qu[eé]\s+(?:veo|puedo\s+ver|podemos\s+ver|se\s+ve)(?:\s+(?:aqu[ií]|alrededor|en\s+la\s+(?:habitaci[oó]n|sala|estancia|cueva|zona)))?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  // English ambient observation phrasings:
+  // "I look around", "take a look around", "I look around the room", "I look at the room",
+  // "I look around carefully", etc.
+  if (
+    /^(?:i\s+)?(?:carefully\s+)?(?:look|take\s+a\s+look)\s+around(?:\s+(?:at|in)?\s*(?:the\s+)?(?:room|area|surroundings|chamber|hall|cave|place|scene))?(?:\s+carefully)?$/i.test(
+      clean
+    ) ||
+    /^(?:i\s+)?(?:carefully\s+)?(?:look|take\s+a\s+look)\s+at\s+the\s+(?:room|area|surroundings|chamber|hall|cave|place|scene)(?:\s+carefully)?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  // Spanish ambient observation phrasings:
+  // "miro alrededor", "echo un vistazo alrededor", "miro la habitación", "miro a mi alrededor"
+  if (
+    /^(?:(?:yo\s+)?(?:miro|mirar)|(?:echo|echar)\s+un\s+vistazo)\s+alrededor(?:\s+(?:de\s+la\s+(?:habitaci[oó]n|sala|estancia|cueva|zona)|con\s+cuidado))?$/i.test(
+      clean
+    ) ||
+    /^(?:(?:yo\s+)?(?:miro|mirar)|(?:echo|echar)\s+un\s+vistazo)\s+(?:a\s+mi\s+alrededor|la\s+(?:habitaci[oó]n|sala|estancia|zona|cueva|escena)|el\s+(?:lugar|cuarto|entorno)|a\s+la\s+(?:habitaci[oó]n|sala|estancia|zona|cueva))(?:\s+con\s+cuidado)?$/i.test(
+      clean
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Parses a player's free-text action into a structured Intent.
  *
  * @param playerInput - Raw text the player typed (e.g. "I cast Fireball at level 3 on the orc").
@@ -167,9 +246,54 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
   // preposition first so the two compose into a bare name.
   const stripLeadingPreposition = (raw: string | undefined): string | undefined =>
     raw?.replace(
-      /^(?:to|at|on|from|off|against|behind|past|a|al|a\s+la|de|del|contra|hacia|tras|detrás\s+de)\s+/i,
+      /^(?:to|at|on|from|off|against|behind|past|with|a|al|a\s+la|de|del|contra|hacia|tras|detrás\s+de|con)\s+/i,
       ""
     );
+
+  // Social actions frequently attach infinitive or content clauses to the target
+  // ("I persuade the innkeeper to open the gate", "I deceive the guard that we are merchants",
+  // "persuado al posadero para que abra la puerta"). Stripping the clause isolates
+  // the target creature deterministically without invoking an NLP parser.
+  // If the action begins directly with or consists of a purpose/content clause with
+  // no preceding target noun ("I negotiate to lower the price", "I bluff that we are merchants",
+  // "negocio para bajar el precio", "engaño diciendo que somos mercaderes"), it resolves to undefined.
+  const cleanSocialTarget = (raw: string | undefined): string | undefined => {
+    if (!raw) return undefined;
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+
+    // Check if the input begins directly with or consists of a purpose/content clause
+    // (with no preceding target noun).
+    // In English, "to" can also precede a target NPC ("to the guard", "to a merchant").
+    // If "to" is followed by an article ("the", "a", "an"), it introduces a target noun.
+    const isTargetlessClause =
+      /^(?:that|into|about|para\s+que|para|de\s+que|diciendo\s+que|que|sobre)\b/i.test(trimmed) ||
+      /^to\s+(?!(?:the|a|an)\s+)/i.test(trimmed);
+
+    if (isTargetlessClause) {
+      return undefined;
+    }
+
+    // If an explicit target noun precedes a purpose/content clause:
+    // "the guard to open the gate" -> "the guard"
+    // "the merchant that we are nobles" -> "the merchant"
+    // "con el mercader para bajar el precio" -> "con el mercader"
+    // "al guardia diciendo que somos nobles" -> "al guardia"
+    const match = trimmed.match(
+      /^(.*?)(?:\s+(?:to|that|into|about|para\s+que|para|de\s+que|diciendo\s+que|que|sobre)\s+.+)$/i
+    );
+    const candidate = match ? match[1] : trimmed;
+
+    const withoutPrep = stripLeadingPreposition(candidate)?.trim();
+    if (!withoutPrep) return undefined;
+
+    const candidateTarget = withoutPrep
+      .replace(/^[¿¡\s]+/, "")
+      .replace(/[.!?\s]+$/, "")
+      .trim();
+
+    return cleanName(candidateTarget);
+  };
 
   const prefixedValue = (pattern: RegExp): string | undefined => {
     const match = input.match(pattern);
@@ -288,6 +412,8 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
     };
   } else if (lower === "rest" || lower === "descansar" || lower === "descanso") {
     intent = { actionType: "rest", restType: "short" };
+  } else if (isAmbientObservation(input)) {
+    intent = { actionType: "general" };
   } else if (
     /^(?:(?:i\s+)?(?:say|ask|tell|greet|speak|talk|reply|answer|smile|laugh|cry|nod|bow|wave|sing|whisper|shout)|(?:digo|pregunto|saludo|hablo|respondo|sonrío|rio|río|lloro|asiento|me\s+inclino|canto|susurro|grito))\b|^(?:hello|hi|greetings|hola|buenas)\b/i.test(
       input
@@ -317,12 +443,17 @@ export async function parseIntent(playerInput: string): Promise<Intent> {
       // shoving an opponent — need to know which one; without it the backend
       // would have to contest against whoever else happened to be standing
       // there. Absent or unrecognisable, the gate falls back to a band.
-      const targetName = cleanName(stripLeadingPreposition(improvised.rest));
+      const targetName = improvised.action.socialApproach
+        ? cleanSocialTarget(improvised.rest)
+        : cleanName(stripLeadingPreposition(improvised.rest));
 
       intent = {
         actionType: "ability_check",
         skill: improvised.action.skill,
         band: improvised.action.band,
+        ...(improvised.action.socialApproach
+          ? { socialApproach: improvised.action.socialApproach }
+          : {}),
         ...(targetName ? { targetName } : {}),
       };
     }

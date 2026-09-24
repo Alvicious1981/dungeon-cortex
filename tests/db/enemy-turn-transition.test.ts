@@ -96,6 +96,93 @@ describe("resolveEnemyTurn", () => {
     });
   });
 
+  it("selects inventory quantity before resolving the player's armour class", async () => {
+    const tx = buildTx();
+    mockRandom([0.75, 0.5, 0.3]);
+
+    await resolveEnemyTurn(tx, CTX);
+
+    expect(tx.character.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          inventory: expect.objectContaining({
+            select: expect.objectContaining({ quantity: true }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not give a depleted shield AC during an enemy attack", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 20,
+      maxHp: 20,
+      stats: { DEX: 10 },
+      inventory: [
+        {
+          type: "armor",
+          quantity: 0,
+          equippedSlot: "OFF_HAND",
+          properties: {
+            baseAC: 2,
+            armorClass: "shield",
+            addDexModifier: false,
+            maxDexBonus: null,
+          },
+        },
+      ],
+    });
+    // d20 = 6 (0.25) + 4 = 10: hits AC 10 but misses AC 12.
+    mockRandom([0.25, 0.5, 0.3]);
+
+    await resolveEnemyTurn(tx, CTX);
+
+    expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 14 } });
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1",
+        role: "system",
+        content: "Goblin — Scimitar: 10 vs AC 10, hit, 6 slashing damage.",
+      },
+    });
+  });
+
+  it("keeps a usable shield's AC during an enemy attack", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 20,
+      maxHp: 20,
+      stats: { DEX: 10 },
+      inventory: [
+        {
+          type: "armor",
+          quantity: 1,
+          equippedSlot: "OFF_HAND",
+          properties: {
+            baseAC: 2,
+            armorClass: "shield",
+            addDexModifier: false,
+            maxDexBonus: null,
+          },
+        },
+      ],
+    });
+    // d20 = 6 (0.25) + 4 = 10: misses AC 12 from the usable shield.
+    mockRandom([0.25]);
+
+    await resolveEnemyTurn(tx, CTX);
+
+    expect(tx.character.update).not.toHaveBeenCalled();
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1",
+        role: "system",
+        content: "Goblin — Scimitar: 10 vs AC 12, miss.",
+      },
+    });
+  });
+
   it("reports the player downed and alive at 0 HP", async () => {
     const tx = buildTx();
     (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({

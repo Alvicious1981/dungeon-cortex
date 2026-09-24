@@ -40,7 +40,9 @@ export type NarrativeFactType =
   | 'player_stabilized'
   | 'player_revived'
   | 'player_woke'
-  | 'player_died';
+  | 'player_died'
+  // Authoritative social resolution (PR #227 remediation).
+  | 'social_check_resolved';
 
 export const NarrativeFactTypeSchema = z.enum([
   'attack_hit',
@@ -62,6 +64,7 @@ export const NarrativeFactTypeSchema = z.enum([
   'player_revived',
   'player_woke',
   'player_died',
+  'social_check_resolved',
 ]);
 
 /** A single resolved game event from the backend. */

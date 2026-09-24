@@ -19,6 +19,7 @@ import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import { searchMemories } from "@/lib/memory/search";
 import type { NPCPersonality } from "@/lib/rules/social";
 import type { NPCTraits } from "@/lib/rules/npc";
+import type { CharacterNarrativeProfile } from "@/lib/character-sheet/contracts";
 
 // ---------------------------------------------------------------------------
 // Return types
@@ -49,6 +50,8 @@ export interface ContextCharacter {
   /** D&D 5e exhaustion level (0-6). */
   exhaustionLevel: number;
   inventory: ContextInventoryItem[];
+  /** Player-authored narrative profile, or null if none exists. Required field, never optional. */
+  profile: CharacterNarrativeProfile | null;
 }
 
 export interface ContextInventoryItem {
@@ -206,12 +209,116 @@ export interface CampaignContext {
    */
   gold: number;
   /**
-   * The NPC in scope, or null. Derived from the current node's `npcSeed` — the
-   * backend's own signal for "there is someone here" — never from the client
-   * or the model. Was also an unsupplied optional, so the narrator's whole NPC
-   * section, secret disclosure included, never rendered.
+   * Authoritative list of NPCs currently present in the scene.
+   * - In legacy mode (`scenePresenceVersion === 0`): holds 0 or 1 NPC resolved from `currentNode.npcSeed`.
+   * - In canonical mode (`scenePresenceVersion >= 1`): holds all NPCs resolved from `CampaignSceneParticipant`.
+   */
+  activeNPCs: ContextActiveNPC[];
+  /**
+   * Single-NPC compatibility accessor (DC-NARR-002B-R2).
+   * - Exactly 1 present NPC -> resolves to that NPC.
+   * - 0 or 2+ present NPCs -> null (in multi-NPC scenes, there is no unambiguous single
+   *   active NPC; resolves to null to avoid arbitrary ordering bias).
+   * For multi-NPC scenes, consumers must read `activeNPCs` instead.
    */
   activeNPC: ContextActiveNPC | null;
+}
+
+interface CanonicalParticipantRecord {
+  campaignId: string;
+  npcId: string;
+  npc?: {
+    name: string;
+    race: string | null;
+    profession: string | null;
+    alignment: string | null;
+    traits: unknown;
+    disposition: number | null;
+    personalityTags: unknown;
+    hasMetPlayer: boolean;
+  } | null;
+}
+
+interface ScenePresenceReaderDb {
+  campaignSceneParticipant?: {
+    findMany(args: {
+      where: { campaignId: string };
+      orderBy?: { npcId: "asc" | "desc" };
+      include?: {
+        npc?:
+          | boolean
+          | {
+              select?: Record<string, boolean>;
+            };
+        nPC?:
+          | boolean
+          | {
+              select?: Record<string, boolean>;
+            };
+      };
+    }): Promise<CanonicalParticipantRecord[]>;
+  };
+}
+
+/**
+ * Resolves authoritative scene participants from `CampaignSceneParticipant`.
+ *
+ * Used in canonical mode (`scenePresenceVersion >= 1`).
+ * - Strictly queries `CampaignSceneParticipant` scoped by `campaignId`.
+ * - Never consults legacy `currentNode.npcSeed`.
+ * - Preserves all present NPCs in stable technical order (sorted by `npcId: "asc"`).
+ * - Soft-failure on error: returns empty array rather than falling back to legacy data.
+ */
+async function fetchCanonicalActiveNPCs(
+  campaignId: string
+): Promise<ContextActiveNPC[]> {
+  try {
+    const db = prisma as unknown as ScenePresenceReaderDb;
+    if (!db.campaignSceneParticipant?.findMany) {
+      return [];
+    }
+
+    const participants = await db.campaignSceneParticipant.findMany({
+      where: { campaignId },
+      orderBy: { npcId: "asc" },
+      include: {
+        npc: {
+          select: {
+            name: true,
+            race: true,
+            profession: true,
+            alignment: true,
+            traits: true,
+            disposition: true,
+            personalityTags: true,
+            hasMetPlayer: true,
+          },
+        },
+      },
+    });
+
+    const result: ContextActiveNPC[] = [];
+    for (const participant of participants) {
+      const npc =
+        participant.npc ??
+        (participant as unknown as { nPC?: typeof participant.npc }).nPC;
+      if (!npc) continue;
+      result.push({
+        name: npc.name,
+        race: npc.race,
+        profession: npc.profession,
+        alignment: npc.alignment,
+        traits: (npc.traits as NPCTraits | null) ?? null,
+        disposition: npc.disposition,
+        personalityTags: (npc.personalityTags as NPCPersonality | null) ?? null,
+        hasMetPlayer: npc.hasMetPlayer,
+      });
+    }
+
+    return result;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -369,10 +476,28 @@ export async function buildCampaignContext(
 ): Promise<CampaignContext> {
   const [campaign, activeEncounter, recentLogsDesc, relevantMemories, quests, currentExploration] = await Promise.all([
     // Pillar 1: character with inventory
-    prisma.campaign.findUnique({
+    (
+      prisma.campaign as unknown as {
+        findUnique(args: {
+          where: { id: string };
+          select: {
+            gold: boolean;
+            scenePresenceVersion: boolean;
+            character: {
+              select: Record<string, unknown>;
+            };
+          };
+        }): Promise<{
+          gold: number;
+          scenePresenceVersion?: number | null;
+          character: ContextCharacter;
+        } | null>;
+      }
+    ).findUnique({
       where: { id: campaignId },
       select: {
         gold: true,
+        scenePresenceVersion: true,
         character: {
           select: {
             id: true,
@@ -390,6 +515,16 @@ export async function buildCampaignContext(
             hitDiceTotal: true,
             hitDiceRemaining: true,
             exhaustionLevel: true,
+            profile: {
+              select: {
+                appearance: true,
+                backstory: true,
+                personalityTraits: true,
+                ideals: true,
+                bonds: true,
+                flaws: true,
+              },
+            },
             inventory: {
               select: {
                 id: true,
@@ -484,18 +619,32 @@ export async function buildCampaignContext(
     throw new Error(`Campaign not found: ${campaignId}`);
   }
 
-  // Sequential, not part of the Promise.all above: the NPC in scope is decided
-  // by the node the exploration query just resolved, so it cannot be fetched
-  // before that answer exists. Failures are swallowed like exploration's, so a
-  // missing NPC never blocks the action pipeline.
-  const activeNPC = await fetchActiveNPC(campaignId, currentExploration ?? null).catch(
-    () => null
-  );
+  // Sequential, not part of the Promise.all above: the NPC(s) in scope are decided
+  // by either CampaignSceneParticipant (canonical version >= 1) or currentNode.npcSeed
+  // (legacy version 0). Failures are swallowed so a missing NPC never blocks the pipeline.
+  const isCanonicalMode = (campaign.scenePresenceVersion ?? 0) >= 1;
+
+  let activeNPCs: ContextActiveNPC[] = [];
+  if (isCanonicalMode) {
+    // Canonical mode: CampaignSceneParticipant is the ONLY source of truth.
+    // Zero participants means empty scene — fail-closed, never falls back to legacy npcSeed.
+    activeNPCs = await fetchCanonicalActiveNPCs(campaignId).catch(() => []);
+  } else {
+    // Legacy mode: resolves NPC from currentNode.npcSeed.
+    const legacyNPC = await fetchActiveNPC(campaignId, currentExploration ?? null).catch(
+      () => null
+    );
+    activeNPCs = legacyNPC ? [legacyNPC] : [];
+  }
 
   return {
-    character: campaign.character,
+    character: {
+      ...campaign.character,
+      profile: campaign.character.profile ?? null,
+    },
     gold: campaign.gold,
-    activeNPC,
+    activeNPCs,
+    activeNPC: activeNPCs.length === 1 ? activeNPCs[0] : null,
     activeEncounter: activeEncounter ?? null,
     // Reverse so logs are oldest-first (natural reading order for AI context)
     recentLogs: recentLogsDesc.reverse(),

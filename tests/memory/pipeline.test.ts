@@ -323,4 +323,50 @@ describe("buildCampaignContext", () => {
       "Campaign not found: nonexistent-id"
     );
   });
+
+  it("loads and normalizes the character profile relation", async () => {
+    const profileFixture = {
+      appearance: "Scarred warrior",
+      backstory: "Veteran of the Goblin Wars",
+      personalityTraits: "Taciturn and watchful",
+      ideals: "Loyalty to companions",
+      bonds: "An ancestral blade",
+      flaws: "Haunted by battle",
+    };
+
+    mockCampaignFindUnique.mockResolvedValueOnce({
+      character: {
+        ...characterFixture,
+        profile: profileFixture,
+      },
+    } as never);
+    mockEncounterFindFirst.mockResolvedValueOnce(null);
+    mockGameLogFindMany.mockResolvedValueOnce([]);
+    mockQuestFindMany.mockResolvedValueOnce([]);
+
+    const ctx = await buildCampaignContext(CAMPAIGN_ID);
+
+    expect(mockCampaignFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: CAMPAIGN_ID },
+        select: expect.objectContaining({
+          character: expect.objectContaining({
+            select: expect.objectContaining({
+              profile: {
+                select: {
+                  appearance: true,
+                  backstory: true,
+                  personalityTraits: true,
+                  ideals: true,
+                  bonds: true,
+                  flaws: true,
+                },
+              },
+            }),
+          }),
+        }),
+      })
+    );
+    expect(ctx.character.profile).toEqual(profileFixture);
+  });
 });

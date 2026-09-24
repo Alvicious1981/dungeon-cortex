@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/session";
 import { NextRequest } from "next/server";
 import { buildCampaignContext } from "@/lib/memory/context";
+import type { ContextCharacter } from "@/lib/memory/context";
 import { computeConsequences } from "@/lib/rules/combat";
 import { parseIntent } from "@/lib/ai/intent";
 import { streamNarrative } from "@/lib/ai/narrator";
@@ -171,16 +172,26 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     const downed = { id: "t2", name: "Goblin", hp: 0, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
     const hero = { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
 
-    const contextWith = (combatants: unknown[]) => ({
+    const contextWith = (
+      combatants: unknown[],
+      inventory: ContextCharacter["inventory"] = [
+        {
+          id: "w1",
+          name: "Longsword",
+          type: "weapon",
+          quantity: 1,
+          equippedSlot: "MAIN_HAND",
+          properties: {},
+        },
+      ],
+    ) => ({
       character: {
         id: "char-1",
         name: "Hero",
         class: "fighter",
         level: 1,
         stats: { STR: 14 },
-        inventory: [
-          { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
-        ],
+        inventory,
       },
       relevantMemories: [],
       recentLogs: [],
@@ -195,16 +206,169 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       },
     });
 
-    const attackWith = async (intent: Record<string, unknown>, body: Record<string, unknown> = {}) => {
+    const attackWith = async (
+      intent: Record<string, unknown>,
+      body: Record<string, unknown> = {},
+      action = "I swing at it",
+    ) => {
       (parseIntent as any).mockResolvedValue({ actionType: "attack", ...intent });
       return POST(
         new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
           method: "POST",
-          body: JSON.stringify({ action: "I swing at it", ...body }),
+          body: JSON.stringify({ action, ...body }),
         }),
         { params: Promise.resolve({ id: campaignId }) }
       );
     };
+
+    const macroAttackWith = async (inventory: ContextCharacter["inventory"]) => {
+      const combatants = [hero, hostile];
+      (buildCampaignContext as any).mockResolvedValue(contextWith(combatants, inventory));
+      (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+      return POST(
+        new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "Attack", targetIds: [hostile.id] }),
+        }),
+        { params: Promise.resolve({ id: campaignId }) },
+      );
+    };
+
+    const resolvedWeaponName = () =>
+      (computeConsequences as any).mock.calls.at(-1)?.[0]?.weapon;
+
+    const resolvedDamageType = () =>
+      (computeConsequences as any).mock.calls.at(-1)?.[0]?.damageType;
+
+    it("uses the first non-depleted main-hand weapon for a macro Attack", async () => {
+      const res = await macroAttackWith([
+        { id: "broken-bow", name: "Broken Bow", type: "weapon", quantity: 0, equippedSlot: "MAIN_HAND", properties: {} },
+        { id: "rapier", name: "Rapier", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Rapier");
+    });
+
+    it("uses the equipped main-hand weapon for a free-text attack", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], [
+        { id: "dagger", name: "Dagger", type: "weapon", quantity: 1, equippedSlot: null, properties: {} },
+        { id: "longsword", name: "Longsword", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
+      ]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Longsword");
+    });
+
+    it("resolves a punch unarmed when its only weapon is stowed", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], [
+        { id: "dagger", name: "Dagger", type: "weapon", quantity: 1, equippedSlot: null, properties: {} },
+      ]));
+
+      const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+    });
+
+    it("resolves a punch unarmed when its main-hand weapon is depleted", async () => {
+      const inventory = [
+        { id: "broken-sword", name: "Broken Sword", type: "weapon", quantity: 0, equippedSlot: "MAIN_HAND", properties: {} },
+      ];
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], inventory));
+
+      const freeText = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+      expect(freeText.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+    });
+
+    it("resolves a punch unarmed with no weapons", async () => {
+      const resilientHostile = { ...hostile, hp: 100, maxHp: 100 };
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, resilientHostile], []));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, resilientHostile]);
+      const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+      try {
+        const res = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+        expect(res.status).toBe(200);
+        expect(resolvedWeaponName()).toBe("Unarmed");
+        expect(resolvedDamageType()).toBe("bludgeoning");
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
+    it("keeps the slashing fallback for an equipped weapon with no resolved damage type", async () => {
+      const inventory = [
+        { id: "unknown-weapon", name: "Unknown Weapon", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
+      ];
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], inventory));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+      (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+      (prisma.srdItem.findMany as any).mockResolvedValue([]);
+
+      const res = await attackWith({ targetName: "Goblin" });
+
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unknown Weapon");
+      expect(resolvedDamageType()).toBe("slashing");
+    });
+
+    it("keeps macro Attacks unarmed when no usable main-hand weapon exists", async () => {
+      const inventory = [
+        { id: "broken-sword", name: "Broken Sword", type: "weapon", quantity: 0, equippedSlot: "MAIN_HAND", properties: {} },
+      ];
+
+      vi.clearAllMocks();
+      (getAuthUser as any).mockResolvedValue(mockUser);
+      (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+      (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+      (prisma.srdItem.findMany as any).mockResolvedValue([]);
+
+      const macro = await macroAttackWith(inventory);
+
+      expect(macro.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+    });
+
+    it("does not normalize a padded main-hand slot for either attack path", async () => {
+      const inventory = [
+        { id: "longsword", name: "Longsword", type: "weapon", quantity: 1, equippedSlot: " MAIN_HAND ", properties: {} },
+      ];
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile], inventory));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const freeText = await attackWith({ targetName: "Goblin" }, {}, "I punch the goblin");
+
+      expect(freeText.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+
+      vi.clearAllMocks();
+      (getAuthUser as any).mockResolvedValue(mockUser);
+      (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+      (prisma.srdItem.findUnique as any).mockResolvedValue(null);
+      (prisma.srdItem.findMany as any).mockResolvedValue([]);
+
+      const macro = await macroAttackWith(inventory);
+
+      expect(macro.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Unarmed");
+    });
+
+    it("continues to resolve a valid main-hand weapon", async () => {
+      const res = await macroAttackWith([
+        { id: "longsword", name: "Longsword", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(resolvedWeaponName()).toBe("Longsword");
+    });
 
     it("refuses an attack with no target instead of falling through to narration", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
@@ -389,6 +553,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
                 id: "w1",
                 name: "Longsword",
                 type: "weapon",
+                quantity: 1,
                 equippedSlot: "MAIN_HAND",
                 properties,
               },
@@ -1545,7 +1710,7 @@ describe("Action Route - rejected actions never enter canonical GameLog (DC-AUD-
       skillProficiencies: [],
       exhaustionLevel: 0,
       inventory: [
-        { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
+        { id: "w1", name: "Longsword", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
       ],
     },
     relevantMemories: [],
@@ -1880,7 +2045,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
       id: "char-1", name: "Hero", class: "fighter", level: 1,
       stats: { STR: 14 }, skillProficiencies: [], exhaustionLevel: 0,
       inventory: [
-        { id: "w1", name: "Longsword", type: "weapon", equippedSlot: "MAIN_HAND", properties: {} },
+        { id: "w1", name: "Longsword", type: "weapon", quantity: 1, equippedSlot: "MAIN_HAND", properties: {} },
       ],
     },
     relevantMemories: [],

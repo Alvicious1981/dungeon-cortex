@@ -97,6 +97,7 @@ function primeContext(): void {
       allEdges: [],
     },
     gold: 0,
+    activeNPCs: [],
     activeNPC: null,
   });
   (prisma.campaign.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -355,6 +356,7 @@ describe("travel gate", () => {
         allEdges: [],
       },
       gold: 0,
+      activeNPCs: [],
       activeNPC: null,
     });
     (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
