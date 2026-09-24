@@ -1030,15 +1030,53 @@ describe("executeCombatAction", () => {
 
       expect(outcome.consequences[0]?.conditionsApplied).toHaveLength(0);
     });
+
+    it("marks each consequence target with its own Combatant.isPlayer when the caster stands in the area", async () => {
+      const enemy = buildEnemy();
+      const player = buildPlayer();
+      const tx = buildMockTx();
+      // Per target: failed save (0.4 → 9 < DC 15), 1d8 → 8 (0.99), hit-location 0.0.
+      mockRandom([0.4, 0.99, 0.0, 0.4, 0.99, 0.0]);
+
+      const outcome = await executeCombatAction({
+        actionType: "cast_spell",
+        encounter: buildEncounter([player, enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        targetCombatants: [enemy, player],
+        spellName: "Burning Hands",
+        spellLevel: 1,
+        spellEffect: {
+          type: "damage",
+          dice: "1d8",
+          hasSavingThrow: true,
+          saveAbility: "DEX",
+          damageType: "fire",
+        },
+        spellSaveDC: 15,
+        rawSpellSlots: { "1": { current: 2, max: 4 } },
+        playerCharacterId: "char-1",
+        collectEvents: true,
+      }, tx);
+
+      expect(
+        outcome.consequences.map((consequence) => [consequence.targetName, consequence.targetIsPlayer])
+      ).toEqual([
+        ["Goblin", false],
+        ["Aldric", true],
+      ]);
+    });
   });
 
   // ── buildCombatConsequenceEvent — pure helper ─────────────────────────────────
 
   describe("buildCombatConsequenceEvent", () => {
-    it("builds a targets-only COMBAT_CONSEQUENCE payload", () => {
+    it("builds a COMBAT_CONSEQUENCE payload of the attacker's identity and the canonical targets[]", () => {
       const target: SingleTargetConsequence = {
         targetId: "enemy-1",
         targetName: "Goblin",
+        targetIsPlayer: false,
         damage: 5,
         naturalRoll: 14,
         isCrit: false,
@@ -1051,21 +1089,41 @@ describe("executeCombatAction", () => {
         conditionsApplied: [],
       };
 
-      const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [target] });
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Aldric",
+        attackerIsPlayer: true,
+        targets: [target],
+      });
 
       expect(event).toEqual({
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: "Aldric", targets: [target] },
+        payload: { attackerName: "Aldric", attackerIsPlayer: true, targets: [target] },
       });
-      expect(Object.keys(event.payload).sort()).toEqual(["attackerName", "targets"]);
+      // No flat consequence fields (LAW-01): the payload names who attacked, and
+      // everything that happened lives in targets[].
+      expect(Object.keys(event.payload).sort()).toEqual(["attackerIsPlayer", "attackerName", "targets"]);
+    });
+
+    it("states the attacker's role as given rather than assuming the player", () => {
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Goblin",
+        attackerIsPlayer: false,
+        targets: [],
+      });
+
+      expect(event.payload.attackerIsPlayer).toBe(false);
     });
 
     it("preserves an empty canonical targets array", () => {
-      const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [] });
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Aldric",
+        attackerIsPlayer: true,
+        targets: [],
+      });
 
       expect(event).toEqual({
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: "Aldric", targets: [] },
+        payload: { attackerName: "Aldric", attackerIsPlayer: true, targets: [] },
       });
     });
 
@@ -1073,6 +1131,7 @@ describe("executeCombatAction", () => {
       const target: SingleTargetConsequence = {
         targetId: "e1",
         targetName: "Orc",
+        targetIsPlayer: false,
         damage: 10,
         naturalRoll: 18,
         isCrit: true,
@@ -1085,7 +1144,11 @@ describe("executeCombatAction", () => {
         conditionsApplied: [],
       };
 
-      const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [target] });
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Aldric",
+        attackerIsPlayer: true,
+        targets: [target],
+      });
 
       expect((event.payload.targets as SingleTargetConsequence[])[0]?.isKill).toBe(true);
     });

@@ -174,7 +174,9 @@ This registry defines deprecated fields and legacy logic paths to remove during 
 
 ### 5.1 Deprecated consequence flat fields — Removed 2026-07-25
 
-The deprecated flat members were removed from `CombatConsequencePayload`. The strict consequence event now contains only `attackerName` and complete `targets[]` entries.
+The deprecated flat members were removed from `CombatConsequencePayload`. The strict consequence event now contains only `attackerName`, `attackerIsPlayer` and complete `targets[]` entries.
+
+`attackerIsPlayer` and each target's `targetIsPlayer` say who the player character is (`Combatant.isPlayer`). They identify creatures and carry no consequence, so LAW-01 is unchanged. The code that builds the event states them, both are required so a producer cannot omit them, and the narrator adapter only copies them: it never infers a role. (Added 2026-09-24: until then the adapter labelled every attacker the player and every target a non-player, which inverted both for an enemy's attack.)
 
 ### 5.2 Legacy UI update paths — Resolved 2026-07-25; dead VTT removed 2026-09-10
 

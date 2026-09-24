@@ -373,10 +373,12 @@ export interface FinalizeTurnResult {
 
 export function buildCombatConsequenceEvent(input: {
   attackerName: string;
+  attackerIsPlayer: boolean;
   targets: SingleTargetConsequence[];
 }): CombatConsequenceEvent {
   const payload: CombatConsequencePayload = {
     attackerName: input.attackerName,
+    attackerIsPlayer: input.attackerIsPlayer,
     targets: input.targets,
   };
 
@@ -785,6 +787,7 @@ export async function executeCombatAction(
     const singleConsequence: SingleTargetConsequence = {
       targetName: target.name,
       targetId: target.id,
+      targetIsPlayer: target.isPlayer,
       damage,
       naturalRoll,
       isCrit,

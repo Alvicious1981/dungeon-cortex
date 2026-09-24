@@ -27,9 +27,12 @@ describe('Narrative Integration Tests (Fase 8B.1)', () => {
       type: 'COMBAT_CONSEQUENCE',
       payload: {
         attackerName,
+        // Every caller here is a player character striking enemies.
+        attackerIsPlayer: true,
         targets: targets.map(t => ({
           targetName: t.targetName,
           targetId: t.targetId,
+          targetIsPlayer: false,
           damage: t.damage,
           naturalRoll: t.isCrit ? 20 : (t.isFumble ? 1 : 10),
           isCrit: !!t.isCrit,

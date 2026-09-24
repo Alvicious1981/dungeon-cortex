@@ -187,10 +187,12 @@ describe('Narrative Prompt Builder Tests (Fase 7A/7B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Orc',
               targetId: 'orc-1',
+              targetIsPlayer: false,
               damage: 12,
               naturalRoll: 20,
               isCrit: true,

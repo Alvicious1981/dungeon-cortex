@@ -19,6 +19,7 @@ function buildTarget(
   return {
     targetId,
     targetName,
+    targetIsPlayer: false,
     damage: 0,
     naturalRoll: 10,
     isCrit: false,
@@ -41,10 +42,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 6,
               naturalRoll: 15,
               isCrit: false,
@@ -97,10 +100,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 0,
               naturalRoll: 5,
               isCrit: false,
@@ -131,10 +136,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 12,
               naturalRoll: 20,
               isCrit: true,
@@ -172,10 +179,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 0,
               naturalRoll: 1,
               isCrit: false,
@@ -233,10 +242,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 2,
               naturalRoll: 16,
               isCrit: false,
@@ -268,10 +279,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 5,
               naturalRoll: 12,
               isCrit: false,
@@ -296,10 +309,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 15,
               naturalRoll: 18,
               isCrit: false,
@@ -350,10 +365,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Goblin A',
               targetId: 'goblin-a',
+              targetIsPlayer: false,
               damage: 4,
               naturalRoll: 16,
               isCrit: false,
@@ -368,6 +385,7 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
             {
               targetName: 'Goblin B',
               targetId: 'goblin-b',
+              targetIsPlayer: false,
               damage: 4,
               naturalRoll: 16,
               isCrit: false,
@@ -408,10 +426,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             buildTarget({
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 6,
               hpAfter: 9
             })
@@ -429,10 +449,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             buildTarget({
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 4,
               hpAfter: 11
             })
@@ -461,10 +483,12 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             buildTarget({
               targetName: 'Goblin',
               targetId: 'goblin-1',
+              targetIsPlayer: false,
               damage: 6,
               hpAfter: 9
             })
@@ -494,6 +518,7 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: longActorName,
+          attackerIsPlayer: true,
           targets: [buildTarget({
             targetId: 'long-name-target',
             targetName: longTargetName,
@@ -516,6 +541,7 @@ describe('Combat Fact Adapter Tests (Fase 4A/4B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             buildTarget({ targetId: 'target-one', targetName: `${sharedPrefix} one`, damage: 4 }),
             buildTarget({ targetId: 'target-two', targetName: `${sharedPrefix} two`, damage: 4 }),

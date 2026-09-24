@@ -839,6 +839,8 @@ async function resolveAction(
         if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
+            // A player-action gate: the attacker is the player character.
+            attackerIsPlayer: true,
             targets: committed.attackOutcome.consequences,
           }));
         }
@@ -1780,6 +1782,8 @@ async function resolveAction(
         if (committed.spellOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
+            // A player-action gate: the attacker is the player character.
+            attackerIsPlayer: true,
             targets: committed.spellOutcome.consequences,
           }));
         }
@@ -2111,6 +2115,8 @@ async function resolveAction(
         if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
+            // A player-action gate: the attacker is the player character.
+            attackerIsPlayer: true,
             targets: committed.attackOutcome.consequences,
           }));
         }

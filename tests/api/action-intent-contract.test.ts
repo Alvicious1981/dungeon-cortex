@@ -870,6 +870,34 @@ describe("una explosión no distingue de quién es", () => {
     expect(updated).toContain("p1");
   });
 
+  it("al narrador le llega el lanzador alcanzado por su propia explosión como el personaje jugador", async () => {
+    // El mismo combatiente es atacante y objetivo. Antes el objetivo salía
+    // marcado como no jugador, así que el narrador recibía al mismo personaje
+    // con dos papeles a la vez.
+    const player = {
+      id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+    };
+    encounterWith([player]);
+
+    const { res, frames } = await post("I cast Fireball", { targetX: 0, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+    expect(narrative?.actor).toMatchObject({ name: "Mira", isPlayer: true });
+    expect(narrative?.targets).toEqual([
+      expect.objectContaining({ id: "p1", name: "Mira", isPlayer: true }),
+    ]);
+
+    // And where it came from: the spell gate and the pipeline each state it.
+    const consequence = frames.find((f) => f.e?.type === "COMBAT_CONSEQUENCE");
+    expect(consequence.e.payload).toMatchObject({
+      attackerName: "Mira",
+      attackerIsPlayer: true,
+      targets: [{ targetId: "p1", targetIsPlayer: true }],
+    });
+  });
+
   it("alcanza a una criatura ya a 0 pv dentro del radio", async () => {
     const downed = {
       id: "t1", name: "Goblin Caído", ...NO_MODIFIERS, isPlayer: false, hp: 0, maxHp: 10, ac: 12,
@@ -885,6 +913,81 @@ describe("una explosión no distingue de quién es", () => {
     const { res } = await post("I cast Fireball", { targetX: 1, targetY: 0 });
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe("el narrador recibe a cada criatura con un solo papel cuando el enemigo contraataca", () => {
+  /** What the encounter route snapshots onto an enemy that can attack. */
+  const GOBLIN_PROFILE = {
+    version: 1,
+    walkSpeedFt: 30,
+    multiattack: null,
+    attacks: [
+      {
+        name: "Scimitar",
+        attackBonus: 4,
+        melee: { reachFt: 5 },
+        ranged: null,
+        damage: [{ dice: "1d6+2", type: "slashing" }],
+      },
+    ],
+  };
+
+  it("un ataque del jugador y el contraataque del goblin llegan con cada uno en su papel", async () => {
+    // The route emits the enemy chain's COMBAT_CONSEQUENCE *before* the
+    // player's own, so the narrator context is built from an enemy-authored and
+    // a player-authored consequence in one request: the case where a literal
+    // role labelled the goblin as the player and the hero as a non-player.
+    const player = {
+      id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 5, y: 5, size: "Medium",
+      initiativeTotal: 20, initiativeOrder: 0, attackProfile: null,
+    };
+    // AC 5 and 40 HP: the player's blow lands (natural 10 + modifier) and the
+    // goblin survives to answer it.
+    const goblin = {
+      id: "g1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 40, maxHp: 40, ac: 5,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 5, y: 6, size: "Small",
+      initiativeTotal: 10, initiativeOrder: 1, attackProfile: GOBLIN_PROFILE,
+    };
+    const roster = [player, goblin];
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants: roster,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(roster);
+    // Natural 10 on every die: neither a fumble nor a critical, and above the
+    // goblin's AC 5 and the player's AC 11.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+    try {
+      const { res, frames } = await post("Attack", { targetIds: ["g1"] });
+
+      expect(res.status).toBe(200);
+
+      // The scenario must really contain both attackers, or the roles below
+      // would be checked against a turn that never had the counter-attack.
+      const consequences = frames
+        .filter((f) => f.e?.type === "COMBAT_CONSEQUENCE")
+        .map((f) => f.e.payload);
+      expect(consequences.map((payload) => payload.attackerName)).toEqual(["Goblin", "Mira"]);
+
+      // What the narrator is told: every creature has one role, the right one.
+      const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+      const named = [narrative.actor, ...narrative.targets] as Array<{ name: string; isPlayer: boolean }>;
+      expect(new Set(named.map((creature) => creature.name))).toEqual(new Set(["Mira", "Goblin"]));
+      for (const creature of named) {
+        expect(creature.isPlayer, `${creature.name} in the narrator context`).toBe(creature.name === "Mira");
+      }
+
+      // And where it came from: each producer stated its own role on the event.
+      expect(consequences.map((payload) => payload.attackerIsPlayer)).toEqual([false, true]);
+    } finally {
+      random.mockRestore();
+    }
   });
 });
 

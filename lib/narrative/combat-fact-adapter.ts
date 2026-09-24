@@ -78,19 +78,31 @@ export function adaptCombatEventsToNarrativeContext(
 
   for (const event of events) {
     if (event.type === 'COMBAT_CONSEQUENCE') {
-      const { attackerName: rawAttackerName, targets: consequenceTargets } = event.payload;
+      const {
+        attackerName: rawAttackerName,
+        attackerIsPlayer,
+        targets: consequenceTargets,
+      } = event.payload;
       const attackerName = boundedNarrativeName(rawAttackerName);
 
+      // Who is the player character is stated by the code that built the event
+      // (the enemy-turn chain emits this same event with an enemy as attacker
+      // and the player as target), and it is copied here without a default:
+      // a missing flag fails the strict schema at the narrator boundary
+      // instead of quietly labelling a creature. `actor` is a single slot, so
+      // with several consequences in one turn the last attacker occupies it;
+      // every creature keeps its own role wherever it appears.
       actor = {
         id: '',
         name: attackerName,
-        isPlayer: true
+        isPlayer: attackerIsPlayer,
       };
 
       for (const target of consequenceTargets) {
         const {
           targetName: rawTargetName,
           targetId,
+          targetIsPlayer,
           damage,
           hpAfter,
           isCrit,
@@ -105,7 +117,7 @@ export function adaptCombatEventsToNarrativeContext(
           targets.push({
             id: targetId,
             name: targetName,
-            isPlayer: false,
+            isPlayer: targetIsPlayer,
             hpAfter,
           });
         }
