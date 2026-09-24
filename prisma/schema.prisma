@@ -405,7 +405,7 @@ model Combatant {
   attackProfile        Json?
   /// The Character this Combatant represents (DC-PARTY-002); the player's HP,
   /// death-save and downed-state writes are scoped by it, not by isPlayer.
-  /// NULL = not a player-controlled Character: enemies and NPC-derived
+  /// NULL = not backed by a Character: enemies and NPC-derived
   /// combatants never have one. Never NULL on an isPlayer row — the
   /// Combatant_player_has_character_id CHECK below enforces that.
   characterId          String?

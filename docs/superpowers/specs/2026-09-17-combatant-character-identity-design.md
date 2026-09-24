@@ -208,10 +208,10 @@ the current source, not assumed. No call site needs to *fetch* anything new.
   `party-member-migration-contract.test.ts`: the migration contains the `ADD COLUMN`, the backfill
   `UPDATE ... FROM`, and the `Combatant_one_player_per_encounter_key` index, and does not touch
   unrelated tables' DDL.
-- **Real-disposable-Postgres backfill proof** — create a `Combatant` row directly (bypassing the
-  migration's backfill, simulating a pre-existing row), run the backfill `UPDATE` against it,
-  confirm `characterId` lands correctly from the `Campaign` chain. Mocks cannot prove this; it
-  needs the real join.
+- **Real-disposable-Postgres backfill proof** — extract the migration's own backfill `UPDATE`
+  statement verbatim from the migration file and run it unscoped. Assert the player row was linked
+  correctly from the `Campaign` chain, the enemy row in the same encounter stays `NULL`, a second
+  run affects zero rows (idempotent), and the new CHECK constraint passes after the backfill.
 - **Real-disposable-Postgres constraint proof** — attempt to create a second `isPlayer: true`
   Combatant in an encounter that already has one; confirm Postgres rejects it with a Prisma `P2002`.
   Learned empirically during DC-PARTY-001: Prisma 6.19.2 reports `meta.target` as the raw column
@@ -219,6 +219,16 @@ the current source, not assumed. No call site needs to *fetch* anything new.
   on that, not on a `"Combatant_one_player_per_encounter_key"` substring. RED/GREEN falsification:
   temporarily drop that index, confirm the test goes RED (the insert succeeds instead of throwing),
   restore, confirm GREEN — same technique as DC-PARTY-001's duplicate-membership falsification.
+- **The `Combatant_player_has_character_id` CHECK** — a player Combatant without a `characterId`
+  is rejected at insert time with a CHECK violation (§2, added in the final whole-branch review).
+  The test proves it rejects `isPlayer: true` without `characterId`, permits `isPlayer: true` with
+  `characterId`, permits enemies (`isPlayer: false`) without `characterId`, and prevents unlinking
+  an already-linked player.
+- **The `(encounterId, characterId)` composite unique index** (`Combatant_encounterId_characterId_key`)
+  — a duplicate `(encounterId, characterId)` pair is rejected (§2, added in the final review). The
+  test proves a player and enemy cannot both link the same Character in one encounter, while
+  multiple `NULL`-`characterId` enemy rows in the same encounter remain permitted (NULLs are
+  distinct in Postgres unique indexes), and the same Character can be linked in different encounters.
 - **The write-function safety property — now a unit test, not an integration test.** Design review
   added `Combatant_one_player_per_encounter_key` (§2), which means two `isPlayer: true` rows with
   different `characterId` can no longer be constructed in a real database — the constraint itself
@@ -239,10 +249,16 @@ the current source, not assumed. No call site needs to *fetch* anything new.
   `tests/db/player-downed.test.ts`, and death-save transition's tests) need their fixtures updated
   to pass `characterId` — expected, mechanical maintenance given the signature change, not new
   design risk.
-- **Full regression** — the existing unit suite, `pnpm build`, and the e2e combat specs
-  (`enemy-attack-profile.spec.ts`, `area-save-actions.spec.ts`, `combat-hp-concurrency.spec.ts`,
-  `critical-path.spec.ts`) must all pass unmodified against a real disposable Postgres. Since
-  nothing here changes observable combat behavior, any pass is direct evidence of that.
+- **Full regression** — the full `pnpm test:e2e:smoke` suite (exactly what CI runs) must pass
+  against a real disposable Postgres. Nine e2e fixtures — the shared `tests/e2e/support/combat-fixture.ts`
+  plus eight specs including `area-save-actions.spec.ts` and `combat-hp-concurrency.spec.ts` —
+  were modified only to set `characterId` on their player Combatant row; no assertions were
+  changed. This was discovered by the final whole-branch review: these fixtures predate the plan,
+  and once the new code's write paths scope their `updateMany` calls by `characterId` instead of
+  `isPlayer: true`, a player row without a `characterId` is invisible to them — `death-saves.spec.ts`
+  failed 4 of 6 against real Postgres before the fix. That is why the regression must run the full
+  smoke suite rather than a hand-picked subset: nothing can be ruled out at the fixture level until
+  the entire application's real paths are verified.
 
 ## 7. Error handling
 
@@ -270,11 +286,16 @@ in a future task if it ever proves necessary.
       unapplied per `AGENTS.md`.
 - [ ] `Combatant_one_player_per_encounter_key` partial unique index, with its pre-check DO block,
       in the same migration.
+- [ ] `Combatant_player_has_character_id` CHECK constraint, placed after the backfill in the
+      migration.
+- [ ] `@@unique([encounterId, characterId])` / `Combatant_encounterId_characterId_key` composite
+      unique index in the migration.
 - [ ] `mirrorPlayerCombatantHp`, `applyPlayerDowned`, `rollPlayerDeathSave` scoped by
       `characterId`; all callers updated.
 - [ ] Both Combatant-creation sites set `characterId`.
-- [ ] Tests per §6: migration contract, real-DB backfill proof, real-DB constraint proof with
-      RED/GREEN falsification, the write-function unit test, and the architecture-fence test for
-      creation-site coverage.
-- [ ] Full existing suite (unit + e2e, including against real disposable Postgres) passes
-      unmodified.
+- [ ] Nine e2e fixtures updated to set `characterId` on their player Combatant.
+- [ ] Tests per §6: migration contract, real-DB backfill proof, real-DB single-player constraint
+      proof with RED/GREEN falsification, `Combatant_player_has_character_id` CHECK proof,
+      `(encounterId, characterId)` composite unique index proof, the write-function unit test,
+      and the architecture-fence test for creation-site coverage.
+- [ ] The full `pnpm test:e2e:smoke` suite passes against a real disposable Postgres.
