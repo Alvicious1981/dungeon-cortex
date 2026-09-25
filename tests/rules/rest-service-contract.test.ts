@@ -496,6 +496,124 @@ describe("resolveRest service contract", () => {
     );
   });
 
+  it("restores a warlock's Pact Magic slots on a short rest even when no Hit Die is spent", async () => {
+    // SRD: a warlock "regain[s] all expended spell slots when [they] finish a
+    // short or long rest" — unlike every other class, the refresh is not
+    // conditional on spending a Hit Die. Full HP means an implicit short rest
+    // spends none, so this is the case the fix has to cover.
+    const warlock: CharacterFixture = {
+      id: "character-1",
+      campaignId: "campaign-1",
+      hp: 12,
+      maxHp: 12,
+      level: 3, // Pact slot level 2, 2 slots per the SRD table.
+      class: "Warlock",
+      stats: { CON: 12, constitution: 12 },
+      spellSlots: { "2": { current: 0, max: 2 } },
+      hitDiceTotal: 3,
+      hitDiceRemaining: 3,
+      exhaustionLevel: 0,
+      inventoryVersion: 1,
+      combatVersion: 1,
+      encounterVersion: 1,
+      questVersion: 1,
+      economyVersion: 1,
+    };
+    const { characters, tx } = createTx({ characters: [warlock] });
+
+    const result = await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      tx,
+    });
+
+    expect(characters.find((character) => character.id === "character-1")?.spellSlots).toEqual({
+      "2": { current: 2, max: 2 },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      facts: { restType: "short", hitDiceSpent: 0, slotsRestored: true },
+    });
+    // hp/hitDiceRemaining did not change, so only spellSlots is written —
+    // the no-op guarantee for the rest of the row still holds.
+    expect(tx.character.update).toHaveBeenCalledTimes(1);
+    expect(Object.keys(tx.character.update.mock.calls[0]?.[0]?.data ?? {})).toEqual([
+      "spellSlots",
+    ]);
+  });
+
+  it("keeps a short rest a database no-op when a warlock's Pact Magic slots are already full", async () => {
+    const warlock: CharacterFixture = {
+      id: "character-1",
+      campaignId: "campaign-1",
+      hp: 12,
+      maxHp: 12,
+      level: 3,
+      class: "Warlock",
+      stats: { CON: 12, constitution: 12 },
+      spellSlots: { "2": { current: 2, max: 2 } },
+      hitDiceTotal: 3,
+      hitDiceRemaining: 3,
+      exhaustionLevel: 0,
+      inventoryVersion: 1,
+      combatVersion: 1,
+      encounterVersion: 1,
+      questVersion: 1,
+      economyVersion: 1,
+    };
+    const { tx } = createTx({ characters: [warlock] });
+
+    const result = await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      tx,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      facts: { restType: "short", hitDiceSpent: 0, slotsRestored: false },
+    });
+    expect(tx.character.update).not.toHaveBeenCalled();
+  });
+
+  it("restores a warlock's Pact Magic slots at its class and level's SRD maxima, even if stored stale", async () => {
+    // Same "table over stored value" policy as the long-rest equivalent test:
+    // a warlock levelled before spell-slot progression existed is still
+    // whole after a short rest, not stuck at their old pact slot level.
+    const staleWarlock: CharacterFixture = {
+      id: "character-1",
+      campaignId: "campaign-1",
+      hp: 12,
+      maxHp: 12,
+      level: 5, // Pact slot level 3, 2 slots per the SRD table.
+      class: "Warlock",
+      stats: { CON: 12, constitution: 12 },
+      spellSlots: { "1": { current: 0, max: 1 } },
+      hitDiceTotal: 5,
+      hitDiceRemaining: 5,
+      exhaustionLevel: 0,
+      inventoryVersion: 1,
+      combatVersion: 1,
+      encounterVersion: 1,
+      questVersion: 1,
+      economyVersion: 1,
+    };
+    const { characters, tx } = createTx({ characters: [staleWarlock] });
+
+    await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      tx,
+    });
+
+    expect(characters.find((character) => character.id === "character-1")?.spellSlots).toEqual({
+      "3": { current: 2, max: 2 },
+    });
+  });
+
   it("long rest restores HP", async () => {
     const { characters, tx } = createTx();
 

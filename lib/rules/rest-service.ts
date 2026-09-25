@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier, roll as defaultRoll } from "@/lib/rules/dice";
-import { longRestSpellSlots } from "@/lib/rules/magic";
+import { isSpellSlots, longRestSpellSlots, type SpellSlots } from "@/lib/rules/magic";
 import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import { hitDieForClass } from "@/lib/rules/progression";
 
@@ -285,6 +285,31 @@ async function assertNoActiveEncounter(
   }
 }
 
+/**
+ * A warlock's Pact Magic slots refresh on completing any short rest per the
+ * SRD, unlike every other class's slots, which only return on a long rest.
+ * Reuses `longRestSpellSlots` for the table lookup — the SRD maxima are the
+ * same "give every slot back" computation either way, only which classes get
+ * it on a short rest differs.
+ *
+ * Returns null (no write) when the class is not a warlock or the recomputed
+ * slots match what is already stored, so a short rest that finds a warlock
+ * already topped up stays the database no-op it would otherwise be.
+ */
+function warlockSlotsAfterShortRest(character: RestCharacterRecord): SpellSlots | null {
+  if (character.class.trim().toLowerCase() !== "warlock") return null;
+
+  const restored = longRestSpellSlots(character.class, character.level, character.spellSlots);
+  if (!restored) return null;
+
+  const stored = isSpellSlots(character.spellSlots) ? character.spellSlots : null;
+  const unchanged =
+    stored !== null &&
+    Object.keys(restored).every((key) => stored[key]?.current === restored[key]!.current);
+
+  return unchanged ? null : restored;
+}
+
 function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecord) {
   const hitDice = currentHitDice(character);
   // Exhaustion level 4+ halves the maximum a short rest can heal up to.
@@ -328,15 +353,25 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
       ? 1
       : 0;
 
+  // Independent of Hit Dice: a warlock's Pact Magic refreshes on any short
+  // rest, so this is computed before the hitDiceToSpend branch below decides
+  // whether hp/Hit Dice themselves need a write.
+  const warlockSlots = warlockSlotsAfterShortRest(character);
+
   if (hitDiceToSpend === 0) {
     // Nothing was rolled, so nothing is reported as rolled. `Math.max(1, …)`
     // below would otherwise grant a free hit point for a die never spent.
     //
-    // This must also be a database no-op. Rewriting the hp/Hit Dice values read
-    // above can erase a legitimate concurrent update that commits before this
-    // request resumes (for example, a long rest recovering Hit Dice).
+    // hp/Hit Dice stay a database no-op here: rewriting the values read above
+    // can erase a legitimate concurrent update that commits before this
+    // request resumes (for example, a long rest recovering Hit Dice). A
+    // warlock's slot refresh is the one exception — `warlockSlotsAfterShortRest`
+    // already only returns non-null when something needs to change, so this
+    // write is still skipped whenever there is truly nothing to update.
     return {
-      data: null,
+      data: warlockSlots
+        ? { spellSlots: warlockSlots as unknown as Prisma.InputJsonValue }
+        : null,
       details: {
         hpBefore,
         hpAfter: hpBefore,
@@ -346,7 +381,7 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
         hitDiceRemainingBefore: hitDice.remaining,
         hitDiceRemainingAfter: hitDice.remaining,
         exhaustionReduced: 0,
-        slotsRestored: false,
+        slotsRestored: warlockSlots !== null,
         hitDie: null,
         rolled: null,
         conMod: null,
@@ -367,6 +402,9 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
     data: {
       hp: hpAfter,
       hitDiceRemaining: hitDice.remaining - hitDiceToSpend,
+      ...(warlockSlots
+        ? { spellSlots: warlockSlots as unknown as Prisma.InputJsonValue }
+        : {}),
     },
     details: {
       hpBefore,
@@ -377,7 +415,7 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
       hitDiceRemainingBefore: hitDice.remaining,
       hitDiceRemainingAfter: hitDice.remaining - hitDiceToSpend,
       exhaustionReduced: 0,
-      slotsRestored: false,
+      slotsRestored: warlockSlots !== null,
       hitDie: diceExpression,
       rolled,
       conMod,
