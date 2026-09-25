@@ -391,6 +391,20 @@ Killer and Suggestion are stored with `concentration: null`, which
   **Still open:** `DEFERRED_SPELL_CONDITIONS` lists every other
   condition-imposing spell in the cache with its reason code.
 
+Closed 2026-09-26: **no character could cast above 1st level.**
+`spellSlotsForLevel` in `lib/rules/magic.ts` held the SRD slot tables for every
+class and had no caller. Characters were created with two 1st-level slots if
+they were a wizard, cleric or sorcerer (a bard, druid or warlock got none), and
+`applyLevelUp` never touched `spellSlots`. Now `spellSlotsFor` feeds creation,
+`advanceSpellSlots` runs inside the level-up compare-and-set (under the
+Character row lock, since a cast spends the same column), and a long rest
+restores slots at the table's maxima for the class and level, which also
+repairs every character levelled before this. `tests/rules/spell-slot-progression.test.ts`.
+**Still open:** a warlock's Pact Magic slots return only on a long rest, not
+on a short rest as the SRD says. The short rest deliberately writes nothing
+when it spends no Hit Die, so adding that write needs its own concurrency
+reasoning.
+
 Closed 2026-09-26: **the live spawn path never snapshotted a monster's damage
 modifiers or condition immunities.** `spawnCombatEncounter` in
 `lib/rules/encounter-service.ts` writes all four columns, and has had no

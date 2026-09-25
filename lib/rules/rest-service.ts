@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier, roll as defaultRoll } from "@/lib/rules/dice";
-import { isSpellSlots, restoreAllSlots } from "@/lib/rules/magic";
+import { longRestSpellSlots } from "@/lib/rules/magic";
 import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import { hitDieForClass } from "@/lib/rules/progression";
 
@@ -406,8 +406,10 @@ function resolveLongRest(character: RestCharacterRecord) {
     hitDice.total,
     hitDice.remaining + hitDiceRecovered
   );
-  const slotsBefore = character.spellSlots;
-  const slotsAfter = isSpellSlots(slotsBefore) ? restoreAllSlots(slotsBefore) : slotsBefore;
+  // The maxima come from the SRD table for the class and level, not from the
+  // stored slots, so a character whose slots were never raised when they
+  // levelled up is whole again after one long rest.
+  const slotsAfter = longRestSpellSlots(character.class, character.level, character.spellSlots);
 
   return {
     data: {
@@ -427,7 +429,7 @@ function resolveLongRest(character: RestCharacterRecord) {
       hitDiceRemainingBefore: hitDice.remaining,
       hitDiceRemainingAfter,
       exhaustionReduced: exhaustionBefore - exhaustionLevel,
-      slotsRestored: isSpellSlots(slotsBefore),
+      slotsRestored: slotsAfter !== null,
       hitDie: null,
       rolled: null,
       conMod: null,

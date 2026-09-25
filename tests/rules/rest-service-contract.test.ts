@@ -533,6 +533,32 @@ describe("resolveRest service contract", () => {
     });
   });
 
+  it("long rest restores a caster's slots at its class and level's SRD maxima", async () => {
+    // A level 3 wizard whose slots were never raised past level 1 — every
+    // character levelled before spell-slot progression existed.
+    const staleWizard = {
+      ...baseCharacters[0]!,
+      class: "Wizard",
+      level: 3,
+      spellSlots: { "1": { current: 0, max: 2 } },
+    };
+    const { characters, tx } = createTx({
+      characters: [staleWizard, ...baseCharacters.slice(1)],
+    });
+
+    await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "long",
+      tx,
+    });
+
+    expect(characters.find((character) => character.id === "character-1")?.spellSlots).toEqual({
+      "1": { current: 4, max: 4 },
+      "2": { current: 2, max: 2 },
+    });
+  });
+
   it("does not allow HP above maxHp", async () => {
     const characters = baseCharacters.map((character) =>
       character.id === "character-1" ? { ...character, hp: 11, maxHp: 12 } : character
