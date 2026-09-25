@@ -4,6 +4,7 @@ import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { setPlayerHp } from "@/lib/db/player-hp";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
 import { rollDie } from "@/lib/rules/dice";
+import { exhaustionEffects } from "@/lib/rules/exhaustion";
 import {
   DeathSaveInvariantError,
   derivePlayerLifeState,
@@ -65,7 +66,15 @@ export async function rollPlayerDeathSave(
   // killed the player owns this turn.
   if (derivePlayerLifeState(player) !== "dying") throw new TurnStateConflictError();
 
-  const natural = dice.d20();
+  // A death saving throw is a saving throw, so exhaustion level 3+ puts it at
+  // disadvantage. Read under the Character lock taken above; exhaustion cannot
+  // change during an encounter anyway (neither travel nor a rest may run).
+  const character = await tx.character.findUnique({
+    where: { id: ctx.characterId },
+    select: { exhaustionLevel: true },
+  });
+  const disadvantage = exhaustionEffects(character?.exhaustionLevel).savingThrowDisadvantage;
+  const natural = disadvantage ? Math.min(dice.d20(), dice.d20()) : dice.d20();
   const result = resolveDeathSave(
     { successes: player.deathSaveSuccesses, failures: player.deathSaveFailures },
     natural
@@ -111,7 +120,7 @@ export async function rollPlayerDeathSave(
       role: "system",
       // The counters alone do not tell the player what they mean.
       content:
-        `Death save: ${natural} — ${verdict} (${successes}/3 successes, ${failures}/3 failures).` +
+        `Death save${disadvantage ? " (disadvantage — exhaustion)" : ""}: ${natural} — ${verdict} (${successes}/3 successes, ${failures}/3 failures).` +
         (result.outcome === "stable"
           ? ` ${player.name} is stable.`
           : result.outcome === "dead"

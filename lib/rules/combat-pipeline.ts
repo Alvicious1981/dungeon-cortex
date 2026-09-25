@@ -36,6 +36,8 @@ import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immun
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
 import { applyPlayerDowned } from "@/lib/db/player-downed";
+import { effectiveMaxHp } from "@/lib/rules/exhaustion";
+import { markCharacterDead } from "@/lib/db/character-death";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { EnemyTurnInvariantError, resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
@@ -231,9 +233,9 @@ async function claimConsumableUnit(
  * to overwrite healing another transaction committed first.
  *
  * The dice result is supplied by the caller and is never recomputed here.
- * Each attempt reads the latest hp/maxHp pair, derives the capped result, then
- * conditionally writes only if both values still match the snapshot that
- * authorised that result. A miss means another writer won; re-read and rebase
+ * Each attempt reads the latest hp/maxHp/exhaustionLevel, derives the capped
+ * result, then conditionally writes only if all three still match the snapshot
+ * that authorised that result. A miss means another writer won; re-read and rebase
  * the same healing amount. Matching maxHp as well as hp keeps the cap coherent
  * with concurrent progression or sheet changes.
  *
@@ -256,7 +258,10 @@ async function applyCharacterHealing(
     const character = await characterDb.findUnique({ where: { id: characterId } });
     if (!character) return null;
 
-    const newHp = Math.min(character.hp + healed, character.maxHp);
+    const newHp = Math.min(
+      character.hp + healed,
+      effectiveMaxHp(character.maxHp, character.exhaustionLevel)
+    );
     await characterDb.update({
       where: { id: characterId },
       data: { hp: newHp },
@@ -268,16 +273,21 @@ async function applyCharacterHealing(
   for (let attempt = 0; attempt < MAX_CHARACTER_HEAL_CAS_ATTEMPTS; attempt += 1) {
     const character = await characterDb.findUnique({
       where: { id: characterId },
-      select: { hp: true, maxHp: true },
+      select: { hp: true, maxHp: true, exhaustionLevel: true },
     });
     if (!character) return null;
 
-    const newHp = Math.min(character.hp + healed, character.maxHp);
+    // Exhaustion level 4+ halves the maximum that healing may reach.
+    const newHp = Math.min(
+      character.hp + healed,
+      effectiveMaxHp(character.maxHp, character.exhaustionLevel)
+    );
     const claim = await characterDb.updateMany({
       where: {
         id: characterId,
         hp: character.hp,
         maxHp: character.maxHp,
+        exhaustionLevel: character.exhaustionLevel,
       },
       data: { hp: newHp },
     });
@@ -301,6 +311,11 @@ export interface CombatActionPayload {
   actorConditions: string[];
   /** SRD armour-proficiency penalty on the actor. Defaults to no penalty. */
   actorArmorPenalty?: boolean;
+  /**
+   * The actor's exhaustion level (0-6), from `Character.exhaustionLevel`.
+   * Level 3+ imposes disadvantage on attack rolls. Defaults to 0.
+   */
+  actorExhaustionLevel?: number;
   targetCombatants: PipelineCombatant[];
   
   // Weapon/Attack data
@@ -563,6 +578,7 @@ export async function executeCombatAction(
         attackerConditions: actorConditions,
         defenderConditions: extractConditions(target.conditions),
         attackerArmorPenalty: payload.actorArmorPenalty ?? false,
+        attackerExhaustionLevel: payload.actorExhaustionLevel ?? 0,
         isMelee: true,
         encounterSnapshot: snapshot,
         usedSenses: [],
@@ -904,10 +920,7 @@ async function resolveEncounterIfEnded(input: {
         select: { campaign: { select: { characterId: true } } },
       });
       if (owner) {
-        await tx.character.updateMany({
-          where: { id: owner.campaign.characterId, diedAt: null },
-          data: { diedAt: new Date() },
-        });
+        await markCharacterDead(tx, owner.campaign.characterId);
       }
     }
 

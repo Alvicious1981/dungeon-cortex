@@ -25,6 +25,7 @@ import { abilityModifier } from "@/lib/rules/dice";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import type { CharacterNarrativeProfile } from "@/lib/character-sheet/contracts";
 import { slotAccepts } from "@/lib/rules/equipment-slot";
+import { describeExhaustion, effectiveMaxHp } from "@/lib/rules/exhaustion";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -193,11 +194,19 @@ function formatCharacter(character: CampaignContext["character"]): string {
     `**${character.name}** — ${character.race} ${character.class}, Level ${character.level}`
   );
 
-  lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
+  // The maximum that applies now: exhaustion level 4+ halves it while
+  // `maxHp` keeps the unreduced value (see lib/rules/exhaustion.ts).
+  const currentMaxHp = effectiveMaxHp(character.maxHp, character.exhaustionLevel);
+  lines.push(
+    currentMaxHp === character.maxHp
+      ? `**HP:** ${character.hp} / ${character.maxHp}`
+      : `**HP:** ${character.hp} / ${currentMaxHp} (maximum halved by exhaustion from ${character.maxHp})`
+  );
 
-  // Exhaustion (Phase 6) — Expose only backend-supported mechanical semantics (no unsupported tiers)
-  if (typeof character.exhaustionLevel === "number" && character.exhaustionLevel >= 1) {
-    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
+  // Exhaustion — every tier named here is one the backend enforces.
+  const exhaustion = describeExhaustion(character.exhaustionLevel);
+  if (exhaustion) {
+    lines.push(`**Exhaustion:** ${exhaustion}`);
   }
 
   // Concentration (Phase 7) — Raw truthiness mirrors backend presence
@@ -615,9 +624,10 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   // report it as a plain fact, identically at every value.
   lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
 
-  // Exhaustion — Expose only backend-supported mechanical semantics (no unsupported tiers)
-  if (hud.exhaustionLevel >= 1) {
-    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
+  // Exhaustion — every tier named here is one the backend enforces.
+  const exhaustion = describeExhaustion(hud.exhaustionLevel);
+  if (exhaustion) {
+    lines.push(`**Exhaustion:** ${exhaustion}`);
   }
 
   // Light source

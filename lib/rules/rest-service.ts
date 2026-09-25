@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier, roll as defaultRoll } from "@/lib/rules/dice";
 import { isSpellSlots, restoreAllSlots } from "@/lib/rules/magic";
+import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 
 export type RestType = "short" | "long";
 
@@ -301,7 +302,9 @@ async function assertNoActiveEncounter(
 
 function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecord) {
   const hitDice = currentHitDice(character);
-  const hpBefore = Math.max(0, Math.min(character.maxHp, character.hp));
+  // Exhaustion level 4+ halves the maximum a short rest can heal up to.
+  const maxHp = effectiveMaxHp(character.maxHp, character.exhaustionLevel);
+  const hpBefore = Math.max(0, Math.min(maxHp, character.hp));
 
   // Two different requests arrive here, and only one of them can be invalid.
   //
@@ -336,7 +339,7 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
 
   const hitDiceToSpend = explicit
     ? input.hitDiceToSpend!
-    : hitDice.remaining > 0 && hpBefore < character.maxHp
+    : hitDice.remaining > 0 && hpBefore < maxHp
       ? 1
       : 0;
 
@@ -373,7 +376,7 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
   const diceExpression = `${hitDiceToSpend}d${hitDieSize}`;
   const rolled = (input.roll ?? defaultRoll)(diceExpression).total;
   const healing = Math.max(1, rolled + conMod * hitDiceToSpend);
-  const hpAfter = Math.min(character.maxHp, hpBefore + healing);
+  const hpAfter = Math.min(maxHp, hpBefore + healing);
 
   return {
     data: {
@@ -400,8 +403,16 @@ function resolveShortRest(input: ResolveRestInput, character: RestCharacterRecor
 
 function resolveLongRest(character: RestCharacterRecord) {
   const hitDice = currentHitDice(character);
-  const hpBefore = Math.max(0, Math.min(character.maxHp, character.hp));
-  const hpAfter = Math.max(0, character.maxHp);
+  const exhaustionBefore = Math.max(0, character.exhaustionLevel ?? 0);
+  const exhaustionLevel = Math.max(0, exhaustionBefore - 1);
+  const hpBefore = Math.max(
+    0,
+    Math.min(effectiveMaxHp(character.maxHp, exhaustionBefore), character.hp)
+  );
+  // Hit points are regained up to the maximum that applies once the rest has
+  // also lowered exhaustion by one: a rest taking level 4 to level 3 ends with
+  // the full maximum restored and reached.
+  const hpAfter = Math.max(0, effectiveMaxHp(character.maxHp, exhaustionLevel));
   const hitDiceRecovered = Math.min(
     Math.max(1, Math.floor(hitDice.total / 2)),
     hitDice.total - hitDice.remaining
@@ -410,8 +421,6 @@ function resolveLongRest(character: RestCharacterRecord) {
     hitDice.total,
     hitDice.remaining + hitDiceRecovered
   );
-  const exhaustionBefore = Math.max(0, character.exhaustionLevel ?? 0);
-  const exhaustionLevel = Math.max(0, exhaustionBefore - 1);
   const slotsBefore = character.spellSlots;
   const slotsAfter = isSpellSlots(slotsBefore) ? restoreAllSlots(slotsBefore) : slotsBefore;
 

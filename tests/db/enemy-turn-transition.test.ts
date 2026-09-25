@@ -481,6 +481,52 @@ describe("resolveEnemyTurn — area-save attacks (area-save-actions spec §6)", 
  * real resolveEnemyTurn -> real adapter -> real prompt builder. Only the
  * database is faked, and its `isPlayer` column is the only source of the roles.
  */
+describe("resolveEnemyTurn — the player's exhaustion (SRD levels 3 and 4)", () => {
+  it("rolls the player's save at disadvantage from level 3", async () => {
+    const tx = buildDragonTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 200, maxHp: 200, stats: { DEX: 14, CON: 12 }, class: "rogue", level: 5,
+      exhaustionLevel: 3, inventory: [],
+    });
+    // Two d20s, 20 then 2: disadvantage keeps 2 (+5 = 7), failing DC 21 where a
+    // single die would have rolled 25 and succeeded. Then 18d6 at 4 each = 72.
+    mockRandom([0.95, 0.05, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1", role: "system",
+        content: "Adult Red Dragon — Fire Breath: DC 21 Dexterity save, Aldric rolls 7 — fails, 72 fire damage.",
+      },
+    });
+    expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 128 } });
+  });
+
+  // Massive damage is measured against the hit point maximum, which level 4
+  // halves: 5 leftover damage kills a max-10 character whose maximum is now 5.
+  it("measures massive damage against the halved maximum at level 4", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 1, maxHp: 10, exhaustionLevel: 4, stats: { DEX: 10 }, inventory: [],
+    });
+    mockRandom([0.75, 0.5, 0.3]); // 6 damage: leftover 5
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(outcome).toMatchObject({ playerDowned: true, playerDied: true });
+  });
+
+  it("leaves the same blow merely downing the player below level 4", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 1, maxHp: 10, exhaustionLevel: 3, stats: { DEX: 10 }, inventory: [],
+    });
+    mockRandom([0.75, 0.5, 0.3]);
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(outcome).toMatchObject({ playerDowned: true, playerDied: false });
+  });
+});
+
 describe("resolveEnemyTurn — who the narrator is told is the player", () => {
   interface PromptCreature { name: string; role: string }
   function promptCreatures(events: GameEvent[]): { actor: PromptCreature | null; targets: PromptCreature[] } {

@@ -310,6 +310,8 @@ export interface ComputeConsequencesInput {
   defenderConditions: string[];
   /** SRD armour-proficiency penalty on the attacker. Defaults to no penalty. */
   attackerArmorPenalty?: boolean;
+  /** The attacker's exhaustion level (0-6). Defaults to 0. */
+  attackerExhaustionLevel?: number;
   isMelee: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
@@ -667,6 +669,7 @@ export function computeConsequences(
     attackerConditions,
     defenderConditions,
     attackerArmorPenalty,
+    attackerExhaustionLevel,
     isMelee,
     targetModifiers,
     attack,
@@ -679,7 +682,8 @@ export function computeConsequences(
     attackerConditions,
     defenderConditions,
     isMelee,
-    attackerArmorPenalty ?? false
+    attackerArmorPenalty ?? false,
+    attackerExhaustionLevel ?? 0
   );
 
   // 2. Roll damage and hit location only on a hit.
@@ -903,12 +907,19 @@ export function resolveAttackRoll(
    * This is the sixth parameter after retirement of the never-supplied legacy
    * spatial argument.
    */
-  armorPenalty: boolean = false
+  armorPenalty: boolean = false,
+  /**
+   * The attacker's exhaustion level (0-6). Level 3+ imposes disadvantage on
+   * attack rolls; it is handed to `evaluateAdvantage` so that it cancels
+   * against advantage like any other source.
+   */
+  attackerExhaustionLevel: number = 0
 ): AttackRollResult {
   const evaluated = evaluateAdvantage(
     attackerConditions,
     defenderConditions,
-    isMelee
+    isMelee,
+    attackerExhaustionLevel
   );
   const advantage = evaluated.advantage;
   // Disadvantage does not stack in 5e — one source is the same as three — so

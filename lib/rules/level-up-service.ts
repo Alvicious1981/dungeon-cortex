@@ -8,6 +8,7 @@ import {
   type LevelUpPayload,
 } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
+import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 
 export type LevelUpServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
@@ -50,6 +51,7 @@ interface LevelUpCharacterRecord {
   maxHp: number;
   hitDiceTotal: number;
   hitDiceRemaining: number;
+  exhaustionLevel?: number | null;
 }
 
 interface LevelUpDb {
@@ -306,6 +308,7 @@ async function applyLevelUpInTransaction(
       maxHp: true,
       hitDiceTotal: true,
       hitDiceRemaining: true,
+      exhaustionLevel: true,
     },
   });
   if (!character) {
@@ -334,7 +337,12 @@ async function applyLevelUpInTransaction(
 
   // HP policy: the new hit die raises the ceiling and heals the same amount.
   // Damage already suffered is preserved — a level-up is not a rest.
-  const newHp = Math.min(character.hp + payload.hpGained, payload.newMaxHp);
+  // Exhaustion level 4+ halves the maximum; the stored `maxHp` still rises by
+  // the full amount, so the gain is there once the exhaustion is gone.
+  const newHp = Math.min(
+    character.hp + payload.hpGained,
+    effectiveMaxHp(payload.newMaxHp, character.exhaustionLevel)
+  );
   // One new hit die becomes available, capped at the new total.
   const newHitDiceRemaining = Math.min(character.hitDiceRemaining + 1, nextLevel);
 

@@ -917,6 +917,36 @@ describe("computeConsequences", () => {
     expect(result.combat_facts.attack_roll).toBe(19);
   });
 
+  // ─── attackerExhaustionLevel wiring (Hop A) ─────────────────────────────────
+  // Same observation as the armour penalty above: disadvantage keeps the lower
+  // of the two queued rolls, so a dropped field reports the high one.
+  it("attackerExhaustionLevel 3 forces the attack roll onto disadvantage", () => {
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0.9)  // first d20 → 19
+      .mockReturnValueOnce(0.05); // second d20 → 2
+    const result = computeConsequences({
+      attacker:          "PC:Kara",
+      defender:          "NPC:Orc",
+      weapon:            "Axe",
+      weaponDice:        "1d6",
+      attackModifier:    3,
+      damageType:        "slashing",
+      targetAC:          14,
+      targetHp:          20,
+      targetMaxHp:       20,
+      targetIsPlayer:    false,
+      targetIsBoss:      false,
+      statusApplied:     [],
+      attackerConditions: [],
+      defenderConditions: [],
+      attackerExhaustionLevel: 3,
+      isMelee:           true,
+      encounterSnapshot: makeSnapshot(),
+      usedSenses:        [],
+    });
+    expect(result.combat_facts.attack_roll).toBe(2);
+  });
+
   it("on a miss, damage is 0 and hp is unchanged", () => {
     // Math.random → 0 means d20 = 1 (fumble — always miss)
     vi.spyOn(Math, "random").mockReturnValue(0);

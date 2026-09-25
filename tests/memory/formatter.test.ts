@@ -756,7 +756,7 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
     expect(stowedSection).toContain("- Dagger *(weapon)*");
   });
 
-  it("E. renders supported exhaustion effect when >= 1 and omits it when 0", () => {
+  it("E. renders the enforced exhaustion effects when >= 1 and omits them when 0", () => {
     const exhaustedContext: CampaignContext = {
       ...baseContext,
       character: {
@@ -765,8 +765,9 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
       },
     };
     const exhaustedState = formatCanonicalState(exhaustedContext);
-    expect(exhaustedState).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-    expect(exhaustedState).not.toContain("Level 2");
+    expect(exhaustedState).toContain(
+      "**Exhaustion:** Level 2 — ability checks are at disadvantage; speed is halved."
+    );
 
     const normalContext: CampaignContext = {
       ...baseContext,
@@ -1923,7 +1924,7 @@ describe("P2 Remediation Regression Tests (RED)", () => {
       expect(state).not.toContain("Exhaustion");
     });
 
-    it("renders supported backend effect without numeric level when level 1", () => {
+    it("renders only the ability-check effect at level 1", () => {
       const context: CampaignContext = {
         ...baseContext,
         character: {
@@ -1932,11 +1933,11 @@ describe("P2 Remediation Regression Tests (RED)", () => {
         },
       };
       const state = formatCanonicalState(context);
-      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(state).not.toContain("Level 1");
+      expect(state).toContain("**Exhaustion:** Level 1 — ability checks are at disadvantage.");
+      expect(state).not.toContain("speed");
     });
 
-    it("renders same supported effect wording without numeric level when level 2", () => {
+    it("adds halved speed at level 2", () => {
       const context: CampaignContext = {
         ...baseContext,
         character: {
@@ -1945,11 +1946,46 @@ describe("P2 Remediation Regression Tests (RED)", () => {
         },
       };
       const state = formatCanonicalState(context);
-      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(state).not.toContain("Level 2");
+      expect(state).toContain(
+        "**Exhaustion:** Level 2 — ability checks are at disadvantage; speed is halved."
+      );
+      expect(state).not.toContain("attack rolls");
     });
 
-    it("renders same supported effect wording without numeric level when level 6", () => {
+    it("names the halved hit point maximum at level 4, in the HP line too", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          hp: 5,
+          maxHp: 20,
+          exhaustionLevel: 4,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain(
+        "**Exhaustion:** Level 4 — ability checks are at disadvantage; speed is halved; " +
+          "attack rolls and saving throws are at disadvantage; hit point maximum is halved."
+      );
+      expect(state).toContain("**HP:** 5 / 10 (maximum halved by exhaustion from 20)");
+    });
+
+    it("keeps the plain HP line below level 4", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          hp: 5,
+          maxHp: 20,
+          exhaustionLevel: 3,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**HP:** 5 / 20");
+      expect(state).not.toContain("maximum halved");
+    });
+
+    it("reports death at level 6", () => {
       const context: CampaignContext = {
         ...baseContext,
         character: {
@@ -1958,18 +1994,18 @@ describe("P2 Remediation Regression Tests (RED)", () => {
         },
       };
       const state = formatCanonicalState(context);
-      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(state).not.toContain("Level 6");
+      expect(state).toContain("**Exhaustion:** Level 6 — the character has died of exhaustion.");
     });
 
-    it("formatSurvivalHUD renders only supported backend effect and no numeric tier for exhaustionLevel 3", () => {
+    it("formatSurvivalHUD renders the enforced effects for exhaustionLevel 3", () => {
       const hud = formatSurvivalHUD({
         ...baseHUD,
         exhaustionLevel: 3,
       });
-      expect(hud).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(hud).not.toContain("Level 3");
-      expect(hud).not.toContain("3/6");
+      expect(hud).toContain(
+        "**Exhaustion:** Level 3 — ability checks are at disadvantage; speed is halved; " +
+          "attack rolls and saving throws are at disadvantage."
+      );
     });
 
     it("formatSurvivalHUD omits exhaustion line when level 0", () => {
