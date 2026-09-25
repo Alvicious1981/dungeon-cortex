@@ -481,6 +481,173 @@ describe("resolveEnemyTurn — area-save attacks (area-save-actions spec §6)", 
  * real resolveEnemyTurn -> real adapter -> real prompt builder. Only the
  * database is faked, and its `isPlayer` column is the only source of the roles.
  */
+describe("resolveEnemyTurn — the player's exhaustion (SRD levels 3 and 4)", () => {
+  it("rolls the player's save at disadvantage from level 3", async () => {
+    const tx = buildDragonTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 200, maxHp: 200, stats: { DEX: 14, CON: 12 }, class: "rogue", level: 5,
+      exhaustionLevel: 3, inventory: [],
+    });
+    // Two d20s, 20 then 2: disadvantage keeps 2 (+5 = 7), failing DC 21 where a
+    // single die would have rolled 25 and succeeded. Then 18d6 at 4 each = 72.
+    mockRandom([0.95, 0.05, ...Array(18).fill(0.5)]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: {
+        campaignId: "camp-1", role: "system",
+        content: "Adult Red Dragon — Fire Breath: DC 21 Dexterity save, Aldric rolls 7 — fails, 72 fire damage.",
+      },
+    });
+    expect(tx.character.update).toHaveBeenCalledWith({ where: { id: "char-1" }, data: { hp: 128 } });
+  });
+
+  // Massive damage is measured against the hit point maximum, which level 4
+  // halves: 5 leftover damage kills a max-10 character whose maximum is now 5.
+  it("measures massive damage against the halved maximum at level 4", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 1, maxHp: 10, exhaustionLevel: 4, stats: { DEX: 10 }, inventory: [],
+    });
+    mockRandom([0.75, 0.5, 0.3]); // 6 damage: leftover 5
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(outcome).toMatchObject({ playerDowned: true, playerDied: true });
+  });
+
+  it("leaves the same blow merely downing the player below level 4", async () => {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 1, maxHp: 10, exhaustionLevel: 3, stats: { DEX: 10 }, inventory: [],
+    });
+    mockRandom([0.75, 0.5, 0.3]);
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(outcome).toMatchObject({ playerDowned: true, playerDied: false });
+  });
+});
+
+describe("resolveEnemyTurn — the player's concentration (SRD)", () => {
+  /** A concentrating wizard (CON 12, +1; not proficient in CON saves). */
+  function concentratingTx(overrides: Record<string, unknown> = {}) {
+    const tx = buildTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 20, maxHp: 20, stats: { DEX: 10, CON: 12 }, class: "wizard", level: 3,
+      exhaustionLevel: 0, concentrationSpellId: "bless", inventory: [],
+      ...overrides,
+    });
+    return tx;
+  }
+
+  const logLines = (tx: Prisma.TransactionClient): string[] =>
+    (tx.gameLog.create as ReturnType<typeof vi.fn>).mock.calls.map(([{ data }]) => data.content);
+
+  it("breaks concentration on a failed Constitution save after a hit", async () => {
+    const tx = concentratingTx();
+    // Hit for 6 (as above), then the save: d20 = 2 (0.05) + 1 = 3 vs DC 10.
+    mockRandom([0.75, 0.5, 0.3, 0.05]);
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(tx.character.update).toHaveBeenCalledWith({
+      where: { id: "char-1" }, data: { concentrationSpellId: null },
+    });
+    expect(tx.combatant.updateMany).toHaveBeenCalledWith({
+      where: { encounterId: "enc-1", isPlayer: true }, data: { concentrationSpellId: null },
+    });
+    expect(logLines(tx)).toContain(
+      "Concentration (bless): DC 10 Constitution save, Aldric rolls 3 — concentration broken."
+    );
+    expect(outcome.events).toContainEqual({
+      type: "CONCENTRATION_BROKEN",
+      payload: { targetName: "Aldric", spellName: "bless", reason: "failed_save", dc: 10, roll: 3 },
+    });
+  });
+
+  it("keeps concentration on a successful save and writes nothing to it", async () => {
+    const tx = concentratingTx();
+    // d20 = 15 (0.7) + 1 = 16 vs DC 10.
+    mockRandom([0.75, 0.5, 0.3, 0.7]);
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(tx.character.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { concentrationSpellId: null } })
+    );
+    expect(logLines(tx)).toContain(
+      "Concentration (bless): DC 10 Constitution save, Aldric rolls 16 — holds."
+    );
+    expect(outcome.events.map((e) => e.type)).not.toContain("CONCENTRATION_BROKEN");
+  });
+
+  it("adds the proficiency bonus for a class proficient in Constitution saves", async () => {
+    // A level 3 sorcerer: +1 CON, +2 proficiency. d20 = 7 (0.3): 7 + 3 = 10 meets DC 10.
+    const tx = concentratingTx({ class: "sorcerer" });
+    mockRandom([0.75, 0.5, 0.3, 0.3]);
+    await resolveEnemyTurn(tx, CTX);
+
+    expect(logLines(tx)).toContain(
+      "Concentration (bless): DC 10 Constitution save, Aldric rolls 10 — holds."
+    );
+  });
+
+  it("rolls the save at disadvantage from exhaustion level 3", async () => {
+    const tx = concentratingTx({ exhaustionLevel: 3 });
+    // Two d20s, 15 (0.7) and 2 (0.05): the lower one counts, 2 + 1 = 3.
+    mockRandom([0.75, 0.5, 0.3, 0.7, 0.05]);
+    await resolveEnemyTurn(tx, CTX);
+
+    expect(logLines(tx)).toContain(
+      "Concentration (bless): DC 10 Constitution save, Aldric rolls 3 — concentration broken."
+    );
+  });
+
+  it("does not roll when the attack misses", async () => {
+    const tx = concentratingTx();
+    mockRandom([0.05]); // d20 = 2: a miss
+    await resolveEnemyTurn(tx, CTX);
+
+    expect(logLines(tx).some((line) => line.startsWith("Concentration"))).toBe(false);
+  });
+
+  it("does nothing when the player is not concentrating", async () => {
+    const tx = concentratingTx({ concentrationSpellId: null });
+    mockRandom([0.75, 0.5, 0.3, 0.05]);
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(logLines(tx).some((line) => line.startsWith("Concentration"))).toBe(false);
+    expect(outcome.events.map((e) => e.type)).not.toContain("CONCENTRATION_BROKEN");
+  });
+
+  it("ends concentration without a save when the blow knocks the player out", async () => {
+    const tx = concentratingTx({ hp: 3 });
+    mockRandom([0.75, 0.5, 0.3]); // 6 damage from 3 HP: unconscious, not massive
+    const outcome = await resolveEnemyTurn(tx, CTX);
+
+    expect(logLines(tx)).toContain("Aldric falls unconscious and loses concentration on bless.");
+    expect(tx.character.update).toHaveBeenCalledWith({
+      where: { id: "char-1" }, data: { concentrationSpellId: null },
+    });
+    expect(outcome.events).toContainEqual({
+      type: "CONCENTRATION_BROKEN",
+      payload: { targetName: "Aldric", spellName: "bless", reason: "unconscious" },
+    });
+  });
+
+  it("checks concentration after a breath weapon too", async () => {
+    const tx = buildDragonTx();
+    (tx.character.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      hp: 200, maxHp: 200, stats: { DEX: 14, CON: 12 }, class: "rogue", level: 5,
+      concentrationSpellId: "bless", inventory: [],
+    });
+    // Failed DEX save for 72 fire (as above), then the CON save vs DC 36: d20 = 20 (0.95) + 1 = 21.
+    mockRandom([0.7, ...Array(18).fill(0.5), 0.95]);
+    await resolveEnemyTurn(tx, DRAGON_CTX);
+
+    expect(logLines(tx)).toContain(
+      "Concentration (bless): DC 36 Constitution save, Aldric rolls 21 — concentration broken."
+    );
+  });
+});
+
 describe("resolveEnemyTurn — who the narrator is told is the player", () => {
   interface PromptCreature { name: string; role: string }
   function promptCreatures(events: GameEvent[]): { actor: PromptCreature | null; targets: PromptCreature[] } {

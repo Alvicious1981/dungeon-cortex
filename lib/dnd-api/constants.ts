@@ -1,20 +1,3 @@
-// Hit dice by class index (as returned by D&D 5e API).
-// Used to calculate max HP at level 1 without an extra API call.
-export const CLASS_HIT_DICE: Record<string, number> = {
-  barbarian: 12,
-  bard: 8,
-  cleric: 8,
-  druid: 8,
-  fighter: 10,
-  monk: 8,
-  paladin: 10,
-  ranger: 10,
-  rogue: 8,
-  sorcerer: 6,
-  warlock: 8,
-  wizard: 6,
-};
-
 // Fallback lists used when the D&D 5e API is unreachable.
 export const FALLBACK_RACES = [
   { index: "human", name: "Human" },

@@ -310,6 +310,8 @@ export interface ComputeConsequencesInput {
   defenderConditions: string[];
   /** SRD armour-proficiency penalty on the attacker. Defaults to no penalty. */
   attackerArmorPenalty?: boolean;
+  /** The attacker's exhaustion level (0-6). Defaults to 0. */
+  attackerExhaustionLevel?: number;
   isMelee: boolean;
   encounterSnapshot: EncounterSnapshot;
   usedSenses: string[];
@@ -667,6 +669,7 @@ export function computeConsequences(
     attackerConditions,
     defenderConditions,
     attackerArmorPenalty,
+    attackerExhaustionLevel,
     isMelee,
     targetModifiers,
     attack,
@@ -679,7 +682,8 @@ export function computeConsequences(
     attackerConditions,
     defenderConditions,
     isMelee,
-    attackerArmorPenalty ?? false
+    attackerArmorPenalty ?? false,
+    attackerExhaustionLevel ?? 0
   );
 
   // 2. Roll damage and hit location only on a hit.
@@ -903,27 +907,27 @@ export function resolveAttackRoll(
    * This is the sixth parameter after retirement of the never-supplied legacy
    * spatial argument.
    */
-  armorPenalty: boolean = false
+  armorPenalty: boolean = false,
+  /**
+   * The attacker's exhaustion level (0-6). Level 3+ imposes disadvantage on
+   * attack rolls; it is handed to `evaluateAdvantage` so that it cancels
+   * against advantage like any other source.
+   */
+  attackerExhaustionLevel: number = 0
 ): AttackRollResult {
-  const evaluated = evaluateAdvantage(
+  // Every source of advantage and disadvantage — conditions, exhaustion and
+  // the armour penalty — enters one pool, so any advantage and any
+  // disadvantage cancel into a normal roll (SRD), the same way
+  // `resolveAbilityCheck` treats them. The armour penalty used to be OR'd in
+  // after neutralization, so an advantaged attacker in armour they could not
+  // use still rolled with advantage.
+  const { advantage, disadvantage } = evaluateAdvantage(
     attackerConditions,
     defenderConditions,
-    isMelee
+    isMelee,
+    attackerExhaustionLevel,
+    armorPenalty
   );
-  const advantage = evaluated.advantage;
-  // Disadvantage does not stack in 5e — one source is the same as three — so
-  // the armour penalty joins the pool with an `||` rather than overriding it.
-  //
-  // What it does NOT do here: cancel against advantage. The selection below
-  // picks advantage outright whenever both are present, so an advantaged
-  // attacker in armour they cannot use still rolls with advantage. That
-  // diverges from `resolveAbilityCheck` (lib/rules/ability-check.ts:269),
-  // which does cancel the two into a normal roll. The divergence is pre-existing and deliberately out of
-  // scope for this increment — see the plan's "A rule this codebase does not
-  // implement" note — and it is pinned by
-  // `tests/rules/armor-penalty-wiring.test.ts` so a later change to it is
-  // deliberate rather than accidental.
-  const disadvantage = evaluated.disadvantage || armorPenalty;
 
   const rollResult: RollResult = advantage
     ? rollWithAdvantage(20, attackModifier)
@@ -994,10 +998,12 @@ export function resolveSavingThrow(
  */
 export function resolveConcentrationCheck(
   damage: number,
-  conModifier: number
+  conModifier: number,
+  /** A Constitution save at disadvantage, e.g. exhaustion level 3+. */
+  disadvantage: boolean = false
 ): { success: boolean; dc: number; roll: number; total: number } {
   const dc = Math.max(10, Math.floor(damage / 2));
-  const result = resolveSavingThrow(conModifier, dc);
+  const result = resolveSavingThrow(conModifier, dc, false, disadvantage);
   return {
     ...result,
     dc,

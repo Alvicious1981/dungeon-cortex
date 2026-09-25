@@ -302,6 +302,33 @@ describe("executeCombatAction", () => {
       expect(outcome.consequences[0]?.naturalRoll).toBe(2);
     });
 
+    // ── actorExhaustionLevel wiring (Hop B) — same observation as above ──
+    it("actorExhaustionLevel 3 forces the attack roll onto disadvantage", async () => {
+      const enemy = buildEnemy();
+      const tx = buildMockTx();
+      mockRandom([0.9, 0.05]);
+
+      const payload: CombatActionPayload = {
+        actionType: "attack",
+        encounter: buildEncounter([buildPlayer(), enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        actorExhaustionLevel: 3,
+        targetCombatants: [enemy],
+        weaponName: "Dagger",
+        weaponDice: "1d4",
+        damageType: "piercing",
+        attackModifier: 0,
+        flatDamageBonus: 0,
+        collectEvents: true,
+      };
+
+      const outcome = await executeCombatAction(payload, tx);
+
+      expect(outcome.consequences[0]?.naturalRoll).toBe(2);
+    });
+
     it("without actorArmorPenalty, the attack roll is a single unpenalised d20", async () => {
       const enemy = buildEnemy();
       const tx = buildMockTx();

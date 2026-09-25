@@ -118,4 +118,42 @@ describe("conditions and advantage logic", () => {
       expect(result.dice).toEqual([10]);
     });
   });
+  // SRD exhaustion level 3: disadvantage on attack rolls. It is one more
+  // source in the pool, so it cancels against advantage like any other.
+  describe("exhaustion on attack rolls", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("imposes disadvantage from level 3", () => {
+      expect(evaluateAdvantage([], [], true, 3)).toEqual({ advantage: false, disadvantage: true });
+    });
+
+    it("imposes nothing at level 2", () => {
+      expect(evaluateAdvantage([], [], true, 2)).toEqual({ advantage: false, disadvantage: false });
+    });
+
+    it("cancels against advantage into a normal roll", () => {
+      // Prone defender, melee → advantage; exhausted attacker → disadvantage.
+      expect(evaluateAdvantage([], ["prone"], true, 3)).toEqual({ advantage: false, disadvantage: false });
+    });
+
+    it("treats an armour penalty as one more source in the same pool", () => {
+      expect(evaluateAdvantage([], [], true, 0, true)).toEqual({ advantage: false, disadvantage: true });
+      // Prone defender in melee → advantage; unproficient armour → cancels.
+      expect(evaluateAdvantage([], ["prone"], true, 0, true)).toEqual({ advantage: false, disadvantage: false });
+    });
+
+    it("reaches resolveAttackRoll: an exhausted attacker keeps the lower die", () => {
+      let i = 0;
+      const values = [0.2, 0.7]; // 5, then 15
+      vi.spyOn(Math, "random").mockImplementation(() => values[i++]);
+
+      const result = resolveAttackRoll(0, 10, [], [], true, false, 3);
+
+      expect(result.disadvantage).toBe(true);
+      expect(result.roll).toBe(5);
+      expect(result.hit).toBe(false);
+    });
+  });
 });
