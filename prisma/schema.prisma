@@ -325,6 +325,11 @@ model Combatant {
   /// {index, name, url} objects to their index, and every id it produces is a
   /// key of CONDITION_REGISTRY.
   conditionImmunities   String[] @default([])
+  /// SRD creature type ("humanoid", "undead"…), snapshotted at spawn like the
+  /// modifiers above; "humanoid" for the player. NULL = unknown (a row from
+  /// before this column, or an enemy with no SRD record). Spells that name the
+  /// creatures they can target ("choose a humanoid") refuse an unknown type.
+  creatureType          String?
   /// The ID of the spell currently being concentrated on. Null = no active concentration.
   concentrationSpellId String?
   size                 String  @default("Medium")

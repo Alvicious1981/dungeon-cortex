@@ -12,7 +12,7 @@
  */
 
 import type { Ability } from "@/lib/rules/ability-check";
-import { spellConditionFor } from "@/lib/rules/spell-conditions";
+import { spellConditionFor, type SpellConditionEntry } from "@/lib/rules/spell-conditions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -318,18 +318,28 @@ export interface SpellEffect {
   /** Damage applied when the target succeeds on its saving throw. */
   saveDamage: "half" | "none";
   /**
-   * Condition to apply on a failed save, as a CONDITION_REGISTRY key. Comes
+   * Conditions to apply on a failed save, as CONDITION_REGISTRY keys. Come
    * from SPELL_CONDITIONS (lib/rules/spell-conditions.ts), never from the
-   * spell's prose. Null if none.
+   * spell's prose. Empty if none.
    */
-  condition: string | null;
-  /** How that condition ends. Set exactly when `condition` is. */
-  conditionEnds: {
-    spellIndex: string;
-    concentration: boolean;
-    durationRounds: number;
-  } | null;
+  conditions: readonly string[];
+  /**
+   * The table row behind those conditions: how they end, whether the target
+   * repeats the save, and who the spell can target or leaves unaffected. Set
+   * exactly when `conditions` is non-empty.
+   */
+  conditionTerms: SpellConditionTerms | null;
 }
+
+export type SpellConditionTerms = { spellIndex: string } & Pick<
+  SpellConditionEntry,
+  | "concentration"
+  | "durationRounds"
+  | "repeatSave"
+  | "onlyTypes"
+  | "unaffectedTypes"
+  | "unaffectedAtIntelligence"
+>;
 
 /**
  * Returns the canonical spellcasting ability ("INT" | "WIS" | "CHA") for a
@@ -410,13 +420,19 @@ export function resolveSpellEffect(
   // (Web); where the cache has one, the table test requires them to agree.
   const spellIndex = typeof spellData.index === "string" ? spellData.index : null;
   const conditionEntry = spellConditionFor(spellIndex);
-  const condition = conditionEntry?.condition ?? null;
-  const conditionEnds =
+  const conditions = conditionEntry?.conditions ?? [];
+  const conditionTerms: SpellConditionTerms | null =
     conditionEntry && spellIndex
       ? {
           spellIndex,
           concentration: conditionEntry.concentration,
           durationRounds: conditionEntry.durationRounds,
+          ...(conditionEntry.repeatSave ? { repeatSave: conditionEntry.repeatSave } : {}),
+          ...(conditionEntry.onlyTypes ? { onlyTypes: conditionEntry.onlyTypes } : {}),
+          ...(conditionEntry.unaffectedTypes ? { unaffectedTypes: conditionEntry.unaffectedTypes } : {}),
+          ...(conditionEntry.unaffectedAtIntelligence !== undefined
+            ? { unaffectedAtIntelligence: conditionEntry.unaffectedAtIntelligence }
+            : {}),
         }
       : null;
 
@@ -451,8 +467,8 @@ export function resolveSpellEffect(
         hasSavingThrow: !!dc,
         saveAbility: dcType,
         saveDamage,
-        condition,
-        conditionEnds,
+        conditions,
+        conditionTerms,
       };
     }
   }
@@ -470,11 +486,11 @@ export function resolveSpellEffect(
         .replace(/\s*\+\s*APT\b/gi, modStr)
         .replace(/\bAPT\b/gi, String(spellcastingMod))
         .replace(/\s+/g, ""); // strip remaining whitespace for dice parser
-      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", condition: null, conditionEnds: null };
+      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", conditions: [], conditionTerms: null };
     }
   }
 
-  // --- Condition without damage (Entangle, Web) ---
+  // --- Condition without damage (Entangle, Web, Hold Person) ---
   if (conditionEntry) {
     const saveAbility = dcType ?? conditionEntry.save;
     return {
@@ -484,13 +500,13 @@ export function resolveSpellEffect(
       hasSavingThrow: saveAbility !== null,
       saveAbility,
       saveDamage: "none",
-      condition,
-      conditionEnds,
+      conditions,
+      conditionTerms,
     };
   }
 
   // --- Utility spell ---
-  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", condition: null, conditionEnds: null };
+  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", conditions: [], conditionTerms: null };
 }
 
 /**

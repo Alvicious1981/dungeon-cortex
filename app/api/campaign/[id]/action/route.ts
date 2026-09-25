@@ -32,6 +32,7 @@ import {
 } from "@/lib/db/equipment-transition";
 import { abilityCheckAdvantageFrom } from "@/lib/rules/item-effects";
 import { stealthDisadvantageFor } from "@/lib/rules/armor-stealth";
+import { targetRefusal } from "@/lib/rules/spell-conditions";
 import {
   evaluateAbilityCheckAdvantage,
   isImmobilized,
@@ -1735,6 +1736,23 @@ async function resolveAction(
         // stores no target count, so there is no field to validate against.
         // Recorded as a remaining leak in the design doc.
         targets = requestedTargets;
+      }
+
+      // ── Who a condition spell may name ────────────────────────────────────
+      // Hold Person's "choose a humanoid" makes any other target an illegal
+      // cast, refused here before a slot or a turn is spent — the same place
+      // an out-of-range target is. A target of unknown type is refused too,
+      // since the spell's legality or effect depends on it.
+      if (effect.conditionTerms) {
+        for (const target of targets) {
+          const refusal = targetRefusal(effect.conditionTerms, target);
+          if (refusal) {
+            return NextResponse.json(
+              { error: refusal, code: "SPELL_TARGET_INVALID" },
+              { status: 400 }
+            );
+          }
+        }
       }
 
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);

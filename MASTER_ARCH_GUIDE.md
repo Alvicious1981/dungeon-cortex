@@ -66,6 +66,7 @@ Current status: Core deterministic backend patterns exist, but implementation tr
 - `Combatant.conditions` is canonical for condition state.
 - Rendering, advantage/disadvantage derivation, and persistence flows must read from this backend state.
 - `Combatant.spellConditions` records why a spell-imposed condition holds and when it ends (docs/DECISION_SPELL_CONDITIONS.md §4). It is written in the same update as `conditions`, never read in its place, and a spell condition without a record is refused.
+- A spell-imposed condition that allows a repeat save ends on the target's successful save at the end of its turn, or on damage where the spell says so (docs/DECISION_SPELL_CONDITIONS.md §5b). The engine rolls it; the narrator only reports it.
 
 ### LAW-06: D&D 5e/SRD 2014 Is the Only Active Rules System
 

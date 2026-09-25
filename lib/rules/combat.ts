@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { roll, rollN, rollWithAdvantage, rollWithDisadvantage } from "./dice";
 import type { RollResult } from "./dice";
-import { evaluateAdvantage, isKnownCondition } from "./conditions";
+import { evaluateAdvantage, isKnownCondition, meleeHitsAreCritical } from "./conditions";
 import { DEATH_SAVE_LIMIT } from "./death-save";
 
 import {
@@ -937,8 +937,12 @@ export function resolveAttackRoll(
 
   const naturalRoll = rollResult.diceTotal;
   const total = rollResult.total;
-  const critical = naturalRoll === 20;
   const fumble = naturalRoll === 1;
+  const hit = naturalRoll === 20 || (!fumble && total >= targetAC);
+  // SRD: a hit from within 5 feet on a paralyzed or unconscious creature is a
+  // critical hit, whatever the die shows.
+  const critical =
+    naturalRoll === 20 || (hit && isMelee && meleeHitsAreCritical(defenderConditions));
 
   return {
     roll: naturalRoll,
@@ -946,7 +950,7 @@ export function resolveAttackRoll(
     total,
     advantage,
     disadvantage,
-    hit: critical || (!fumble && total >= targetAC),
+    hit,
     critical,
     fumble,
   };

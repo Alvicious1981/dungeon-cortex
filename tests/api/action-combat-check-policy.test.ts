@@ -130,6 +130,7 @@ const player = {
   damageResistances: [],
   damageVulnerabilities: [],
   conditionImmunities: [],
+  creatureType: "humanoid",
   stats: { STR: 14, DEX: 12, CON: 12, INT: 16, WIS: 12, CHA: 10 },
   x: 0,
   y: 0,
@@ -151,6 +152,7 @@ const enemy = {
   damageResistances: [],
   damageVulnerabilities: [],
   conditionImmunities: [],
+  creatureType: "humanoid",
   stats: { DEX: 14, WIS: 10 },
   x: 1,
   y: 0,
@@ -312,7 +314,8 @@ beforeEach(() => {
     hasSavingThrow: false,
     saveAbility: null,
     saveDamage: "none",
-    condition: null,
+    conditions: [],
+    conditionTerms: null,
   });
   (acquireActionReceipt as any).mockResolvedValue({
     outcome: "acquired",
@@ -565,5 +568,72 @@ describe("política fail-closed de chequeos en combate", () => {
     expect(resolveAbilityCheck).toHaveBeenCalledOnce();
     expect(body).toContain("ABILITY_CHECK_RESOLVED");
     expect(streamNarrative).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a condition spell refuses a target it cannot name (Hold Person)", () => {
+  const HOLD_PERSON = {
+    id: "hold-person",
+    name: "Hold Person",
+    level: 2,
+    slotLevel: 2,
+    concentration: true,
+    sourceEndpoint: "https://www.dnd5eapi.co/api/2014/spells/hold-person",
+    area: null,
+    unsupportedAreaType: null,
+    range: { kind: "distance", feetFromCaster: 60 },
+    type: "utility",
+    dice: null,
+    damageType: null,
+    hasSavingThrow: true,
+    saveAbility: "WIS",
+    saveDamage: "none",
+    conditions: ["paralyzed"],
+    conditionTerms: {
+      spellIndex: "hold-person",
+      concentration: true,
+      durationRounds: 10,
+      repeatSave: { onDamage: false },
+      onlyTypes: ["humanoid"],
+    },
+  };
+
+  function contextAgainst(target: Record<string, unknown>) {
+    const context = contextWithEncounter(0);
+    return {
+      ...context,
+      character: { ...context.character, spellSlots: { "2": { current: 1, max: 1 } } },
+      activeEncounter: { ...context.activeEncounter, combatants: [player, target] },
+    };
+  }
+
+  beforeEach(() => {
+    (resolveCachedSpell as any).mockResolvedValue(HOLD_PERSON);
+  });
+
+  it.each([
+    ["a beast", "beast", /can only target a humanoid/],
+    ["a creature of unknown type", null, /creature type is unknown/],
+  ])("refuses %s before anything is spent", async (_label, creatureType, message) => {
+    (buildCampaignContext as any).mockResolvedValue(contextAgainst({ ...enemy, creatureType }));
+
+    const res = await post("I cast Hold Person", { targetIds: [enemy.id] });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "SPELL_TARGET_INVALID" });
+    expect(body.error).toMatch(message);
+    expect(executeCombatAction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("casts on a humanoid", async () => {
+    (buildCampaignContext as any).mockResolvedValue(contextAgainst({ ...enemy, creatureType: "humanoid" }));
+
+    const res = await post("I cast Hold Person", { targetIds: [enemy.id] });
+    await res.text();
+
+    expect(res.status).toBe(200);
+    expect(executeCombatAction).toHaveBeenCalledOnce();
   });
 });

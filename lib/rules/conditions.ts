@@ -42,6 +42,16 @@ export interface ConditionRegistryEntry {
   incapacitated?: boolean;
   /** The creature's speed becomes 0 (SRD: Grappled, Restrained). */
   speedZero?: boolean;
+  /**
+   * The creature automatically fails Strength and Dexterity saving throws
+   * (SRD: Paralyzed, Petrified, Stunned, Unconscious).
+   */
+  autoFailStrDexSaves?: boolean;
+  /**
+   * An attack that hits the creature from within 5 feet is a critical hit
+   * (SRD: Paralyzed, Unconscious).
+   */
+  meleeHitsCritical?: boolean;
 }
 
 /**
@@ -70,6 +80,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     name: "Paralyzed",
     attackerAdvantage: true,
     incapacitated: true,
+    autoFailStrDexSaves: true,
+    meleeHitsCritical: true,
   },
   petrified: {
     id: "petrified",
@@ -78,12 +90,14 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     incapacitated: true,
     // SRD: "the creature ... is unaware of its surroundings".
     unawareOfSurroundings: true,
+    autoFailStrDexSaves: true,
   },
   stunned: {
     id: "stunned",
     name: "Stunned",
     attackerAdvantage: true,
     incapacitated: true,
+    autoFailStrDexSaves: true,
   },
   unconscious: {
     id: "unconscious",
@@ -92,6 +106,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     incapacitated: true,
     // SRD: "the creature ... is unaware of its surroundings".
     unawareOfSurroundings: true,
+    autoFailStrDexSaves: true,
+    meleeHitsCritical: true,
   },
   restrained: {
     id: "restrained",
@@ -317,5 +333,28 @@ export function isIncapacitated(conditions: readonly string[]): boolean {
 export function isImmobilized(conditions: readonly string[]): boolean {
   return conditions.some(
     (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.speedZero === true
+  );
+}
+
+/**
+ * Whether the creature automatically fails this saving throw — the registry's
+ * `autoFailStrDexSaves` flag, for a Strength or Dexterity save only.
+ */
+export function autoFailsSave(conditions: readonly string[], ability: string): boolean {
+  const upper = ability.toUpperCase();
+  if (upper !== "STR" && upper !== "DEX") return false;
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.autoFailStrDexSaves === true
+  );
+}
+
+/**
+ * Whether a melee hit on the creature is a critical hit — the registry's
+ * `meleeHitsCritical` flag. The SRD says "within 5 feet"; the engine treats a
+ * melee attack as that range, which also crits for a reach weapon at 10 feet.
+ */
+export function meleeHitsAreCritical(conditions: readonly string[]): boolean {
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.meleeHitsCritical === true
   );
 }
