@@ -1008,6 +1008,7 @@ describe("executeCombatAction", () => {
           hasSavingThrow: true,
           saveAbility: "DEX",
           condition: "poisoned",
+          conditionEnds: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
         },
         spellSaveDC: 15,
         collectEvents: true,
@@ -1048,6 +1049,7 @@ describe("executeCombatAction", () => {
           hasSavingThrow: true,
           saveAbility: "DEX",
           condition: "poisoned",
+          conditionEnds: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
         },
         spellSaveDC: 15,
         collectEvents: true,
@@ -1188,7 +1190,12 @@ describe("executeCombatAction", () => {
       mockRandom([]);
 
       const outcome = await executeCombatAction(
-        cast("Restrain", { type: "utility", hasSavingThrow: false, condition: "restrained" }, [goblin]),
+        cast("Restrain", {
+          type: "utility",
+          hasSavingThrow: false,
+          condition: "restrained",
+          conditionEnds: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
+        }, [goblin]),
         tx
       );
 
@@ -1862,6 +1869,7 @@ describe("condition immunity", () => {
         dice: "1d6",
         hasSavingThrow: false,
         condition: "poisoned",
+        conditionEnds: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
       },
       playerCharacterId: "char-1",
       collectEvents: true,

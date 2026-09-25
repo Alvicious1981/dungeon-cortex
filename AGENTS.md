@@ -367,21 +367,25 @@ know "Sí" or "verdadero", so Fear, Gaseous Form, Hypnotic Pattern, Phantasmal
 Killer and Suggestion are stored with `concentration: null`, which
 `resolveCachedSpell` reads as `false`.
 
-- **`lib/rules/magic.ts:427`** — `resolveSpellEffect` returns `condition: null`
-  on all three exit paths, with its own TODO: *"To be extracted from SRD
-  description or specialized fields."* Because of it, **no spell in the game
-  applies any condition.** `CONDITION_REGISTRY`, `applyCondition`,
-  `lib/rules/condition-immunity.ts` and `Combatant.conditionImmunities` are all
-  built, wired and unreachable, waiting on this one field.
-  **Blocked by the data, not by effort — do not pick this up expecting a small
-  increment.** `data/srd-es/spells.json` has no structured condition anywhere:
-  zero `/api/conditions` references, zero `condition*` keys, and the word
-  "charmed" appears exactly once in the whole file, inside a `desc`. Extracting
-  a condition from a spell therefore means deriving a mechanical outcome from
-  prose, which this project does not do. It needs either a new structured
-  source or an explicit, recorded decision about that boundary. An earlier note
-  here called it the highest-value item; that was written without checking the
-  spell data, and it was wrong.
+- **Spell conditions — unblocked 2026-09-25, partly delivered.** The entry
+  that stood here said `resolveSpellEffect` returned `condition: null` on every
+  path and that this was "blocked by the data": `spells.json` carries no
+  structured condition, so extracting one meant reading prose. Both halves were
+  right. What unblocked it was the second route the entry named, an explicit
+  recorded decision: `docs/DECISION_SPELL_CONDITIONS.md` makes
+  `lib/rules/spell-conditions.ts` a hand-transcribed SRD table, bound to the
+  cache by `tests/rules/spell-conditions.test.ts` (it may add a missing save,
+  never contradict one the data holds).
+  **Applying a condition was only half the job, and the easier half.**
+  `removeCondition` had no caller, so a condition, once written, lasted the whole
+  fight. Every spell condition now carries a `SpellConditionRecord` in
+  `Combatant.spellConditions`, written in the same update as the condition, and
+  `lib/db/spell-condition-end.ts` takes it off when the caster's concentration
+  ends or the duration runs out. The pipeline refuses a condition with no
+  `conditionEnds`, so one that cannot end cannot be written.
+  **Still open:** only Entangle, Web and Black Tentacles are in the table.
+  `DEFERRED_SPELL_CONDITIONS` lists every other condition-imposing spell in the
+  cache with its reason code; `repeat_save` (Hold Person and friends) is next.
 - **The whole wilderness subsystem** — not a dormant value: a subsystem the
   project switched off on purpose. `stealthAdvantage` at
   `lib/rules/wilderness.ts:275` is one field of it, and the note that stood here

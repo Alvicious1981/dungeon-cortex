@@ -33,6 +33,8 @@ import {
   type ModifiedDamage,
 } from "@/lib/rules/damage-modifiers";
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
+import { readSpellConditionRecords, recordsForGrant } from "@/lib/rules/spell-conditions";
+import { concentrationOf, endSpellConditions, expiredFor } from "@/lib/db/spell-condition-end";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
 import { applyPlayerDowned } from "@/lib/db/player-downed";
@@ -52,6 +54,8 @@ export interface PipelineCombatant {
   maxHp: number;
   ac: number;
   conditions: unknown;
+  /** SpellConditionRecord[] — why a spell-imposed condition holds. */
+  spellConditions?: unknown;
   stats: unknown;
   damageImmunities?: string[];
   damageResistances?: string[];
@@ -79,6 +83,11 @@ interface PipelineSpellEffect {
   saveAbility?: string | null;
   saveDamage?: "half" | "none";
   condition?: string | null;
+  conditionEnds?: {
+    spellIndex: string;
+    concentration: boolean;
+    durationRounds: number;
+  } | null;
   concentration?: boolean;
 }
 
@@ -484,6 +493,18 @@ export async function executeCombatAction(
       data: { concentrationSpellId: payload.spellName },
     });
 
+    // The old spell ends here, before this cast applies anything, so the new
+    // spell's conditions are never taken off with the old one's — recasting
+    // the same spell included.
+    if (previousSpell && actorCombatant && encounter.id) {
+      const ended = await endSpellConditions(tx, {
+        encounterId: encounter.id,
+        shouldEnd: concentrationOf(actorCombatant.id),
+        reason: "concentration ended",
+      });
+      systemLogs.push(...ended.map((e) => e.log));
+    }
+
     if (actorCombatant) {
       await tx.combatant.update({
         where: { id: actorCombatant.id },
@@ -535,6 +556,7 @@ export async function executeCombatAction(
   }
 
   // RESOLVE TARGETS
+  let brokenConcentrationCasterId: string | null = null;
   for (const target of targetCombatants) {
     let damage = 0;
     let saved = false;
@@ -655,7 +677,10 @@ export async function executeCombatAction(
       // from one list. Computing them separately is how the two come to
       // disagree — and the facts reach the narrator, so a disagreement would
       // have it describing a condition the engine had refused.
-      if (!saved && effect.condition) {
+      //
+      // A condition without `conditionEnds` is not applied: nothing could ever
+      // take it off, so it would last the rest of the fight.
+      if (!saved && effect.condition && effect.conditionEnds) {
         const grant = grantConditions({
           conditions: [effect.condition],
           immunities: target.conditionImmunities ?? [],
@@ -758,9 +783,31 @@ export async function executeCombatAction(
           persistedConditions
         );
 
+        // Why each new condition holds, written in the same update as the
+        // condition itself, so no condition a spell applied can exist without
+        // the record that later takes it off. Rebased on the locked row too.
+        const ends = payload.spellEffect?.conditionEnds;
+        const spellConditions = ends
+          ? [
+              ...readSpellConditionRecords(updatedTarget?.spellConditions ?? target.spellConditions),
+              ...recordsForGrant({
+                granted: conditionsToApply,
+                spellIndex: ends.spellIndex,
+                casterId: payload.actorId,
+                entry: ends,
+                round: encounter.round,
+              }),
+            ]
+          : undefined;
+
         await tx.combatant.update({
           where: { id: target.id },
-          data: { conditions: rebasedConditions },
+          data: {
+            conditions: rebasedConditions,
+            ...(spellConditions
+              ? { spellConditions: spellConditions as unknown as Prisma.InputJsonValue }
+              : {}),
+          },
         });
       }
 
@@ -824,16 +871,20 @@ export async function executeCombatAction(
 
     // An attack and a damaging spell say what happened to every creature they
     // name: a miss, a saved target and an immune one included. A heal or a
-    // utility spell only names creatures it may do nothing to: the heal is
-    // applied to the caster above, and the resolver gives a utility spell no
-    // dice, save or condition. An entry for one says damage 0 and, for a heal,
-    // the HP from before it, and the narrator adapter reads that as "Attack
+    // plain utility spell only names creatures it may do nothing to: the heal
+    // is applied to the caster above, and such a utility spell has no dice,
+    // save or condition. An entry for one says damage 0 and, for a heal, the
+    // HP from before it, and the narrator adapter reads that as "Attack
     // missed". So such a spell reports a creature only if it changed it.
+    // A spell that imposes a condition through a save (SPELL_CONDITIONS)
+    // reports every creature that rolled one, the way a damaging spell reports
+    // a saved target: the narrator is owed "it resisted", not silence.
     const reportsTarget =
       actionType === "attack" ||
       payload.spellEffect?.type === "damage" ||
       damage > 0 ||
-      conditionsToApply.length > 0;
+      conditionsToApply.length > 0 ||
+      Boolean(payload.spellEffect?.conditionEnds && payload.spellEffect.hasSavingThrow);
     if (reportsTarget) consequences.push(singleConsequence);
 
     if (collectEvents) {
@@ -865,6 +916,7 @@ export async function executeCombatAction(
         where: { id: target.id },
         data: { concentrationSpellId: null },
       });
+      if (target.isPlayer) brokenConcentrationCasterId = target.id;
 
       if (collectEvents) {
         events.push({
@@ -877,6 +929,18 @@ export async function executeCombatAction(
         });
       }
     }
+  }
+
+  // After the loop, not inside it: when the player's own spell breaks their
+  // concentration, the conditions this same cast put on creatures earlier in
+  // the loop end too, and none put on later ones survive.
+  if (brokenConcentrationCasterId && encounter.id) {
+    const ended = await endSpellConditions(tx, {
+      encounterId: encounter.id,
+      shouldEnd: concentrationOf(brokenConcentrationCasterId),
+      reason: "concentration broken",
+    });
+    systemLogs.push(...ended.map((e) => e.log));
   }
 
   if (totalDamageDealt > 0 && encounter.id) {
@@ -1061,6 +1125,71 @@ async function resolveEncounterIfEnded(input: {
  * throws TurnStateConflictError and rolls everything back; there is no stale
  * return to report. The loop is bounded by one iteration per combatant.
  */
+/**
+ * Ends the conditions whose spell has run its duration, at the start of the
+ * caster's turn.
+ *
+ * When one of them was held by concentration, the spell's duration is also
+ * the most concentration can last, so concentration ends with it. That spell
+ * is necessarily the one the player is concentrating on now: casting another
+ * concentration spell ends the older one's records at once (the replacement
+ * in executeCombatAction), so no record of an earlier spell survives to here.
+ */
+async function expirePlayerSpellConditions(
+  tx: Prisma.TransactionClient,
+  input: {
+    encounterId: string;
+    owner: { campaignId: string; characterId: string };
+    casterId: string;
+    round: number;
+    collectEvents: boolean;
+    events: GameEvent[];
+  }
+): Promise<void> {
+  let concentrationExpired = false;
+  const ended = await endSpellConditions(tx, {
+    encounterId: input.encounterId,
+    shouldEnd: (record) => {
+      const expired = expiredFor(input.casterId, input.round)(record);
+      if (expired && record.concentration) concentrationExpired = true;
+      return expired;
+    },
+    reason: "duration expired",
+  });
+  for (const entry of ended) {
+    await tx.gameLog.create({
+      data: { campaignId: input.owner.campaignId, role: "system", content: entry.log },
+    });
+  }
+  if (!concentrationExpired) return;
+
+  const character = await tx.character.findUnique({
+    where: { id: input.owner.characterId },
+    select: { concentrationSpellId: true, name: true },
+  });
+  if (!character?.concentrationSpellId) return;
+
+  // Character first, then its Combatant mirror — the lock order setPlayerHp keeps.
+  await tx.character.update({
+    where: { id: input.owner.characterId },
+    data: { concentrationSpellId: null },
+  });
+  await tx.combatant.updateMany({
+    where: { encounterId: input.encounterId, isPlayer: true },
+    data: { concentrationSpellId: null },
+  });
+  if (input.collectEvents) {
+    input.events.push({
+      type: "CONCENTRATION_BROKEN",
+      payload: {
+        targetName: character.name,
+        spellName: character.concentrationSpellId,
+        reason: "duration_expired",
+      },
+    });
+  }
+}
+
 async function runEnemyChain(input: {
   tx: Prisma.TransactionClient;
   encounterId: string;
@@ -1087,6 +1216,17 @@ async function runEnemyChain(input: {
       throw new EnemyTurnInvariantError(`Encounter ${encounterId} has no combatant at ${turnIndex}.`);
     }
     if (active.isPlayer) {
+      // The player's turn begins, which is when a spell cast on an earlier
+      // turn of theirs runs out: 1 minute is ten of the caster's turns.
+      await expirePlayerSpellConditions(tx, {
+        encounterId,
+        owner,
+        casterId: active.id,
+        round,
+        collectEvents,
+        events,
+      });
+
       // The player's turn begins: a stable player wakes on the scheduled round
       // (death-saves spec §6.5). setPlayerHp's mirror clears the death state.
       if (shouldWake({ hp: active.hp ?? 1, stableWakeRound: active.stableWakeRound ?? null }, round)) {

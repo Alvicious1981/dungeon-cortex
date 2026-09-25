@@ -310,6 +310,10 @@ model Combatant {
   stats                Json    @default("{}")
   conditions           Json    @default("[]")
   // String[] of active condition names, e.g. ["Prone", "Poisoned"].
+  /// Why a spell-imposed entry of `conditions` holds, and when it ends:
+  /// SpellConditionRecord[] (lib/rules/spell-conditions.ts). Written only by
+  /// the combat pipeline beside `conditions`; empty means no spell put one on.
+  spellConditions      Json    @default("[]")
   /// SRD damage modifiers, snapshotted from the monster at spawn. Same names
   /// and shapes as SrdMonster's, so no reader has to translate between them.
   /// Empty for the player: no rule in this codebase grants a player resistance.

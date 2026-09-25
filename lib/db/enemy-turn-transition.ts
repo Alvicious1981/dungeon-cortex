@@ -28,6 +28,7 @@ import { setPlayerHp } from "@/lib/db/player-hp";
 import { applyPlayerDowned } from "@/lib/db/player-downed";
 import { effectiveMaxHp, exhaustionEffects } from "@/lib/rules/exhaustion";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import { concentrationOf, endSpellConditions } from "@/lib/db/spell-condition-end";
 
 /**
  * A state the enemy-turn chain must never reach. The action route maps it to
@@ -243,8 +244,10 @@ export async function resolveEnemyTurn(
   // survived every blow and the narrator was told it was still active.
   let concentratingOn = character.concentrationSpellId ?? null;
 
-  const checkPlayerConcentration = async (damage: number, hpAfter: number): Promise<void> => {
-    if (!concentratingOn || damage <= 0) return;
+  // Resolves to true when concentration ended, so a caller mid-turn can
+  // re-read the conditions the spell was holding on this enemy.
+  const checkPlayerConcentration = async (damage: number, hpAfter: number): Promise<boolean> => {
+    if (!concentratingOn || damage <= 0) return false;
     const spell = concentratingOn;
     let content: string;
     let check: ReturnType<typeof resolveConcentrationCheck> | null = null;
@@ -260,7 +263,7 @@ export async function resolveEnemyTurn(
         `${check.total} — ${check.success ? "holds" : "concentration broken"}.`;
     }
     await tx.gameLog.create({ data: { campaignId: ctx.campaignId, role: "system", content } });
-    if (check?.success) return;
+    if (check?.success) return false;
 
     concentratingOn = null;
     // Character first, then its Combatant mirror — the lock order setPlayerHp keeps.
@@ -272,6 +275,18 @@ export async function resolveEnemyTurn(
       where: { encounterId: ctx.encounterId, isPlayer: true },
       data: { concentrationSpellId: null },
     });
+    // The spell ends, and with it every condition it was holding.
+    const ended = await endSpellConditions(tx, {
+      encounterId: ctx.encounterId,
+      shouldEnd: concentrationOf(player.id),
+      reason: check ? "concentration broken" : "caster fell unconscious",
+    });
+    for (const entry of ended) {
+      await tx.gameLog.create({ data: { campaignId: ctx.campaignId, role: "system", content: entry.log } });
+      // This enemy's own attacks for the rest of its turn roll without the
+      // condition that just ended.
+      if (entry.combatantId === enemy.id) enemyConditions = entry.conditions;
+    }
     if (ctx.collectEvents) {
       events.push({
         type: "CONCENTRATION_BROKEN",
@@ -283,6 +298,7 @@ export async function resolveEnemyTurn(
         },
       });
     }
+    return true;
   };
 
   // The player's current AC, from current inventory — never the Combatant.ac
@@ -292,7 +308,7 @@ export async function resolveEnemyTurn(
     inventory: character.inventory,
     dexModifier: abilityModifier(stats.DEX ?? 10),
   }).armorClass;
-  const enemyConditions = extractConditions(enemy.conditions);
+  let enemyConditions = extractConditions(enemy.conditions);
   const playerConditions = extractConditions(player.conditions);
   let hp = character.hp;
 

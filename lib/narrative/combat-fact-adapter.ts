@@ -133,7 +133,10 @@ export function adaptCombatEventsToNarrativeContext(
             description: `Damage confirmed: ${damage} to ${targetName}`,
             payload: { damageAmount: damage, ...targetIdentity }
           });
-        } else {
+        } else if (conditionsApplied.length === 0) {
+          // A spell that restrained its target without damaging it did not
+          // miss: the condition fact below is the whole outcome. Only an entry
+          // that changed nothing reads as a miss.
           addFact({
             type: 'attack_miss',
             description: `Attack missed ${targetName}`,

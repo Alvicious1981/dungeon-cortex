@@ -21,19 +21,12 @@
  * "Poisoned" capitalised while the SRD index is lowercase, and the two reach
  * this function from opposite directions.
  *
- * Not live yet, and that is deliberate. No spell in this codebase currently
- * produces a condition: `resolveSpellEffect` in `magic.ts` returns
- * `condition: null` on all three of its exit paths, with an acknowledged TODO
- * at `magic.ts:427` — "To be extracted from SRD description or specialized
- * fields." `resolveCachedSpell` spreads that effect unchanged, so the only
- * live source of `effect.condition` is null, and `combat-pipeline.ts`'s
- * `if (!saved && effect.condition)` cannot be entered by any request today.
- * The rule in this module is correct and reachable in the code sense — it is
- * simply unreachable in practice until spell condition extraction is built,
- * which is a separate increment. The column and the rule are repaired now so
- * both are already in place on the day conditions become extractable,
- * exactly as `equipItem`'s slot validation shipped before the AI tool that
- * reaches it was re-enabled.
+ * Live since 2026-09-25: `resolveSpellEffect` now takes a spell's condition
+ * from the curated SRD table in `lib/rules/spell-conditions.ts`
+ * (docs/DECISION_SPELL_CONDITIONS.md), and `combat-pipeline.ts` runs every
+ * such condition through `grantConditions` before writing it. Until then the
+ * resolver returned `condition: null` on every path and this rule, though
+ * wired, was never reached.
  */
 
 export interface ConditionGrant {
