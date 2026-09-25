@@ -132,8 +132,10 @@ const CONDITION_TERMS: Record<string, ConditionTerms> = {
     assertions: [asserted('prone|derribad[oa]'), /\bcae\s+al\s+suelo\b/i],
   },
   restrained: {
-    mentions: [/restrained/i, /atrapado/i, /sujeto/i],
-    assertions: [asserted('restrained|atrapad[oa]|sujet[oa]')],
+    // "Apresado" is the Spanish SRD's name for Restrained, and the word the
+    // narrator reaches for once Entangle or Web holds a creature.
+    mentions: [/restrained/i, /atrapado/i, /sujeto/i, /\bapresad[oa]s?\b/i],
+    assertions: [asserted('restrained|atrapad[oa]|sujet[oa]|apresad[oa]s?')],
   },
   stunned: {
     mentions: [/stunned/i, /aturdid[oa]s?/i],
@@ -156,6 +158,28 @@ const conditionMappings = Object.values(CONDITION_REGISTRY).map(entry => ({
   }),
 }));
 
+/** Where each pattern matches in the text, in order. */
+function matchIndexes(text: string, patterns: readonly RegExp[]): number[] {
+  const indexes: number[] = [];
+  for (const pattern of patterns) {
+    const global = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+    for (const match of text.matchAll(global)) indexes.push(match.index ?? 0);
+  }
+  return indexes.sort((a, b) => a - b);
+}
+
+/**
+ * Whether the condition word at `index` is said to have ended: "no longer
+ * restrained", "ya no está apresado", "deja de estar paralizado". Up to three
+ * words may sit between the phrase and the condition ("is no longer held
+ * restrained" reads oddly, "ya no está del todo apresado" does not).
+ */
+const ENDED_BEFORE = /(?:\bno\s+longer|\bya\s+no|\bdej(?:a|an|ó|aron)\s+de\s+(?:estar|ser))\s+(?:[\p{L}]+\s+){0,3}$/iu;
+
+function endsCondition(text: string, index: number): boolean {
+  return ENDED_BEFORE.test(text.slice(Math.max(0, index - 60), index));
+}
+
 /**
  * Validates AI narrative text against backend combat context to prevent hallucinations,
  * rule inventions, and retro jargon leakage.
@@ -167,12 +191,19 @@ const conditionMappings = Object.values(CONDITION_REGISTRY).map(entry => ({
  * - Reject unauthorized loot.
  * - Reject unconfirmed death descriptions.
  * - Reject mechanical hit/miss contradictions.
- * - Reject unconfirmed conditions.
+ * - Reject conditions neither applied this action nor held in the backend's
+ *   state after it, and reject narrating the end of one that is still held.
  * - Reject forbidden terms in runtime.
  */
 export function validateNarrativeText(
   text: string,
-  context?: CombatNarrativeContext
+  context?: CombatNarrativeContext,
+  /**
+   * What the backend's state holds after the action, read by the caller from
+   * the same campaign context the narrator is shown. `activeConditions` are
+   * the condition names any combatant carries (Combatant.conditions).
+   */
+  backendState?: { activeConditions?: readonly string[] }
 ): NarrativeValidationResult {
   const issues: NarrativeValidationIssue[] = [];
 
@@ -404,34 +435,56 @@ export function validateNarrativeText(
   // (combat-fact-adapter: "falls unconscious at 0 HP", "stable but
   // unconscious"). PLAYER_DOWNED carries no condition_applied companion.
   const unconsciousFactTypes = new Set(['player_downed', 'player_stabilized']);
-
-  const factlessConditionMatch = conditionMappings.some(mapping =>
-    mapping.assertions.some(regex => regex.test(text)),
+  // Conditions a combatant holds in the backend's state after this action. A
+  // condition that lasts across turns (Entangle, Hold Person) is confirmed by
+  // that state even on a turn that applied nothing, and a condition no one
+  // holds any more may be narrated as ended.
+  const active = new Set(
+    (backendState?.activeConditions ?? []).map((condition) => condition.trim().toLowerCase()),
   );
-  if (!context && factlessConditionMatch) {
-    issues.push({
-      code: 'unconfirmed_condition',
-      message: 'Narrated condition is not confirmed by backend consequences.',
-      severity: 'error',
-    });
-  }
 
   for (const mapping of conditionMappings) {
-    const mentionsCondition = [...mapping.mentions, ...mapping.assertions].some(regex => regex.test(text));
-    if (context && mentionsCondition) {
-      const isConfirmed = context.facts.some(f =>
-        (f.type === 'condition_applied' &&
-          typeof f.payload?.conditionName === 'string' &&
-          f.payload.conditionName.toLowerCase() === mapping.condition.toLowerCase()) ||
-        (mapping.condition === 'Unconscious' && unconsciousFactTypes.has(f.type))
-      );
-      if (!isConfirmed) {
-        issues.push({
-          code: 'unconfirmed_condition',
-          message: `Narrated condition "${mapping.condition}" is not confirmed by the backend.`,
-          severity: 'error'
-        });
+    const isActive = active.has(mapping.condition.toLowerCase());
+    const confirmedByFacts = Boolean(context?.facts.some(f =>
+      (f.type === 'condition_applied' &&
+        typeof f.payload?.conditionName === 'string' &&
+        f.payload.conditionName.toLowerCase() === mapping.condition.toLowerCase()) ||
+      (mapping.condition === 'Unconscious' && unconsciousFactTypes.has(f.type))
+    ));
+    // On a combat turn any mention needs confirmation; without combat facts
+    // only an explicit assertion does, as before.
+    const patterns = context ? [...mapping.mentions, ...mapping.assertions] : mapping.assertions;
+
+    let unconfirmed = false;
+    let contradicted = false;
+    for (const index of matchIndexes(text, patterns)) {
+      if (endsCondition(text, index)) {
+        // "no longer restrained": true only if nobody still is.
+        if (isActive) contradicted = true;
+      } else if (!confirmedByFacts && !isActive) {
+        unconfirmed = true;
       }
+    }
+
+    if (unconfirmed) {
+      issues.push(context
+        ? {
+            code: 'unconfirmed_condition',
+            message: `Narrated condition "${mapping.condition}" is not confirmed by the backend.`,
+            severity: 'error',
+          }
+        : {
+            code: 'unconfirmed_condition',
+            message: 'Narrated condition is not confirmed by backend consequences.',
+            severity: 'error',
+          });
+    }
+    if (contradicted) {
+      issues.push({
+        code: 'contradicted_condition',
+        message: `Narration ends "${mapping.condition}", which the backend still holds.`,
+        severity: 'error',
+      });
     }
   }
 

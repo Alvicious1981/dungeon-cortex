@@ -180,6 +180,24 @@ with a condition and no damage is no longer reported as "Attack missed". Every
 creature that rolled a save against a condition spell gets a `targets[]` entry,
 so a resisted spell is reported, not silent.
 
+**Lasting conditions (2026-09-26).** The narrative validator
+(`lib/narrative/narrative-validator.ts`) used to accept a condition only from a
+`condition_applied` fact of the same action. So on every later turn, "the
+goblin, still restrained" was rejected and replaced by fallback prose, although
+the narrator's own campaign state listed the condition. `streamNarrative` now
+passes the validator the conditions every combatant holds in the same
+post-action state (`activeConditions`). The validator:
+
+- accepts a condition applied this action, or one some combatant still holds;
+- accepts "no longer restrained" / "ya no está apresado" only when no combatant
+  still holds it, and rejects it (`contradicted_condition`) when one does;
+- rejects any other mention, as before.
+
+The granularity is the condition, not the creature: the validator already
+matched `condition_applied` by name alone, and the state is read the same way.
+The Spanish SRD's "apresado" (Restrained) was missing from the validator's
+vocabulary and is now recognised.
+
 ## 8. Deploy order
 
 Apply migrations `20260925120000_add_combatant_spell_conditions` and
