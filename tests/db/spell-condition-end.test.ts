@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
+import { rollRepeatSaves } from "@/lib/db/spell-condition-end";
 import { finalizeEncounterTurn } from "@/lib/rules/combat-pipeline";
 import type { SpellConditionRecord } from "@/lib/rules/spell-conditions";
 
@@ -81,9 +82,9 @@ const CTX = {
   collectEvents: true,
 };
 
-function mockRandom(values: number[]): void {
+function mockRandom(values: number[]) {
   let i = 0;
-  vi.spyOn(Math, "random").mockImplementation(() => values[i++] ?? 0.5);
+  return vi.spyOn(Math, "random").mockImplementation(() => values[i++] ?? 0.5);
 }
 
 const logLines = (tx: Prisma.TransactionClient): string[] =>
@@ -208,5 +209,102 @@ describe("a spell condition's duration", () => {
     expect(tx.character.update).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: { concentrationSpellId: null } }),
     );
+  });
+});
+
+describe("a held enemy repeats its save at the end of its turn", () => {
+  const holdPerson = (overrides: Partial<SpellConditionRecord> = {}): SpellConditionRecord => ({
+    condition: "paralyzed",
+    spellIndex: "hold-person",
+    casterId: "p1",
+    concentration: true,
+    endsAtRound: 50,
+    repeatSave: { ability: "WIS", dc: 13, onDamage: false },
+    ...overrides,
+  });
+  const paralyzedGoblin = {
+    conditions: ["paralyzed"],
+    spellConditions: [holdPerson()],
+    stats: { WIS: 10 },
+  };
+
+  it("breaks free on a success, after a turn it could not act in", async () => {
+    const tx = buildTx(rows(paralyzedGoblin));
+    // The goblin is incapacitated, so its turn rolls nothing: the first die
+    // is its Wisdom save. d20 = 20.
+    mockRandom([0.95]);
+
+    await finalizeEncounterTurn({
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 3, failOnStaleTurn: true,
+    });
+
+    expect(logLines(tx)).toContain(
+      "Goblin repeats the Wisdom save against hold-person: 20 vs DC 13 — the spell ends on it.",
+    );
+    expect(tx.combatant.update).toHaveBeenCalledWith({
+      where: { id: "g1" },
+      data: { conditions: [], spellConditions: [] },
+    });
+    expect(logLines(tx)).toContain("Goblin is no longer paralyzed: hold-person — saved.");
+  });
+
+  it("stays held on a failure", async () => {
+    const tx = buildTx(rows(paralyzedGoblin));
+    mockRandom([0.1]); // d20 = 3
+
+    await finalizeEncounterTurn({
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 3, failOnStaleTurn: true,
+    });
+
+    expect(logLines(tx)).toContain(
+      "Goblin repeats the Wisdom save against hold-person: 3 vs DC 13 — still held.",
+    );
+    expect(tx.combatant.update).not.toHaveBeenCalled();
+  });
+
+  it("gives no repeat save for a spell that allows none", async () => {
+    const tx = buildTx(rows({ ...idleEntangled }));
+    const random = mockRandom([]);
+
+    await finalizeEncounterTurn({
+      tx, encounterId: "enc-1", currentTurnIndex: 0, round: 3, failOnStaleTurn: true,
+    });
+
+    expect(random).not.toHaveBeenCalled();
+    expect(logLines(tx).some((line) => line.includes("repeats"))).toBe(false);
+  });
+});
+
+const idleEntangled = { attackProfile: null, spellConditions: [entangle({ endsAtRound: 50 })] };
+
+describe("rollRepeatSaves frees only the creature that saved", () => {
+  it("leaves a second creature held by the same upcast Hold Person", async () => {
+    const hold = {
+      condition: "paralyzed",
+      spellIndex: "hold-person",
+      casterId: "p1",
+      concentration: true,
+      endsAtRound: 50,
+      repeatSave: { ability: "WIS" as const, dc: 13, onDamage: false },
+    };
+    const held = (id: string, name: string) => ({
+      id, name, stats: { WIS: 10 }, conditions: ["paralyzed"], spellConditions: [hold],
+    });
+    const tx = {
+      combatant: {
+        // Answers with both rows, as a double that ignores `where` would.
+        findMany: vi.fn().mockResolvedValue([held("g1", "Bandit"), held("g2", "Thug")]),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    } as unknown as Prisma.TransactionClient;
+    mockRandom([0.95]); // d20 = 20
+
+    await rollRepeatSaves(tx, { encounterId: "enc-1", combatantId: "g1", trigger: "end_of_turn" });
+
+    expect(tx.combatant.update).toHaveBeenCalledTimes(1);
+    expect(tx.combatant.update).toHaveBeenCalledWith({
+      where: { id: "g1" },
+      data: { conditions: [], spellConditions: [] },
+    });
   });
 });

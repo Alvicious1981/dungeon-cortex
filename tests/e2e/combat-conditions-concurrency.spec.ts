@@ -82,9 +82,9 @@ function conditionPayload(input: {
     spellEffect: {
       type: "utility",
       hasSavingThrow: false,
-      condition: input.condition,
+      conditions: [input.condition],
       // A condition without its end is refused (docs/DECISION_SPELL_CONDITIONS.md §4).
-      conditionEnds: {
+      conditionTerms: {
         spellIndex: `concurrency-${input.condition}`,
         concentration: false,
         durationRounds: 10,

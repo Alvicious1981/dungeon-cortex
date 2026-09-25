@@ -37,7 +37,10 @@ describe("SPELL_CONDITIONS — against the SRD cache", () => {
 
   it("names only conditions the engine knows", () => {
     for (const [index, entry] of Object.entries(SPELL_CONDITIONS)) {
-      expect(Object.keys(CONDITION_REGISTRY), index).toContain(entry.condition);
+      expect(entry.conditions.length, index).toBeGreaterThan(0);
+      for (const condition of entry.conditions) {
+        expect(Object.keys(CONDITION_REGISTRY), index).toContain(condition);
+      }
     }
   });
 
@@ -74,8 +77,8 @@ describe("resolveSpellEffect — conditions come from the table and nowhere else
     for (const record of SPELLS) {
       const effect = resolveSpellEffect(record, 9, 3, 20);
       const inTable = String(record.index) in SPELL_CONDITIONS;
-      expect(effect.condition !== null, String(record.index)).toBe(inTable);
-      expect(effect.conditionEnds !== null, String(record.index)).toBe(inTable);
+      expect(effect.conditions.length > 0, String(record.index)).toBe(inTable);
+      expect(effect.conditionTerms !== null, String(record.index)).toBe(inTable);
     }
   });
 
@@ -86,15 +89,15 @@ describe("resolveSpellEffect — conditions come from the table and nowhere else
       dice: null,
       hasSavingThrow: true,
       saveAbility: "STR",
-      condition: "restrained",
-      conditionEnds: { spellIndex: "entangle", concentration: true, durationRounds: 10 },
+      conditions: ["restrained"],
+      conditionTerms: { spellIndex: "entangle", concentration: true, durationRounds: 10 },
     });
   });
 
   it("takes Web's save from the table, because the cache row has no dc", () => {
     expect(dcIndexOf(BY_INDEX.get("web")!)).toBeNull();
     const effect = resolveSpellEffect(BY_INDEX.get("web")!, 2, 3, 3);
-    expect(effect).toMatchObject({ hasSavingThrow: true, saveAbility: "DEX", condition: "restrained" });
+    expect(effect).toMatchObject({ hasSavingThrow: true, saveAbility: "DEX", conditions: ["restrained"] });
   });
 
   it("keeps Black Tentacles' damage and adds its condition", () => {
@@ -104,7 +107,7 @@ describe("resolveSpellEffect — conditions come from the table and nowhere else
       dice: "3d6",
       damageType: "bludgeoning",
       saveAbility: "DEX",
-      condition: "restrained",
+      conditions: ["restrained"],
     });
   });
 });

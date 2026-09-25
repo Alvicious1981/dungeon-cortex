@@ -42,6 +42,15 @@ function isEnemyInput(v: unknown): v is EnemyInput {
   );
 }
 
+/** An enemy with no SRD record: type unknown, and no modifiers to claim. */
+const NO_SRD_SNAPSHOT = {
+  creatureType: null,
+  damageImmunities: [] as string[],
+  damageResistances: [] as string[],
+  damageVulnerabilities: [] as string[],
+  conditionImmunities: [] as string[],
+};
+
 export async function POST(req: NextRequest, { params }: RouteContext) {
   const { id: campaignId } = await params;
 
@@ -118,13 +127,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       // than a partial block. A missing WIS used to leave the creature with no
       // Perception at all, which any contested check reads as "unknown".
       if (!e.monsterIndex) {
-        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null, srdAttackProfile: null };
+        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null, srdAttackProfile: null, srdSnapshot: NO_SRD_SNAPSHOT };
       }
       const srdMonster = await prisma.srdMonster.findUnique({
         where: { id: e.monsterIndex },
       });
       if (!srdMonster) {
-        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null, srdAttackProfile: null };
+        return { ...e, ac: 10, stats: monsterAbilityScores({}), srdXp: null, srdAttackProfile: null, srdSnapshot: NO_SRD_SNAPSHOT };
       }
       const data = srdMonster.data as Record<string, unknown>;
       // The stored SRD JSON spells ability scores as flat top-level fields
@@ -147,6 +156,16 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         // recognised. Named `srdAttackProfile`, not `attackProfile`, so the
         // column's single-reader architecture test sees no second reader here.
         srdAttackProfile: profileMonster(data),
+        // The seeded columns, the same values spawnCombatEncounter snapshots.
+        // This route, the only live spawn path, never wrote them, so every
+        // creature fought with no resistance, immunity or condition immunity.
+        srdSnapshot: {
+          creatureType: srdMonster.type ?? null,
+          damageImmunities: srdMonster.damageImmunities ?? [],
+          damageResistances: srdMonster.damageResistances ?? [],
+          damageVulnerabilities: srdMonster.damageVulnerabilities ?? [],
+          conditionImmunities: srdMonster.conditionImmunities ?? [],
+        },
       };
     })
   );
@@ -234,6 +253,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           initiativeOrder,
           stats: campaign.character.stats || {},
           concentrationSpellId: campaign.character.concentrationSpellId,
+          // Every SRD playable race is humanoid.
+          creatureType: "humanoid",
           x: posX,
           y: posY,
           // The player is never a source of the combat XP award (§7 of the decision only
@@ -255,6 +276,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         initiativeTotal: entry.initiative,
         initiativeOrder,
         stats: enemy.stats || {},
+        ...enemy.srdSnapshot,
         x: posX,
         y: posY,
         // Backend-authorized snapshot resolved above; never derived from the request body.

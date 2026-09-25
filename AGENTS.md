@@ -383,9 +383,27 @@ Killer and Suggestion are stored with `concentration: null`, which
   `lib/db/spell-condition-end.ts` takes it off when the caster's concentration
   ends or the duration runs out. The pipeline refuses a condition with no
   `conditionEnds`, so one that cannot end cannot be written.
-  **Still open:** only Entangle, Web and Black Tentacles are in the table.
-  `DEFERRED_SPELL_CONDITIONS` lists every other condition-imposing spell in the
-  cache with its reason code; `repeat_save` (Hold Person and friends) is next.
+  Phase 2 (2026-09-26) added Tasha's Hideous Laughter, Hold Person and Hold
+  Monster: the target repeats the save at the end of its turns (and on damage,
+  for Tasha's), `onlyTypes`/`unaffectedTypes` read the new
+  `Combatant.creatureType` snapshot, and paralyzed gained its SRD automatic
+  STR/DEX save failure and melee critical hits.
+  **Still open:** `DEFERRED_SPELL_CONDITIONS` lists every other
+  condition-imposing spell in the cache with its reason code.
+
+Closed 2026-09-26: **the live spawn path never snapshotted a monster's damage
+modifiers or condition immunities.** `spawnCombatEncounter` in
+`lib/rules/encounter-service.ts` writes all four columns, and has had no
+production caller since it was written; `POST /api/campaign/[id]/encounter`,
+the route the game actually calls, wrote none of them. Every entry above that
+calls those columns "snapshotted at spawn" was describing the dead copy. So
+in real play `applyDamageModifiers` and `grantConditions` ran against empty
+lists: no skeleton was vulnerable to bludgeoning, and no fire elemental
+ignored fire. The route now copies the seeded `SrdMonster` columns, and
+`tests/api/encounter-route-srd-snapshot.test.ts` pins it. The same lesson as
+the tool surface: a service with the right code and no caller is not proof
+the behaviour exists. **`spawnCombatEncounter` is still dead code;** whether
+to delete it or route through it is a separate call.
 - **The whole wilderness subsystem** — not a dormant value: a subsystem the
   project switched off on purpose. `stealthAdvantage` at
   `lib/rules/wilderness.ts:275` is one field of it, and the note that stood here

@@ -22,8 +22,8 @@
 import type { Ability } from "@/lib/rules/ability-check";
 
 export interface SpellConditionEntry {
-  /** The condition, as a key of CONDITION_REGISTRY. */
-  condition: string;
+  /** The conditions, as keys of CONDITION_REGISTRY (Tasha's imposes two). */
+  conditions: readonly string[];
   /**
    * The saving throw that resists it. Given here only because the cache omits
    * it for some spells (Web has no `dc`); where the cache has one, the test
@@ -37,6 +37,30 @@ export interface SpellConditionEntry {
    * start of the caster's turn once that many rounds have passed.
    */
   durationRounds: number;
+  /**
+   * The target repeats the save at the end of each of its turns, ending the
+   * spell on itself on a success. `onDamage`: also each time it takes damage,
+   * with advantage (Tasha's Hideous Laughter).
+   */
+  repeatSave?: { onDamage: boolean };
+  /**
+   * The only creature types the spell may target — Hold Person's "choose a
+   * humanoid". Aiming it at anything else is an illegal cast, refused before a
+   * slot is spent, and so is a target whose type is unknown.
+   */
+  onlyTypes?: readonly string[];
+  /**
+   * Creature types the spell has no effect on — Hold Monster's "no effect on
+   * undead". A legal target: the spell is cast and does nothing to it. A
+   * target whose type is unknown is refused, since whether it is affected
+   * cannot be decided.
+   */
+  unaffectedTypes?: readonly string[];
+  /**
+   * A target with this Intelligence or less is unaffected (Tasha's: "a
+   * creature with an Intelligence score of 4 or less isn't affected").
+   */
+  unaffectedAtIntelligence?: number;
 }
 
 /**
@@ -50,23 +74,56 @@ export interface SpellConditionEntry {
  */
 export const SPELL_CONDITIONS: Readonly<Record<string, SpellConditionEntry>> = {
   // Entangle — 1st level. Restrained, STR save, concentration up to 1 minute.
-  entangle: { condition: "restrained", save: "STR", concentration: true, durationRounds: 10 },
+  entangle: { conditions: ["restrained"], save: "STR", concentration: true, durationRounds: 10 },
   // Web — 2nd level. Restrained, DEX save, concentration up to 1 hour.
-  web: { condition: "restrained", save: "DEX", concentration: true, durationRounds: 600 },
+  web: { conditions: ["restrained"], save: "DEX", concentration: true, durationRounds: 600 },
   // Evard's Black Tentacles — 4th level. 3d6 bludgeoning and restrained, DEX
   // save, concentration up to 1 minute.
   "black-tentacles": {
-    condition: "restrained",
+    conditions: ["restrained"],
     save: "DEX",
     concentration: true,
     durationRounds: 10,
+  },
+  // Tasha's Hideous Laughter — 1st level. Prone and incapacitated, WIS save,
+  // concentration up to 1 minute. Repeats the save at the end of each of its
+  // turns and when it takes damage (with advantage). INT 4 or less: unaffected.
+  "hideous-laughter": {
+    conditions: ["prone", "incapacitated"],
+    save: "WIS",
+    concentration: true,
+    durationRounds: 10,
+    repeatSave: { onDamage: true },
+    unaffectedAtIntelligence: 4,
+  },
+  // Hold Person — 2nd level. A humanoid; paralyzed, WIS save, concentration up
+  // to 1 minute. Repeats the save at the end of each of its turns.
+  "hold-person": {
+    conditions: ["paralyzed"],
+    save: "WIS",
+    concentration: true,
+    durationRounds: 10,
+    repeatSave: { onDamage: false },
+    onlyTypes: ["humanoid"],
+  },
+  // Hold Monster — 5th level. Any creature but undead; paralyzed, WIS save,
+  // concentration up to 1 minute. Repeats the save at the end of each of its turns.
+  "hold-monster": {
+    conditions: ["paralyzed"],
+    save: "WIS",
+    concentration: true,
+    durationRounds: 10,
+    repeatSave: { onDamage: false },
+    unaffectedTypes: ["undead"],
   },
 };
 
 /** Why a spell that imposes a condition is not in SPELL_CONDITIONS yet. */
 export type DeferralReason =
-  /** The target repeats the save at the end of each of its turns. */
-  | "repeat_save"
+  /** Deals damage to the target at the end of each of its turns as well. */
+  | "damage_each_turn"
+  /** No initial save; decided by the target's hit points. */
+  | "hit_point_threshold"
   /** The condition ends on an event the engine does not track (damage, a shake, line of sight). */
   | "ends_on_event"
   /** Charmed has no mechanical reader in the engine yet. */
@@ -90,11 +147,8 @@ export type DeferralReason =
  * not an absence nobody can see.
  */
 export const DEFERRED_SPELL_CONDITIONS: Readonly<Record<string, DeferralReason>> = {
-  "hideous-laughter": "repeat_save",
-  "hold-person": "repeat_save",
-  "hold-monster": "repeat_save",
-  "phantasmal-killer": "repeat_save",
-  "power-word-stun": "repeat_save",
+  "phantasmal-killer": "damage_each_turn",
+  "power-word-stun": "hit_point_threshold",
   "blindness-deafness": "caster_choice",
   command: "caster_choice",
   fear: "ends_on_event",
@@ -150,12 +204,34 @@ export interface SpellConditionRecord {
   concentration: boolean;
   /** Ends at the start of the caster's turn in this round. */
   endsAtRound: number;
+  /**
+   * The save the creature repeats to end it: at the end of each of its turns,
+   * and on damage (with advantage) when `onDamage`. The DC is the caster's
+   * spell save DC at the time of the cast. Absent when the spell allows none.
+   */
+  repeatSave?: { ability: Ability; dc: number; onDamage: boolean };
+}
+
+const ABILITIES: readonly string[] = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
+
+function isRepeatSave(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    typeof r.ability === "string" &&
+    ABILITIES.includes(r.ability) &&
+    typeof r.dc === "number" &&
+    Number.isFinite(r.dc) &&
+    typeof r.onDamage === "boolean"
+  );
 }
 
 function isRecord(value: unknown): value is SpellConditionRecord {
   if (typeof value !== "object" || value === null) return false;
   const r = value as Record<string, unknown>;
   return (
+    isRepeatSave(r.repeatSave) &&
     typeof r.condition === "string" &&
     typeof r.spellIndex === "string" &&
     typeof r.casterId === "string" &&
@@ -184,6 +260,8 @@ export function recordsForGrant(input: {
   casterId: string;
   entry: Pick<SpellConditionEntry, "concentration" | "durationRounds">;
   round: number;
+  /** The save a repeat roll uses; omitted when the spell allows no repeat. */
+  repeatSave?: SpellConditionRecord["repeatSave"];
 }): SpellConditionRecord[] {
   return input.granted.map((condition) => ({
     condition,
@@ -191,7 +269,80 @@ export function recordsForGrant(input: {
     casterId: input.casterId,
     concentration: input.entry.concentration,
     endsAtRound: input.round + input.entry.durationRounds,
+    ...(input.repeatSave ? { repeatSave: input.repeatSave } : {}),
   }));
+}
+
+/**
+ * One cast's hold on a creature: the records of a single spell from a single
+ * caster. A repeat save is rolled once per hold, not once per condition —
+ * Tasha's puts two conditions on its target and one save ends both.
+ */
+export interface SpellHold {
+  spellIndex: string;
+  casterId: string;
+  repeatSave: NonNullable<SpellConditionRecord["repeatSave"]>;
+}
+
+/** The distinct holds on a creature that allow a repeat save. */
+export function repeatableHolds(
+  records: readonly SpellConditionRecord[],
+  filter: (hold: SpellHold) => boolean = () => true
+): SpellHold[] {
+  const seen = new Map<string, SpellHold>();
+  for (const r of records) {
+    if (!r.repeatSave) continue;
+    const key = `${r.casterId}\u0000${r.spellIndex}`;
+    if (!seen.has(key)) {
+      seen.set(key, { spellIndex: r.spellIndex, casterId: r.casterId, repeatSave: r.repeatSave });
+    }
+  }
+  return [...seen.values()].filter(filter);
+}
+
+/** Selects every record of one hold. */
+export function recordsOf(hold: Pick<SpellHold, "spellIndex" | "casterId">) {
+  return (record: SpellConditionRecord) =>
+    record.spellIndex === hold.spellIndex && record.casterId === hold.casterId;
+}
+
+/**
+ * Whether a creature is simply unaffected by a condition spell — a legal
+ * target the spell does nothing to (Hold Monster on undead, Tasha's on INT 4
+ * or less). Unknown type counts as affected here; the route refuses a cast
+ * whose outcome depends on an unknown type before it gets this far.
+ */
+export function isUnaffected(
+  entry: Pick<SpellConditionEntry, "unaffectedTypes" | "unaffectedAtIntelligence">,
+  target: { creatureType?: string | null; intelligence: number }
+): boolean {
+  const type = target.creatureType?.trim().toLowerCase();
+  if (type && entry.unaffectedTypes?.some((t) => t === type)) return true;
+  if (
+    entry.unaffectedAtIntelligence !== undefined &&
+    target.intelligence <= entry.unaffectedAtIntelligence
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Why a creature may not be targeted by a condition spell at all, or null
+ * when it may. Refused before anything is spent (see the cast route).
+ */
+export function targetRefusal(
+  entry: Pick<SpellConditionEntry, "onlyTypes" | "unaffectedTypes">,
+  target: { name: string; creatureType?: string | null }
+): string | null {
+  const dependsOnType = Boolean(entry.onlyTypes?.length || entry.unaffectedTypes?.length);
+  if (!dependsOnType) return null;
+  const type = target.creatureType?.trim().toLowerCase();
+  if (!type) return `${target.name}'s creature type is unknown, so this spell cannot be aimed at it.`;
+  if (entry.onlyTypes && !entry.onlyTypes.includes(type)) {
+    return `${target.name} is a ${type}; this spell can only target a ${entry.onlyTypes.join(" or ")}.`;
+  }
+  return null;
 }
 
 /**

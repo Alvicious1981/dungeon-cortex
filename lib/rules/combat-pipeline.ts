@@ -33,8 +33,21 @@ import {
   type ModifiedDamage,
 } from "@/lib/rules/damage-modifiers";
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
-import { readSpellConditionRecords, recordsForGrant } from "@/lib/rules/spell-conditions";
-import { concentrationOf, endSpellConditions, expiredFor } from "@/lib/db/spell-condition-end";
+import {
+  isUnaffected,
+  readSpellConditionRecords,
+  recordsForGrant,
+  repeatableHolds,
+} from "@/lib/rules/spell-conditions";
+import type { SpellConditionTerms } from "@/lib/rules/magic";
+import { ABILITIES, type Ability } from "@/lib/rules/ability-check";
+import { autoFailsSave } from "@/lib/rules/conditions";
+import {
+  concentrationOf,
+  endSpellConditions,
+  expiredFor,
+  rollRepeatSaves,
+} from "@/lib/db/spell-condition-end";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
 import { applyPlayerDowned } from "@/lib/db/player-downed";
@@ -61,6 +74,8 @@ export interface PipelineCombatant {
   damageResistances?: string[];
   damageVulnerabilities?: string[];
   conditionImmunities?: string[];
+  /** SRD creature type; null/absent = unknown. */
+  creatureType?: string | null;
   concentrationSpellId: string | null;
 }
 
@@ -82,13 +97,13 @@ interface PipelineSpellEffect {
   hasSavingThrow?: boolean;
   saveAbility?: string | null;
   saveDamage?: "half" | "none";
-  condition?: string | null;
-  conditionEnds?: {
-    spellIndex: string;
-    concentration: boolean;
-    durationRounds: number;
-  } | null;
+  conditions?: readonly string[];
+  conditionTerms?: SpellConditionTerms | null;
   concentration?: boolean;
+}
+
+function isAbility(value: unknown): value is Ability {
+  return typeof value === "string" && (ABILITIES as readonly string[]).includes(value);
 }
 
 function normalizeDamageType(value: string | null | undefined): DamageType {
@@ -571,6 +586,9 @@ export async function executeCombatAction(
     let conditionsBlocked: readonly string[] = [];
     let damageUnresolved: readonly string[] = [];
     let damageApplied: ModifiedDamage["applied"] = "none";
+    // Whether the row, as the damage write returned it, holds a spell that
+    // lets the creature repeat its save when damaged (Tasha's).
+    let heldOnDamage = false;
 
     if (actionType === "attack") {
       const snapshot: EncounterSnapshot = {
@@ -633,12 +651,30 @@ export async function executeCombatAction(
       
     } else if (actionType === "cast_spell" && payload.spellEffect) {
       const effect = payload.spellEffect;
-      if (effect.hasSavingThrow && effect.saveAbility && payload.spellSaveDC) {
-        const targetStats = (target.stats as Record<string, number>) || {};
+      const targetStats = (target.stats as Record<string, number>) || {};
+      // A legal target the spell does nothing to (Hold Monster on undead,
+      // Tasha's on INT 4 or less): no save is rolled and nothing is applied.
+      const unaffected =
+        effect.conditionTerms !== null &&
+        effect.conditionTerms !== undefined &&
+        isUnaffected(effect.conditionTerms, {
+          creatureType: target.creatureType,
+          intelligence: targetStats.INT ?? 10,
+        });
+      if (unaffected) {
+        systemLogs.push(`${target.name} is unaffected by ${payload.spellName || "the spell"}.`);
+      } else if (effect.hasSavingThrow && effect.saveAbility && payload.spellSaveDC) {
         const targetMod = abilityModifier(targetStats[effect.saveAbility] ?? 10);
-        const saveResult = resolveSavingThrow(targetMod, payload.spellSaveDC);
-        saved = saveResult.success;
-        saveRoll = saveResult.roll;
+        // SRD: a paralyzed, stunned, unconscious or petrified creature
+        // automatically fails Strength and Dexterity saving throws.
+        if (autoFailsSave(extractConditions(target.conditions), effect.saveAbility)) {
+          saved = false;
+          saveRoll = 0;
+        } else {
+          const saveResult = resolveSavingThrow(targetMod, payload.spellSaveDC);
+          saved = saveResult.success;
+          saveRoll = saveResult.roll;
+        }
         naturalRoll = saveRoll;
         
         if (effect.dice) {
@@ -678,11 +714,11 @@ export async function executeCombatAction(
       // disagree — and the facts reach the narrator, so a disagreement would
       // have it describing a condition the engine had refused.
       //
-      // A condition without `conditionEnds` is not applied: nothing could ever
+      // A condition without `conditionTerms` is not applied: nothing could ever
       // take it off, so it would last the rest of the fight.
-      if (!saved && effect.condition && effect.conditionEnds) {
+      if (!unaffected && !saved && effect.conditions?.length && effect.conditionTerms) {
         const grant = grantConditions({
-          conditions: [effect.condition],
+          conditions: effect.conditions,
           immunities: target.conditionImmunities ?? [],
         });
         conditionsToApply = grant.granted;
@@ -766,6 +802,10 @@ export async function executeCombatAction(
         where: { id: target.id },
         data: { hp: { decrement: damage } },
       });
+      heldOnDamage = repeatableHolds(
+        readSpellConditionRecords(updatedTarget?.spellConditions ?? target.spellConditions),
+        (hold) => hold.repeatSave.onDamage
+      ).length > 0;
 
       if (conditionsToApply.length > 0) {
         // `update` returns the row as it exists after waiting for any earlier row
@@ -786,7 +826,7 @@ export async function executeCombatAction(
         // Why each new condition holds, written in the same update as the
         // condition itself, so no condition a spell applied can exist without
         // the record that later takes it off. Rebased on the locked row too.
-        const ends = payload.spellEffect?.conditionEnds;
+        const ends = payload.spellEffect?.conditionTerms;
         const spellConditions = ends
           ? [
               ...readSpellConditionRecords(updatedTarget?.spellConditions ?? target.spellConditions),
@@ -796,6 +836,14 @@ export async function executeCombatAction(
                 casterId: payload.actorId,
                 entry: ends,
                 round: encounter.round,
+                repeatSave:
+                  ends.repeatSave && isAbility(payload.spellEffect?.saveAbility) && payload.spellSaveDC
+                    ? {
+                        ability: payload.spellEffect.saveAbility,
+                        dc: payload.spellSaveDC,
+                        onDamage: ends.repeatSave.onDamage,
+                      }
+                    : undefined,
               }),
             ]
           : undefined;
@@ -853,6 +901,18 @@ export async function executeCombatAction(
       }
     }
 
+    // SRD (Tasha's Hideous Laughter): a creature held by a spell that allows
+    // it repeats the save each time it takes damage, with advantage. Rolled
+    // after the damage is written, against the records already on the row.
+    if (heldOnDamage && damage > 0 && newHp > 0 && encounter.id) {
+      const repeat = await rollRepeatSaves(tx, {
+        encounterId: encounter.id,
+        combatantId: target.id,
+        trigger: "damage",
+      });
+      systemLogs.push(...repeat.logs);
+    }
+
     const singleConsequence: SingleTargetConsequence = {
       targetName: target.name,
       targetId: target.id,
@@ -884,7 +944,7 @@ export async function executeCombatAction(
       payload.spellEffect?.type === "damage" ||
       damage > 0 ||
       conditionsToApply.length > 0 ||
-      Boolean(payload.spellEffect?.conditionEnds && payload.spellEffect.hasSavingThrow);
+      Boolean(payload.spellEffect?.conditionTerms && payload.spellEffect.hasSavingThrow);
     if (reportsTarget) consequences.push(singleConsequence);
 
     if (collectEvents) {
@@ -1279,6 +1339,19 @@ async function runEnemyChain(input: {
         );
       }
       return ended;
+    }
+
+    // The end of this enemy's turn: a spell that allows it (Hold Person,
+    // Tasha's) gives it another save, whether or not it could act this turn.
+    const repeat = await rollRepeatSaves(tx, {
+      encounterId,
+      combatantId: active.id,
+      trigger: "end_of_turn",
+    });
+    for (const content of repeat.logs) {
+      await tx.gameLog.create({
+        data: { campaignId: owner.campaignId, role: "system", content },
+      });
     }
 
     const next = advanceTurn({

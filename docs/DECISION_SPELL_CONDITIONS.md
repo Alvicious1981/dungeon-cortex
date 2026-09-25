@@ -1,6 +1,6 @@
 ---
 title: Decision — Spell Conditions from a Curated SRD Table
-status: Accepted — Phase 1 (restrained: Entangle, Web, Black Tentacles)
+status: Accepted — Phase 1 (restrained) and Phase 2 (repeat saves)
 date: 2026-09-25
 scope: Spell resolution, combat pipeline, condition lifecycle, AI narration boundary
 ---
@@ -101,10 +101,63 @@ Deliberately not modelled, in the caster's favour:
 - a creature that enters the area after the cast, or starts its turn there, is
   not affected. Only the creatures in the area when the spell is cast are.
 
+## 5b. Phase 2: the target repeats the save
+
+Applied: **Tasha's Hideous Laughter** (1st level, castable today: prone and
+incapacitated), **Hold Person** (2nd) and **Hold Monster** (5th), both
+paralyzed. All three are Wisdom saves held by concentration for up to 1
+minute.
+
+- **Repeat save.** A row's `repeatSave` makes the target roll again at the end
+  of each of its turns, and for Tasha's also each time it takes damage, with
+  advantage. The ability and the caster's DC at the cast are stored on the
+  record (`SpellConditionRecord.repeatSave`). One roll per spell and caster
+  ends every condition that spell put on the creature: a success on Tasha's
+  removes both prone and incapacitated.
+- **Who it can target.** `onlyTypes` makes any other creature an illegal
+  target (Hold Person: "choose a humanoid"). The cast route refuses it with
+  `400 SPELL_TARGET_INVALID` before a slot or a turn is spent. `unaffectedTypes`
+  (Hold Monster: "no effect on undead") and `unaffectedAtIntelligence`
+  (Tasha's: INT 4 or less) leave a legal target untouched: no save is rolled,
+  and a log line says so. A target whose type is unknown is refused by any
+  spell whose rule depends on type.
+- **Creature type** is a new snapshot, `Combatant.creatureType` (migration
+  `20260926120000`), written at spawn. The player is `humanoid`.
+
+Paralyzed now carries its full SRD effect, not only the part that already
+existed (advantage against it, no actions):
+
+- `autoFailStrDexSaves` (paralyzed, petrified, stunned, unconscious): a
+  Strength or Dexterity save fails without a roll. A Wisdom save, such as the
+  repeat save itself, is rolled normally.
+- `meleeHitsCritical` (paralyzed, unconscious): a melee hit is a critical
+  hit. The SRD says "within 5 feet"; the engine treats every melee attack as
+  that range, so a reach weapon at 10 feet also crits. That approximation
+  favours the attacker.
+
+Approximations in phase 2:
+
+- When Tasha's ends, the target loses prone at the same time instead of
+  spending half its movement to stand. Standing up is not modelled.
+- Only enemies roll the end-of-turn save. A player who targets themselves
+  with one of these spells is not given it.
+- The enemy's end of turn comes after its (skipped) turn in the enemy chain,
+  so a creature that breaks free acts on its next turn, as the SRD intends.
+
+### A dormant defect this phase depended on
+
+The live spawn path, `POST /api/campaign/[id]/encounter`, never snapshotted a
+monster's damage immunities, resistances, vulnerabilities or condition
+immunities. `spawnCombatEncounter` does, and has no production caller. So in
+real play every creature fought with none of them, and `grantConditions`
+checked every paralysis against an empty list. The route now copies the
+seeded `SrdMonster` columns. **This also changes damage in play:** a skeleton
+now takes double bludgeoning damage, and a fire elemental ignores fire.
+
 ## 6. Deferred (reason codes in `DEFERRED_SPELL_CONDITIONS`)
 
-- `repeat_save`: Hold Person, Hold Monster, Tasha's Hideous Laughter,
-  Phantasmal Killer, Power Word Stun. This is the next phase.
+- `damage_each_turn`: Phantasmal Killer.
+- `hit_point_threshold`: Power Word Stun.
 - `caster_choice`: Command, Blindness/Deafness.
 - `ends_on_event`: Fear, Hypnotic Pattern.
 - `charmed_unread`: Charm Person, Animal Friendship, the Dominate spells, Geas,
@@ -129,7 +182,10 @@ so a resisted spell is reported, not silent.
 
 ## 8. Deploy order
 
-Apply migration `20260925120000_add_combatant_spell_conditions` **before**
-deploying the code: Prisma selects every scalar column of `Combatant`, so new
-code against the old schema fails every query on that table. Old code ignores
-the new column.
+Apply migrations `20260925120000_add_combatant_spell_conditions` and
+`20260926120000_add_combatant_creature_type` **before** deploying the code:
+Prisma selects every scalar column of `Combatant`, and `lib/memory/context.ts`
+selects `creatureType` on every campaign action, so new code against the old
+schema fails. Old code ignores the new columns. Encounters created before
+phase 2 have `creatureType` NULL, so Hold Person and Hold Monster refuse their
+creatures until the next encounter.

@@ -102,7 +102,7 @@ describe("casting Entangle", () => {
     mockRandom([0.2]);
 
     await executeCombatAction(
-      castEntangle([buildEnemy()], { spellEffect: { ...ENTANGLE, conditionEnds: null } }),
+      castEntangle([buildEnemy()], { spellEffect: { ...ENTANGLE, conditionTerms: null } }),
       tx,
     );
 
