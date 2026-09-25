@@ -335,13 +335,15 @@ describe("formatter narrator-tool containment", () => {
     }
   });
 
-  it("limits the general tooling protocol to the temporary read-only surface", () => {
+  it("limits the general tooling protocol to the permanent read-only surface", () => {
     const prompt = formatSystemPrompt(baseContext);
 
+    // lib/ai/tool-policy.ts: the narrator's tools are read-only SRD lookups,
+    // and the reduction is permanent — no generator is model-visible.
     expect(prompt).toContain("Only use a tool that is available in this request");
-    expect(prompt).toContain("non-mutating reference lookups or deterministic generators");
-    expect(prompt).toContain("does not establish a canonical fact");
-    expect(prompt).toContain("backend context already identifies and authorizes");
+    expect(prompt).toContain("The available tools are read-only D&D 5e SRD reference lookups");
+    expect(prompt).toContain("Never use a tool to resolve, apply, or persist a mechanical outcome");
+    expect(prompt).not.toMatch(/generator/i);
     expect(prompt).not.toContain("call the relevant tool first");
   });
 });
@@ -622,6 +624,28 @@ describe("formatIronLaws — no wilderness watches", () => {
     const laws = formatIronLaws();
     expect(laws).toContain("Code is Law / State is Truth");
     expect(laws).toContain("Tooling Protocol");
+  });
+});
+
+describe("formatIronLaws — tools are not a source of mechanics (#238)", () => {
+  /**
+   * The narrator's only tools are read-only SRD lookups, which never authorize
+   * an outcome (docs/DECISION_5E_SRD_API.md §7). These lines named tool output
+   * as a source of mechanics, described generators that are not registered,
+   * and asked for a lookup "before narrating mechanics".
+   */
+  it("names no tool output, generator, or lookup as a source of mechanics", () => {
+    const laws = formatIronLaws();
+    expect(laws).not.toContain("tool outputs");
+    expect(laws).not.toMatch(/generator/i);
+    expect(laws).not.toContain("before narrating mechanics");
+  });
+
+  it("grounds mechanics in backend facts and states what a lookup cannot do", () => {
+    const laws = formatIronLaws();
+    expect(laws).toContain("Narrate only mechanics that come from backend-resolved facts or persisted state");
+    expect(laws).toContain("read-only D&D 5e SRD reference lookups");
+    expect(laws).toContain("A lookup never establishes a hit, a save, damage, healing, a condition, or any other outcome");
   });
 });
 
