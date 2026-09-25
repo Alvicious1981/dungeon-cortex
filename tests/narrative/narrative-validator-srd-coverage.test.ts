@@ -70,6 +70,14 @@ describe('SRD 2014 condition coverage in the narrative validator', () => {
     expect(validateNarrativeText(text, withCondition(name)).issues).toEqual([]);
   });
 
+  it.each([
+    'The guard is charmed by the vampire.',
+    'El guardia queda hechizado por la bruja.',
+  ])('still rejects being charmed by a creature: %s', (text) => {
+    expect(codes(text, factsWithoutConditions)).toContain('unconfirmed_condition');
+    expect(codes(text)).toContain('unconfirmed_condition');
+  });
+
   it('does not accept a condition confirmed for a different condition', () => {
     expect(codes('The goblin is charmed.', withCondition('Frightened'))).toContain('unconfirmed_condition');
     expect(codes('El goblin se vuelve invisible.', withCondition('Blinded'))).toContain('unconfirmed_condition');
@@ -109,6 +117,10 @@ describe('ordinary words that must not be read as conditions', () => {
     'Encantado de conocerte, dice el tabernero.',
     'The charming bard bows to the crowd.',
     'El marinero se mantiene agarrado a la cuerda.',
+    'The guard captain is charmed by your wit.',
+    'The innkeeper seems charmed with the compliment.',
+    'La dama queda hechizada por la melodía.',
+    'El mercader parece hechizado con tu sonrisa.',
   ])('accepts on combat and factless turns: %s', (text) => {
     expect(validateNarrativeText(text, factsWithoutConditions).issues).toEqual([]);
     expect(validateNarrativeText(text).issues).toEqual([]);
@@ -124,6 +136,7 @@ describe('AC, DC and labelled HP figures', () => {
     ['armor class of 15', 'The knight has an armor class of 15.'],
     ['15 de CA', 'El caballero tiene 15 de CA.'],
     ['CA quince', 'El caballero tiene CA quince.'],
+    ['CA once', 'El caballero tiene CA once.'],
     ['CD 13', 'Necesitas superar una CD 13.'],
     ['DC 13', 'Make a DC 13 Dexterity saving throw.'],
     ['CD de 13', 'La trampa tiene una CD de 13.'],
@@ -147,6 +160,8 @@ describe('AC, DC and labelled HP figures', () => {
     'The orc wears thick plate armor.',
     'La cerradura parece difícil de forzar.',
     'Hay catres viejos en la sala.',
+    'The spell mends your wounds and your hit points once more swell with vigor.',
+    'Its armor class once again proves formidable.',
   ])('accepts qualitative descriptions: %s', (text) => {
     expect(validateNarrativeText(text, factsWithoutConditions).issues).toEqual([]);
     expect(validateNarrativeText(text).issues).toEqual([]);
