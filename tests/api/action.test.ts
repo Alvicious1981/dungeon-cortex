@@ -1041,7 +1041,7 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
 
       expect(res.status).toBe(200);
       expect((prisma.combatant as any).updateMany).toHaveBeenCalledWith({
-        where: { encounterId: "enc_123", isPlayer: true },
+        where: { encounterId: "enc_123", characterId: "char-1" },
         data: { deathSaveSuccesses: 1, deathSaveFailures: 0 },
       });
       expect(canonicalUserLogWrites()).toHaveLength(1);

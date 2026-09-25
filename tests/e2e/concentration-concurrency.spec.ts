@@ -169,6 +169,7 @@ test(scenario.title, async ({ request }) => {
             {
               name: "Concentrating Player",
               isPlayer: true,
+              characterId: created.characterId,
               hp: 20,
               maxHp: 20,
               ac: 12,

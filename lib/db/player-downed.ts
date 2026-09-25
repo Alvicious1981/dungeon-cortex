@@ -7,11 +7,15 @@ import { DEATH_SAVE_LIMIT, resolveDownedBlow } from "@/lib/rules/death-save";
  * (docs/superpowers/specs/2026-09-15-death-saves-design.md §6.1). Runs after
  * setPlayerHp, whose mirror already reset the death state to "dying"; only
  * massive damage writes more — the canonical death marker.
+ *
+ * Scoped by characterId, not isPlayer:true alone (DC-PARTY-002) — see
+ * lib/db/player-hp.ts's mirrorPlayerCombatantHp for the same reasoning.
  */
 export async function applyPlayerDowned(
   tx: Prisma.TransactionClient,
   input: {
     encounterId: string;
+    characterId: string;
     hpBefore: number;
     damage: number;
     maxHp: number;
@@ -22,7 +26,7 @@ export async function applyPlayerDowned(
   const fall = resolveDownedBlow(input);
   if (fall === "instant_death") {
     await tx.combatant.updateMany({
-      where: { encounterId: input.encounterId, isPlayer: true },
+      where: { encounterId: input.encounterId, characterId: input.characterId },
       data: { deathSaveFailures: DEATH_SAVE_LIMIT },
     });
     if (input.collectEvents) {

@@ -16,15 +16,21 @@ export const DEATH_STATE_RESET = {
  * Combatant row in an active encounter is its mirror. resolveEncounterEnd
  * reads the mirror, so the two must never diverge
  * (docs/superpowers/specs/2026-09-15-enemy-turns-design.md §6.3).
+ *
+ * Scoped by characterId, not isPlayer:true alone (DC-PARTY-002) — the
+ * database now also guarantees at most one isPlayer:true Combatant per
+ * encounter (Combatant_one_player_per_encounter_key), but this still
+ * targets the specific Combatant rather than trusting the boolean alone.
  */
 export async function mirrorPlayerCombatantHp(
   tx: Prisma.TransactionClient,
   encounterId: string | null,
+  characterId: string,
   hp: number
 ): Promise<void> {
   if (!encounterId) return;
   await tx.combatant.updateMany({
-    where: { encounterId, isPlayer: true },
+    where: { encounterId, characterId },
     data: { hp, ...DEATH_STATE_RESET },
   });
 }
@@ -40,6 +46,6 @@ export async function setPlayerHp(
 ): Promise<number> {
   const hp = Math.max(0, Math.trunc(input.hp));
   await tx.character.update({ where: { id: input.characterId }, data: { hp } });
-  await mirrorPlayerCombatantHp(tx, input.encounterId, hp);
+  await mirrorPlayerCombatantHp(tx, input.encounterId, input.characterId, hp);
   return hp;
 }

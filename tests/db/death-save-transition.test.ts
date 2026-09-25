@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { rollPlayerDeathSave } from "@/lib/db/death-save-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import { DeathSaveInvariantError } from "@/lib/rules/death-save";
 
 const CTX = {
   campaignId: "camp-1", encounterId: "enc-1", characterId: "char-1",
@@ -33,8 +34,11 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
     const { tx, order } = buildTx({});
     const out = await rollPlayerDeathSave(tx, CTX, dice(14));
     expect(out).toMatchObject({ outcome: "dying", endsTurn: true });
+    expect(tx.combatant.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { encounterId: "enc-1", characterId: "char-1" } })
+    );
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveSuccesses: 1, deathSaveFailures: 0 },
     });
     expect(order).toEqual(["Character", "Combatant", "Encounter"]);
@@ -57,7 +61,7 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
     const out = await rollPlayerDeathSave(tx, CTX, dice(11, 3));
     expect(out.outcome).toBe("stable");
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveSuccesses: 3, deathSaveFailures: 0, stableWakeRound: 7 },
     });
     expect(out.events.map((e) => e.type)).toEqual(["DEATH_SAVE_ROLLED", "PLAYER_STABILIZED"]);
@@ -82,7 +86,7 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
     const out = await rollPlayerDeathSave(tx, CTX, dice(3));
     expect(out).toMatchObject({ outcome: "dead", endsTurn: true });
     expect(tx.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveSuccesses: 0, deathSaveFailures: 3 },
     });
     expect(out.events).toContainEqual({ type: "PLAYER_DIED", payload: { cause: "death_saves" } });
@@ -94,6 +98,18 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
   it("refuses a player who is no longer dying", async () => {
     const { tx } = buildTx({ hp: 1 });
     await expect(rollPlayerDeathSave(tx, CTX, dice(14))).rejects.toBeInstanceOf(TurnStateConflictError);
+    expect(tx.combatant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("names the encounter and the character when no Combatant carries that link", async () => {
+    // The lookup is by (encounterId, characterId), so a miss means no Combatant
+    // in this encounter is linked to this character — not necessarily that
+    // the encounter has no player at all.
+    const { tx } = buildTx({});
+    (tx.combatant.findFirst as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    const attempt = rollPlayerDeathSave(tx, CTX, dice(14));
+    await expect(attempt).rejects.toBeInstanceOf(DeathSaveInvariantError);
+    await expect(attempt).rejects.toThrow("Encounter enc-1 has no Combatant linked to character char-1.");
     expect(tx.combatant.updateMany).not.toHaveBeenCalled();
   });
 

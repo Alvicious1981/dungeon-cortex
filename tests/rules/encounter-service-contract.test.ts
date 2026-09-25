@@ -144,6 +144,7 @@ describe("spawnCombatEncounter service contract", () => {
             {
               name: "Aldric",
               isPlayer: true,
+              characterId: "char-1",
               hp: 18,
               maxHp: 20,
               ac: 13,

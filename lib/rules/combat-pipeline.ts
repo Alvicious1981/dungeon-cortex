@@ -261,7 +261,7 @@ async function applyCharacterHealing(
       where: { id: characterId },
       data: { hp: newHp },
     });
-    await mirrorPlayerCombatantHp(tx, encounterId, newHp);
+    await mirrorPlayerCombatantHp(tx, encounterId, characterId, newHp);
     return newHp;
   }
 
@@ -283,7 +283,7 @@ async function applyCharacterHealing(
     });
 
     if (claim.count === 1) {
-      await mirrorPlayerCombatantHp(tx, encounterId, newHp);
+      await mirrorPlayerCombatantHp(tx, encounterId, characterId, newHp);
       return newHp;
     }
   }
@@ -780,6 +780,7 @@ export async function executeCombatAction(
         if (newHp === 0 && hpBeforeHit > 0 && encounter.id) {
           await applyPlayerDowned(tx, {
             encounterId: encounter.id,
+            characterId: playerCharacterId,
             hpBefore: hpBeforeHit,
             damage,
             maxHp: target.maxHp,

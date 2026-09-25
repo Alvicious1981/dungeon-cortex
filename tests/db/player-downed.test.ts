@@ -14,7 +14,7 @@ describe("applyPlayerDowned (death-saves spec §6.1)", () => {
     const t = tx();
     const events: GameEvent[] = [];
     const fall = await applyPlayerDowned(t, {
-      encounterId: "enc-1", hpBefore: 5, damage: 8, maxHp: 20, collectEvents: true, events,
+      encounterId: "enc-1", characterId: "char-1", hpBefore: 5, damage: 8, maxHp: 20, collectEvents: true, events,
     });
     expect(fall).toBe("dying");
     expect(events).toEqual([{ type: "PLAYER_DOWNED", payload: {} }]);
@@ -25,11 +25,11 @@ describe("applyPlayerDowned (death-saves spec §6.1)", () => {
     const t = tx();
     const events: GameEvent[] = [];
     const fall = await applyPlayerDowned(t, {
-      encounterId: "enc-1", hpBefore: 5, damage: 25, maxHp: 20, collectEvents: true, events,
+      encounterId: "enc-1", characterId: "char-1", hpBefore: 5, damage: 25, maxHp: 20, collectEvents: true, events,
     });
     expect(fall).toBe("dead");
     expect(t.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       data: { deathSaveFailures: 3 },
     });
     expect(events).toEqual([{ type: "PLAYER_DIED", payload: { cause: "massive_damage" } }]);
