@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
 
+import { parseSrdBoolean } from "../lib/srd/seed-values";
+
 const prisma = new PrismaClient();
 const db = prisma as any;
 
@@ -52,16 +54,6 @@ function asInt(value: unknown): number | null {
 function asFloat(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
-  }
-  return null;
-}
-
-function asBool(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (["true", "1", "yes", "si", "s"].includes(normalized)) return true;
-    if (["false", "0", "no", "n"].includes(normalized)) return false;
   }
   return null;
 }
@@ -196,8 +188,8 @@ function normalizeSpell(raw: unknown): { id: string; name: string; payload: Json
     ),
     range: asString(asString(pickFirst(s, ["range", "alcance"]))),
     duration: asString(pickFirst(s, ["duration", "duracion", "duraci\u00f3n"])),
-    ritual: asBool(s.ritual),
-    concentration: asBool(pickFirst(s, ["concentration", "concentracion", "concentraci\u00f3n"])),
+    ritual: parseSrdBoolean(s.ritual),
+    concentration: parseSrdBoolean(pickFirst(s, ["concentration", "concentracion", "concentraci\u00f3n"])),
     attackType: asString(s.attack_type),
     damageType: refIndex(damageRaw.damage_type),
     saveAbility: refIndex(asRecord(dcRaw.dc_type)),

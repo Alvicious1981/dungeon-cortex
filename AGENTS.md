@@ -362,10 +362,24 @@ saw it. It now maps the index onto `Ability`. A `damage` block with no
 longer read as damage; a Sleep dealt 5d8. `tests/rules/spell-effect-srd-data.test.ts`
 reads the real `spells.json`.
 
-Still open, same family: the seed's `asBool` (`prisma/seed-srd.ts`) does not
-know "Sí" or "verdadero", so Fear, Gaseous Form, Hypnotic Pattern, Phantasmal
-Killer and Suggestion are stored with `concentration: null`, which
-`resolveCachedSpell` reads as `false`.
+Closed 2026-09-25, same family: the seed's boolean reader now knows "Sí" and
+"verdadero". `asBool` (`prisma/seed-srd.ts`) only recognized
+"true"/"1"/"yes"/"si"/"s" and "false"/"0"/"no"/"n", so Fear, Gaseous Form,
+Hypnotic Pattern, Phantasmal Killer and Suggestion — whose `concentration` in
+`data/srd-es/spells.json` is "Sí" or "verdadero" — were stored with
+`concentration: null`, which `resolveCachedSpell` reads as `false`.
+`lib/srd/seed-values.ts` now exports `parseSrdBoolean`, pulled into its own
+module because `prisma/seed-srd.ts` connects to the database on import and so
+can never be imported from a test; it adds "sí", "verdadero" and "falso" to
+the accepted values, and both the `ritual:` and `concentration:` fields in
+`normalizeSpell` call it. `tests/srd/seed-values.test.ts` reads
+`prisma/seed-srd.ts` as text to confirm it calls `parseSrdBoolean` and defines
+no local reader of its own, and parses every ritual/concentration value in
+`data/srd-es/spells.json` to confirm none resolve to null, including the five
+spells named above.
+**Rows already seeded still hold `concentration: null` until `pnpm seed` runs
+again** — this fix changes what the next seed run writes, not the rows
+already in the database.
 
 - **Spell conditions — unblocked 2026-09-25, partly delivered.** The entry
   that stood here said `resolveSpellEffect` returned `condition: null` on every

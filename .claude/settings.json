@@ -63,7 +63,7 @@
       "Bash(pnpm seed:*)",
       "Bash(pnpm run seed:*)",
       "Bash(npm run seed:*)",
-      "Bash(*seed-srd.ts*)",
+      "Bash(*tsx*seed-srd.ts*)",
       "Read(//**/.env)",
       "Read(//**/.env.local)",
       "Read(//**/.env.development)",
