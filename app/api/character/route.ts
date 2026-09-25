@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { ABILITY_SCORES, type AbilityScore } from "@/lib/dnd-api/constants";
 import { hitDieForClass } from "@/lib/rules/progression";
 import { defaultSkillProficiencies } from "@/lib/rules/class-skills";
 import { buildStartingInventory } from "@/lib/rules/starting-inventory";
+import { spellSlotsFor } from "@/lib/rules/magic";
 
 interface CreateCharacterBody {
   name: string;
@@ -69,10 +71,11 @@ export async function POST(req: NextRequest) {
   }
   const maxHp = calcMaxHp(characterClass, stats.CON);
 
-  const SPELLCASTING_CLASSES = ["wizard", "cleric", "sorcerer"];
-  const spellSlots = SPELLCASTING_CLASSES.includes(characterClass.trim().toLowerCase())
-    ? { "1": { current: 2, max: 2 } }
-    : undefined;
+  // The SRD's level 1 slots for the class. A hand-written list of three
+  // classes used to decide this, so a bard, druid or warlock began with none.
+  const spellSlots = (spellSlotsFor(characterClass, 1) ?? undefined) as
+    | Prisma.InputJsonValue
+    | undefined;
 
   const character = await prisma.character.create({
     data: {

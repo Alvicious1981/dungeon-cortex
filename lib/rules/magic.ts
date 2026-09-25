@@ -254,6 +254,80 @@ export function spellSlotsForLevel(
   }
 }
 
+/**
+ * The SRD slot maxima for a class and level as the `Character.spellSlots`
+ * shape, every slot available. Null when the class has no slots at that level
+ * (a fighter; a paladin or ranger at level 1).
+ *
+ * `spellSlotsForLevel` held the right table from the start and had no caller:
+ * characters were created with two 1st-level slots if they were a wizard,
+ * cleric or sorcerer and none otherwise, and levelling up never changed them,
+ * so no character could ever cast a spell above 1st level.
+ *
+ * @pure
+ */
+export function spellSlotsFor(characterClass: string, level: number): SpellSlots | null {
+  const clamped = Math.min(20, Math.max(1, Math.trunc(level)));
+  const row = spellSlotsForLevel(characterClass.trim(), clamped);
+  const slots: SpellSlots = {};
+  row.forEach((max, index) => {
+    if (max > 0) slots[String(index + 1)] = { current: max, max };
+  });
+  return Object.keys(slots).length > 0 ? slots : null;
+}
+
+/**
+ * The slots after gaining a level: the new level's maxima, with every slot
+ * already spent still spent. New slots arrive available — the same policy the
+ * level-up applies to hit points, where the new die raises the ceiling and
+ * heals the same amount but earlier damage stays.
+ *
+ * A warlock's Pact Magic slots are all one level, and that level rises (1st
+ * to 2nd at level 3), so the spent count carries over as a total rather than
+ * per spell level.
+ *
+ * A class with no slots at the new level keeps whatever it had (normally
+ * none). @pure
+ */
+export function advanceSpellSlots(
+  current: SpellSlots | null,
+  characterClass: string,
+  newLevel: number
+): SpellSlots | null {
+  const next = spellSlotsFor(characterClass, newLevel);
+  if (!next) return current;
+
+  const spentAt = (key: string): number => {
+    const entry = current?.[key];
+    return entry ? Math.max(0, entry.max - entry.current) : 0;
+  };
+  const totalSpent = Object.keys(current ?? {}).reduce((sum, key) => sum + spentAt(key), 0);
+  const pact = characterClass.trim().toLowerCase() === "warlock";
+
+  for (const [key, entry] of Object.entries(next)) {
+    const spent = pact ? totalSpent : spentAt(key);
+    entry.current = Math.max(0, entry.max - spent);
+  }
+  return next;
+}
+
+/**
+ * The slots after a long rest: all of them, at the maxima the SRD gives the
+ * character's class and level. Taking the maxima from the table rather than
+ * the stored ones is what repairs a character whose slots were never raised
+ * when they levelled up. A class with no table slots keeps its stored slots,
+ * restored. @pure
+ */
+export function longRestSpellSlots(
+  characterClass: string,
+  level: number,
+  stored: unknown
+): SpellSlots | null {
+  const table = spellSlotsFor(characterClass, level);
+  if (table) return table;
+  return isSpellSlots(stored) ? restoreAllSlots(stored) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Concentration
 // ---------------------------------------------------------------------------
