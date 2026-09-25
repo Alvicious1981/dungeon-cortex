@@ -178,6 +178,8 @@ The deprecated flat members were removed from `CombatConsequencePayload`. The st
 
 `attackerIsPlayer` and each target's `targetIsPlayer` say who the player character is (`Combatant.isPlayer`). They identify creatures and carry no consequence, so LAW-01 is unchanged. The code that builds the event states them, both are required so a producer cannot omit them, and the narrator adapter only copies them: it never infers a role. (Added 2026-09-24: until then the adapter labelled every attacker the player and every target a non-player, which inverted both for an enemy's attack.)
 
+A `targets[]` entry says what an action did to a creature, so the pipeline makes one for every creature an attack or a damaging spell names (a miss, a saved target and an immune one included) and for a heal or utility spell only when it changed the creature: damage dealt or a condition applied. A heal is applied to the caster before the target loop and the spell resolver gives a utility spell no dice, save or condition, so the creatures such a spell names get no entry. The payload's shape is unchanged. The narrator adapter reads an entry with no damage as `attack_miss`, and an entry for a heal would also have carried the HP from before it. (Added 2026-09-25.)
+
 ### 5.2 Legacy UI update paths — Resolved 2026-07-25; dead VTT removed 2026-09-10
 
 - `CombatHUDController` and `ConsequenceLog` consume `targets[]` directly.
