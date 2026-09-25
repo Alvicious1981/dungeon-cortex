@@ -60,14 +60,24 @@ function asserted(words: string): RegExp {
 // levels of the condition ("un nivel de agotamiento", never "agotado"), and
 // "agarrado a" (holding on to something) is not Grappled. "Encantado" is left
 // out entirely because it usually means "pleased".
+// "Charmed by your wit", "hechizada por la melodía": delight, not the SRD
+// condition. Being charmed by a creature ("by the vampire") is still caught.
+const NOT_CHARMED_BY_PROSE =
+  '(?!\\s+(?:by|with|por|con)\\s+(?:(?:your|his|her|their|its|the|a|an|tu|tus|su|sus|el|la|los|las|un|una)\\s+)?' +
+  '(?:wit|words?|smiles?|charm|voice|melod(?:y|ies)|songs?|music|tales?|stor(?:y|ies)|manners|beauty|performance|jokes?|compliments?|offer|gifts?|humou?r|grace|' +
+  'ingenio|palabras?|sonrisas?|encanto|voz|melodías?|canci(?:ón|ones)|música|historias?|relatos?|modales|belleza|actuación|bromas?|cumplidos?|oferta|regalos?|humor|gracia)\\b)';
+
 const CONDITION_TERMS: Record<string, ConditionTerms> = {
   blinded: {
     mentions: [/blinded/i, /cegad[oa]s?/i],
     assertions: [asserted('blinded|cegad[oa]')],
   },
   charmed: {
-    mentions: [/\bcharmed\b/i, /\bhechizad[oa]s?\b/i],
-    assertions: [asserted('charmed|hechizad[oa]s?')],
+    mentions: [
+      new RegExp(`\\bcharmed\\b${NOT_CHARMED_BY_PROSE}`, 'i'),
+      new RegExp(`\\bhechizad[oa]s?\\b${NOT_CHARMED_BY_PROSE}`, 'i'),
+    ],
+    assertions: [asserted(`(?:charmed|hechizad[oa]s?)${NOT_CHARMED_BY_PROSE}`)],
   },
   deafened: {
     mentions: [/deafened/i, /ensordecid[oa]s?/i],
@@ -306,7 +316,8 @@ export function validateNarrativeText(
   // The narrator sees each combatant's AC and HP in the campaign state; like
   // HP amounts, those figures stay on the character sheet, never in the prose.
   // Qualitative wording ("una armadura gruesa") remains valid.
-  const mechanicNumber = `(?:\\d+|(?!(?:un|uno|una|one)\\b)${numberWord})`;
+  // Spanish "once" (eleven) is also English "once": "hit points once more".
+  const mechanicNumber = `(?:\\d+|(?!(?:un|uno|una|one)\\b|once\\s+(?:more|again|and|upon|in|or|before|twice|a)\\b)${numberWord})`;
   const acDcLabel = '(?:AC|DC|CA|CD|armou?r\\s+class|difficulty\\s+class|clase\\s+de\\s+armadura|clase\\s+de\\s+dificultad)';
   // The label must end at a separator or a digit, so "catres" is not "CA tres".
   const labelSeparator = '(?:\\s*[:=]\\s*|\\s+|(?=\\d))';
