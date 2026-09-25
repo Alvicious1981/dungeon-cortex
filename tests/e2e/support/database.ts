@@ -50,6 +50,11 @@ async function deleteCampaignRecords(
   prisma: PrismaClient,
   campaignId: string
 ): Promise<void> {
+  // PartyMember.campaignId is RESTRICT (DC-PARTY-001), so its rows must be
+  // gone before the Campaign delete below, not just before the Character
+  // delete in cleanupE2ERecords.
+  await prisma.partyMember.deleteMany({ where: { campaignId } });
+
   // The action route can persist its assistant GameLog from Next's after(...)
   // hook after the first deleteMany has completed. Retry this exact FK race
   // once, re-deleting logs before the second campaign-delete attempt.
@@ -83,6 +88,13 @@ export async function cleanupE2ERecords(
     }
 
     if (records.characterId) {
+      // A companion PartyMember row (future work) would reference this
+      // character without sharing records.campaignId, so it's cleaned up
+      // here too, scoped by characterId rather than assuming campaignId
+      // alone already caught it.
+      await prisma.partyMember.deleteMany({
+        where: { characterId: records.characterId },
+      });
       await prisma.inventoryItem.deleteMany({
         where: { characterId: records.characterId },
       });
