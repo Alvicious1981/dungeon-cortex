@@ -450,6 +450,31 @@ describe("Move macro: exhaustion reduces speed (SRD levels 2 and 5)", () => {
   });
 });
 
+describe("Move macro: a restrained or grappled player's speed is 0 (SRD)", () => {
+  it.each(["restrained", "grappled"])("refuses any movement while %s, writing nothing", async (condition) => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([{ ...combatant({ x: 0, y: 0 }), conditions: [condition] }]))
+    );
+
+    const res = await post({ action: "Move", targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "SPEED_ZERO" });
+    expectNoMovePersistence();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+
+  it("still moves under a condition that leaves speed alone", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      contextWith(encounterWith([{ ...combatant({ x: 0, y: 0 }), conditions: ["poisoned"] }]))
+    );
+
+    const res = await post({ action: "Move", targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("Move macro: speed bounds the distance", () => {
   it("allows exactly the default 30 ft — six squares", async () => {
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(

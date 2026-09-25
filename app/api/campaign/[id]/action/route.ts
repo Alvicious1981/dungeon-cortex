@@ -34,6 +34,7 @@ import { abilityCheckAdvantageFrom } from "@/lib/rules/item-effects";
 import { stealthDisadvantageFor } from "@/lib/rules/armor-stealth";
 import {
   evaluateAbilityCheckAdvantage,
+  isImmobilized,
   isUnawareOfSurroundings,
 } from "@/lib/rules/conditions";
 import { resolveRest, RestServiceError } from "@/lib/rules/rest-service";
@@ -922,6 +923,18 @@ async function resolveAction(
         return NextResponse.json(
           {
             error: "Exhaustion has reduced your speed to 0. You cannot move.",
+            code: "SPEED_ZERO",
+          },
+          { status: 409 }
+        );
+      }
+
+      // SRD: a grappled or restrained creature's speed is 0 — the player's own
+      // area spell can restrain them as well as their enemies.
+      if (isImmobilized(extractConditions(playerCombatant.conditions))) {
+        return NextResponse.json(
+          {
+            error: "You are held in place and your speed is 0. You cannot move.",
             code: "SPEED_ZERO",
           },
           { status: 409 }

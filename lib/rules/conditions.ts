@@ -40,6 +40,8 @@ export interface ConditionRegistryEntry {
   unawareOfSurroundings?: boolean;
   /** Combatant cannot take actions or reactions. */
   incapacitated?: boolean;
+  /** The creature's speed becomes 0 (SRD: Grappled, Restrained). */
+  speedZero?: boolean;
 }
 
 /**
@@ -96,6 +98,7 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     name: "Restrained",
     selfDisadvantageOnAttack: true,
     attackerAdvantage: true,
+    speedZero: true,
   },
   invisible: {
     id: "invisible",
@@ -138,7 +141,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
   grappled: {
     id: "grappled",
     name: "Grappled",
-    // Speed 0; no direct attack-roll modifier per 5e 2014 SRD.
+    // No direct attack-roll modifier per 5e 2014 SRD.
+    speedZero: true,
   },
   incapacitated: {
     id: "incapacitated",
@@ -301,5 +305,17 @@ export function isUnawareOfSurroundings(conditions: readonly string[]): boolean 
 export function isIncapacitated(conditions: readonly string[]): boolean {
   return conditions.some(
     (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.incapacitated === true
+  );
+}
+
+/**
+ * Whether any active condition sets the creature's speed to 0 — the
+ * registry's `speedZero` flag. A restrained enemy still acts (with
+ * disadvantage), so this is separate from isIncapacitated: it stops the move,
+ * not the turn.
+ */
+export function isImmobilized(conditions: readonly string[]): boolean {
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.speedZero === true
   );
 }

@@ -1,0 +1,229 @@
+/**
+ * lib/rules/spell-conditions.ts
+ *
+ * Which SRD spells put a condition on their targets, transcribed by hand from
+ * the SRD 5.1 rules text (docs/DECISION_SPELL_CONDITIONS.md).
+ *
+ * @pure — no database, no I/O, no randomness.
+ *
+ * Neither the SRD cache nor dnd5eapi.co carries a spell's condition as data:
+ * `data/srd-es/spells.json` has no condition key and no `/api/conditions`
+ * reference, and the word appears only inside `desc`. Reading it out of that
+ * prose would be deriving mechanics from wording, which this project does not
+ * do. So the condition is written down here instead, one spell at a time, and
+ * `tests/rules/spell-conditions.test.ts` binds every row to the data: the
+ * spell must exist, its condition must be a registry key, and where the cache
+ * does carry a field — the save, concentration — the row must agree with it.
+ *
+ * The table only adds what the data lacks. It never overrides a structured
+ * field the data holds; a disagreement fails the test instead.
+ */
+
+import type { Ability } from "@/lib/rules/ability-check";
+
+export interface SpellConditionEntry {
+  /** The condition, as a key of CONDITION_REGISTRY. */
+  condition: string;
+  /**
+   * The saving throw that resists it. Given here only because the cache omits
+   * it for some spells (Web has no `dc`); where the cache has one, the test
+   * requires the two to match.
+   */
+  save: Ability | null;
+  /** The condition ends when the caster's concentration does. */
+  concentration: boolean;
+  /**
+   * The spell's duration in rounds (1 minute = 10). The condition ends at the
+   * start of the caster's turn once that many rounds have passed.
+   */
+  durationRounds: number;
+}
+
+/**
+ * The spells whose condition the engine applies. Each row is the SRD's
+ * "must succeed on a saving throw or be <condition>", nothing more.
+ *
+ * What the rows deliberately leave out is recorded in the decision: a
+ * restrained creature cannot use its action to break free, and a creature that
+ * enters the area after the cast is not affected. The condition lasts until
+ * concentration or the duration ends.
+ */
+export const SPELL_CONDITIONS: Readonly<Record<string, SpellConditionEntry>> = {
+  // Entangle — 1st level. Restrained, STR save, concentration up to 1 minute.
+  entangle: { condition: "restrained", save: "STR", concentration: true, durationRounds: 10 },
+  // Web — 2nd level. Restrained, DEX save, concentration up to 1 hour.
+  web: { condition: "restrained", save: "DEX", concentration: true, durationRounds: 600 },
+  // Evard's Black Tentacles — 4th level. 3d6 bludgeoning and restrained, DEX
+  // save, concentration up to 1 minute.
+  "black-tentacles": {
+    condition: "restrained",
+    save: "DEX",
+    concentration: true,
+    durationRounds: 10,
+  },
+};
+
+/** Why a spell that imposes a condition is not in SPELL_CONDITIONS yet. */
+export type DeferralReason =
+  /** The target repeats the save at the end of each of its turns. */
+  | "repeat_save"
+  /** The condition ends on an event the engine does not track (damage, a shake, line of sight). */
+  | "ends_on_event"
+  /** Charmed has no mechanical reader in the engine yet. */
+  | "charmed_unread"
+  /** Affects creatures by a hit-point pool, not a saving throw. */
+  | "hit_point_pool"
+  /** Prone ends when the creature stands up, which is not modelled. */
+  | "prone_stand_up"
+  /** The caster chooses the effect (a command word, blind or deaf). */
+  | "caster_choice"
+  /** Applied to the caster or an ally, and ends when they attack. */
+  | "self_or_ally"
+  /** Several stages or several possible conditions. */
+  | "multi_stage"
+  /** Removes the target from the encounter. */
+  | "removes_target";
+
+/**
+ * Spells in the cache that impose a condition and are not applied yet, with
+ * the reason. Written down so the gap is a list somebody shortens on purpose,
+ * not an absence nobody can see.
+ */
+export const DEFERRED_SPELL_CONDITIONS: Readonly<Record<string, DeferralReason>> = {
+  "hideous-laughter": "repeat_save",
+  "hold-person": "repeat_save",
+  "hold-monster": "repeat_save",
+  "phantasmal-killer": "repeat_save",
+  "power-word-stun": "repeat_save",
+  "blindness-deafness": "caster_choice",
+  command: "caster_choice",
+  fear: "ends_on_event",
+  "hypnotic-pattern": "ends_on_event",
+  "charm-person": "charmed_unread",
+  "animal-friendship": "charmed_unread",
+  "dominate-beast": "charmed_unread",
+  "dominate-person": "charmed_unread",
+  "dominate-monster": "charmed_unread",
+  geas: "charmed_unread",
+  "modify-memory": "charmed_unread",
+  sleep: "hit_point_pool",
+  "color-spray": "hit_point_pool",
+  grease: "prone_stand_up",
+  earthquake: "prone_stand_up",
+  invisibility: "self_or_ally",
+  "greater-invisibility": "self_or_ally",
+  banishment: "removes_target",
+  "flesh-to-stone": "multi_stage",
+  contagion: "multi_stage",
+  eyebite: "multi_stage",
+  "divine-word": "multi_stage",
+  symbol: "multi_stage",
+  "prismatic-spray": "multi_stage",
+  "prismatic-wall": "multi_stage",
+  weird: "multi_stage",
+  "storm-of-vengeance": "multi_stage",
+};
+
+/** The table row for an SRD spell index, or null when the spell applies none. */
+export function spellConditionFor(spellIndex: unknown): SpellConditionEntry | null {
+  if (typeof spellIndex !== "string") return null;
+  return SPELL_CONDITIONS[spellIndex.trim().toLowerCase()] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Where a condition came from, and when it ends
+// ---------------------------------------------------------------------------
+
+/**
+ * One condition a spell put on a creature, persisted in
+ * `Combatant.spellConditions` beside the plain `conditions` list every rule
+ * reads. The list says what holds; these records say why, so the engine can
+ * take it off again.
+ */
+export interface SpellConditionRecord {
+  condition: string;
+  /** SRD index of the spell that applied it. */
+  spellIndex: string;
+  /** `Combatant.id` of the caster. */
+  casterId: string;
+  /** Ends when the caster's concentration ends. */
+  concentration: boolean;
+  /** Ends at the start of the caster's turn in this round. */
+  endsAtRound: number;
+}
+
+function isRecord(value: unknown): value is SpellConditionRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    typeof r.condition === "string" &&
+    typeof r.spellIndex === "string" &&
+    typeof r.casterId === "string" &&
+    typeof r.concentration === "boolean" &&
+    typeof r.endsAtRound === "number" &&
+    Number.isFinite(r.endsAtRound)
+  );
+}
+
+/**
+ * Reads `Combatant.spellConditions`. Only this module writes the column, so a
+ * malformed entry is not expected; it is dropped rather than trusted, and the
+ * test for this function says so.
+ */
+export function readSpellConditionRecords(value: unknown): SpellConditionRecord[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+/**
+ * The records a successful cast adds for a creature: one per condition that
+ * actually took hold (after immunities), never one per condition attempted.
+ */
+export function recordsForGrant(input: {
+  granted: readonly string[];
+  spellIndex: string;
+  casterId: string;
+  entry: Pick<SpellConditionEntry, "concentration" | "durationRounds">;
+  round: number;
+}): SpellConditionRecord[] {
+  return input.granted.map((condition) => ({
+    condition,
+    spellIndex: input.spellIndex,
+    casterId: input.casterId,
+    concentration: input.entry.concentration,
+    endsAtRound: input.round + input.entry.durationRounds,
+  }));
+}
+
+/**
+ * Takes the records `shouldEnd` selects off a creature, and with them each
+ * condition no remaining record still holds.
+ *
+ * Two spells restraining the same creature leave it restrained until both
+ * end, which is why a condition is removed only when its last record goes. A
+ * condition with no record at all did not come from a spell, so nothing here
+ * removes it.
+ */
+export function endSpellConditionRecords(input: {
+  conditions: readonly string[];
+  records: readonly SpellConditionRecord[];
+  shouldEnd: (record: SpellConditionRecord) => boolean;
+}): {
+  conditions: string[];
+  records: SpellConditionRecord[];
+  ended: SpellConditionRecord[];
+} {
+  const ended = input.records.filter(input.shouldEnd);
+  const records = input.records.filter((r) => !input.shouldEnd(r));
+  if (ended.length === 0) {
+    return { conditions: [...input.conditions], records, ended };
+  }
+
+  const stillHeld = new Set(records.map((r) => r.condition.toLowerCase()));
+  const endedConditions = new Set(ended.map((r) => r.condition.toLowerCase()));
+  const conditions = input.conditions.filter((c) => {
+    const key = c.toLowerCase();
+    return !endedConditions.has(key) || stillHeld.has(key);
+  });
+
+  return { conditions, records, ended };
+}

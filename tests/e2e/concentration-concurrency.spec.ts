@@ -277,6 +277,10 @@ test(scenario.title, async ({ request }) => {
         $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) =>
           realTx.$queryRaw(query, ...values),
         combatant: {
+          // A broken concentration ends the spell's conditions, which reads
+          // the encounter's combatants (lib/db/spell-condition-end.ts).
+          findMany: (args: unknown) =>
+            realTx.combatant.findMany(args as Prisma.CombatantFindManyArgs),
           updateMany: (args: unknown) =>
             realTx.combatant.updateMany(args as Prisma.CombatantUpdateManyArgs),
           update: async (args: unknown) => {

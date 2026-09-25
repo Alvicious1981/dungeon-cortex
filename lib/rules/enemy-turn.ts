@@ -21,7 +21,7 @@ import {
   type GridCombatant,
   type GridPoint,
 } from "@/lib/rules/geometry";
-import { isIncapacitated } from "@/lib/rules/conditions";
+import { isImmobilized, isIncapacitated } from "@/lib/rules/conditions";
 import {
   averageDamage,
   type MonsterAttackProfileV1,
@@ -162,7 +162,10 @@ export function planEnemyTurn(input: EnemyTurnInput): EnemyTurnPlan {
   const profile = enemy.profile;
   if (enemy.hp <= 0 || profile === null || isIncapacitated(enemy.conditions)) return noAction();
 
-  const destination = bestDestination(input);
+  // Speed 0 (restrained, grappled): the enemy fights from where it stands.
+  const destination = isImmobilized(enemy.conditions)
+    ? { x: enemy.x, y: enemy.y }
+    : bestDestination(input);
   const moved = destination.x !== enemy.x || destination.y !== enemy.y;
   const atDestination = { ...enemy, x: destination.x, y: destination.y };
 
