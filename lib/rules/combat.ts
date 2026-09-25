@@ -998,10 +998,12 @@ export function resolveSavingThrow(
  */
 export function resolveConcentrationCheck(
   damage: number,
-  conModifier: number
+  conModifier: number,
+  /** A Constitution save at disadvantage, e.g. exhaustion level 3+. */
+  disadvantage: boolean = false
 ): { success: boolean; dc: number; roll: number; total: number } {
   const dc = Math.max(10, Math.floor(damage / 2));
-  const result = resolveSavingThrow(conModifier, dc);
+  const result = resolveSavingThrow(conModifier, dc, false, disadvantage);
   return {
     ...result,
     dc,
