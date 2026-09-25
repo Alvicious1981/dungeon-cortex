@@ -335,6 +335,12 @@ export interface CombatActionPayload {
 
 export interface CombatOutcome {
   events: GameEvent[];
+  /**
+   * One entry for each creature the action did something to: every creature an
+   * attack or a damaging spell names, and a creature a heal or a utility spell
+   * changed. It becomes COMBAT_CONSEQUENCE `targets[]`, where an entry with no
+   * damage reads as a missed attack.
+   */
   consequences: SingleTargetConsequence[];
   totalDamageDealt: number;
   consequenceDetails?: CombatConsequences[];
@@ -799,7 +805,20 @@ export async function executeCombatAction(
       conditionsApplied: [...conditionsToApply],
       narrativeTags: tags,
     };
-    consequences.push(singleConsequence);
+
+    // An attack and a damaging spell say what happened to every creature they
+    // name: a miss, a saved target and an immune one included. A heal or a
+    // utility spell only names creatures it may do nothing to: the heal is
+    // applied to the caster above, and the resolver gives a utility spell no
+    // dice, save or condition. An entry for one says damage 0 and, for a heal,
+    // the HP from before it, and the narrator adapter reads that as "Attack
+    // missed". So such a spell reports a creature only if it changed it.
+    const reportsTarget =
+      actionType === "attack" ||
+      payload.spellEffect?.type === "damage" ||
+      damage > 0 ||
+      conditionsToApply.length > 0;
+    if (reportsTarget) consequences.push(singleConsequence);
 
     if (collectEvents) {
       if (isFumble) {

@@ -1069,6 +1069,128 @@ describe("executeCombatAction", () => {
     });
   });
 
+  // ── Spells that do nothing to the creatures they name ────────────────────────
+
+  describe("cast_spell — a heal or utility spell reports only what it did to a creature", () => {
+    // `consequences` becomes COMBAT_CONSEQUENCE.targets[], and the narrator
+    // adapter reads an entry with no damage as "Attack missed". A heal is
+    // applied to the caster before the target loop, and the resolver gives a
+    // utility spell no dice, no save and no condition, so the creatures such a
+    // spell names have nothing to report. An entry for one would say damage 0
+    // and, for a heal, the HP from before it.
+    const cast = (
+      spellName: string,
+      spellEffect: NonNullable<CombatActionPayload["spellEffect"]>,
+      targetCombatants: PipelineCombatant[]
+    ): CombatActionPayload => ({
+      actionType: "cast_spell",
+      encounter: buildEncounter([buildPlayer({ hp: 10 }), buildEnemy()]),
+      actorId: "player-1",
+      actorName: "Aldric",
+      actorConditions: [],
+      targetCombatants,
+      spellName,
+      spellLevel: 1,
+      spellEffect,
+      rawSpellSlots: { "1": { current: 2, max: 4 } },
+      playerCharacterId: "char-1",
+      collectEvents: true,
+    });
+
+    it("reports no entry for the caster of a heal, whose entry would carry the HP from before it", async () => {
+      const caster = buildPlayer({ hp: 10 });
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+      // roll("1d8"): 0.5 → 5
+      mockRandom([0.5]);
+
+      const outcome = await executeCombatAction(
+        cast("Cure Wounds", { type: "healing", dice: "1d8" }, [caster]),
+        tx
+      );
+
+      // The heal happened, and the event is what says what HP the caster has.
+      expect(outcome.events.find((e) => e.type === "HEALING_RECEIVED")?.payload).toMatchObject({
+        amount: 5,
+        newHp: 15,
+      });
+      expect(outcome.consequences).toEqual([]);
+    });
+
+    it("reports no entry for the caster of a utility spell", async () => {
+      const caster = buildPlayer({ hp: 10 });
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+      mockRandom([]);
+
+      const outcome = await executeCombatAction(
+        cast("Shield", { type: "utility", dice: null }, [caster]),
+        tx
+      );
+
+      // The cast resolved, so an empty list is a decision and not a spell that never ran.
+      expect(outcome.events.some((e) => e.type === "SPELL_CAST")).toBe(true);
+      expect(outcome.consequences).toEqual([]);
+    });
+
+    const NON_DAMAGING: Array<[string, string, NonNullable<CombatActionPayload["spellEffect"]>]> = [
+      ["a heal", "Cure Wounds", { type: "healing", dice: "1d8" }],
+      ["a utility spell", "Shield", { type: "utility", dice: null }],
+    ];
+
+    it.each(NON_DAMAGING)(
+      "reports no entry for a hostile creature %s is aimed at",
+      async (_what, spellName, effect) => {
+        // The action route takes a non-area spell's targets from the client
+        // with no hostile filter, so this is reachable.
+        const goblin = buildEnemy();
+        const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+        mockRandom([0.5]);
+
+        const outcome = await executeCombatAction(cast(spellName, effect, [goblin]), tx);
+
+        expect(outcome.events.some((e) => e.type === "SPELL_CAST")).toBe(true);
+        expect(outcome.consequences).toEqual([]);
+      }
+    );
+
+    it("still reports a utility spell that put a condition on the creature", async () => {
+      // No damage, but a condition took hold, and `conditionsApplied` is where
+      // the HUD and the narrator learn it. The e2e spec
+      // combat-conditions-concurrency drives the same effect against Postgres.
+      const goblin = buildEnemy();
+      const tx = buildMockTx();
+      mockRandom([]);
+
+      const outcome = await executeCombatAction(
+        cast("Restrain", { type: "utility", hasSavingThrow: false, condition: "restrained" }, [goblin]),
+        tx
+      );
+
+      expect(outcome.consequences).toHaveLength(1);
+      expect(outcome.consequences[0]).toMatchObject({
+        targetId: "enemy-1",
+        damage: 0,
+        conditionsApplied: ["restrained"],
+      });
+    });
+
+    it("still reports a utility effect that dealt damage", async () => {
+      // The target loop rolls the dice of any effect that is not a heal as
+      // damage, whatever the effect is called, and writes it to the row.
+      const goblin = buildEnemy();
+      const tx = buildMockTx();
+      // roll("1d6"): 0.5 → 4; hit-location: 0.0
+      mockRandom([0.5, 0.0]);
+
+      const outcome = await executeCombatAction(
+        cast("Stinging Mote", { type: "utility", dice: "1d6" }, [goblin]),
+        tx
+      );
+
+      expect(outcome.consequences).toHaveLength(1);
+      expect(outcome.consequences[0]).toMatchObject({ targetId: "enemy-1", damage: 4, hpAfter: 11 });
+    });
+  });
+
   // ── buildCombatConsequenceEvent — pure helper ─────────────────────────────────
 
   describe("buildCombatConsequenceEvent", () => {
