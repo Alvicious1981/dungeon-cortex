@@ -9,6 +9,7 @@ import {
   extractConditions,
   resolveAttackRoll,
   resolveSavingThrow,
+  resolveConcentrationCheck,
   rollDamage,
   rollHitLocation,
 } from "@/lib/rules/combat";
@@ -216,11 +217,13 @@ export async function resolveEnemyTurn(
       class: true,
       level: true,
       exhaustionLevel: true,
+      concentrationSpellId: true,
       inventory: { select: { type: true, quantity: true, equippedSlot: true, properties: true } },
     },
   })) as {
     hp: number; maxHp: number; stats: unknown; class: string; level: number;
     exhaustionLevel?: number | null;
+    concentrationSpellId?: string | null;
     inventory: ArmorInventoryRow[];
   } | null;
   if (!character) {
@@ -231,6 +234,56 @@ export async function resolveEnemyTurn(
   // threshold, since that rule is written against the hit point maximum.
   const exhaustion = exhaustionEffects(character.exhaustionLevel);
   const playerMaxHp = effectiveMaxHp(character.maxHp, character.exhaustionLevel);
+
+  // SRD: taking damage while concentrating forces a Constitution save, DC 10
+  // or half the damage, whichever is higher — one save per source of damage.
+  // Falling unconscious (0 HP) ends concentration outright: an incapacitated
+  // creature cannot concentrate. Until this existed, enemy hits never touched
+  // the player's concentration at all, so a spell the player was holding
+  // survived every blow and the narrator was told it was still active.
+  let concentratingOn = character.concentrationSpellId ?? null;
+
+  const checkPlayerConcentration = async (damage: number, hpAfter: number): Promise<void> => {
+    if (!concentratingOn || damage <= 0) return;
+    const spell = concentratingOn;
+    let content: string;
+    let check: ReturnType<typeof resolveConcentrationCheck> | null = null;
+    if (hpAfter <= 0) {
+      content = `${player.name} falls unconscious and loses concentration on ${spell}.`;
+    } else {
+      const conSaveModifier =
+        abilityModifier(((character.stats ?? {}) as Record<string, number>).CON ?? 10) +
+        (isProficientInSave(character.class, "CON") ? proficiencyBonus(character.level) : 0);
+      check = resolveConcentrationCheck(damage, conSaveModifier, exhaustion.savingThrowDisadvantage);
+      content =
+        `Concentration (${spell}): DC ${check.dc} Constitution save, ${player.name} rolls ` +
+        `${check.total} — ${check.success ? "holds" : "concentration broken"}.`;
+    }
+    await tx.gameLog.create({ data: { campaignId: ctx.campaignId, role: "system", content } });
+    if (check?.success) return;
+
+    concentratingOn = null;
+    // Character first, then its Combatant mirror — the lock order setPlayerHp keeps.
+    await tx.character.update({
+      where: { id: ctx.characterId },
+      data: { concentrationSpellId: null },
+    });
+    await tx.combatant.updateMany({
+      where: { encounterId: ctx.encounterId, isPlayer: true },
+      data: { concentrationSpellId: null },
+    });
+    if (ctx.collectEvents) {
+      events.push({
+        type: "CONCENTRATION_BROKEN",
+        payload: {
+          targetName: player.name,
+          spellName: spell,
+          reason: check ? "failed_save" : "unconscious",
+          ...(check ? { dc: check.dc, roll: check.total } : {}),
+        },
+      });
+    }
+  };
 
   // The player's current AC, from current inventory — never the Combatant.ac
   // copy, which no in-combat equipment change updates (spec §5.5).
@@ -330,6 +383,8 @@ export async function resolveEnemyTurn(
       }
     }
 
+    await checkPlayerConcentration(damage, hp);
+
     if (hp <= 0) {
       const fall = await applyPlayerDowned(tx, {
         encounterId: ctx.encounterId,
@@ -402,6 +457,8 @@ export async function resolveEnemyTurn(
         events.push({ type: "DAMAGE_DEALT", payload: { damage, naturalRoll: save.roll, targetName: player.name } });
       }
     }
+
+    await checkPlayerConcentration(damage, hp);
 
     if (hp <= 0) {
       const fall = await applyPlayerDowned(tx, {
