@@ -11,6 +11,8 @@
  * responsible for persisting the returned state via prisma.character.update.
  */
 
+import type { Ability } from "@/lib/rules/ability-check";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -307,8 +309,11 @@ export interface SpellEffect {
   damageType: string | null;
   /** True when the spell grants a saving throw (damage may be halved on success). */
   hasSavingThrow: boolean;
-  /** Ability score index for the saving throw, e.g. "dex". Null if none. */
-  saveAbility: string | null;
+  /**
+   * Ability for the saving throw, spelled the way `Combatant.stats` keys it
+   * ("DEX"). Null if the spell grants none.
+   */
+  saveAbility: Ability | null;
   /** Damage applied when the target succeeds on its saving throw. */
   saveDamage: "half" | "none";
   /** Condition to apply on failed save (or non-save spells), e.g. "Blinded". Null if none. */
@@ -340,6 +345,21 @@ export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CH
 }
 
 /**
+ * The SRD's `dc.dc_type.index` values, mapped onto the keys `Combatant.stats`
+ * uses. The data spells the ability "wis"; a creature's scores are stored as
+ * "WIS". Looking one up with the other found nothing, so every creature
+ * rolled its save against a player's spell with the +0 of a score of 10.
+ */
+const SAVE_ABILITY_BY_SRD_INDEX: Record<string, Ability> = {
+  str: "STR",
+  dex: "DEX",
+  con: "CON",
+  int: "INT",
+  wis: "WIS",
+  cha: "CHA",
+};
+
+/**
  * Extracts the mechanical effect of a spell cast at the given slot level from
  * a raw SrdSpell data blob (Spanish 5e SRD format).
  *
@@ -349,6 +369,12 @@ export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CH
  *   - `heal_at_slot_level[slotLevel]`               → leveled healing dice (may contain "APT")
  *   - `dc.dc_type.index`                         → saving throw ability
  *   - `dc.dc_success`                            → "mitad" = half damage on save
+ *
+ * A `damage` block counts as damage only when it names a `damage_type`. Two
+ * SRD records carry dice there that are not damage of any one type: Sleep's
+ * 5d8 is the hit-point pool it puts to sleep, and Prismatic Spray's 10d6 takes
+ * its type from the ray each target rolls. Read as damage, a Sleep dealt 5d8
+ * to its target. Neither is resolvable as damage, so neither is resolved as it.
  *
  * "APT" in healing formulas is replaced with the numeric `spellcastingMod`
  * so the result is a valid dice expression (e.g. "1d8+3").
@@ -363,7 +389,9 @@ export function resolveSpellEffect(
 ): SpellEffect {
   // --- Damage spell ---
   const dmg = spellData.damage as Record<string, unknown> | undefined;
-  if (dmg) {
+  const dmgType =
+    ((dmg?.damage_type as Record<string, unknown> | undefined)?.index as string | undefined) ?? null;
+  if (dmg && dmgType) {
     const bySlot = dmg.damage_at_slot_level as Record<string, string> | undefined;
     const byCharacterLevel = dmg.damage_at_character_level as
       | Record<string, string>
@@ -380,9 +408,12 @@ export function resolveSpellEffect(
         tiers.filter((tier) => tier <= requestedLevel).at(-1) ?? tiers[0];
       const dice = bestTier === undefined ? null : scaling[String(bestTier)] ?? null;
 
-      const dmgType = (dmg.damage_type as Record<string, unknown> | undefined)?.index as string ?? null;
       const dc = spellData.dc as Record<string, unknown> | undefined;
-      const dcType = dc ? ((dc.dc_type as Record<string, unknown> | undefined)?.index as string ?? null) : null;
+      const dcIndex = (dc?.dc_type as Record<string, unknown> | undefined)?.index;
+      const dcType =
+        typeof dcIndex === "string"
+          ? SAVE_ABILITY_BY_SRD_INDEX[dcIndex.trim().toLowerCase()] ?? null
+          : null;
       const dcSuccess = String(dc?.dc_success ?? "").toLowerCase();
       const saveDamage = /half|mitad/.test(dcSuccess) ? "half" : "none";
 

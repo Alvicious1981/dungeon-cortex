@@ -132,7 +132,7 @@ describe("magic rules", () => {
       expect(effect.dice).toBe("3d8");
       expect(effect.damageType).toBe("radiant");
       expect(effect.hasSavingThrow).toBe(true);
-      expect(effect.saveAbility).toBe("dex");
+      expect(effect.saveAbility).toBe("DEX");
     });
 
     it("falls back to lower tier damage if exact slot missing", () => {
