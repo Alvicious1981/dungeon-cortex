@@ -236,3 +236,11 @@ describe('Narrative Prompt Builder Tests (Fase 7A/7B.1)', () => {
     expect(fallbackProse.toLowerCase()).not.toContain('morale' + ' ' + 'check');
   });
 });
+
+describe("buildNarrativePrompt — lasting conditions", () => {
+  it("tells the narrator a condition listed in the campaign state is confirmed and ongoing", () => {
+    const { system } = buildNarrativePrompt({ facts: [] });
+    expect(system).toContain("A condition listed on a combatant in the campaign state is confirmed and ongoing");
+    expect(system).toContain("no longer under a condition only when the campaign state no longer lists it");
+  });
+});
