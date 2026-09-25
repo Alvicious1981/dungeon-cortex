@@ -24,7 +24,7 @@
  * Not live yet, and that is deliberate. No spell in this codebase currently
  * produces a condition: `resolveSpellEffect` in `magic.ts` returns
  * `condition: null` on all three of its exit paths, with an acknowledged TODO
- * at `magic.ts:396` — "To be extracted from SRD description or specialized
+ * at `magic.ts:427` — "To be extracted from SRD description or specialized
  * fields." `resolveCachedSpell` spreads that effect unchanged, so the only
  * live source of `effect.condition` is null, and `combat-pipeline.ts`'s
  * `if (!saved && effect.condition)` cannot be entered by any request today.

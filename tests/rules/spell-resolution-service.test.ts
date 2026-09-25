@@ -60,7 +60,7 @@ describe("resolveCachedSpell", () => {
       dice: "9d6",
       damageType: "fire",
       hasSavingThrow: true,
-      saveAbility: "dex",
+      saveAbility: "DEX",
       saveDamage: "half",
       concentration: false,
       sourceEndpoint: "https://www.dnd5eapi.co/api/2014/spells/fireball",
@@ -101,7 +101,7 @@ describe("resolveCachedSpell", () => {
     expect(result).toMatchObject({
       dice: "3d6",
       saveDamage: "none",
-      saveAbility: "dex",
+      saveAbility: "DEX",
     });
     expect(db.srdSpell.findMany).toHaveBeenCalledOnce();
   });

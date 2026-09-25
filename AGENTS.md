@@ -352,7 +352,22 @@ resolved against. Fifty-six combatant fixtures in `tests/api/action.test.ts` and
 do now, because a fixture thinner than the row it stands for is how a shape
 mismatch survives a green suite.
 
-- **`lib/rules/magic.ts:396`** — `resolveSpellEffect` returns `condition: null`
+Closed 2026-09-25, two defects found while scoping the spell-condition entry
+below, each a shape mismatch between the SRD cache and its reader:
+`resolveSpellEffect` passed the save ability through as the data spells it
+(`"wis"`) while `Combatant.stats` keys it `"WIS"`, so **every creature rolled
+its save against a player's spell at +0** — the tests fed it `"DEX"` and never
+saw it. It now maps the index onto `Ability`. A `damage` block with no
+`damage_type` (Sleep's hit-point pool, Prismatic Spray's per-ray dice) is no
+longer read as damage; a Sleep dealt 5d8. `tests/rules/spell-effect-srd-data.test.ts`
+reads the real `spells.json`.
+
+Still open, same family: the seed's `asBool` (`prisma/seed-srd.ts`) does not
+know "Sí" or "verdadero", so Fear, Gaseous Form, Hypnotic Pattern, Phantasmal
+Killer and Suggestion are stored with `concentration: null`, which
+`resolveCachedSpell` reads as `false`.
+
+- **`lib/rules/magic.ts:427`** — `resolveSpellEffect` returns `condition: null`
   on all three exit paths, with its own TODO: *"To be extracted from SRD
   description or specialized fields."* Because of it, **no spell in the game
   applies any condition.** `CONDITION_REGISTRY`, `applyCondition`,
