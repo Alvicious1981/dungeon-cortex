@@ -146,7 +146,30 @@ export function generateFallbackProse(
     }
   }
 
-  // 11. Default neutral statement
+  // 11. Death saves (death-saves spec §6.6). The player's death is stated only
+  // on player_died, which then replaces the dying-state sentences it ends.
+  const hasPlayerFact = (type: NarrativeFact['type']) => facts.some(f => f.type === type);
+  if (hasPlayerFact('player_died')) {
+    parts.push('Tu último aliento se apaga: has muerto.');
+  } else {
+    if (hasPlayerFact('player_downed')) {
+      parts.push('Te desplomas inconsciente, al borde de la muerte.');
+    }
+    if (hasPlayerFact('death_save_rolled')) {
+      parts.push('Luchas por aferrarte a la vida.');
+    }
+    if (hasPlayerFact('player_stabilized')) {
+      parts.push('Tu respiración se estabiliza, aunque sigues inconsciente.');
+    }
+    if (hasPlayerFact('player_revived')) {
+      parts.push('Recuperas la consciencia de repente y vuelves a la lucha.');
+    }
+    if (hasPlayerFact('player_woke')) {
+      parts.push('Recuperas poco a poco la consciencia.');
+    }
+  }
+
+  // 12. Default neutral statement
   if (parts.length === 0) {
     parts.push('La escena continúa.');
   }

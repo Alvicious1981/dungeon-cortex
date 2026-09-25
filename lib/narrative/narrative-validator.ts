@@ -261,6 +261,11 @@ export function validateNarrativeText(
     { names: [/unconscious/i, /inconsciente/i], condition: 'Unconscious' }
   ];
 
+  // Death-save facts that state, by themselves, that the player is unconscious
+  // (combat-fact-adapter: "falls unconscious at 0 HP", "stable but
+  // unconscious"). PLAYER_DOWNED carries no condition_applied companion.
+  const unconsciousFactTypes = new Set(['player_downed', 'player_stabilized']);
+
   const explicitFactlessConditionRegex = /(?:\b(?:is|becomes?|queda|quedó|quedo)\s+(?:stunned|aturdid[oa]|prone|derribad[oa]|poisoned|envenenad[oa]|blinded|cegad[oa]|deafened|ensordecid[oa]|frightened|asustad[oa]|aterrad[oa]|paralyzed|paralizad[oa]|petrified|petrificad[oa]|restrained|atrapad[oa]|sujet[oa]|unconscious|inconsciente)\b|\bcae\s+al\s+suelo\b)/i;
   if (!context && explicitFactlessConditionRegex.test(text)) {
     issues.push({
@@ -273,10 +278,11 @@ export function validateNarrativeText(
   for (const mapping of conditionMappings) {
     const mentionsCondition = mapping.names.some(regex => regex.test(text));
     if (context && mentionsCondition) {
-      const isConfirmed = context.facts.some(f => 
-        f.type === 'condition_applied' && 
-        typeof f.payload?.conditionName === 'string' &&
-        f.payload.conditionName.toLowerCase() === mapping.condition.toLowerCase()
+      const isConfirmed = context.facts.some(f =>
+        (f.type === 'condition_applied' &&
+          typeof f.payload?.conditionName === 'string' &&
+          f.payload.conditionName.toLowerCase() === mapping.condition.toLowerCase()) ||
+        (mapping.condition === 'Unconscious' && unconsciousFactTypes.has(f.type))
       );
       if (!isConfirmed) {
         issues.push({
