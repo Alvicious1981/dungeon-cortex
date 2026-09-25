@@ -8,7 +8,7 @@ const CTX = {
   round: 4, turnIndex: 0, collectEvents: true,
 };
 
-function buildTx(player: Record<string, unknown>, touched = 1) {
+function buildTx(player: Record<string, unknown>, touched = 1, exhaustionLevel = 0) {
   const order: string[] = [];
   const tx = {
     $queryRaw: vi.fn(async () => { order.push("Character"); return []; }),
@@ -19,7 +19,10 @@ function buildTx(player: Record<string, unknown>, touched = 1) {
       }),
       updateMany: vi.fn(async () => { order.push("Combatant"); return { count: 1 }; }),
     },
-    character: { update: vi.fn(async () => { order.push("Character"); return {}; }) },
+    character: {
+      findUnique: vi.fn().mockResolvedValue({ exhaustionLevel }),
+      update: vi.fn(async () => { order.push("Character"); return {}; }),
+    },
     encounter: { updateMany: vi.fn(async () => { order.push("Encounter"); return { count: touched }; }) },
     gameLog: { create: vi.fn() },
   } as unknown as Prisma.TransactionClient;
@@ -100,5 +103,28 @@ describe("rollPlayerDeathSave (death-saves spec §6.3)", () => {
   it("refuses a stale turn", async () => {
     const { tx } = buildTx({}, 0);
     await expect(rollPlayerDeathSave(tx, CTX, dice(14))).rejects.toBeInstanceOf(TurnStateConflictError);
+  });
+  // A death saving throw is a saving throw: exhaustion level 3+ puts it at
+  // disadvantage, so two d20s are rolled and the lower one counts.
+  it("rolls at disadvantage from exhaustion level 3, keeping the lower die", async () => {
+    const { tx } = buildTx({}, 1, 3);
+    const rolls = [14, 4];
+    const out = await rollPlayerDeathSave(tx, CTX, { d20: () => rolls.shift()!, d4: () => 2 });
+    expect(out.events[0]).toEqual({
+      type: "DEATH_SAVE_ROLLED",
+      payload: { natural: 4, successes: 0, failures: 1, outcome: "dying" },
+    });
+    expect(tx.gameLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        content: expect.stringContaining("Death save (disadvantage — exhaustion): 4"),
+      }),
+    });
+  });
+
+  it("rolls a single die below exhaustion level 3", async () => {
+    const { tx } = buildTx({}, 1, 2);
+    const rolls = [14, 4];
+    const out = await rollPlayerDeathSave(tx, CTX, { d20: () => rolls.shift()!, d4: () => 2 });
+    expect(out.events[0]).toMatchObject({ payload: { natural: 14, successes: 1 } });
   });
 });

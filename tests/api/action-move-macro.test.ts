@@ -393,6 +393,63 @@ describe("Move macro: the complete footprint stays inside the 10x10 grid (DC-PLA
   });
 });
 
+/** The same context with the character at a given exhaustion level. */
+const exhaustedContextWith = (activeEncounter: unknown, exhaustionLevel: number) => {
+  const context = contextWith(activeEncounter);
+  return { ...context, character: { ...context.character, exhaustionLevel } };
+};
+
+describe("Move macro: exhaustion reduces speed (SRD levels 2 and 5)", () => {
+  it("halves speed at level 2: three squares are legal", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      exhaustedContextWith(encounterWith([combatant({ x: 0, y: 0 })]), 2)
+    );
+
+    const res = await post({ action: "Move", targetX: 3, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    expect(prisma.combatant.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("halves speed at level 2: the fourth square is refused", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      exhaustedContextWith(encounterWith([combatant({ x: 0, y: 0 })]), 2)
+    );
+
+    const res = await post({ action: "Move", targetX: 4, targetY: 0 });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "Movement exceeds speed. Distance: 20 ft, speed: 15 ft.",
+    });
+    expectNoMovePersistence();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+
+  it("keeps full speed at level 1", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      exhaustedContextWith(encounterWith([combatant({ x: 0, y: 0 })]), 1)
+    );
+
+    const res = await post({ action: "Move", targetX: 6, targetY: 0 });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses any movement at level 5, writing nothing", async () => {
+    (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(
+      exhaustedContextWith(encounterWith([combatant({ x: 0, y: 0 })]), 5)
+    );
+
+    const res = await post({ action: "Move", targetX: 1, targetY: 0 });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "SPEED_ZERO" });
+    expectNoMovePersistence();
+    expect(userLogWrites()).toHaveLength(0);
+  });
+});
+
 describe("Move macro: speed bounds the distance", () => {
   it("allows exactly the default 30 ft — six squares", async () => {
     (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue(

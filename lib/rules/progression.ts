@@ -171,6 +171,25 @@ export const HIT_DIE_MAP: Readonly<Record<CharacterClass, number>> = {
 } as const;
 
 /**
+ * The hit die for a class name as it is stored or received — case-insensitive.
+ *
+ * The one lookup every caller uses: the level-1 maximum at character creation,
+ * short-rest Hit Die spending, and (through `HIT_DIE_MAP`) level-up. The same
+ * table used to be written out three times — here, as a `switch` in
+ * `rest-service.ts`, and as `CLASS_HIT_DICE` in `lib/dnd-api/constants.ts` —
+ * so a change to one would have left the others disagreeing silently.
+ *
+ * An unrecognised class reads as a d8, the value both earlier copies fell
+ * back to, so no existing character's rest or creation changes.
+ */
+export function hitDieForClass(className: string): number {
+  const key = className.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(HIT_DIE_MAP, key)
+    ? HIT_DIE_MAP[key as CharacterClass]
+    : 8;
+}
+
+/**
  * XP awarded per exploration event type.
  * Tuned for a solo-character campaign where combat XP averages 200–1800
  * per encounter (CR 1–5).

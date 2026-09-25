@@ -232,6 +232,14 @@ implement death by exhaustion. The rule writes up to 6 and the log line records
 it; what happens at 6 is a separate increment. This is stated rather than
 silently capped at 5, which would be inventing a rule.
 
+**Closed 2026-09-25.** `lib/rules/exhaustion.ts` now holds the whole SRD table
+and every tier has a consumer: level 2 halves combat movement, level 3 puts
+the player's attack rolls and saving throws (forced-march, area, death saves)
+at disadvantage, level 4 halves the hit point maximum that healing, rests,
+level-ups and massive damage read, level 5 refuses movement and travel, and a
+march that reaches level 6 writes `diedAt` through `markCharacterDead`
+(`lib/db/character-death.ts`) in the same transaction as the level.
+
 ## 8. Intent
 
 `lib/ai/intent.ts` gains `travel` in its action-type enum, a deterministic
@@ -283,7 +291,7 @@ never writes at all; each such test needs its populated twin.
 1. Retire `lib/rules/wilderness.ts`, `wilderness-service.ts` and
    `lib/ai/tools/wilderness.ts` — 1,414 lines whose model this decision
    rejects.
-2. Death at exhaustion level 6.
+2. ~~Death at exhaustion level 6.~~ Done — see §7.
 3. A persisted hours-travelled-today counter, if the §4.3 limit proves to
    matter in play.
 4. `explorationHUD`, still without a producer, blocked by the same excluded

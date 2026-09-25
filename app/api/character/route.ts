@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
-import { CLASS_HIT_DICE, ABILITY_SCORES, type AbilityScore } from "@/lib/dnd-api/constants";
+import { ABILITY_SCORES, type AbilityScore } from "@/lib/dnd-api/constants";
+import { hitDieForClass } from "@/lib/rules/progression";
 import { defaultSkillProficiencies } from "@/lib/rules/class-skills";
 import { buildStartingInventory } from "@/lib/rules/starting-inventory";
 
@@ -17,7 +18,7 @@ function conModifier(con: number): number {
 }
 
 function calcMaxHp(classIndex: string, con: number): number {
-  const hitDie = CLASS_HIT_DICE[classIndex.toLowerCase()] ?? 8;
+  const hitDie = hitDieForClass(classIndex);
   return hitDie + conModifier(con);
 }
 

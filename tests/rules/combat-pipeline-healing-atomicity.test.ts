@@ -68,6 +68,32 @@ function atomicTx() {
 describe("combat-pipeline Character healing atomicity", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  // SRD exhaustion level 4 halves the hit point maximum: healing stops at
+  // half of the stored `maxHp`, and the claim binds the level it was capped by.
+  it("caps healing at the halved maximum from exhaustion level 4", async () => {
+    const tx = atomicTx();
+    const inventory = tx.inventoryItem as unknown as {
+      findUnique: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
+    };
+    const character = tx.character as unknown as {
+      findUnique: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
+    };
+    inventory.findUnique.mockResolvedValueOnce({ quantity: 1 });
+    inventory.deleteMany.mockResolvedValueOnce({ count: 1 });
+    character.findUnique.mockResolvedValueOnce({ hp: 9, maxHp: 20, exhaustionLevel: 4 });
+    character.updateMany.mockResolvedValueOnce({ count: 1 });
+    vi.spyOn(Math, "random").mockReturnValue(0.99); // 1d2 => 2
+
+    await executeCombatAction(itemPayload(), tx);
+
+    expect(character.updateMany).toHaveBeenCalledWith({
+      where: { id: "char-1", hp: 9, maxHp: 20, exhaustionLevel: 4 },
+      data: { hp: 10 },
+    });
+  });
+
   it("re-bases the same rolled heal after a stale HP compare-and-set", async () => {
     const tx = atomicTx();
     const inventory = tx.inventoryItem as unknown as {

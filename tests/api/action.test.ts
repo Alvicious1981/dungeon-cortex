@@ -703,6 +703,24 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(penaltyReachingTheRule()).toBe(false);
     });
 
+    // Exhaustion level 3 imposes disadvantage on attack rolls. Like the armour
+    // penalty, the payload field is optional, so only a test on THIS route
+    // proves the character's level reaches the rule.
+    it("carries the character's exhaustion level to the rule", async () => {
+      const base = contextWith([hero, hostile]);
+      (buildCampaignContext as any).mockResolvedValue({
+        ...base,
+        character: { ...base.character, exhaustionLevel: 3 },
+      });
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      const call = (computeConsequences as any).mock.calls.at(-1);
+      expect(call?.[0].attackerExhaustionLevel).toBe(3);
+    });
+
     it("rejects a targetIds selection naming more than one creature", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, { ...hostile, id: "t3" }]));
 
@@ -834,6 +852,34 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(res.status).toBe(200);
     const call = (computeConsequences as any).mock.calls.at(-1);
     expect(call?.[0].attackerArmorPenalty).toBe(true);
+  });
+
+  it("carries the exhaustion level on the macro Attack path too", async () => {
+    const target = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
+    const player = { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
+    const combatants = [player, target];
+
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { name: "Hero", class: "fighter", stats: { STR: 10 }, exhaustionLevel: 4, inventory: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: { id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0, combatants },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(200);
+    const call = (computeConsequences as any).mock.calls.at(-1);
+    expect(call?.[0].attackerExhaustionLevel).toBe(4);
   });
 
   it("refuses a macro Attack while an enemy owns the initiative slot", async () => {

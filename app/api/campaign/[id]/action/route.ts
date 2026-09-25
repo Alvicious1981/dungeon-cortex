@@ -87,6 +87,7 @@ import {
   resolveRollCommand,
 } from "@/lib/actions/roll-command";
 import { resolveTravelGate } from "@/lib/actions/travel-command";
+import { exhaustedSpeedFt } from "@/lib/rules/exhaustion";
 import { Prisma } from "@prisma/client";
 import type { ContextCharacter, ContextCombatant } from "@/lib/memory/context";
 import { resolveEncounterTurnAuthority } from "@/lib/rules/turn-authority";
@@ -796,6 +797,9 @@ async function resolveAction(
               inventory: context.character.inventory,
               characterClass: context.character.class,
             }).applies,
+            // Neither travel nor a rest can run during an encounter, so the
+            // level read before the lock is the level in force for this attack.
+            actorExhaustionLevel: context.character.exhaustionLevel,
             targetCombatants: targets,
             weaponName: foundWeapon?.name || "Unarmed",
             weaponDice: attack.weaponDice,
@@ -907,10 +911,22 @@ async function resolveAction(
       const DEFAULT_SPEED_FT = 30;
       const combatantStats = (playerCombatant.stats as Record<string, unknown>) ?? {};
       const rawSpeed = combatantStats.speed;
-      const speedFt = typeof rawSpeed === "number" && rawSpeed > 0
+      const baseSpeedFt = typeof rawSpeed === "number" && rawSpeed > 0
         ? rawSpeed
         : DEFAULT_SPEED_FT;
+      // SRD exhaustion: level 2 halves speed, level 5 reduces it to 0.
+      const speedFt = exhaustedSpeedFt(baseSpeedFt, context.character.exhaustionLevel);
       const speedSquares = Math.floor(speedFt / 5);
+
+      if (speedSquares === 0) {
+        return NextResponse.json(
+          {
+            error: "Exhaustion has reduced your speed to 0. You cannot move.",
+            code: "SPEED_ZERO",
+          },
+          { status: 409 }
+        );
+      }
 
       // ── Distance validation (Chebyshev — 5e grid diagonal = 1 square) ─────
       const distSquares = chebyshevSquares(from, to);
@@ -2072,6 +2088,9 @@ async function resolveAction(
               inventory: context.character.inventory,
               characterClass: context.character.class,
             }).applies,
+            // Neither travel nor a rest can run during an encounter, so the
+            // level read before the lock is the level in force for this attack.
+            actorExhaustionLevel: context.character.exhaustionLevel,
             targetCombatants: targets,
             weaponName: foundWeapon?.name || "Unarmed",
             weaponDice: attack.weaponDice,

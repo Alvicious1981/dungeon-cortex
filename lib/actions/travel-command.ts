@@ -32,6 +32,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { abilityModifier } from "@/lib/rules/dice";
 import { travelDistanceMiles, resolveJourney } from "@/lib/rules/travel";
+import { effectiveMaxHp, exhaustionEffects } from "@/lib/rules/exhaustion";
+import { markCharacterDead } from "@/lib/db/character-death";
 import { syncSceneParticipants } from "@/lib/rules/scene-presence-service";
 
 export interface TravelGateInput {
@@ -93,6 +95,18 @@ export async function resolveTravelGate({
   if (hasActiveEncounter) {
     return NextResponse.json(
       { error: "You cannot march away from a fight that is still happening." },
+      { status: 409 }
+    );
+  }
+
+  // SRD exhaustion level 5 reduces speed to 0: a character who cannot move
+  // cannot march anywhere. Refused before anything is read or written.
+  if (exhaustionEffects(character.exhaustionLevel).speedMultiplier === 0) {
+    return NextResponse.json(
+      {
+        error: "Exhaustion has reduced your speed to 0. You cannot travel until you rest.",
+        code: "SPEED_ZERO",
+      },
       { status: 409 }
     );
   }
@@ -173,6 +187,19 @@ export async function resolveTravelGate({
   });
 
   const dayCount = journey.days === 1 ? "1 day" : `${journey.days} days`;
+  const exhaustionAfter = character.exhaustionLevel + journey.exhaustionGained;
+  const effectsBefore = exhaustionEffects(character.exhaustionLevel);
+  const effectsAfter = exhaustionEffects(exhaustionAfter);
+  // Only a level this march crossed is news; an effect already in force was
+  // reported by the journey that caused it.
+  const crossed = [
+    !effectsBefore.hitPointMaximumHalved && effectsAfter.hitPointMaximumHalved
+      ? " Hit point maximum halved."
+      : "",
+    !effectsBefore.dead && effectsAfter.dead
+      ? " The character dies of exhaustion."
+      : "",
+  ].join("");
   const logLine = journey.forcedHours > 0
     ? `Travel: ${origin.name} → ${destination.name}, ` +
       `${journey.distanceMiles} mi forced march, ${journey.hours} h. ` +
@@ -180,7 +207,8 @@ export async function resolveTravelGate({
       `DC ${journey.saves.map((s) => s.dc).join("/")} → ` +
       `${journey.saves.filter((s) => !s.success).length} failed, ` +
       `exhaustion ${character.exhaustionLevel} → ` +
-      `${character.exhaustionLevel + journey.exhaustionGained}.`
+      `${exhaustionAfter}.` +
+      crossed
     : `Travel: ${origin.name} → ${destination.name}, ` +
       `${journey.distanceMiles} mi at normal pace, ${dayCount}.`;
 
@@ -226,13 +254,36 @@ export async function resolveTravelGate({
             exhaustionLevel: character.exhaustionLevel,
           },
           data: {
-            exhaustionLevel:
-              character.exhaustionLevel + journey.exhaustionGained,
+            exhaustionLevel: exhaustionAfter,
           },
         });
 
         if (exhaustionClaim.count !== 1) {
           throw new TravelStateConflictError();
+        }
+
+        // Level 4 halves the hit point maximum. `maxHp` keeps the real value
+        // (see `effectiveMaxHp`), so current hit points above the halved
+        // maximum are lowered to it. The claim above holds the Character row
+        // lock, so `maxHp` read here cannot move before this commits.
+        if (effectsAfter.hitPointMaximumHalved) {
+          const row = await tx.character.findUnique({
+            where: { id: character.id },
+            select: { maxHp: true },
+          });
+          if (row) {
+            const cap = effectiveMaxHp(row.maxHp, exhaustionAfter);
+            await tx.character.updateMany({
+              where: { id: character.id, hp: { gt: cap } },
+              data: { hp: cap },
+            });
+          }
+        }
+
+        // Level 6 is death: the same canonical marker a failed third death
+        // save writes, so every campaign write route refuses from here on.
+        if (effectsAfter.dead) {
+          await markCharacterDead(tx, character.id);
         }
       }
 

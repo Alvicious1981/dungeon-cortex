@@ -35,6 +35,7 @@ interface Row {
   maxHp: number;
   hitDiceTotal: number;
   hitDiceRemaining: number;
+  exhaustionLevel?: number;
 }
 
 // Model E settled state: `level` is the last mechanically applied level and
@@ -227,6 +228,17 @@ describe("applyLevelUp — concurrent confirmations (Model E)", () => {
     expect(store.row.hp).toBe(Math.min(4 + 8, store.row.maxHp));
     expect(store.row.hp).toBe(12);
     expect(store.row.hitDiceRemaining).toBe(1);
+  });
+
+  // SRD exhaustion level 4 halves the hit point maximum. The stored maximum
+  // still rises by the full gain; current HP stops at half of the new one.
+  it("caps the healed hit points at the halved maximum from exhaustion level 4", async () => {
+    const store = makeStore(pendingRow({ exhaustionLevel: 4 }));
+
+    await call(store);
+
+    expect(store.row.maxHp).toBe(18);
+    expect(store.row.hp).toBe(9);
   });
 
   it("scopes the conditional write to the Model E pre-ascension predicate", async () => {

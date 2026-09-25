@@ -9,6 +9,8 @@
  * scripts/seed-conditions.ts). This registry is the compile-time guard.
  */
 
+import { exhaustionEffects } from "@/lib/rules/exhaustion";
+
 export interface ConditionRegistryEntry {
   id: string;
   name: string;
@@ -167,14 +169,24 @@ export function isKnownCondition(conditionId: string): boolean {
  * @param attackerConditions List of conditions currently affecting the attacker.
  * @param defenderConditions List of conditions currently affecting the defender.
  * @param isMelee True if the attack is a melee attack.
+ * @param attackerExhaustionLevel The attacker's exhaustion level (0-6). Level 3
+ *        or more is one more source of disadvantage, and it enters the pool
+ *        *before* neutralization, so an advantaged exhausted attacker rolls a
+ *        normal d20 exactly as the SRD requires.
+ * @param attackerArmorPenalty True when the attacker wears armour they are not
+ *        proficient with (SRD: disadvantage on every Strength or Dexterity
+ *        attack). Another source in the same pool, for the same reason.
  */
 export function evaluateAdvantage(
   attackerConditions: string[],
   defenderConditions: string[],
-  isMelee: boolean
+  isMelee: boolean,
+  attackerExhaustionLevel: number = 0,
+  attackerArmorPenalty: boolean = false
 ): { advantage: boolean; disadvantage: boolean } {
   let hasAdvantage = false;
-  let hasDisadvantage = false;
+  let hasDisadvantage =
+    exhaustionEffects(attackerExhaustionLevel).attackDisadvantage || attackerArmorPenalty;
 
   // 1. Process Attacker's own conditions.
   for (const condId of attackerConditions) {
@@ -238,7 +250,7 @@ export function evaluateAbilityCheckAdvantage(
 ): { advantage: boolean; disadvantage: boolean } {
   // Multiple sources of disadvantage do not stack in 5e — one is the same as
   // three — so this is a boolean, not a count.
-  let hasDisadvantage = exhaustionLevel >= 1;
+  let hasDisadvantage = exhaustionEffects(exhaustionLevel).abilityCheckDisadvantage;
 
   for (const condId of conditions) {
     const entry = CONDITION_REGISTRY[condId.toLowerCase()];
