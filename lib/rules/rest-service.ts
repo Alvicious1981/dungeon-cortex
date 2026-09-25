@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { abilityModifier, roll as defaultRoll } from "@/lib/rules/dice";
 import { isSpellSlots, restoreAllSlots } from "@/lib/rules/magic";
 import { effectiveMaxHp } from "@/lib/rules/exhaustion";
+import { hitDieForClass } from "@/lib/rules/progression";
 
 export type RestType = "short" | "long";
 
@@ -137,22 +138,6 @@ function assertRestType(restType: string): asserts restType is RestType {
       "INVALID_REST_TYPE",
       "restType must be \"short\" or \"long\"."
     );
-  }
-}
-
-function hitDieForClass(characterClass: string): number {
-  switch (characterClass.toLowerCase()) {
-    case "barbarian":
-      return 12;
-    case "fighter":
-    case "paladin":
-    case "ranger":
-      return 10;
-    case "sorcerer":
-    case "wizard":
-      return 6;
-    default:
-      return 8;
   }
 }
 

@@ -7,6 +7,7 @@ import {
   MIN_LEVEL,
   MAX_LEVEL,
   HIT_DIE_MAP,
+  hitDieForClass,
   EXPLORATION_XP,
   TriggerLevelUpInputSchema,
   LevelUpPayloadSchema,
@@ -727,5 +728,27 @@ describe("buildLevelUpPayload", () => {
     const payload = buildLevelUpPayload({ ...baseInput, useAverage: false });
     expect(LevelUpPayloadSchema.safeParse(payload).success).toBe(true);
     expect(payload.newMaxHp).toBeGreaterThan(baseInput.currentMaxHp);
+  });
+});
+
+describe("hitDieForClass — the one class → Hit Die lookup", () => {
+  it("reads every class from HIT_DIE_MAP", () => {
+    for (const [className, die] of Object.entries(HIT_DIE_MAP)) {
+      expect(hitDieForClass(className)).toBe(die);
+    }
+  });
+
+  it("ignores case and surrounding space, as stored rows and API indices vary", () => {
+    expect(hitDieForClass("Barbarian")).toBe(12);
+    expect(hitDieForClass(" WIZARD ")).toBe(6);
+  });
+
+  it("reads an unknown class as a d8, the value both retired copies fell back to", () => {
+    expect(hitDieForClass("artificer")).toBe(8);
+  });
+
+  it("never reads an inherited object property as a class", () => {
+    expect(hitDieForClass("constructor")).toBe(8);
+    expect(hitDieForClass("toString")).toBe(8);
   });
 });

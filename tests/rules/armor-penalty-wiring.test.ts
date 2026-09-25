@@ -35,15 +35,13 @@ describe("resolveAttackRoll takes the armour penalty", () => {
     expect(resolveAttackRoll(5, 10, [], [], true).disadvantage).toBe(false);
   });
 
-  it("still reports the advantage a condition grants, which wins as it does today", () => {
-    // NOTE: this asserts CURRENT behaviour, not the SRD. resolveAttackRoll
-    // picks advantage outright when both are present (combat.ts:887) — it does
-    // not cancel them, unlike resolveAbilityCheck:269 which does. That
-    // divergence is pre-existing and out of scope; see the plan's "A rule this
-    // codebase does not implement" note. Pinning it here means PR 3 changes it
-    // deliberately rather than by accident.
+  it("cancels against the advantage a condition grants into a normal roll", () => {
+    // SRD: any advantage and any disadvantage cancel, however many of each.
+    // This test used to pin the opposite — advantage winning outright — as a
+    // known divergence from resolveAbilityCheck; it is now the rule.
     const result = resolveAttackRoll(5, 10, ["invisible"], [], true, true);
-    expect(result.advantage).toBe(true);
-    expect(result.disadvantage).toBe(true);
+    expect(result.advantage).toBe(false);
+    expect(result.disadvantage).toBe(false);
+    expect(result.dice).toHaveLength(1);
   });
 });

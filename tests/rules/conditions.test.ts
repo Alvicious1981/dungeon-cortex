@@ -138,6 +138,12 @@ describe("conditions and advantage logic", () => {
       expect(evaluateAdvantage([], ["prone"], true, 3)).toEqual({ advantage: false, disadvantage: false });
     });
 
+    it("treats an armour penalty as one more source in the same pool", () => {
+      expect(evaluateAdvantage([], [], true, 0, true)).toEqual({ advantage: false, disadvantage: true });
+      // Prone defender in melee → advantage; unproficient armour → cancels.
+      expect(evaluateAdvantage([], ["prone"], true, 0, true)).toEqual({ advantage: false, disadvantage: false });
+    });
+
     it("reaches resolveAttackRoll: an exhausted attacker keeps the lower die", () => {
       let i = 0;
       const values = [0.2, 0.7]; // 5, then 15
