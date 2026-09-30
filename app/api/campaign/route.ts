@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { characterAliveRefusal, guardResponse } from "@/lib/db/campaign-guard";
+import { buildMainPartyMemberData } from "@/lib/party/roster";
 
 interface CreateCampaignBody {
   characterId: string;
@@ -50,13 +51,25 @@ export async function POST(req: NextRequest) {
   const alive = await characterAliveRefusal(prisma, character.id);
   if (alive) return guardResponse(alive);
 
-  const campaign = await prisma.campaign.create({
-    data: {
-      userId: user.id,
-      characterId: character.id,
-      title: title.trim(),
-      status: "active",
-    },
+  // DC-PARTY-001: every Campaign gets a MAIN PartyMember row for its main
+  // Character, created atomically with the Campaign so "this Campaign has a
+  // Party" holds from the moment the Campaign exists, not just for
+  // backfilled historical data (see docs/PARTY_AND_COMPANIONS.md). This
+  // does not change Campaign.characterId's meaning or this route's response
+  // shape — it only adds a normalized mirror of the same fact.
+  const campaign = await prisma.$transaction(async (tx) => {
+    const created = await tx.campaign.create({
+      data: {
+        userId: user.id,
+        characterId: character.id,
+        title: title.trim(),
+        status: "active",
+      },
+    });
+    await tx.partyMember.create({
+      data: buildMainPartyMemberData(created.id, character.id),
+    });
+    return created;
   });
 
   return NextResponse.json({ id: campaign.id }, { status: 201 });

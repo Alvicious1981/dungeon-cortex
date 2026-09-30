@@ -614,6 +614,72 @@ describe("resolveRest service contract", () => {
     });
   });
 
+  it.each([
+    ["a stale maximum", { "2": { current: 2, max: 3 } }],
+    ["an obsolete slot level", {
+      "1": { current: 1, max: 1 },
+      "2": { current: 2, max: 2 },
+    }],
+  ] as const)("repairs %s even when the current Pact Magic slots are full", async (_label, slots) => {
+    const { characters, tx } = createTx({
+      characters: [{ ...baseCharacters[0], class: "Warlock", hp: 12, spellSlots: slots }],
+    });
+
+    const result = await resolveRest({
+      campaignId: "campaign-1",
+      restType: "short",
+      tx,
+    });
+
+    expect(characters[0].spellSlots).toEqual({ "2": { current: 2, max: 2 } });
+    expect(result).toMatchObject({ facts: { slotsRestored: true, hitDiceSpent: 0 } });
+    expect(tx.character.update).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      data: { spellSlots: { "2": { current: 2, max: 2 } } },
+    }));
+  });
+
+  it("refreshes Pact Magic with no Hit Dice left without changing HP or rolling", async () => {
+    const { characters, tx } = createTx({
+      characters: [{
+        ...baseCharacters[0], class: "Warlock", hitDiceRemaining: 0,
+        spellSlots: { "2": { current: 0, max: 2 } },
+      }],
+    });
+    const roll = deterministicRoll(6);
+
+    const result = await resolveRest({ campaignId: "campaign-1", restType: "short", roll, tx });
+
+    expect(roll).not.toHaveBeenCalled();
+    expect(characters[0]).toMatchObject({
+      hp: 4, hitDiceRemaining: 0, spellSlots: { "2": { current: 2, max: 2 } },
+    });
+    expect(result).toMatchObject({ facts: { hpRecovered: 0, hitDiceSpent: 0, slotsRestored: true } });
+    expect(tx.character.update).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      data: { spellSlots: { "2": { current: 2, max: 2 } } },
+    }));
+  });
+
+  it("refreshes Pact Magic in the same write that heals with a Hit Die", async () => {
+    const { characters, tx } = createTx({
+      characters: [{
+        ...baseCharacters[0], class: "Warlock",
+        spellSlots: { "2": { current: 0, max: 2 } },
+      }],
+    });
+
+    const result = await resolveRest({
+      campaignId: "campaign-1", restType: "short", roll: deterministicRoll(6), tx,
+    });
+
+    expect(characters[0]).toMatchObject({
+      hp: 12, hitDiceRemaining: 1, spellSlots: { "2": { current: 2, max: 2 } },
+    });
+    expect(result).toMatchObject({ facts: { hpRecovered: 8, hitDiceSpent: 1, slotsRestored: true } });
+    expect(tx.character.update).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      data: { hp: 12, hitDiceRemaining: 1, spellSlots: { "2": { current: 2, max: 2 } } },
+    }));
+  });
+
   it("long rest restores HP", async () => {
     const { characters, tx } = createTx();
 

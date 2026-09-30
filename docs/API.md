@@ -1,153 +1,147 @@
 # API Documentation — Dungeon Cortex
 
-This document summarizes the main API surface for contributors and Codex.
+This document covers the main campaign action route and its streaming/retry contract. Other routes are not fully specified here.
 
-## API principles
+Reviewed against the implementation on 2026-09-30. This is a static contract review; it does not claim that runtime or integration tests were executed.
 
-- API routes validate input, permissions, and campaign state.
-- Backend code owns mechanical legality, rolls, DCs, HP, spell slots, conditions, persistence, and deterministic events.
-- AI narration must only describe outcomes already resolved by backend facts.
-- The frontend renders state and collects intent; it does not resolve authoritative mechanics.
+## Authority and implementation
 
-## Related implementation files
+Backend code owns mechanical legality, rolls, DCs, HP, resources, conditions, persistence, and deterministic events. The frontend collects intent and renders authoritative state; narration describes resolved facts.
 
-- `app/api/campaign/[id]/action/route.ts`
-- `lib/events/game-events.ts`
-- `lib/rules/combat-pipeline.ts`
-- `lib/narrative/combat-fact-adapter.ts`
-- `MASTER_ARCH_GUIDE.md`
+Relevant implementation:
 
-## Documented vs undocumented routes
+- [Action route](../app/api/campaign/%5Bid%5D/action/route.ts)
+- [Shared request transport](../lib/events/action-transport.ts)
+- [Game events and SSE frames](../lib/events/game-events.ts)
+- [Action receipts](../lib/actions/request-receipt.ts)
+- [Roll command](../lib/actions/roll-command.ts)
+- [Narrator](../lib/ai/narrator.ts)
+- [Narrator tool policy](../lib/ai/tool-policy.ts)
+- [Architecture guide](../MASTER_ARCH_GUIDE.md)
 
-This document currently covers the main campaign action route only.
-
-Additional API routes should be added here when their contracts become stable. If a route changes request fields, response shape, SSE frames, or error semantics, update this document in the same PR.
-
-## Streaming contract
-
-The main action route emits Server-Sent Events.
-
-General stream phases:
-
-1. Deterministic game events.
-2. AI narration tokens.
-3. Optional payloads such as level-up or merchant data.
-4. Completion sentinel.
-
-Frame categories:
-
-| Frame kind | Purpose |
-| --- | --- |
-| `evt` | Backend-resolved deterministic game event. |
-| `txt` | Narration text delta. |
-| `level_up` | Optional level-up payload. |
-| `merchant` | Optional merchant payload. |
-| `done` | Stream completion marker. |
-
-Pseudo-flow:
-
-```text
-backend event frame
-narration text frame
-optional payload frame
-completion frame
-```
+The current identity resolver is private mode, not real authentication: it requires literal `PRIVATE_MODE_ENABLED=true` and returns the same private user for every request. Ownership checks compare against that identity; they do not provide isolation between people sharing private mode.
 
 ## `POST /api/campaign/[id]/action`
 
-Handles player actions, deterministic gates, state mutation, game events, and narration streaming.
+Validates the request and campaign, resolves the applicable backend gates, persists the result, and responds with JSON for `/roll ` or SSE for normal narrative actions.
 
 ### Request body
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Contract |
 | --- | --- | --- | --- |
-| `action` | string | Yes | Player action or macro action. |
-| `targetIds` | string array | No | Combatant IDs for targeted actions. |
-| `targetX` | integer | No | Zero-based tactical-grid anchor X for movement (`0` through `9`). |
-| `targetY` | integer | No | Zero-based tactical-grid anchor Y for movement (`0` through `9`). |
+| `action` | string | Yes | Trimmed, non-empty player action or macro; length is bounded by `NARRATOR_DATA_LIMITS.playerActionChars`. |
+| `requestId` | string | No, for legacy compatibility | If present: trimmed, non-empty, at most 128 characters. Enables durable deduplication. The application client always sends it. |
+| `targetIds` | string array | No | Combatant IDs; each action validates its target selection. |
+| `targetX` | integer | No | Zero-based footprint-anchor X for `Move`, from 0 through 9. |
+| `targetY` | integer | No | Zero-based footprint-anchor Y for `Move`, from 0 through 9. |
+
+Example for an existing campaign belonging to the current private user:
+
+```json
+{
+  "action": "/roll 1d20+5",
+  "requestId": "example-roll-001"
+}
+```
+
+Use a fresh ID for each new action. Keep the same ID and mechanically relevant payload for a retry of that submission.
 
 ### Macro actions
 
-The route supports deterministic macro actions that bypass LLM intent parsing for reliability:
+The route has explicit branches for:
 
-- `Attack`
-- `End Turn`
-- `Move`
+- `Attack`: exactly one selected target; requires the player's turn.
+- `End Turn`: finalizes the player's turn, or resumes a chain parked on an enemy-owned slot.
+- `Move`: backend-validated tactical movement.
+- `Death Save`: available to a dying player.
+- `Wait`: available to a stable unconscious player.
 
-`Move` uses the creature's top-left footprint anchor on the fixed 10×10 combat
-grid. The whole footprint must fit: a Large creature, for example, may anchor
-at `(8,8)` but not `(9,8)`. An invalid destination returns HTTP `400` with
-`code: "MOVE_OUT_OF_BOUNDS"` before combat state, movement budget, canonical
-history, or movement events are changed.
+Availability depends on encounter and player state. These branches bypass natural-language classification. Natural-language classification in `lib/ai/intent.ts` is also deterministic; it does not make an LLM classification call. Recognized intents proceed to their backend gates; ambiguous mechanical input requests clarification rather than being narrated as a resolved outcome.
 
-### Non-streaming action exception
+`Move` uses the top-left footprint anchor on the fixed 10×10 grid. The entire footprint must fit: a Large creature can anchor at `(8,8)`, but not `(9,8)`. An out-of-bounds destination returns HTTP 400 / `MOVE_OUT_OF_BOUNDS` before movement state, budget, canonical history, or movement events change.
 
-`/roll` commands are handled as a quick non-streaming response.
+### Non-streaming roll command
 
-Example user action:
+The command prefix is `/roll `, including its trailing space. `/roll` alone does not enter the roll handler.
 
-```text
-/roll 1d20+5
-```
+For `/roll 1d20+5`, the handler:
 
-Expected behavior:
+1. Attempts to parse and roll the notation.
+2. Persists the player command and a system line with the result.
+3. Settles the receipt, when present.
+4. Returns HTTP 202 with `{"ok":true}`.
 
-- validate dice notation;
-- persist the user action;
-- persist the system roll result;
-- return a JSON status response.
+Invalid notation also returns HTTP 202 with the same body and writes an invalid-notation warning to the chronicle. A 202 response does not establish that dice were successfully rolled. This handler emits no SSE or game events.
 
-### Natural language actions
+## Streaming contract
 
-Natural language actions are parsed into intent before backend resolution.
+SSE frames are JSON following `data: `, terminated by a blank line. Network chunks need not align with frames; accumulate and parse complete frames.
 
-Known intent categories include:
+Normal order:
 
-- attack,
-- cast spell,
-- use item,
-- equip,
-- rest,
-- explore,
-- travel,
-- move.
+1. Deterministic `evt` frames.
+2. `level_up_available`, if the backend detects a pending level-up.
+3. Verified narration in `txt`.
+4. `done`, after which the client refreshes authoritative state.
 
-### Error responses
+| Discriminator `t` | Wire payload | Current behavior |
+| --- | --- | --- |
+| `evt` | `e: GameEvent` | Deterministic backend event. |
+| `level_up_available` | `payload` | Notice of a pending level-up; no level-up is applied by this frame. |
+| `txt` | `d: string` | Text chunk. The current narrator buffers and validates the complete response before yielding one verified chunk. |
+| `duplicate` | `requestId: string` | Completed submission recognized; mechanics are not executed again. |
+| `level_up` | `payload` | Retained contract branch; the current narrator payload resolves null, so that branch emits nothing. |
+| `merchant` | `payload` | Retained contract branch; the current narrator payload resolves null, so that branch emits nothing. |
+| `done` | None | End of stream. |
 
-| Status | Meaning |
+The narrator's four tools are read-only SRD lookups. No mutating tool callback is wired into the model-visible catalogue. Output validation can replace generated text with validated fallback prose.
+
+Mechanical resolution and receipt completion precede narrative delivery. The route schedules assistant-log persistence and memory consolidation using `after(...)`; a completed receipt does not guarantee narration was delivered or persisted. Do not repeat a settled mechanical action merely to obtain missing prose.
+
+## Deduplication and retries
+
+`requestId` is scoped to the actor, with a unique database constraint on `(actorUserId, requestId)`. It is bound to the campaign and a fingerprint of the action, targets, and coordinates. Missing IDs skip the receipt protocol and have no durable deduplication protection.
+
+| Existing receipt / conflict | Response |
 | --- | --- |
-| `400` | Invalid JSON, missing action, invalid target, invalid movement, or action impossible. |
-| `401` | Authentication failure. |
-| `403` | Campaign does not belong to the authenticated user. |
-| `404` | Campaign not found. |
-| `409` | Campaign is not active. |
+| Pending (`PROCESSING`) | HTTP 409 / `ACTION_IN_FLIGHT`. The outcome is uncertain; a live and an interrupted submission are indistinguishable. |
+| ID bound to another campaign or payload | HTTP 409 / `REQUEST_ID_REUSED`. |
+| Completed JSON response, including a roll | Original status and body replayed; no second roll. |
+| Rejected submission | Stored refusal status and body replayed. |
+| Completed stream | HTTP 200 SSE: `duplicate`, stored `evt` frames when available, then `done`. No narration or stale level-up notice is replayed. |
 
-## Event authority
+Replay-event snapshots are best-effort and limited to 64 KiB. Old receipts or snapshots that could not be stored produce `duplicate` followed by `done` without events; refresh state in either case.
 
-A game event is authoritative only when emitted by backend code.
+For `ACTION_IN_FLIGHT`, refresh and inspect state/history before diagnosing the unresolved receipt. Do not change the ID to force an uncertain action to run again. For a genuinely new action, generate a new ID.
 
-Important event categories:
+## Errors and recovery
 
-- combat consequence events,
-- turn and round advancement,
-- movement events,
-- equipment events,
-- rest events,
-- exploration warnings,
-- level-up and merchant payloads.
+| Status / code | Meaning and recovery |
+| --- | --- |
+| 400 | Invalid JSON, action, target, movement, or other action-specific refusal. Correct the request. |
+| 401 | Private identity is not enabled. Check the local private-mode configuration. |
+| 403 | Campaign does not belong to the resolved user. |
+| 404 | Campaign not found. |
+| 409 / `CAMPAIGN_NOT_ACTIVE` | The campaign is inactive. |
+| 409 / `CHARACTER_DEAD` | Persistent character death prevents further writes. |
+| 409 / `PLAYER_UNCONSCIOUS` | Ordinary actions refused; the action route can identify `allowedAction` as `Death Save` or `Wait`. |
+| 409 / `NOT_PLAYER_TURN` | Refresh turn state; ordinary player actions require the player's initiative slot. |
+| 409 / `TURN_STATE_CONFLICT` | Concurrent turn state changed; the guarded transition rolls back. Refresh before declaring the next action. |
+| 409 / `ACTION_IN_FLIGHT`, `REQUEST_ID_REUSED` | See retry semantics above. |
+| 500 / `ENEMY_TURN_INVARIANT`, `DEATH_SAVE_INVARIANT` | Inconsistent combat state; the transition rolls back. Inspect server diagnostics. |
 
-## Combat consequence rule
+This table covers important responses, not every action-specific refusal.
 
-`targets[]` is the canonical source of truth for combat consequences.
+### Retired turn endpoint
 
-Deprecated flat fields such as `targetId`, `hpAfter`, or `damage` must not be used as the primary source of truth in new code.
+`POST /api/campaign/[id]/encounter/turn` returns HTTP 410. Send `{"action":"End Turn","requestId":"<new-id>"}` to the campaign action route instead.
+
+## Combat consequence authority
+
+`COMBAT_CONSEQUENCE.payload.targets[]` is the canonical consequence list. Each entry describes its target; `attackerIsPlayer` and `targetIsPlayer` explicitly identify player roles. The strict payload has no legacy flat consequence fields.
+
+Do not infer emitted behavior from the event-type catalogue alone: some entries or compatibility frames can be declared without an active producer.
 
 ## Documentation maintenance
 
-When an API route changes, update this document in the same PR.
-
-When event payloads change, also check:
-
-- `lib/events/game-events.ts`
-- `MASTER_ARCH_GUIDE.md`
-- related tests
+When requests, responses, retry semantics, or frames change, update this document alongside the route, shared transport, and relevant tests. Verify both producers and consumers. Record runtime validation separately from static source inspection.

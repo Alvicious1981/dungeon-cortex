@@ -305,7 +305,10 @@ function warlockSlotsAfterShortRest(character: RestCharacterRecord): SpellSlots 
   const stored = isSpellSlots(character.spellSlots) ? character.spellSlots : null;
   const unchanged =
     stored !== null &&
-    Object.keys(restored).every((key) => stored[key]?.current === restored[key]!.current);
+    Object.keys(stored).length === Object.keys(restored).length &&
+    Object.entries(restored).every(([key, entry]) =>
+      stored[key]?.current === entry.current && stored[key]?.max === entry.max
+    );
 
   return unchanged ? null : restored;
 }
