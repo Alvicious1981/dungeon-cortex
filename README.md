@@ -31,20 +31,55 @@ Use Codex for implementation, documentation updates, audits, and small validated
 
 ### Install for a human local setup
 
+Use a new development database. The migration and seed commands below write to the configured database.
+
+CI uses Node.js 20, pnpm 9, and PostgreSQL 16 with pgvector. The migrations require the `vector` extension and create `pg_trgm`; make these available and ensure the database role can apply the migrations.
+
 ```bash
-pnpm install
+git clone https://github.com/Alvicious1981/dungeon-cortex.git
+cd dungeon-cortex
+pnpm install --frozen-lockfile
 cp .env.example .env
+```
+
+Before continuing, edit `.env` in the repository root:
+
+1. Set `DATABASE_URL` and `DIRECT_URL` to the same development database.
+2. Set `PRIVATE_MODE_ENABLED=true` for the current private local mode.
+3. Leave `OPENAI_API_KEY` empty to try mock narration, or configure a key for real narration.
+
+Then apply the existing migrations and load the initial data:
+
+```bash
 pnpm generate
-pnpm prisma migrate dev
+pnpm exec prisma migrate deploy
 pnpm seed
+pnpm exec tsx scripts/seed-conditions.ts
+pnpm exec prisma migrate status
 pnpm dev
 ```
+
+`migrate deploy` applies the checked-in migrations. Use `migrate dev` only when deliberately developing schema changes against a disposable development database.
+
+Check the seed summaries before proceeding. `pnpm seed` reads `data/srd-es/` and upserts `SrdSpell`, `SrdItem`, and `SrdMonster`; it does not populate `SrdEquipment` or `SrdCondition`. It can exit successfully despite failed upserts, so inspect `total`, `upserted`, `skipped`, and `failed`. The separate conditions script fetches the 2014 conditions from dnd5eapi and should report `Errors: 0`; it requires network access.
+
+The instructions above are derived from the implementation and CI configuration. They were reviewed statically on 2026-09-30; a fresh local installation was not executed during that review.
 
 The local app should open at:
 
 ```text
 http://localhost:3000
 ```
+
+### First campaign
+
+1. Open the local app and select **Crear personaje**.
+2. Fill **Nombre del personaje**, check **Linaje** and **Clase**, then select **Comenzar aventura**.
+3. On the campaign page, enter `/roll 1d20` in **Tu acción** and select **Actuar**.
+4. Check the command and roll result in **Bitácora de aventura**.
+5. Visit `/campaigns` and select **Continuar campaña** to resume it.
+
+This is the journey covered by `tests/e2e/critical-path.spec.ts`; reading the test does not establish that it passed on your installation. Without an OpenAI key, the narrator uses validated mock or fallback text. That does not establish that semantic memory works without the provider.
 
 ### Important note for Codex
 
@@ -73,7 +108,7 @@ Run the smallest reliable validation command for the change being made.
 
 ```bash
 pnpm typecheck
-pnpm test
+pnpm exec vitest run --maxWorkers=2
 pnpm build
 ```
 
@@ -85,7 +120,9 @@ pnpm test:e2e
 pnpm check-retro
 ```
 
-For the full validation matrix by change type, see `CONTRIBUTING.md`.
+For the validation matrix by change type, see `CONTRIBUTING.md` and `AGENTS.md`. AGENTS recommends limiting local Vitest workers to two to avoid worker-startup timeouts.
+
+Data-backed E2E tests require a disposable database whose name contains an `e2e` or `test` segment and `E2E_TEST_MODE=true`. Point both the application and tests at that database. For the verified project runbook, see the E2E section in `AGENTS.md`; it uses `pnpm build` followed by `pnpm start` and `PLAYWRIGHT_SKIP_WEBSERVER=1` to avoid development compilation timeouts.
 
 ## Troubleshooting
 
@@ -121,6 +158,14 @@ Then retry the failing command.
 
 Confirm the local database exists and that `DATABASE_URL` points to it. For agent-driven work, do not run migrations unless the active task explicitly authorizes database changes.
 
+### Seed finishes but data is missing
+
+Inspect the seed counters and any sampled errors. The main seed treats failed upserts as non-fatal; exit code zero alone does not prove the data loaded. Fix the reported issue and repeat the affected seed against the intended development database. Check the separate conditions seed as well.
+
+### An action returns `ACTION_IN_FLIGHT`
+
+Refresh campaign state and inspect the chronicle before retrying. A pending receipt means the outcome is uncertain; do not force another execution with a new request ID. See `docs/API.md` for retry semantics.
+
 ### Port 3000 is already in use
 
 Stop the existing process or run the app on another port according to your local Next.js setup.
@@ -131,7 +176,7 @@ Run the smallest relevant command first:
 
 ```bash
 pnpm typecheck
-pnpm test
+pnpm exec vitest run --maxWorkers=2
 pnpm build
 ```
 

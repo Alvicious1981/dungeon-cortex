@@ -4,11 +4,11 @@
  * The travel gate. See
  * docs/superpowers/specs/2026-09-03-wilderness-travel-srd-design.md.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const prismaTx = vi.hoisted(() => ({
   campaign: { updateMany: vi.fn() },
-  character: { updateMany: vi.fn() },
+  character: { updateMany: vi.fn(), findUnique: vi.fn() },
   gameLog: { create: vi.fn() },
 }));
 
@@ -81,9 +81,9 @@ const CHARACTER = {
   inventory: [],
 };
 
-function primeContext(): void {
+function primeContext(character: typeof CHARACTER = CHARACTER): void {
   (buildCampaignContext as ReturnType<typeof vi.fn>).mockResolvedValue({
-    character: CHARACTER,
+    character,
     activeEncounter: null,
     recentLogs: [],
     relevantMemories: [],
@@ -422,3 +422,96 @@ describe("travel gate", () => {
     expect(userRows[0][0].data.content).toBe("travel to the Gilded Boar");
   });
 });
+
+/**
+ * SRD exhaustion beyond level 1, as the travel gate applies it. The fixture
+ * journey is 33 miles: 11 hours, three forced. Every die is pinned to a
+ * natural 1, so every forced hour costs a level.
+ */
+describe("travel gate — exhaustion levels 4, 5 and 6", () => {
+  const forcedMarch = () =>
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      actionType: "travel",
+      destination: "Gilded Boar",
+      forceMarch: true,
+    });
+
+  const systemLine = (): string =>
+    prismaTx.gameLog.create.mock.calls
+      .map(([arg]) => arg.data)
+      .find((data: { role: string }) => data.role === "system")?.content ?? "";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaTx.campaign.updateMany.mockResolvedValue({ count: 1 });
+    prismaTx.character.updateMany.mockResolvedValue({ count: 1 });
+    prismaTx.character.findUnique.mockResolvedValue({ maxHp: 20 });
+    prismaTx.gameLog.create.mockResolvedValue({});
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    forcedMarch();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("relies on a fixture journey with three forced hours", () => {
+    expect(Math.ceil(travelDistanceMiles("seed_origin", "seed_dest") / 3) - 8).toBe(3);
+  });
+
+  it("lowers current HP to the halved maximum when the march reaches level 4", async () => {
+    primeContext({ ...CHARACTER, exhaustionLevel: 1 });
+
+    const res = await POST(request("travel to the Gilded Boar, forced march"), { params });
+
+    expect(res.status).toBe(200);
+    expect(prismaTx.character.updateMany).toHaveBeenCalledWith({
+      where: { id: "char_1", hp: { gt: 10 } },
+      data: { hp: 10 },
+    });
+    expect(systemLine()).toContain("exhaustion 1 → 4. Hit point maximum halved.");
+    expect(prismaTx.character.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { diedAt: expect.any(Date) } })
+    );
+  });
+
+  it("leaves HP alone when the march stops short of level 4", async () => {
+    primeContext({ ...CHARACTER, exhaustionLevel: 0 });
+
+    await POST(request("travel to the Gilded Boar, forced march"), { params });
+
+    expect(prismaTx.character.findUnique).not.toHaveBeenCalled();
+    expect(prismaTx.character.updateMany).toHaveBeenCalledTimes(1); // the level only
+  });
+
+  it("kills the character when the march reaches level 6", async () => {
+    primeContext({ ...CHARACTER, exhaustionLevel: 3 });
+
+    const res = await POST(request("travel to the Gilded Boar, forced march"), { params });
+
+    expect(res.status).toBe(200);
+    expect(prismaTx.character.updateMany).toHaveBeenCalledWith({
+      where: { id: "char_1", exhaustionLevel: 3 },
+      data: { exhaustionLevel: 6 },
+    });
+    expect(prismaTx.character.updateMany).toHaveBeenCalledWith({
+      where: { id: "char_1", diedAt: null },
+      data: { diedAt: expect.any(Date) },
+    });
+    expect(systemLine()).toContain(
+      "exhaustion 3 → 6. Hit point maximum halved. The character dies of exhaustion."
+    );
+  });
+
+  it("refuses to travel at level 5, writing nothing", async () => {
+    primeContext({ ...CHARACTER, exhaustionLevel: 5 });
+
+    const res = await POST(request("travel to the Gilded Boar, forced march"), { params });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "SPEED_ZERO" });
+    expect(prismaTx.campaign.updateMany).not.toHaveBeenCalled();
+    expect(prismaTx.character.updateMany).not.toHaveBeenCalled();
+    expect(prismaTx.gameLog.create).not.toHaveBeenCalled();
+    expect(prisma.gameLog.create).not.toHaveBeenCalled();
+  });
+});
+

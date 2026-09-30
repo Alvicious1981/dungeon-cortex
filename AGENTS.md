@@ -352,21 +352,86 @@ resolved against. Fifty-six combatant fixtures in `tests/api/action.test.ts` and
 do now, because a fixture thinner than the row it stands for is how a shape
 mismatch survives a green suite.
 
-- **`lib/rules/magic.ts:396`** — `resolveSpellEffect` returns `condition: null`
-  on all three exit paths, with its own TODO: *"To be extracted from SRD
-  description or specialized fields."* Because of it, **no spell in the game
-  applies any condition.** `CONDITION_REGISTRY`, `applyCondition`,
-  `lib/rules/condition-immunity.ts` and `Combatant.conditionImmunities` are all
-  built, wired and unreachable, waiting on this one field.
-  **Blocked by the data, not by effort — do not pick this up expecting a small
-  increment.** `data/srd-es/spells.json` has no structured condition anywhere:
-  zero `/api/conditions` references, zero `condition*` keys, and the word
-  "charmed" appears exactly once in the whole file, inside a `desc`. Extracting
-  a condition from a spell therefore means deriving a mechanical outcome from
-  prose, which this project does not do. It needs either a new structured
-  source or an explicit, recorded decision about that boundary. An earlier note
-  here called it the highest-value item; that was written without checking the
-  spell data, and it was wrong.
+Closed 2026-09-25, two defects found while scoping the spell-condition entry
+below, each a shape mismatch between the SRD cache and its reader:
+`resolveSpellEffect` passed the save ability through as the data spells it
+(`"wis"`) while `Combatant.stats` keys it `"WIS"`, so **every creature rolled
+its save against a player's spell at +0** — the tests fed it `"DEX"` and never
+saw it. It now maps the index onto `Ability`. A `damage` block with no
+`damage_type` (Sleep's hit-point pool, Prismatic Spray's per-ray dice) is no
+longer read as damage; a Sleep dealt 5d8. `tests/rules/spell-effect-srd-data.test.ts`
+reads the real `spells.json`.
+
+Closed 2026-09-25, same family: the seed's boolean reader now knows "Sí" and
+"verdadero". `asBool` (`prisma/seed-srd.ts`) only recognized
+"true"/"1"/"yes"/"si"/"s" and "false"/"0"/"no"/"n", so Fear, Gaseous Form,
+Hypnotic Pattern, Phantasmal Killer and Suggestion — whose `concentration` in
+`data/srd-es/spells.json` is "Sí" or "verdadero" — were stored with
+`concentration: null`, which `resolveCachedSpell` reads as `false`.
+`lib/srd/seed-values.ts` now exports `parseSrdBoolean`, pulled into its own
+module because `prisma/seed-srd.ts` connects to the database on import and so
+can never be imported from a test; it adds "sí", "verdadero" and "falso" to
+the accepted values, and both the `ritual:` and `concentration:` fields in
+`normalizeSpell` call it. `tests/srd/seed-values.test.ts` reads
+`prisma/seed-srd.ts` as text to confirm it calls `parseSrdBoolean` and defines
+no local reader of its own, and parses every ritual/concentration value in
+`data/srd-es/spells.json` to confirm none resolve to null, including the five
+spells named above.
+**Rows already seeded still hold `concentration: null` until `pnpm seed` runs
+again** — this fix changes what the next seed run writes, not the rows
+already in the database.
+
+- **Spell conditions — unblocked 2026-09-25, partly delivered.** The entry
+  that stood here said `resolveSpellEffect` returned `condition: null` on every
+  path and that this was "blocked by the data": `spells.json` carries no
+  structured condition, so extracting one meant reading prose. Both halves were
+  right. What unblocked it was the second route the entry named, an explicit
+  recorded decision: `docs/DECISION_SPELL_CONDITIONS.md` makes
+  `lib/rules/spell-conditions.ts` a hand-transcribed SRD table, bound to the
+  cache by `tests/rules/spell-conditions.test.ts` (it may add a missing save,
+  never contradict one the data holds).
+  **Applying a condition was only half the job, and the easier half.**
+  `removeCondition` had no caller, so a condition, once written, lasted the whole
+  fight. Every spell condition now carries a `SpellConditionRecord` in
+  `Combatant.spellConditions`, written in the same update as the condition, and
+  `lib/db/spell-condition-end.ts` takes it off when the caster's concentration
+  ends or the duration runs out. The pipeline refuses a condition with no
+  `conditionEnds`, so one that cannot end cannot be written.
+  Phase 2 (2026-09-26) added Tasha's Hideous Laughter, Hold Person and Hold
+  Monster: the target repeats the save at the end of its turns (and on damage,
+  for Tasha's), `onlyTypes`/`unaffectedTypes` read the new
+  `Combatant.creatureType` snapshot, and paralyzed gained its SRD automatic
+  STR/DEX save failure and melee critical hits.
+  **Still open:** `DEFERRED_SPELL_CONDITIONS` lists every other
+  condition-imposing spell in the cache with its reason code.
+
+Closed 2026-09-26: **no character could cast above 1st level.**
+`spellSlotsForLevel` in `lib/rules/magic.ts` held the SRD slot tables for every
+class and had no caller. Characters were created with two 1st-level slots if
+they were a wizard, cleric or sorcerer (a bard, druid or warlock got none), and
+`applyLevelUp` never touched `spellSlots`. Now `spellSlotsFor` feeds creation,
+`advanceSpellSlots` runs inside the level-up compare-and-set (under the
+Character row lock, since a cast spends the same column), and a long rest
+restores slots at the table's maxima for the class and level, which also
+repairs every character levelled before this. `tests/rules/spell-slot-progression.test.ts`.
+**Still open:** a warlock's Pact Magic slots return only on a long rest, not
+on a short rest as the SRD says. The short rest deliberately writes nothing
+when it spends no Hit Die, so adding that write needs its own concurrency
+reasoning.
+
+Closed 2026-09-26: **the live spawn path never snapshotted a monster's damage
+modifiers or condition immunities.** `spawnCombatEncounter` in
+`lib/rules/encounter-service.ts` writes all four columns, and has had no
+production caller since it was written; `POST /api/campaign/[id]/encounter`,
+the route the game actually calls, wrote none of them. Every entry above that
+calls those columns "snapshotted at spawn" was describing the dead copy. So
+in real play `applyDamageModifiers` and `grantConditions` ran against empty
+lists: no skeleton was vulnerable to bludgeoning, and no fire elemental
+ignored fire. The route now copies the seeded `SrdMonster` columns, and
+`tests/api/encounter-route-srd-snapshot.test.ts` pins it. The same lesson as
+the tool surface: a service with the right code and no caller is not proof
+the behaviour exists. **`spawnCombatEncounter` is still dead code;** whether
+to delete it or route through it is a separate call.
 - **The whole wilderness subsystem** — not a dormant value: a subsystem the
   project switched off on purpose. `stealthAdvantage` at
   `lib/rules/wilderness.ts:275` is one field of it, and the note that stood here
@@ -382,266 +447,53 @@ mismatch survives a green suite.
   reviving two models and taking the rules decision that migration parked, which
   is a project call and not an increment. Do not propose it as a next step
   without that decision being made first.
-- **The entire non-SRD AI tool surface** — 24 tool definitions across seven
-  builders, none with a production caller. `buildNarratorTools` spreads only
-  `buildSrdTools()`; `buildCombatTools`, `buildExplorationTools`,
-  `buildInventoryTools`, `buildProgressionTools`, `buildSocialTools`,
-  `buildWildernessTool` and `buildWorldTools` are all unreferenced outside
-  their own tests. `UNAVAILABLE_NARRATOR_TOOL_NAMES` in `lib/ai/tool-policy.ts`
-  is the full list.
+### Current narrator tool surface
 
-  **This entry said "twelve tool definitions across `social.ts` and
-  `world.ts`" until 2026-08-31.** That was the two files a defect scan
-  happened to surface; the directory was never listed. Same error as the rest
-  of this section — measuring the part that was handed over and describing it
-  as the whole.
+Verified against the implementation on 2026-09-30:
 
-  `a0bb009` stopped `buildNarratorTools` spreading them. This is the shape of
-  the dead `srd-lookup.ts` surface deleted in `8806e06`, with one difference
-  that kept it hidden: `lib/ai/tool-policy.ts` called the reduction temporary
-  and named "SEC-AI-001 PR 3" as what would restore them, which reads as the
-  "no callers yet, and the plan says so" exception. **That plan was cancelled,
-  not delayed.** SEC-AI-001 closed completed on 2026-08-30 having replaced
-  PR 3's design — contextual activation became physical exclusion — so nothing
-  is scheduled to call these again. The comment has been corrected; the
-  modules have not been touched.
-  **Not blocked, but not a one-file delete either.** The import graph was
-  verified across `app/`, `lib/`, `components/`, `scripts/`, `workflows/` and
-  `evals/` on 2026-08-31, and it was worse than two dead wrappers: **four
-  backend services were then reachable only through them.**
+- `buildNarratorTools` in `lib/ai/narrator.ts` physically projects
+  `buildSrdTools()` through the fixed policy in `lib/ai/tool-policy.ts`.
+- The four model-visible tools are read-only SRD lookups:
+  `getSpellInfo`, `getItemInfo`, `getEquipmentInfo`, and `getMonsterInfo`.
+- `UNAVAILABLE_NARRATOR_TOOL_NAMES` currently lists `generateLocation`,
+  `moveToNode`, `executeExplorationTurn`, and `executeTravelWatch`.
+  The remaining builder modules are `lib/ai/tools/exploration.ts` and
+  `lib/ai/tools/wilderness.ts`, alongside `srd-lookup.ts`.
+- The old combat, inventory, progression, social, and world AI builder files
+  are absent from the current tree. Do not plan their deletion or refer to the
+  historical 24-tool catalogue as the implemented surface.
+- The policy declares the reduction permanent. There is no scheduled
+  restoration of mutating narrator tools. Widening the model-visible surface
+  requires a new decision and its own Issue.
+- `levelUpPayload` and `merchantPayload` returned by the narrator resolve
+  to null. The action route retains conditional compatibility frames, but
+  those branches do not currently emit a resolved level-up or merchant payload.
+  A `level_up_available` frame is a separate backend notice; it does not apply
+  a level-up.
 
-  **All four rows are gone as of 2026-09-06. The table is empty, and that is
-  the finished state, not an omission.**
+Narration is buffered and validated before a single text chunk is emitted.
+A completed action receipt means the authoritative mechanical outcome
+finished; it does not guarantee narration delivery or persistence.
 
-  What happened to each, verified against the tree and the history rather than
-  assumed:
+### Lessons from retired services
 
-  - **`lib/rules/equipment-service.ts` was deleted** in `5096b3d`, "delete
-    equipment-service and the AI tool that was its only caller" (#103). Its
-    row claimed `equipCharacterItem` was shadowed by the `equip` gate in the
-    action route. That was true when written; the resolution was to remove the
-    service, leaving the gate as the single implementation.
-  - **`lib/rules/trade-service.ts` was deleted** in `c51b5ad`, "delete the
-    social tool builder and the trade service it tethered" (#117).
-  - **`lib/rules/npc-service.ts` was deleted** on 2026-09-06, after a full read
-    of the service against the route. Every capability its row credited it with
-    had acquired a live implementation elsewhere: the npc route writes
-    `race`/`profession`/`alignment`/`traits` since #118, and
-    `app/api/campaign/[id]/social/route.ts` writes `personalityTags`,
-    `hasMetPlayer` and the initial attitude while `social-service` maintains
-    `disposition`. `trackMerchantState` turned out to persist nothing
-    merchant-specific — the `NPC` model has no merchant columns, and
-    `archetype` only ever appeared in the returned facts.
+`lib/rules/equipment-service.ts`, `trade-service.ts`, and `npc-service.ts`
+are absent. Their historical comparisons must not be treated as a current
+deletion backlog. The live equipment gate is in the campaign action route;
+trade uses `app/actions/trade.ts`; social checks have a live route through
+`lib/rules/social-service.ts`.
 
-    What tipped it was the safety argument going stale. This entry used to
-    excuse the service's caller-supplied `name`/`maxHp`/`ac` and any-string
-    `role` on the grounds that `trackNPC` and `generateAndTrackNPC` derived the
-    statblock at the call site. Both were deleted in #117, so the mitigation
-    was gone and only the hazard was left — including an ownership check,
-    `if (input.userId && …)`, that no caller could trigger.
-  - **`lib/rules/social-service.ts` has a live caller and is no longer
-    dormant.** `resolveSocialCheck` is imported by
-    `app/api/campaign/[id]/social/route.ts` and `resolveRumors` by
-    `app/api/campaign/[id]/social/rumors/route.ts`. Its row said "none — there
-    is no social route at all", which stopped being true when those routes
-    landed (#99–#104).
+Retain the lessons from those comparisons when reviewing another module:
 
-  **This table sent a reader looking for `equipCharacterItem` on 2026-09-06,
-  five PRs after it was deleted.** That is the failure mode this whole section
-  exists to warn about, committed by the warning itself: a claim about
-  behaviour that was true when written and never re-checked. Before acting on
-  any row here, confirm the file still exists and grep for its importers. The
-  row is a lead, not a fact.
+- Check the current caller graph and schema, not a service-shaped filename.
+- A mocked database can accept fields the real Prisma schema rejects.
+- Compare validation, ownership, transaction boundaries, and persisted facts
+  before deciding that two implementations are equivalent.
+- Check test imports and assertions as well as production callers before
+  removing a module or an architectural guard.
 
-  The equipment row named `app/api/campaign/[id]/inventory/route.ts` until
-  2026-08-31. That route is `GET` only and equips nothing; the real live path
-  was the action route's `equip` gate. A row in this table is a claim about
-  behaviour, and that one was written from a directory listing.
-
-  All three comparisons were done, and **they did not share a verdict** —
-  which is the point. Reading each pair was the only way to find that out, and
-  it is why two of them ended in a deletion and one in a route.
-
-  **Trade was compared line by line on 2026-08-31. Neither copy is whole, and
-  an earlier version of this note guessed the wrong way about which is.** It
-  said the dead services were "transactional and Zod-validated" and that the
-  dead copy "may well be the correct one" — for trade that is false, and the
-  guess was made from module shape without reading either file.
-
-  - `app/actions/trade.ts` **did not validate `quantity` at all — fixed in
-    `12267bf`.** A negative quantity on buy made `totalCost` negative, passed
-    the `gold < totalCost` check, and reached `gold: { decrement: <negative> }`,
-    which raises the balance. It is a Server Action, so the UI was never the
-    only caller. The `campaign.userId !== user.id` check confined it to the
-    caller's own save — self-cheating rather than privilege escalation — but
-    accepting an illegal quantity and mutating gold from it breached backend
-    mechanical authority regardless. The guard now refuses before the
-    transaction opens, so nothing partial can be written, and
-    `tests/actions/trade-quantity-validation.test.ts` covers the negative,
-    zero, fractional and non-finite cases plus one asserting a valid quantity
-    still gets through. **The defect is worth remembering even though it is
-    closed:** it sat on the live path the whole time the review attention was
-    on the dead one.
-  - **`lib/rules/social-service.ts` had the same defect, found 2026-09-01 and
-    since fixed.** Its character lookup selected `campaignId`, and `Character`
-    has no such scalar — only the `campaigns Campaign[]` relation — so real
-    Prisma would throw `Unknown field campaignId` on the first call. Worse, two
-    lines read that field to check ownership, so **the character ownership
-    guard checked nothing.** Same cause as trade's: `resolveDb` casts Prisma
-    through a hand-written interface, and the contract test injects a fake `tx`
-    that returns whatever it is asked for.
-
-    Repaired when the module got its production caller (#99–#104). Verified
-    2026-09-06: the lookup now selects `{ id, stats, level, skillProficiencies }`
-    and `assertCharacterOwnership` compares `campaign.characterId !==
-    characterId`, a real field against a real field. The guard also carries an
-    honest comment about how narrow it is — the production route omits
-    `characterId`, so the comparison is satisfied by construction and the real
-    protection is the route's own `campaign.userId` gate.
-
-    **Keep the lesson even though the instance is closed:** two modules with
-    the same phantom field was a pattern, not a coincidence. Assume any
-    service wrapper that casts Prisma through a hand-written interface has it
-    too until that interface is read against `schema.prisma`. A green contract
-    test proves nothing here, because the fake `tx` answers whatever it is
-    asked.
-  - `lib/rules/trade-service.ts` **did not match the schema**, and was deleted
-    in `c51b5ad` (#117). `InventoryItem` has no `campaignId` column and
-    `Character` has no `campaignId` field, yet the service passed `campaignId`
-    to `inventoryItem.create` (real Prisma would throw `Unknown argument` on
-    the first purchase) and asserted against `item.campaignId` and
-    `character.campaignId`, which are always `undefined` against real rows — so
-    half of each ownership check was a no-op. It stayed green because
-    `resolveDb` cast `prisma as unknown as TradeDb` and its contract test
-    injected a fake `tx`. Mocked shape, never checked against the table: the
-    exact pair of defects this file warns about, and the reason the module went
-    rather than being wired up.
-
-  So the live path held the auth check, the working schema, the prose log the
-  narrator consumes and the input validation too, leaving `trade-service.ts`
-  with nothing the live path lacked and one thing it got wrong. That is what
-  settled the verdict for trade — and why the verdict has to be reached by
-  reading both copies, not by assuming the service-shaped one is the good one.
-
-  **It still cannot be deleted on its own, and an earlier version of this
-  paragraph said otherwise.** That version listed only what production code
-  would lose — `getCampaignCharacterIdForTrade` and the `TradeServiceError`
-  codes — because the production import graph was the only thing checked. The
-  test bindings were not, and they are what block the delete:
-
-  - `lib/ai/tools/social.ts:31` imports both functions for its `executeTrade`
-    tool, so removing the module fails `pnpm typecheck`.
-  - `tests/architecture/social-tool-no-direct-trade-prisma.test.ts:29`
-    **requires** that import to exist. Its thirteen assertions are a Code is
-    Law guard written in the negative: `executeTrade` must not call
-    `prisma.$transaction`, must not mutate `campaign.gold`, must not write
-    `InventoryItem`, must not compose trade prose while persisting. Deleting
-    the service deletes the proof that the AI layer cannot touch money.
-  - `tests/rules/trade-service-contract.test.ts` plus `vi.mock` lines in
-    `tests/ai/tools/tool-result-contract.test.ts:87` and
-    `tests/ai/narrator-real-sdk-containment.test.ts:20`.
-
-  The guard now protects dead code — `executeTrade` has no production caller
-  either — so removing both together is coherent. But that is five files and
-  the retirement of an architectural barrier, not a one-module delete, and
-  `executeTrade` is one of twelve tools in `buildSocialTools`/`buildWorldTools`
-  whose siblings will have bindings of their own. **Decide the fate of those
-  two builders as a whole; do not pick trade off separately.** Checking the
-  production import graph and calling a module deletable is how this paragraph
-  was wrong twice.
-
-  **`equipment-service` — the live path won outright, and the service was
-  deleted in `5096b3d` (#103).** Kept here because the comparison is what
-  produced the verdict, and the same reasoning applies to the next pair.
-
-  The `equip` gate runs inside `prisma.$transaction` while
-  `equipCharacterItem` fired its updates through `Promise.all`, so a
-  half-applied equip was possible in the dead one and not in the live one. The
-  gate also *derives* the slot with `slotFor`, where the service accepted a
-  `targetSlot` from its caller and validated it — deriving is the stronger of
-  the two, since no illegal value can be supplied at all. The service carried
-  the same phantom `campaignId` on `InventoryItem` as trade, on a branch real
-  Prisma never reached. It held nothing the gate lacked, so it went.
-
-  **`npc-service` — the verdict reversed between 2026-08-31 and 2026-09-06,
-  and the reversal is the lesson.** This section used to call it "not a
-  duplicate, and the only one of the three worth keeping on its merits". It
-  was deleted on 2026-09-06. Nothing about the module changed; what changed was
-  everything around it.
-
-  The comparison itself still stands and is worth keeping. The route derives
-  its statblock from `generateNPC` and refuses to trust the body, keeps
-  `name`/`maxHp`/`ac` immutable after creation, whitelists three roles and
-  requires an active campaign. The service did none of that: it took
-  `name`/`maxHp`/`ac` from its caller's descriptor, let an update rewrite them
-  through `baseNpcUpdateData`, accepted any non-empty `role`, and its ownership
-  check was opt-in — `if (input.userId && campaign?.userId && …)`.
-
-  **Two things then made the "keep it" half expire.**
-
-  First, the safety argument. This entry excused the caller-supplied statblock
-  because `trackNPC` and `generateAndTrackNPC` derived it via
-  `generateNPC(seed, role)` at the call site — "the boundary holds at the call
-  site, not in the service". #117 deleted both. With no callers at all, there
-  was no call site left to hold the boundary; only the hazard remained.
-
-  Second, the capability argument. `disposition`, `personalityTags`, `traits`,
-  `race`/`profession`/`alignment` and `trackMerchantState` were said to have
-  "no equivalent on the route at all". By 2026-09-06 every one of them did:
-  #118 gave the npc route `race`/`profession`/`alignment`/`traits`, and the
-  social route (#99–#104) writes `personalityTags`, `hasMetPlayer` and the
-  initial attitude while `social-service` maintains `disposition`.
-  `trackMerchantState` never held anything — the `NPC` model has no merchant
-  columns, so `archetype` only ever reached the returned facts.
-
-  **A verdict about two modules is only true on the date it was reached.**
-  Re-derive it before acting on it; this one flipped in six days without
-  either module being touched.
-
-  ### What to do with the tool surface
-
-  **Do not bulk-delete the wrappers.** Two reasons, both concrete.
-
-  First, they are what the AI-layer boundary is enforced *against*. Around ten
-  `tests/architecture/*-tool-no-direct-prisma.test.ts` files exist to prove the
-  AI layer never reaches for Prisma, and `narrator-tool-containment.test.ts:72`
-  — "catalogues every implemented non-SRD tool as unavailable" — binds both
-  ends by enumerating what exists. With no non-SRD tools implemented that
-  assertion is vacuous: it passes forever and guards nothing. A test that
-  cannot fail is worse than no test, and this would produce ten of them.
-
-  Second, they are the only written record of what the game was meant to do.
-  SEC-AI-001 correctly took the AI's hands off the wheel but did not build
-  replacement controls for everything it removed.
-
-  **That gap has largely closed since this was written.** As of 2026-09-06 the
-  game can attack, cast, equip, rest, level up, trade, travel, run a social
-  check and set an NPC disposition — the last two through
-  `app/api/campaign/[id]/social/route.ts` and its rumors sibling (#99–#104).
-  What remains unbuilt is merchant tracking as a persisted concept, and the
-  `NPC` model has no columns for it, so that is a schema question before it is
-  a route question. Check the gap before citing it; this paragraph named three
-  missing capabilities and two of them now exist.
-
-  So this is a product backlog wearing dead code's clothes, and it resolves
-  capability by capability, never in bulk:
-
-  - `equipment-service` — delete; the live gate wins outright and the service
-    has already rotted.
-  - `trade-service` and its guard — delete, once `narrator-tool-containment`
-    is confirmed to cover the invariant the trade-specific guard asserts.
-  - `npc-service` — deleted 2026-09-06. The product decision was answered by
-    building the routes: the npc route took over identity (#118) and the
-    social route took over disposition and first contact (#99–#104), leaving
-    the service with nothing of its own.
-  - `social-service` — **kept, and now live.** The answer here was "yes,
-    build a route", and it was built. It is no longer part of this backlog.
-  - combat, exploration, inventory, progression — **four builders whose
-    services were never compared.** Do not assume they match any verdict here.
-  - wilderness — leave alone; it is blocked by the recorded decision above.
-
-  The four pairs that *were* compared produced four different verdicts. Any
-  rule applied across the surface would have been right about one of them.
+The preceding wilderness note remains a recorded block on reviving that
+subsystem. It is not a request to restore its tools or models.
 
 ## Work style
 

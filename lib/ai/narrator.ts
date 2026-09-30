@@ -113,6 +113,25 @@ export function buildNarratorTools(campaignId: string) {
  * @param campaignId  - The campaign to narrate for.
  * @param playerInput - The player's raw action text.
  */
+/**
+ * The conditions any combatant holds after the action, from the same
+ * post-action campaign context the narrator is shown as canonical state. A
+ * restraint that lasts several turns is confirmed here on every one of them,
+ * not only on the turn a spell applied it.
+ */
+function heldConditions(encounter: { combatants: Array<{ conditions: unknown }> } | null | undefined): string[] {
+  if (!encounter) return [];
+  return [
+    ...new Set(
+      encounter.combatants.flatMap((combatant) =>
+        Array.isArray(combatant.conditions)
+          ? combatant.conditions.filter((c): c is string => typeof c === "string")
+          : []
+      )
+    ),
+  ];
+}
+
 export async function streamNarrative(
   campaignId: string,
   playerInput: string,
@@ -221,7 +240,9 @@ export async function streamNarrative(
         .join('\n'))
     : Promise.resolve(result.text);
   const finalNarrativeTextPromise = generatedTextPromise.then((fullText) => {
-    const validation = validateNarrativeText(fullText, safeNarrativeContext);
+    const validation = validateNarrativeText(fullText, safeNarrativeContext, {
+      activeConditions: heldConditions(context.activeEncounter),
+    });
     return validation.ok ? fullText.trim() : validatedFallbackProse(fallbackContext);
   }).catch(() => {
     return validatedFallbackProse(fallbackContext);

@@ -158,12 +158,19 @@ This pre-check is also the empirical answer to "does any existing data — inclu
 migration refuses to apply and says so, rather than the question being resolved by code review
 alone.
 
-**Deploy order:** the migration (with this backfill) must be applied before the new application
-code ships. This is enforced structurally, not just by convention — the generated Prisma Client
-will not expose `characterId` on `Combatant` at all until the schema and a matching migration
-exist together, so the new code literally cannot run against the old schema. Per `AGENTS.md`, the
-migration is written and committed but left unapplied against the real save; the maintainer
-applies it, same as DC-PARTY-001.
+The complete migration is one atomic `DO $add_combatant_character_link$` statement;
+the guard above illustrates its duplicate-player check. Column creation, backfill,
+constraints and both unique indexes all roll back together if any operation fails,
+even in a SQL client that normally commits statements individually.
+
+**Deploy order:** pause campaign writes and drain all old application instances first.
+The maintainer then applies the migration with its backfill, deploys the new application
+and its matching generated Prisma Client, and resumes writes. This is a coordinated
+maintenance deployment: old code cannot create a player combatant once the new CHECK
+exists, and new code cannot select `characterId` before its column exists.
+Generating the client validates the schema locally; it does not check or migrate the
+live database. Per `AGENTS.md`, the migration is committed but left unapplied against
+the real save; only disposable test databases are used for automated validation.
 
 **Deploy order, the reverse direction** (added in the final whole-branch review). The paragraph
 above covers new code meeting the old schema. The opposite window exists too: between

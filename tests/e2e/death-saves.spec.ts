@@ -78,7 +78,17 @@ test("@smoke a terminal death save lands in exactly one consistent state", async
       prisma.combatant.findUniqueOrThrow({ where: { id: fixture.playerId } }),
       prisma.encounter.findUniqueOrThrow({ where: { id: fixture.encounterId } }),
     ]);
+    // Four end states, told apart by the events. Stabilising schedules the wake
+    // at round 1 + d4, and the chain this same save ends wraps into round 2, so
+    // a d4 of 1 wakes the player inside this request (death-saves spec §6.5) and
+    // the persisted row is the conscious one. The Wait test below pins that
+    // transition without dice.
     if (events.includes("PLAYER_REVIVED")) {
+      expect(player).toMatchObject({
+        hp: 1, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null,
+      });
+      expect(encounter.status).toBe("active");
+    } else if (events.includes("PLAYER_STABILIZED") && events.includes("PLAYER_WOKE")) {
       expect(player).toMatchObject({
         hp: 1, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null,
       });

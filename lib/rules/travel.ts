@@ -12,6 +12,7 @@
  */
 import { seededFloat } from "@/lib/rules/generators";
 import { resolveSavingThrow } from "@/lib/rules/combat";
+import { exhaustionEffects, MAX_EXHAUSTION_LEVEL } from "@/lib/rules/exhaustion";
 
 /** SRD normal travel pace: 3 miles per hour. */
 export const MILES_PER_HOUR_NORMAL = 3;
@@ -26,8 +27,8 @@ export const MILES_PER_DAY_NORMAL = MILES_PER_HOUR_NORMAL * TRAVEL_HOURS_PER_DAY
 export const MIN_JOURNEY_MILES = 12;
 export const MAX_JOURNEY_MILES = 48;
 
-/** SRD exhaustion runs 1..6. Level 6 is death, which this game does not model. */
-export const MAX_EXHAUSTION = 6;
+/** SRD exhaustion runs 1..6. Level 6 is death — see `lib/rules/exhaustion.ts`. */
+export const MAX_EXHAUSTION = MAX_EXHAUSTION_LEVEL;
 
 export interface ForcedMarchSave {
   /** Absolute hour of the march: the first forced hour is the ninth. */
@@ -36,6 +37,8 @@ export interface ForcedMarchSave {
   roll: number;
   total: number;
   success: boolean;
+  /** Rolled at disadvantage because exhaustion had reached level 3. */
+  disadvantage: boolean;
 }
 
 export interface JourneyOutcome {
@@ -106,10 +109,15 @@ export function resolveJourney(input: {
 
   for (let past = 1; past <= forcedHours; past++) {
     const dc = 10 + past;
+    // Exhaustion takes effect the moment it is gained, so each save reads the
+    // level the march has reached so far: a failure that brings the character
+    // to level 3 puts every later save of the same march at disadvantage.
+    const levelNow = currentExhaustion + failed;
+    const disadvantage = exhaustionEffects(levelNow).savingThrowDisadvantage;
     // Delegated, not reimplemented: SRD saving throws already have exactly one
     // implementation and this does not become a second.
-    const { success, roll, total } = resolveSavingThrow(conModifier, dc);
-    saves.push({ hour: TRAVEL_HOURS_PER_DAY + past, dc, roll, total, success });
+    const { success, roll, total } = resolveSavingThrow(conModifier, dc, false, disadvantage);
+    saves.push({ hour: TRAVEL_HOURS_PER_DAY + past, dc, roll, total, success, disadvantage });
     if (!success) failed += 1;
   }
 

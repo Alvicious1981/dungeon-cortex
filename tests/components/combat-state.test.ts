@@ -10,6 +10,7 @@ function target(
   return {
     targetId,
     targetName: targetId,
+    targetIsPlayer: false,
     damage: 4,
     naturalRoll: 14,
     isCrit: false,

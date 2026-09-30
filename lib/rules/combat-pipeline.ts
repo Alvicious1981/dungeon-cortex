@@ -33,9 +33,26 @@ import {
   type ModifiedDamage,
 } from "@/lib/rules/damage-modifiers";
 import { grantConditions, immuneConditionLog } from "@/lib/rules/condition-immunity";
+import {
+  isUnaffected,
+  readSpellConditionRecords,
+  recordsForGrant,
+  repeatableHolds,
+} from "@/lib/rules/spell-conditions";
+import type { SpellConditionTerms } from "@/lib/rules/magic";
+import { ABILITIES, type Ability } from "@/lib/rules/ability-check";
+import { autoFailsSave } from "@/lib/rules/conditions";
+import {
+  concentrationOf,
+  endSpellConditions,
+  expiredFor,
+  rollRepeatSaves,
+} from "@/lib/db/spell-condition-end";
 import type { WeaponQuality } from "@/lib/rules/weapon-quality";
 import { mirrorPlayerCombatantHp, setPlayerHp } from "@/lib/db/player-hp";
 import { applyPlayerDowned } from "@/lib/db/player-downed";
+import { effectiveMaxHp } from "@/lib/rules/exhaustion";
+import { markCharacterDead } from "@/lib/db/character-death";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { EnemyTurnInvariantError, resolveEnemyTurn } from "@/lib/db/enemy-turn-transition";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
@@ -50,11 +67,15 @@ export interface PipelineCombatant {
   maxHp: number;
   ac: number;
   conditions: unknown;
+  /** SpellConditionRecord[] — why a spell-imposed condition holds. */
+  spellConditions?: unknown;
   stats: unknown;
   damageImmunities?: string[];
   damageResistances?: string[];
   damageVulnerabilities?: string[];
   conditionImmunities?: string[];
+  /** SRD creature type; null/absent = unknown. */
+  creatureType?: string | null;
   concentrationSpellId: string | null;
 }
 
@@ -76,8 +97,13 @@ interface PipelineSpellEffect {
   hasSavingThrow?: boolean;
   saveAbility?: string | null;
   saveDamage?: "half" | "none";
-  condition?: string | null;
+  conditions?: readonly string[];
+  conditionTerms?: SpellConditionTerms | null;
   concentration?: boolean;
+}
+
+function isAbility(value: unknown): value is Ability {
+  return typeof value === "string" && (ABILITIES as readonly string[]).includes(value);
 }
 
 function normalizeDamageType(value: string | null | undefined): DamageType {
@@ -231,9 +257,9 @@ async function claimConsumableUnit(
  * to overwrite healing another transaction committed first.
  *
  * The dice result is supplied by the caller and is never recomputed here.
- * Each attempt reads the latest hp/maxHp pair, derives the capped result, then
- * conditionally writes only if both values still match the snapshot that
- * authorised that result. A miss means another writer won; re-read and rebase
+ * Each attempt reads the latest hp/maxHp/exhaustionLevel, derives the capped
+ * result, then conditionally writes only if all three still match the snapshot
+ * that authorised that result. A miss means another writer won; re-read and rebase
  * the same healing amount. Matching maxHp as well as hp keeps the cap coherent
  * with concurrent progression or sheet changes.
  *
@@ -256,7 +282,10 @@ async function applyCharacterHealing(
     const character = await characterDb.findUnique({ where: { id: characterId } });
     if (!character) return null;
 
-    const newHp = Math.min(character.hp + healed, character.maxHp);
+    const newHp = Math.min(
+      character.hp + healed,
+      effectiveMaxHp(character.maxHp, character.exhaustionLevel)
+    );
     await characterDb.update({
       where: { id: characterId },
       data: { hp: newHp },
@@ -268,16 +297,21 @@ async function applyCharacterHealing(
   for (let attempt = 0; attempt < MAX_CHARACTER_HEAL_CAS_ATTEMPTS; attempt += 1) {
     const character = await characterDb.findUnique({
       where: { id: characterId },
-      select: { hp: true, maxHp: true },
+      select: { hp: true, maxHp: true, exhaustionLevel: true },
     });
     if (!character) return null;
 
-    const newHp = Math.min(character.hp + healed, character.maxHp);
+    // Exhaustion level 4+ halves the maximum that healing may reach.
+    const newHp = Math.min(
+      character.hp + healed,
+      effectiveMaxHp(character.maxHp, character.exhaustionLevel)
+    );
     const claim = await characterDb.updateMany({
       where: {
         id: characterId,
         hp: character.hp,
         maxHp: character.maxHp,
+        exhaustionLevel: character.exhaustionLevel,
       },
       data: { hp: newHp },
     });
@@ -301,6 +335,11 @@ export interface CombatActionPayload {
   actorConditions: string[];
   /** SRD armour-proficiency penalty on the actor. Defaults to no penalty. */
   actorArmorPenalty?: boolean;
+  /**
+   * The actor's exhaustion level (0-6), from `Character.exhaustionLevel`.
+   * Level 3+ imposes disadvantage on attack rolls. Defaults to 0.
+   */
+  actorExhaustionLevel?: number;
   targetCombatants: PipelineCombatant[];
   
   // Weapon/Attack data
@@ -335,6 +374,12 @@ export interface CombatActionPayload {
 
 export interface CombatOutcome {
   events: GameEvent[];
+  /**
+   * One entry for each creature the action did something to: every creature an
+   * attack or a damaging spell names, and a creature a heal or a utility spell
+   * changed. It becomes COMBAT_CONSEQUENCE `targets[]`, where an entry with no
+   * damage reads as a missed attack.
+   */
   consequences: SingleTargetConsequence[];
   totalDamageDealt: number;
   consequenceDetails?: CombatConsequences[];
@@ -373,10 +418,12 @@ export interface FinalizeTurnResult {
 
 export function buildCombatConsequenceEvent(input: {
   attackerName: string;
+  attackerIsPlayer: boolean;
   targets: SingleTargetConsequence[];
 }): CombatConsequenceEvent {
   const payload: CombatConsequencePayload = {
     attackerName: input.attackerName,
+    attackerIsPlayer: input.attackerIsPlayer,
     targets: input.targets,
   };
 
@@ -461,6 +508,18 @@ export async function executeCombatAction(
       data: { concentrationSpellId: payload.spellName },
     });
 
+    // The old spell ends here, before this cast applies anything, so the new
+    // spell's conditions are never taken off with the old one's — recasting
+    // the same spell included.
+    if (previousSpell && actorCombatant && encounter.id) {
+      const ended = await endSpellConditions(tx, {
+        encounterId: encounter.id,
+        shouldEnd: concentrationOf(actorCombatant.id),
+        reason: "concentration ended",
+      });
+      systemLogs.push(...ended.map((e) => e.log));
+    }
+
     if (actorCombatant) {
       await tx.combatant.update({
         where: { id: actorCombatant.id },
@@ -512,6 +571,7 @@ export async function executeCombatAction(
   }
 
   // RESOLVE TARGETS
+  let brokenConcentrationCasterId: string | null = null;
   for (const target of targetCombatants) {
     let damage = 0;
     let saved = false;
@@ -526,6 +586,9 @@ export async function executeCombatAction(
     let conditionsBlocked: readonly string[] = [];
     let damageUnresolved: readonly string[] = [];
     let damageApplied: ModifiedDamage["applied"] = "none";
+    // Whether the row, as the damage write returned it, holds a spell that
+    // lets the creature repeat its save when damaged (Tasha's).
+    let heldOnDamage = false;
 
     if (actionType === "attack") {
       const snapshot: EncounterSnapshot = {
@@ -561,6 +624,7 @@ export async function executeCombatAction(
         attackerConditions: actorConditions,
         defenderConditions: extractConditions(target.conditions),
         attackerArmorPenalty: payload.actorArmorPenalty ?? false,
+        attackerExhaustionLevel: payload.actorExhaustionLevel ?? 0,
         isMelee: true,
         encounterSnapshot: snapshot,
         usedSenses: [],
@@ -587,12 +651,30 @@ export async function executeCombatAction(
       
     } else if (actionType === "cast_spell" && payload.spellEffect) {
       const effect = payload.spellEffect;
-      if (effect.hasSavingThrow && effect.saveAbility && payload.spellSaveDC) {
-        const targetStats = (target.stats as Record<string, number>) || {};
+      const targetStats = (target.stats as Record<string, number>) || {};
+      // A legal target the spell does nothing to (Hold Monster on undead,
+      // Tasha's on INT 4 or less): no save is rolled and nothing is applied.
+      const unaffected =
+        effect.conditionTerms !== null &&
+        effect.conditionTerms !== undefined &&
+        isUnaffected(effect.conditionTerms, {
+          creatureType: target.creatureType,
+          intelligence: targetStats.INT ?? 10,
+        });
+      if (unaffected) {
+        systemLogs.push(`${target.name} is unaffected by ${payload.spellName || "the spell"}.`);
+      } else if (effect.hasSavingThrow && effect.saveAbility && payload.spellSaveDC) {
         const targetMod = abilityModifier(targetStats[effect.saveAbility] ?? 10);
-        const saveResult = resolveSavingThrow(targetMod, payload.spellSaveDC);
-        saved = saveResult.success;
-        saveRoll = saveResult.roll;
+        // SRD: a paralyzed, stunned, unconscious or petrified creature
+        // automatically fails Strength and Dexterity saving throws.
+        if (autoFailsSave(extractConditions(target.conditions), effect.saveAbility)) {
+          saved = false;
+          saveRoll = 0;
+        } else {
+          const saveResult = resolveSavingThrow(targetMod, payload.spellSaveDC);
+          saved = saveResult.success;
+          saveRoll = saveResult.roll;
+        }
         naturalRoll = saveRoll;
         
         if (effect.dice) {
@@ -631,9 +713,12 @@ export async function executeCombatAction(
       // from one list. Computing them separately is how the two come to
       // disagree — and the facts reach the narrator, so a disagreement would
       // have it describing a condition the engine had refused.
-      if (!saved && effect.condition) {
+      //
+      // A condition without `conditionTerms` is not applied: nothing could ever
+      // take it off, so it would last the rest of the fight.
+      if (!unaffected && !saved && effect.conditions?.length && effect.conditionTerms) {
         const grant = grantConditions({
-          conditions: [effect.condition],
+          conditions: effect.conditions,
           immunities: target.conditionImmunities ?? [],
         });
         conditionsToApply = grant.granted;
@@ -717,6 +802,10 @@ export async function executeCombatAction(
         where: { id: target.id },
         data: { hp: { decrement: damage } },
       });
+      heldOnDamage = repeatableHolds(
+        readSpellConditionRecords(updatedTarget?.spellConditions ?? target.spellConditions),
+        (hold) => hold.repeatSave.onDamage
+      ).length > 0;
 
       if (conditionsToApply.length > 0) {
         // `update` returns the row as it exists after waiting for any earlier row
@@ -734,9 +823,39 @@ export async function executeCombatAction(
           persistedConditions
         );
 
+        // Why each new condition holds, written in the same update as the
+        // condition itself, so no condition a spell applied can exist without
+        // the record that later takes it off. Rebased on the locked row too.
+        const ends = payload.spellEffect?.conditionTerms;
+        const spellConditions = ends
+          ? [
+              ...readSpellConditionRecords(updatedTarget?.spellConditions ?? target.spellConditions),
+              ...recordsForGrant({
+                granted: conditionsToApply,
+                spellIndex: ends.spellIndex,
+                casterId: payload.actorId,
+                entry: ends,
+                round: encounter.round,
+                repeatSave:
+                  ends.repeatSave && isAbility(payload.spellEffect?.saveAbility) && payload.spellSaveDC
+                    ? {
+                        ability: payload.spellEffect.saveAbility,
+                        dc: payload.spellSaveDC,
+                        onDamage: ends.repeatSave.onDamage,
+                      }
+                    : undefined,
+              }),
+            ]
+          : undefined;
+
         await tx.combatant.update({
           where: { id: target.id },
-          data: { conditions: rebasedConditions },
+          data: {
+            conditions: rebasedConditions,
+            ...(spellConditions
+              ? { spellConditions: spellConditions as unknown as Prisma.InputJsonValue }
+              : {}),
+          },
         });
       }
 
@@ -783,9 +902,22 @@ export async function executeCombatAction(
       }
     }
 
+    // SRD (Tasha's Hideous Laughter): a creature held by a spell that allows
+    // it repeats the save each time it takes damage, with advantage. Rolled
+    // after the damage is written, against the records already on the row.
+    if (heldOnDamage && damage > 0 && newHp > 0 && encounter.id) {
+      const repeat = await rollRepeatSaves(tx, {
+        encounterId: encounter.id,
+        combatantId: target.id,
+        trigger: "damage",
+      });
+      systemLogs.push(...repeat.logs);
+    }
+
     const singleConsequence: SingleTargetConsequence = {
       targetName: target.name,
       targetId: target.id,
+      targetIsPlayer: target.isPlayer,
       damage,
       naturalRoll,
       isCrit,
@@ -797,7 +929,24 @@ export async function executeCombatAction(
       conditionsApplied: [...conditionsToApply],
       narrativeTags: tags,
     };
-    consequences.push(singleConsequence);
+
+    // An attack and a damaging spell say what happened to every creature they
+    // name: a miss, a saved target and an immune one included. A heal or a
+    // plain utility spell only names creatures it may do nothing to: the heal
+    // is applied to the caster above, and such a utility spell has no dice,
+    // save or condition. An entry for one says damage 0 and, for a heal, the
+    // HP from before it, and the narrator adapter reads that as "Attack
+    // missed". So such a spell reports a creature only if it changed it.
+    // A spell that imposes a condition through a save (SPELL_CONDITIONS)
+    // reports every creature that rolled one, the way a damaging spell reports
+    // a saved target: the narrator is owed "it resisted", not silence.
+    const reportsTarget =
+      actionType === "attack" ||
+      payload.spellEffect?.type === "damage" ||
+      damage > 0 ||
+      conditionsToApply.length > 0 ||
+      Boolean(payload.spellEffect?.conditionTerms && payload.spellEffect.hasSavingThrow);
+    if (reportsTarget) consequences.push(singleConsequence);
 
     if (collectEvents) {
       if (isFumble) {
@@ -828,6 +977,7 @@ export async function executeCombatAction(
         where: { id: target.id },
         data: { concentrationSpellId: null },
       });
+      if (target.isPlayer) brokenConcentrationCasterId = target.id;
 
       if (collectEvents) {
         events.push({
@@ -840,6 +990,18 @@ export async function executeCombatAction(
         });
       }
     }
+  }
+
+  // After the loop, not inside it: when the player's own spell breaks their
+  // concentration, the conditions this same cast put on creatures earlier in
+  // the loop end too, and none put on later ones survive.
+  if (brokenConcentrationCasterId && encounter.id) {
+    const ended = await endSpellConditions(tx, {
+      encounterId: encounter.id,
+      shouldEnd: concentrationOf(brokenConcentrationCasterId),
+      reason: "concentration broken",
+    });
+    systemLogs.push(...ended.map((e) => e.log));
   }
 
   if (totalDamageDealt > 0 && encounter.id) {
@@ -902,10 +1064,7 @@ async function resolveEncounterIfEnded(input: {
         select: { campaign: { select: { characterId: true } } },
       });
       if (owner) {
-        await tx.character.updateMany({
-          where: { id: owner.campaign.characterId, diedAt: null },
-          data: { diedAt: new Date() },
-        });
+        await markCharacterDead(tx, owner.campaign.characterId);
       }
     }
 
@@ -1027,6 +1186,71 @@ async function resolveEncounterIfEnded(input: {
  * throws TurnStateConflictError and rolls everything back; there is no stale
  * return to report. The loop is bounded by one iteration per combatant.
  */
+/**
+ * Ends the conditions whose spell has run its duration, at the start of the
+ * caster's turn.
+ *
+ * When one of them was held by concentration, the spell's duration is also
+ * the most concentration can last, so concentration ends with it. That spell
+ * is necessarily the one the player is concentrating on now: casting another
+ * concentration spell ends the older one's records at once (the replacement
+ * in executeCombatAction), so no record of an earlier spell survives to here.
+ */
+async function expirePlayerSpellConditions(
+  tx: Prisma.TransactionClient,
+  input: {
+    encounterId: string;
+    owner: { campaignId: string; characterId: string };
+    casterId: string;
+    round: number;
+    collectEvents: boolean;
+    events: GameEvent[];
+  }
+): Promise<void> {
+  let concentrationExpired = false;
+  const ended = await endSpellConditions(tx, {
+    encounterId: input.encounterId,
+    shouldEnd: (record) => {
+      const expired = expiredFor(input.casterId, input.round)(record);
+      if (expired && record.concentration) concentrationExpired = true;
+      return expired;
+    },
+    reason: "duration expired",
+  });
+  for (const entry of ended) {
+    await tx.gameLog.create({
+      data: { campaignId: input.owner.campaignId, role: "system", content: entry.log },
+    });
+  }
+  if (!concentrationExpired) return;
+
+  const character = await tx.character.findUnique({
+    where: { id: input.owner.characterId },
+    select: { concentrationSpellId: true, name: true },
+  });
+  if (!character?.concentrationSpellId) return;
+
+  // Character first, then its Combatant mirror — the lock order setPlayerHp keeps.
+  await tx.character.update({
+    where: { id: input.owner.characterId },
+    data: { concentrationSpellId: null },
+  });
+  await tx.combatant.updateMany({
+    where: { encounterId: input.encounterId, isPlayer: true },
+    data: { concentrationSpellId: null },
+  });
+  if (input.collectEvents) {
+    input.events.push({
+      type: "CONCENTRATION_BROKEN",
+      payload: {
+        targetName: character.name,
+        spellName: character.concentrationSpellId,
+        reason: "duration_expired",
+      },
+    });
+  }
+}
+
 async function runEnemyChain(input: {
   tx: Prisma.TransactionClient;
   encounterId: string;
@@ -1053,6 +1277,17 @@ async function runEnemyChain(input: {
       throw new EnemyTurnInvariantError(`Encounter ${encounterId} has no combatant at ${turnIndex}.`);
     }
     if (active.isPlayer) {
+      // The player's turn begins, which is when a spell cast on an earlier
+      // turn of theirs runs out: 1 minute is ten of the caster's turns.
+      await expirePlayerSpellConditions(tx, {
+        encounterId,
+        owner,
+        casterId: active.id,
+        round,
+        collectEvents,
+        events,
+      });
+
       // The player's turn begins: a stable player wakes on the scheduled round
       // (death-saves spec §6.5). setPlayerHp's mirror clears the death state.
       if (shouldWake({ hp: active.hp ?? 1, stableWakeRound: active.stableWakeRound ?? null }, round)) {
@@ -1105,6 +1340,19 @@ async function runEnemyChain(input: {
         );
       }
       return ended;
+    }
+
+    // The end of this enemy's turn: a spell that allows it (Hold Person,
+    // Tasha's) gives it another save, whether or not it could act this turn.
+    const repeat = await rollRepeatSaves(tx, {
+      encounterId,
+      combatantId: active.id,
+      trigger: "end_of_turn",
+    });
+    for (const content of repeat.logs) {
+      await tx.gameLog.create({
+        data: { campaignId: owner.campaignId, role: "system", content },
+      });
     }
 
     const next = advanceTurn({

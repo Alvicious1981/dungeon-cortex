@@ -9,6 +9,8 @@
  * scripts/seed-conditions.ts). This registry is the compile-time guard.
  */
 
+import { exhaustionEffects } from "@/lib/rules/exhaustion";
+
 export interface ConditionRegistryEntry {
   id: string;
   name: string;
@@ -38,6 +40,18 @@ export interface ConditionRegistryEntry {
   unawareOfSurroundings?: boolean;
   /** Combatant cannot take actions or reactions. */
   incapacitated?: boolean;
+  /** The creature's speed becomes 0 (SRD: Grappled, Restrained). */
+  speedZero?: boolean;
+  /**
+   * The creature automatically fails Strength and Dexterity saving throws
+   * (SRD: Paralyzed, Petrified, Stunned, Unconscious).
+   */
+  autoFailStrDexSaves?: boolean;
+  /**
+   * An attack that hits the creature from within 5 feet is a critical hit
+   * (SRD: Paralyzed, Unconscious).
+   */
+  meleeHitsCritical?: boolean;
 }
 
 /**
@@ -66,6 +80,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     name: "Paralyzed",
     attackerAdvantage: true,
     incapacitated: true,
+    autoFailStrDexSaves: true,
+    meleeHitsCritical: true,
   },
   petrified: {
     id: "petrified",
@@ -74,12 +90,14 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     incapacitated: true,
     // SRD: "the creature ... is unaware of its surroundings".
     unawareOfSurroundings: true,
+    autoFailStrDexSaves: true,
   },
   stunned: {
     id: "stunned",
     name: "Stunned",
     attackerAdvantage: true,
     incapacitated: true,
+    autoFailStrDexSaves: true,
   },
   unconscious: {
     id: "unconscious",
@@ -88,12 +106,15 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
     incapacitated: true,
     // SRD: "the creature ... is unaware of its surroundings".
     unawareOfSurroundings: true,
+    autoFailStrDexSaves: true,
+    meleeHitsCritical: true,
   },
   restrained: {
     id: "restrained",
     name: "Restrained",
     selfDisadvantageOnAttack: true,
     attackerAdvantage: true,
+    speedZero: true,
   },
   invisible: {
     id: "invisible",
@@ -136,7 +157,8 @@ export const CONDITION_REGISTRY: Record<string, ConditionRegistryEntry> = {
   grappled: {
     id: "grappled",
     name: "Grappled",
-    // Speed 0; no direct attack-roll modifier per 5e 2014 SRD.
+    // No direct attack-roll modifier per 5e 2014 SRD.
+    speedZero: true,
   },
   incapacitated: {
     id: "incapacitated",
@@ -167,14 +189,24 @@ export function isKnownCondition(conditionId: string): boolean {
  * @param attackerConditions List of conditions currently affecting the attacker.
  * @param defenderConditions List of conditions currently affecting the defender.
  * @param isMelee True if the attack is a melee attack.
+ * @param attackerExhaustionLevel The attacker's exhaustion level (0-6). Level 3
+ *        or more is one more source of disadvantage, and it enters the pool
+ *        *before* neutralization, so an advantaged exhausted attacker rolls a
+ *        normal d20 exactly as the SRD requires.
+ * @param attackerArmorPenalty True when the attacker wears armour they are not
+ *        proficient with (SRD: disadvantage on every Strength or Dexterity
+ *        attack). Another source in the same pool, for the same reason.
  */
 export function evaluateAdvantage(
   attackerConditions: string[],
   defenderConditions: string[],
-  isMelee: boolean
+  isMelee: boolean,
+  attackerExhaustionLevel: number = 0,
+  attackerArmorPenalty: boolean = false
 ): { advantage: boolean; disadvantage: boolean } {
   let hasAdvantage = false;
-  let hasDisadvantage = false;
+  let hasDisadvantage =
+    exhaustionEffects(attackerExhaustionLevel).attackDisadvantage || attackerArmorPenalty;
 
   // 1. Process Attacker's own conditions.
   for (const condId of attackerConditions) {
@@ -238,7 +270,7 @@ export function evaluateAbilityCheckAdvantage(
 ): { advantage: boolean; disadvantage: boolean } {
   // Multiple sources of disadvantage do not stack in 5e — one is the same as
   // three — so this is a boolean, not a count.
-  let hasDisadvantage = exhaustionLevel >= 1;
+  let hasDisadvantage = exhaustionEffects(exhaustionLevel).abilityCheckDisadvantage;
 
   for (const condId of conditions) {
     const entry = CONDITION_REGISTRY[condId.toLowerCase()];
@@ -289,5 +321,40 @@ export function isUnawareOfSurroundings(conditions: readonly string[]): boolean 
 export function isIncapacitated(conditions: readonly string[]): boolean {
   return conditions.some(
     (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.incapacitated === true
+  );
+}
+
+/**
+ * Whether any active condition sets the creature's speed to 0 — the
+ * registry's `speedZero` flag. A restrained enemy still acts (with
+ * disadvantage), so this is separate from isIncapacitated: it stops the move,
+ * not the turn.
+ */
+export function isImmobilized(conditions: readonly string[]): boolean {
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.speedZero === true
+  );
+}
+
+/**
+ * Whether the creature automatically fails this saving throw — the registry's
+ * `autoFailStrDexSaves` flag, for a Strength or Dexterity save only.
+ */
+export function autoFailsSave(conditions: readonly string[], ability: string): boolean {
+  const upper = ability.toUpperCase();
+  if (upper !== "STR" && upper !== "DEX") return false;
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.autoFailStrDexSaves === true
+  );
+}
+
+/**
+ * Whether a melee hit on the creature is a critical hit — the registry's
+ * `meleeHitsCritical` flag. The SRD says "within 5 feet"; the engine treats a
+ * melee attack as that range, which also crits for a reach weapon at 10 feet.
+ */
+export function meleeHitsAreCritical(conditions: readonly string[]): boolean {
+  return conditions.some(
+    (condId) => CONDITION_REGISTRY[condId.toLowerCase()]?.meleeHitsCritical === true
   );
 }

@@ -85,6 +85,7 @@ export function buildNarrativePrompt(context: CombatNarrativeContext): Narrative
     'Use only D&D 5e/SRD 2014 terminology; omit alternate or legacy ruleset terminology.',
     'Include no numerical HP, damage, or healing values and no XP, loot, gold, or other unconfirmed rewards.',
     'Include no unconfirmed death or conditions. Describe only facts explicitly confirmed by the backend.',
+    'A condition listed on a combatant in the campaign state is confirmed and ongoing, and may be described as lasting. Say a creature is no longer under a condition only when the campaign state no longer lists it.',
     'If safe narration is impossible, produce minimal narration: one sentence based only on confirmed facts.',
     'Use the language requested by the player and honor the supplied tone and qualitative intensity.',
   ].join('\n');

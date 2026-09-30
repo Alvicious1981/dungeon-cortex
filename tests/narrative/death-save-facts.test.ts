@@ -34,4 +34,25 @@ describe("death-save narration (death-saves spec §6.6)", () => {
     expect(issues.map((i) => i.code)).not.toContain("unconfirmed_player_death");
     expect(issues.map((i) => i.code)).not.toContain("unconfirmed_death");
   });
+
+  it.each(["PLAYER_DOWNED", "PLAYER_STABILIZED"] as const)(
+    "accepts narrating the player unconscious on %s",
+    (type) => {
+      const context = adaptCombatEventsToNarrativeContext([{ type, payload: {} }]);
+
+      expect(validateNarrativeText("Caes inconsciente.", context).ok).toBe(true);
+      expect(validateNarrativeText("You fall unconscious.", context).ok).toBe(true);
+    },
+  );
+
+  it("still refuses an unconscious player the backend has not confirmed", () => {
+    const withoutFacts = validateNarrativeText("Caes inconsciente.", { facts: [] });
+    const afterWaking = validateNarrativeText(
+      "Caes inconsciente.",
+      adaptCombatEventsToNarrativeContext([{ type: "PLAYER_WOKE", payload: { hp: 1 } }]),
+    );
+
+    expect(withoutFacts.issues.map((i) => i.code)).toContain("unconfirmed_condition");
+    expect(afterWaking.issues.map((i) => i.code)).toContain("unconfirmed_condition");
+  });
 });

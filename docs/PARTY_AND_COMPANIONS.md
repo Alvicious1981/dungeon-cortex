@@ -122,7 +122,7 @@ Constraints and why each lives where it does:
 | Invariant | Enforcement |
 |---|---|
 | A Character cannot appear twice in the same Party | `@@unique([campaignId, characterId])` — database |
-| Exactly one MAIN per Campaign | Partial unique index `PartyMember_one_main_per_campaign_key` on `(campaignId) WHERE role = 'MAIN'` — database, migration-only (Prisma's schema DSL cannot express a filtered `@@unique`; same limitation as the existing `Encounter_one_active_per_campaign_key`) |
+| Exactly one MAIN per Campaign | Backfill and atomic campaign creation supply the MAIN row; partial unique index `PartyMember_one_main_per_campaign_key` on `(campaignId) WHERE role = 'MAIN'` prevents a second one. The index alone enforces at most one, not the existence of a row. It is migration-only because Prisma cannot express filtered `@@unique` indexes. |
 | Up to 3 active members | `MAX_ACTIVE_PARTY_MEMBERS` in `lib/party/roster.ts` — **application layer**, deliberately not a DB trigger. A hard cap enforced by a trigger is fragile and disproportionate for a foundation PR with no code path that can yet add a 4th member; a future recruitment task enforces this at the point where membership can actually grow. |
 | Role explicit / Control explicit | Real Postgres enums (`PartyRole`, `PartyControlMode`), not `String` + comment. Closed-set classification on a narrow join entity, matching this schema's `CharacterChangeSource` precedent rather than the broad-lifecycle `String @default("active")` convention used by `Campaign`/`Encounter`/`Quest`. An enum makes an illegal value structurally unrepresentable. |
 | Character/user ownership cannot be bypassed | `PartyMember` rows are only ever created after the existing `character.userId !== user.id` ownership check in `app/api/campaign/route.ts` |
@@ -145,6 +145,12 @@ existing reader of `Campaign.characterId` continues to work exactly as before.
 2. **Campaign creation** — `app/api/campaign/route.ts` now creates the Campaign row and its MAIN
    `PartyMember` row inside one `$transaction`, so every Campaign created after this PR ships also
    satisfies the invariant immediately, not just historical data.
+
+**Deployment:** apply `20260917130000_add_party_members` before serving the new campaign-creation
+route. Its transaction always inserts into `PartyMember`; atomicity does not make a missing table
+optional. For DC-PARTY-002's Combatant link, pause writes and drain old application instances before
+applying its migration, deploy the matching code/client, and then resume writes (see the identity
+design's deployment section). No migration is applied to the real save during agent validation.
 
 This compatibility phase ends when a future task switches some reader from `Campaign.characterId` to
 `PartyMember` as its source of truth. No such switch happens in this decision.

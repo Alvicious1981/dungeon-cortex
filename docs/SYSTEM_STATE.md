@@ -16,7 +16,7 @@
 - **Tests:** 29/29 stable tests verified for combat pipeline and API actions.
 
 ### Implementation Details
-- **Contract:** Payloads strictly contain `attackerName` and the `targets[]` array.
+- **Contract:** Payloads strictly contain `attackerName`, `attackerIsPlayer` and the `targets[]` array (`attackerIsPlayer` added 2026-09-24; see `MASTER_ARCH_GUIDE.md` §5.1).
 - **SSE Emission:** Clean contract only; no flat field hydration.
 - **UI Logic:** Results (isKill, isCrit) are derived by iterating over `targets[]`.
 - **Dungeon Mechanics:** Concentration, Spells, and Save DCs are calculated deterministically via Node/Drizzle.

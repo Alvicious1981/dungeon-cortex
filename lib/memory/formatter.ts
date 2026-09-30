@@ -25,6 +25,7 @@ import { abilityModifier } from "@/lib/rules/dice";
 import { parseSkillProficiencies } from "@/lib/rules/class-skills";
 import type { CharacterNarrativeProfile } from "@/lib/character-sheet/contracts";
 import { slotAccepts } from "@/lib/rules/equipment-slot";
+import { describeExhaustion, effectiveMaxHp } from "@/lib/rules/exhaustion";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,13 +76,13 @@ export function formatIronLaws(): string {
     "",
     "**Code is Law / State is Truth:** You have **no mechanical authority**.",
     "Never invent rolls, damage, loot, XP, movement outcomes, social outcomes, weather, or economy changes.",
-    "Narrate only mechanics that come from tool outputs or persisted state in this prompt.",
+    "Narrate only mechanics that come from backend-resolved facts or persisted state in this prompt.",
     "",
-    "**Tooling Protocol:** Only use a tool that is available in this request. Available tools are non-mutating reference lookups or deterministic generators.",
-    "A deterministic generator does not establish a canonical fact unless the backend context already identifies and authorizes the referenced entity.",
+    "**Tooling Protocol:** Only use a tool that is available in this request. The available tools are read-only D&D 5e SRD reference lookups.",
     "Never use a tool to resolve, apply, or persist a mechanical outcome. If no persisted state or backend-resolved fact supports it, do not create that fact in narration.",
     "",
-    "**Lookup Accuracy:** For spells, items, and monsters, use lookup tools before narrating mechanics.",
+    "**Lookup Accuracy:** An SRD lookup may clarify the canonical name or description of a spell, item, or monster.",
+    "A lookup never establishes a hit, a save, damage, healing, a condition, or any other outcome; only backend-resolved facts do.",
     "Never invent AC, HP, damage, or feature text.",
     "",
     "**Continuity:** Keep narration tightly grounded in current state, recent events, and scene context.",
@@ -193,11 +194,19 @@ function formatCharacter(character: CampaignContext["character"]): string {
     `**${character.name}** — ${character.race} ${character.class}, Level ${character.level}`
   );
 
-  lines.push(`**HP:** ${character.hp} / ${character.maxHp}`);
+  // The maximum that applies now: exhaustion level 4+ halves it while
+  // `maxHp` keeps the unreduced value (see lib/rules/exhaustion.ts).
+  const currentMaxHp = effectiveMaxHp(character.maxHp, character.exhaustionLevel);
+  lines.push(
+    currentMaxHp === character.maxHp
+      ? `**HP:** ${character.hp} / ${character.maxHp}`
+      : `**HP:** ${character.hp} / ${currentMaxHp} (maximum halved by exhaustion from ${character.maxHp})`
+  );
 
-  // Exhaustion (Phase 6) — Expose only backend-supported mechanical semantics (no unsupported tiers)
-  if (typeof character.exhaustionLevel === "number" && character.exhaustionLevel >= 1) {
-    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
+  // Exhaustion — every tier named here is one the backend enforces.
+  const exhaustion = describeExhaustion(character.exhaustionLevel);
+  if (exhaustion) {
+    lines.push(`**Exhaustion:** ${exhaustion}`);
   }
 
   // Concentration (Phase 7) — Raw truthiness mirrors backend presence
@@ -615,9 +624,10 @@ export function formatSurvivalHUD(hud: ExplorationHUDContext): string {
   // report it as a plain fact, identically at every value.
   lines.push(`**Rest:** The party has explored ${hud.turnsSinceRest} turn(s) since its last rest.`);
 
-  // Exhaustion — Expose only backend-supported mechanical semantics (no unsupported tiers)
-  if (hud.exhaustionLevel >= 1) {
-    lines.push("**Exhaustion:** Active — ability checks are at disadvantage.");
+  // Exhaustion — every tier named here is one the backend enforces.
+  const exhaustion = describeExhaustion(hud.exhaustionLevel);
+  if (exhaustion) {
+    lines.push(`**Exhaustion:** ${exhaustion}`);
   }
 
   // Light source

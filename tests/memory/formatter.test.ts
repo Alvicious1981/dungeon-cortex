@@ -80,6 +80,7 @@ const combatEncounter: CampaignContext["activeEncounter"] = {
       damageResistances: [],
       damageVulnerabilities: [],
       conditionImmunities: [],
+      creatureType: "humanoid",
       concentrationSpellId: null,
       x: 0,
       y: 0,
@@ -335,13 +336,15 @@ describe("formatter narrator-tool containment", () => {
     }
   });
 
-  it("limits the general tooling protocol to the temporary read-only surface", () => {
+  it("limits the general tooling protocol to the permanent read-only surface", () => {
     const prompt = formatSystemPrompt(baseContext);
 
+    // lib/ai/tool-policy.ts: the narrator's tools are read-only SRD lookups,
+    // and the reduction is permanent — no generator is model-visible.
     expect(prompt).toContain("Only use a tool that is available in this request");
-    expect(prompt).toContain("non-mutating reference lookups or deterministic generators");
-    expect(prompt).toContain("does not establish a canonical fact");
-    expect(prompt).toContain("backend context already identifies and authorizes");
+    expect(prompt).toContain("The available tools are read-only D&D 5e SRD reference lookups");
+    expect(prompt).toContain("Never use a tool to resolve, apply, or persist a mechanical outcome");
+    expect(prompt).not.toMatch(/generator/i);
     expect(prompt).not.toContain("call the relevant tool first");
   });
 });
@@ -549,6 +552,7 @@ describe("formatSystemPrompt — enemy damage and condition constraints", () => 
         damageResistances: ["cold", "necrotic"],
         damageVulnerabilities: ["radiant"],
         conditionImmunities: ["poisoned", "charmed"],
+        creatureType: "undead",
         concentrationSpellId: null,
         x: 1,
         y: 1,
@@ -622,6 +626,28 @@ describe("formatIronLaws — no wilderness watches", () => {
     const laws = formatIronLaws();
     expect(laws).toContain("Code is Law / State is Truth");
     expect(laws).toContain("Tooling Protocol");
+  });
+});
+
+describe("formatIronLaws — tools are not a source of mechanics (#238)", () => {
+  /**
+   * The narrator's only tools are read-only SRD lookups, which never authorize
+   * an outcome (docs/DECISION_5E_SRD_API.md §7). These lines named tool output
+   * as a source of mechanics, described generators that are not registered,
+   * and asked for a lookup "before narrating mechanics".
+   */
+  it("names no tool output, generator, or lookup as a source of mechanics", () => {
+    const laws = formatIronLaws();
+    expect(laws).not.toContain("tool outputs");
+    expect(laws).not.toMatch(/generator/i);
+    expect(laws).not.toContain("before narrating mechanics");
+  });
+
+  it("grounds mechanics in backend facts and states what a lookup cannot do", () => {
+    const laws = formatIronLaws();
+    expect(laws).toContain("Narrate only mechanics that come from backend-resolved facts or persisted state");
+    expect(laws).toContain("read-only D&D 5e SRD reference lookups");
+    expect(laws).toContain("A lookup never establishes a hit, a save, damage, healing, a condition, or any other outcome");
   });
 });
 
@@ -756,7 +782,7 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
     expect(stowedSection).toContain("- Dagger *(weapon)*");
   });
 
-  it("E. renders supported exhaustion effect when >= 1 and omits it when 0", () => {
+  it("E. renders the enforced exhaustion effects when >= 1 and omits them when 0", () => {
     const exhaustedContext: CampaignContext = {
       ...baseContext,
       character: {
@@ -765,8 +791,9 @@ describe("NARR-FIND-03 — Character Profile, Ability Context & Equipped-State G
       },
     };
     const exhaustedState = formatCanonicalState(exhaustedContext);
-    expect(exhaustedState).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-    expect(exhaustedState).not.toContain("Level 2");
+    expect(exhaustedState).toContain(
+      "**Exhaustion:** Level 2 — ability checks are at disadvantage; speed is halved."
+    );
 
     const normalContext: CampaignContext = {
       ...baseContext,
@@ -1923,7 +1950,7 @@ describe("P2 Remediation Regression Tests (RED)", () => {
       expect(state).not.toContain("Exhaustion");
     });
 
-    it("renders supported backend effect without numeric level when level 1", () => {
+    it("renders only the ability-check effect at level 1", () => {
       const context: CampaignContext = {
         ...baseContext,
         character: {
@@ -1932,11 +1959,11 @@ describe("P2 Remediation Regression Tests (RED)", () => {
         },
       };
       const state = formatCanonicalState(context);
-      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(state).not.toContain("Level 1");
+      expect(state).toContain("**Exhaustion:** Level 1 — ability checks are at disadvantage.");
+      expect(state).not.toContain("speed");
     });
 
-    it("renders same supported effect wording without numeric level when level 2", () => {
+    it("adds halved speed at level 2", () => {
       const context: CampaignContext = {
         ...baseContext,
         character: {
@@ -1945,11 +1972,46 @@ describe("P2 Remediation Regression Tests (RED)", () => {
         },
       };
       const state = formatCanonicalState(context);
-      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(state).not.toContain("Level 2");
+      expect(state).toContain(
+        "**Exhaustion:** Level 2 — ability checks are at disadvantage; speed is halved."
+      );
+      expect(state).not.toContain("attack rolls");
     });
 
-    it("renders same supported effect wording without numeric level when level 6", () => {
+    it("names the halved hit point maximum at level 4, in the HP line too", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          hp: 5,
+          maxHp: 20,
+          exhaustionLevel: 4,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain(
+        "**Exhaustion:** Level 4 — ability checks are at disadvantage; speed is halved; " +
+          "attack rolls and saving throws are at disadvantage; hit point maximum is halved."
+      );
+      expect(state).toContain("**HP:** 5 / 10 (maximum halved by exhaustion from 20)");
+    });
+
+    it("keeps the plain HP line below level 4", () => {
+      const context: CampaignContext = {
+        ...baseContext,
+        character: {
+          ...baseCharacter,
+          hp: 5,
+          maxHp: 20,
+          exhaustionLevel: 3,
+        },
+      };
+      const state = formatCanonicalState(context);
+      expect(state).toContain("**HP:** 5 / 20");
+      expect(state).not.toContain("maximum halved");
+    });
+
+    it("reports death at level 6", () => {
       const context: CampaignContext = {
         ...baseContext,
         character: {
@@ -1958,18 +2020,18 @@ describe("P2 Remediation Regression Tests (RED)", () => {
         },
       };
       const state = formatCanonicalState(context);
-      expect(state).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(state).not.toContain("Level 6");
+      expect(state).toContain("**Exhaustion:** Level 6 — the character has died of exhaustion.");
     });
 
-    it("formatSurvivalHUD renders only supported backend effect and no numeric tier for exhaustionLevel 3", () => {
+    it("formatSurvivalHUD renders the enforced effects for exhaustionLevel 3", () => {
       const hud = formatSurvivalHUD({
         ...baseHUD,
         exhaustionLevel: 3,
       });
-      expect(hud).toContain("**Exhaustion:** Active — ability checks are at disadvantage.");
-      expect(hud).not.toContain("Level 3");
-      expect(hud).not.toContain("3/6");
+      expect(hud).toContain(
+        "**Exhaustion:** Level 3 — ability checks are at disadvantage; speed is halved; " +
+          "attack rolls and saving throws are at disadvantage."
+      );
     });
 
     it("formatSurvivalHUD omits exhaustion line when level 0", () => {

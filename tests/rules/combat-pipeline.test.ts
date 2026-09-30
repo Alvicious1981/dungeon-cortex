@@ -302,6 +302,33 @@ describe("executeCombatAction", () => {
       expect(outcome.consequences[0]?.naturalRoll).toBe(2);
     });
 
+    // ── actorExhaustionLevel wiring (Hop B) — same observation as above ──
+    it("actorExhaustionLevel 3 forces the attack roll onto disadvantage", async () => {
+      const enemy = buildEnemy();
+      const tx = buildMockTx();
+      mockRandom([0.9, 0.05]);
+
+      const payload: CombatActionPayload = {
+        actionType: "attack",
+        encounter: buildEncounter([buildPlayer(), enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        actorExhaustionLevel: 3,
+        targetCombatants: [enemy],
+        weaponName: "Dagger",
+        weaponDice: "1d4",
+        damageType: "piercing",
+        attackModifier: 0,
+        flatDamageBonus: 0,
+        collectEvents: true,
+      };
+
+      const outcome = await executeCombatAction(payload, tx);
+
+      expect(outcome.consequences[0]?.naturalRoll).toBe(2);
+    });
+
     it("without actorArmorPenalty, the attack roll is a single unpenalised d20", async () => {
       const enemy = buildEnemy();
       const tx = buildMockTx();
@@ -980,7 +1007,8 @@ describe("executeCombatAction", () => {
           dice: "1d8",
           hasSavingThrow: true,
           saveAbility: "DEX",
-          condition: "poisoned",
+          conditions: ["poisoned"],
+          conditionTerms: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
         },
         spellSaveDC: 15,
         collectEvents: true,
@@ -1020,7 +1048,8 @@ describe("executeCombatAction", () => {
           dice: "1d8",
           hasSavingThrow: true,
           saveAbility: "DEX",
-          condition: "poisoned",
+          conditions: ["poisoned"],
+          conditionTerms: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
         },
         spellSaveDC: 15,
         collectEvents: true,
@@ -1030,15 +1059,180 @@ describe("executeCombatAction", () => {
 
       expect(outcome.consequences[0]?.conditionsApplied).toHaveLength(0);
     });
+
+    it("marks each consequence target with its own Combatant.isPlayer when the caster stands in the area", async () => {
+      const enemy = buildEnemy();
+      const player = buildPlayer();
+      const tx = buildMockTx();
+      // Per target: failed save (0.4 → 9 < DC 15), 1d8 → 8 (0.99), hit-location 0.0.
+      mockRandom([0.4, 0.99, 0.0, 0.4, 0.99, 0.0]);
+
+      const outcome = await executeCombatAction({
+        actionType: "cast_spell",
+        encounter: buildEncounter([player, enemy]),
+        actorId: "player-1",
+        actorName: "Aldric",
+        actorConditions: [],
+        targetCombatants: [enemy, player],
+        spellName: "Burning Hands",
+        spellLevel: 1,
+        spellEffect: {
+          type: "damage",
+          dice: "1d8",
+          hasSavingThrow: true,
+          saveAbility: "DEX",
+          damageType: "fire",
+        },
+        spellSaveDC: 15,
+        rawSpellSlots: { "1": { current: 2, max: 4 } },
+        playerCharacterId: "char-1",
+        collectEvents: true,
+      }, tx);
+
+      expect(
+        outcome.consequences.map((consequence) => [consequence.targetName, consequence.targetIsPlayer])
+      ).toEqual([
+        ["Goblin", false],
+        ["Aldric", true],
+      ]);
+    });
+  });
+
+  // ── Spells that do nothing to the creatures they name ────────────────────────
+
+  describe("cast_spell — a heal or utility spell reports only what it did to a creature", () => {
+    // `consequences` becomes COMBAT_CONSEQUENCE.targets[], and the narrator
+    // adapter reads an entry with no damage as "Attack missed". A heal is
+    // applied to the caster before the target loop, and the resolver gives a
+    // utility spell no dice, no save and no condition, so the creatures such a
+    // spell names have nothing to report. An entry for one would say damage 0
+    // and, for a heal, the HP from before it.
+    const cast = (
+      spellName: string,
+      spellEffect: NonNullable<CombatActionPayload["spellEffect"]>,
+      targetCombatants: PipelineCombatant[]
+    ): CombatActionPayload => ({
+      actionType: "cast_spell",
+      encounter: buildEncounter([buildPlayer({ hp: 10 }), buildEnemy()]),
+      actorId: "player-1",
+      actorName: "Aldric",
+      actorConditions: [],
+      targetCombatants,
+      spellName,
+      spellLevel: 1,
+      spellEffect,
+      rawSpellSlots: { "1": { current: 2, max: 4 } },
+      playerCharacterId: "char-1",
+      collectEvents: true,
+    });
+
+    it("reports no entry for the caster of a heal, whose entry would carry the HP from before it", async () => {
+      const caster = buildPlayer({ hp: 10 });
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+      // roll("1d8"): 0.5 → 5
+      mockRandom([0.5]);
+
+      const outcome = await executeCombatAction(
+        cast("Cure Wounds", { type: "healing", dice: "1d8" }, [caster]),
+        tx
+      );
+
+      // The heal happened, and the event is what says what HP the caster has.
+      expect(outcome.events.find((e) => e.type === "HEALING_RECEIVED")?.payload).toMatchObject({
+        amount: 5,
+        newHp: 15,
+      });
+      expect(outcome.consequences).toEqual([]);
+    });
+
+    it("reports no entry for the caster of a utility spell", async () => {
+      const caster = buildPlayer({ hp: 10 });
+      const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+      mockRandom([]);
+
+      const outcome = await executeCombatAction(
+        cast("Shield", { type: "utility", dice: null }, [caster]),
+        tx
+      );
+
+      // The cast resolved, so an empty list is a decision and not a spell that never ran.
+      expect(outcome.events.some((e) => e.type === "SPELL_CAST")).toBe(true);
+      expect(outcome.consequences).toEqual([]);
+    });
+
+    const NON_DAMAGING: Array<[string, string, NonNullable<CombatActionPayload["spellEffect"]>]> = [
+      ["a heal", "Cure Wounds", { type: "healing", dice: "1d8" }],
+      ["a utility spell", "Shield", { type: "utility", dice: null }],
+    ];
+
+    it.each(NON_DAMAGING)(
+      "reports no entry for a hostile creature %s is aimed at",
+      async (_what, spellName, effect) => {
+        // The action route takes a non-area spell's targets from the client
+        // with no hostile filter, so this is reachable.
+        const goblin = buildEnemy();
+        const tx = buildMockTx({ characterHp: 10, characterMaxHp: 20 });
+        mockRandom([0.5]);
+
+        const outcome = await executeCombatAction(cast(spellName, effect, [goblin]), tx);
+
+        expect(outcome.events.some((e) => e.type === "SPELL_CAST")).toBe(true);
+        expect(outcome.consequences).toEqual([]);
+      }
+    );
+
+    it("still reports a utility spell that put a condition on the creature", async () => {
+      // No damage, but a condition took hold, and `conditionsApplied` is where
+      // the HUD and the narrator learn it. The e2e spec
+      // combat-conditions-concurrency drives the same effect against Postgres.
+      const goblin = buildEnemy();
+      const tx = buildMockTx();
+      mockRandom([]);
+
+      const outcome = await executeCombatAction(
+        cast("Restrain", {
+          type: "utility",
+          hasSavingThrow: false,
+          conditions: ["restrained"],
+          conditionTerms: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
+        }, [goblin]),
+        tx
+      );
+
+      expect(outcome.consequences).toHaveLength(1);
+      expect(outcome.consequences[0]).toMatchObject({
+        targetId: "enemy-1",
+        damage: 0,
+        conditionsApplied: ["restrained"],
+      });
+    });
+
+    it("still reports a utility effect that dealt damage", async () => {
+      // The target loop rolls the dice of any effect that is not a heal as
+      // damage, whatever the effect is called, and writes it to the row.
+      const goblin = buildEnemy();
+      const tx = buildMockTx();
+      // roll("1d6"): 0.5 → 4; hit-location: 0.0
+      mockRandom([0.5, 0.0]);
+
+      const outcome = await executeCombatAction(
+        cast("Stinging Mote", { type: "utility", dice: "1d6" }, [goblin]),
+        tx
+      );
+
+      expect(outcome.consequences).toHaveLength(1);
+      expect(outcome.consequences[0]).toMatchObject({ targetId: "enemy-1", damage: 4, hpAfter: 11 });
+    });
   });
 
   // ── buildCombatConsequenceEvent — pure helper ─────────────────────────────────
 
   describe("buildCombatConsequenceEvent", () => {
-    it("builds a targets-only COMBAT_CONSEQUENCE payload", () => {
+    it("builds a COMBAT_CONSEQUENCE payload of the attacker's identity and the canonical targets[]", () => {
       const target: SingleTargetConsequence = {
         targetId: "enemy-1",
         targetName: "Goblin",
+        targetIsPlayer: false,
         damage: 5,
         naturalRoll: 14,
         isCrit: false,
@@ -1051,21 +1245,41 @@ describe("executeCombatAction", () => {
         conditionsApplied: [],
       };
 
-      const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [target] });
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Aldric",
+        attackerIsPlayer: true,
+        targets: [target],
+      });
 
       expect(event).toEqual({
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: "Aldric", targets: [target] },
+        payload: { attackerName: "Aldric", attackerIsPlayer: true, targets: [target] },
       });
-      expect(Object.keys(event.payload).sort()).toEqual(["attackerName", "targets"]);
+      // No flat consequence fields (LAW-01): the payload names who attacked, and
+      // everything that happened lives in targets[].
+      expect(Object.keys(event.payload).sort()).toEqual(["attackerIsPlayer", "attackerName", "targets"]);
+    });
+
+    it("states the attacker's role as given rather than assuming the player", () => {
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Goblin",
+        attackerIsPlayer: false,
+        targets: [],
+      });
+
+      expect(event.payload.attackerIsPlayer).toBe(false);
     });
 
     it("preserves an empty canonical targets array", () => {
-      const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [] });
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Aldric",
+        attackerIsPlayer: true,
+        targets: [],
+      });
 
       expect(event).toEqual({
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: "Aldric", targets: [] },
+        payload: { attackerName: "Aldric", attackerIsPlayer: true, targets: [] },
       });
     });
 
@@ -1073,6 +1287,7 @@ describe("executeCombatAction", () => {
       const target: SingleTargetConsequence = {
         targetId: "e1",
         targetName: "Orc",
+        targetIsPlayer: false,
         damage: 10,
         naturalRoll: 18,
         isCrit: true,
@@ -1085,7 +1300,11 @@ describe("executeCombatAction", () => {
         conditionsApplied: [],
       };
 
-      const event = buildCombatConsequenceEvent({ attackerName: "Aldric", targets: [target] });
+      const event = buildCombatConsequenceEvent({
+        attackerName: "Aldric",
+        attackerIsPlayer: true,
+        targets: [target],
+      });
 
       expect((event.payload.targets as SingleTargetConsequence[])[0]?.isKill).toBe(true);
     });
@@ -1649,7 +1868,8 @@ describe("condition immunity", () => {
         type: "damage",
         dice: "1d6",
         hasSavingThrow: false,
-        condition: "poisoned",
+        conditions: ["poisoned"],
+        conditionTerms: { spellIndex: "test-spell", concentration: false, durationRounds: 10 },
       },
       playerCharacterId: "char-1",
       collectEvents: true,

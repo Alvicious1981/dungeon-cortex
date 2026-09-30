@@ -443,6 +443,36 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(call?.[2]?.facts.length).toBeGreaterThan(0);
     });
 
+    /**
+     * Who the narrator is told is the player, per attack gate. Each gate builds
+     * its own COMBAT_CONSEQUENCE and states `attackerIsPlayer` at its own call
+     * site, so a test through one gate leaves the other free to drop or flip it.
+     */
+    it("tells the narrator the player is the attacker and the hostile is not, on the free-text attack gate", async () => {
+      (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile]));
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+      expect(narrative?.actor).toMatchObject({ name: "Hero", isPlayer: true });
+      expect(narrative?.targets).toEqual([
+        expect.objectContaining({ id: "t1", name: "Goblin", isPlayer: false }),
+      ]);
+    });
+
+    it("tells the narrator the player is the attacker and the hostile is not, on the macro Attack gate", async () => {
+      const res = await macroAttackWith([]);
+
+      expect(res.status).toBe(200);
+      const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+      expect(narrative?.actor).toMatchObject({ name: "Hero", isPlayer: true });
+      expect(narrative?.targets).toEqual([
+        expect.objectContaining({ id: "t1", name: "Goblin", isPlayer: false }),
+      ]);
+    });
+
     it("rolls the attack at the proficient modifier the weapon earns", async () => {
       // The fixture's Longsword row carries damage and no category — the legacy
       // shape every existing character has. The route must fill it from the SRD
@@ -673,6 +703,24 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
       expect(penaltyReachingTheRule()).toBe(false);
     });
 
+    // Exhaustion level 3 imposes disadvantage on attack rolls. Like the armour
+    // penalty, the payload field is optional, so only a test on THIS route
+    // proves the character's level reaches the rule.
+    it("carries the character's exhaustion level to the rule", async () => {
+      const base = contextWith([hero, hostile]);
+      (buildCampaignContext as any).mockResolvedValue({
+        ...base,
+        character: { ...base.character, exhaustionLevel: 3 },
+      });
+      (prisma.combatant.findMany as any).mockResolvedValue([hero, hostile]);
+
+      const res = await attackWith({}, { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      const call = (computeConsequences as any).mock.calls.at(-1);
+      expect(call?.[0].attackerExhaustionLevel).toBe(3);
+    });
+
     it("rejects a targetIds selection naming more than one creature", async () => {
       (buildCampaignContext as any).mockResolvedValue(contextWith([hero, hostile, { ...hostile, id: "t3" }]));
 
@@ -804,6 +852,34 @@ describe("Action Route - Slice 2 (Multi-Targeting)", () => {
     expect(res.status).toBe(200);
     const call = (computeConsequences as any).mock.calls.at(-1);
     expect(call?.[0].attackerArmorPenalty).toBe(true);
+  });
+
+  it("carries the exhaustion level on the macro Attack path too", async () => {
+    const target = { id: "t1", name: "Goblin", hp: 10, maxHp: 10, ac: 10, conditions: "[]", ...NO_MODIFIERS, isPlayer: false };
+    const player = { id: "p1", name: "Hero", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, conditions: "[]" };
+    const combatants = [player, target];
+
+    (buildCampaignContext as any).mockResolvedValue({
+      character: { name: "Hero", class: "fighter", stats: { STR: 10 }, exhaustionLevel: 4, inventory: [] },
+      relevantMemories: [],
+      recentLogs: [],
+      quests: [],
+      currentExploration: null,
+      activeEncounter: { id: "enc_123", currentTurnIndex: 0, round: 1, totalDamageDealt: 0, combatants },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+
+    const res = await POST(
+      new NextRequest(`http://localhost/api/campaign/${campaignId}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "Attack", targetIds: ["t1"] }),
+      }),
+      { params: Promise.resolve({ id: campaignId }) }
+    );
+
+    expect(res.status).toBe(200);
+    const call = (computeConsequences as any).mock.calls.at(-1);
+    expect(call?.[0].attackerExhaustionLevel).toBe(4);
   });
 
   it("refuses a macro Attack while an enemy owns the initiative slot", async () => {
@@ -2306,7 +2382,7 @@ describe("Action Route - persistent idempotency (DC-AUD-003)", () => {
     // its ordinary refresh.
     const stored = [
       { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
-      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", targets: [] } },
+      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", attackerIsPlayer: true, targets: [] } },
       { type: "ROUND_ADVANCE", payload: { nextTurnIndex: 0, nextRound: 2 } },
     ];
     receiptAlreadyExists({ status: ActionRequestStatus.COMPLETED, replayEvents: stored });

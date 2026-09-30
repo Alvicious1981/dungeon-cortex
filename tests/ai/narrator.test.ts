@@ -276,3 +276,59 @@ describe("streamNarrative contained tool surface", () => {
   });
 });
 
+
+describe("streamNarrative confirms a lasting condition from the post-action state", () => {
+  const attackTurn = {
+    facts: [{ type: "attack_miss" as const, description: "Attack missed Goblin", payload: { targetName: "Goblin" } }],
+  };
+  const lasting = "The goblin, still restrained by the vines, swings wide.";
+
+  function encounterWith(conditions: unknown) {
+    return {
+      ...context(),
+      activeEncounter: {
+        id: "enc-1",
+        round: 3,
+        currentTurnIndex: 0,
+        combatants: [
+          { name: "Thalindra", isPlayer: true, conditions: [] },
+          { name: "Goblin", isPlayer: false, conditions },
+        ],
+      },
+    };
+  }
+
+  function modelSays(text: string) {
+    mockStreamText.mockReturnValueOnce({
+      textStream: (async function* () {})(),
+      text: Promise.resolve(text),
+    } as any);
+  }
+
+  it("keeps narration of a condition a combatant still holds", async () => {
+    mockBuildCampaignContext.mockResolvedValue(encounterWith(["restrained"]));
+    modelSays(lasting);
+
+    const result = await streamNarrative(CAMPAIGN_ID, "I attack the goblin.", attackTurn);
+
+    await expect(result.textPromise).resolves.toBe(lasting);
+  });
+
+  it("replaces it once no combatant holds the condition", async () => {
+    mockBuildCampaignContext.mockResolvedValue(encounterWith([]));
+    modelSays(lasting);
+
+    const result = await streamNarrative(CAMPAIGN_ID, "I attack the goblin.", attackTurn);
+
+    await expect(result.textPromise).resolves.not.toBe(lasting);
+  });
+
+  it("ignores a malformed conditions column rather than trusting it", async () => {
+    mockBuildCampaignContext.mockResolvedValue(encounterWith("restrained"));
+    modelSays(lasting);
+
+    const result = await streamNarrative(CAMPAIGN_ID, "I attack the goblin.", attackTurn);
+
+    await expect(result.textPromise).resolves.not.toBe(lasting);
+  });
+});

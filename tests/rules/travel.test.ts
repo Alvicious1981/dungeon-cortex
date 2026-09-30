@@ -143,7 +143,7 @@ describe("resolveJourney — forced march", () => {
 
   /**
    * SRD exhaustion runs to 6 and stops there. What happens AT 6 is death,
-   * which this game does not implement — recorded in §7 of the spec, not
+   * applied by the travel gate (`lib/actions/travel-command.ts`), not
    * silently avoided by capping lower.
    */
   it("never carries the character past exhaustion 6", () => {
@@ -171,3 +171,49 @@ describe("resolveJourney — forced march", () => {
     expect(hardy.saves[0]!.success).toBe(true); // 15 vs DC 11
   });
 });
+
+/**
+ * SRD exhaustion level 3: disadvantage on saving throws — including the
+ * forced-march Constitution saves that cause the exhaustion in the first place.
+ */
+describe("resolveJourney — forced march under exhaustion", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Feeds the d20s in order: each value is one die. */
+  function d20Sequence(values: number[]): void {
+    let i = 0;
+    vi.spyOn(Math, "random").mockImplementation(() => {
+      const value = values[Math.min(i, values.length - 1)];
+      i += 1;
+      return (value - 1) / 20;
+    });
+  }
+
+  const forced = (distanceMiles: number, currentExhaustion: number) =>
+    resolveJourney({ distanceMiles, forceMarch: true, conModifier: 0, currentExhaustion });
+
+  it("rolls every save at disadvantage from level 3, keeping the lower die", () => {
+    d20Sequence([15, 2]); // 27 mi → 9 h → one forced hour, DC 11
+    const [save] = forced(27, 3).saves;
+    expect(save).toMatchObject({ disadvantage: true, roll: 2, success: false });
+  });
+
+  it("rolls a single die below level 3", () => {
+    d20Sequence([15, 2]);
+    const [save] = forced(27, 2).saves;
+    expect(save).toMatchObject({ disadvantage: false, roll: 15, success: true });
+  });
+
+  /**
+   * Exhaustion applies the moment it is gained: the failure that takes the
+   * character from 2 to 3 puts the rest of the same march at disadvantage.
+   */
+  it("imposes disadvantage on later saves once a failure reaches level 3", () => {
+    d20Sequence([1, 18, 3]); // 30 mi → 10 h → two forced hours
+    const outcome = forced(30, 2);
+    expect(outcome.saves.map((s) => s.disadvantage)).toEqual([false, true]);
+    expect(outcome.saves[1]).toMatchObject({ roll: 3, success: false });
+    expect(outcome.exhaustionGained).toBe(2);
+  });
+});
+

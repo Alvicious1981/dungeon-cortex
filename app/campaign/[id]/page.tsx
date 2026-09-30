@@ -22,6 +22,8 @@ import type {
 import AscensionOverlayController from "@/components/character/AscensionOverlay";
 import LevelUpConfirmationController from "@/components/character/LevelUpConfirmation";
 import XPProgressBar from "@/components/character/XPProgressBar";
+import ExhaustionIndicator from "@/components/character/ExhaustionIndicator";
+import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
 import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
@@ -333,8 +335,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   };
 
   const spellSlots = parseSpellSlots(character.spellSlots);
-  const hpPercent = character.maxHp > 0
-    ? Math.max(0, Math.min(100, Math.round((character.hp / character.maxHp) * 100)))
+  // Display only: exhaustion level 4+ halves the maximum every heal is capped
+  // at, so the bar is measured against that maximum, not the stored one.
+  const currentMaxHp = effectiveMaxHp(character.maxHp, character.exhaustionLevel);
+  const maxHpReduced = currentMaxHp !== character.maxHp;
+  const hpPercent = currentMaxHp > 0
+    ? Math.max(0, Math.min(100, Math.round((character.hp / currentMaxHp) * 100)))
     : 0;
 
   const initiativeEntries: InitiativeEntry[] = activeEncounter
@@ -370,7 +376,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
   }
   const playerDown = lifeState === "dying" || lifeState === "stable";
 
-  const barColor = hpBarColor(character.hp, character.maxHp);
+  const barColor = hpBarColor(character.hp, currentMaxHp);
 
   // Group inventory by type for display
   const TYPE_ORDER: ItemType[] = ["weapon", "armor", "spell", "consumable", "misc"];
@@ -437,7 +443,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               id: c.id,
               name: c.name,
               hp: c.hp,
-              maxHp: c.maxHp,
+              maxHp: c.isPlayer ? currentMaxHp : c.maxHp,
               initiativeTotal: c.initiativeTotal,
               conditions: (c.conditions as string[]) || [],
             }))}
@@ -566,6 +572,9 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 )}
               </div>
 
+              {/* ── Exhaustion (hidden at level 0) ── */}
+              <ExhaustionIndicator exhaustionLevel={character.exhaustionLevel} />
+
               {/* ── HP bar ── */}
               <div>
                 <div className="flex items-baseline justify-between mb-2">
@@ -577,17 +586,25 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   </span>
                   <span className="text-sm font-semibold tabular-nums">
                     <span style={{ color: barColor }}>{character.hp}</span>
-                    <span style={{ color: "#7A6A50" }}> / {character.maxHp}</span>
+                    <span style={{ color: "#7A6A50" }}> / {currentMaxHp}</span>
                   </span>
                 </div>
+                {maxHpReduced && (
+                  <p
+                    className="-mt-1 mb-2 text-right text-[10px]"
+                    style={{ color: "#F87171" }}
+                  >
+                    Máximo reducido por agotamiento (normal: {character.maxHp})
+                  </p>
+                )}
 
                 {/* Track */}
                 <div
                   role="meter"
                   aria-valuenow={character.hp}
                   aria-valuemin={0}
-                  aria-valuemax={character.maxHp}
-                  aria-label={`Hit points: ${character.hp} of ${character.maxHp}`}
+                  aria-valuemax={currentMaxHp}
+                  aria-label={`Hit points: ${character.hp} of ${currentMaxHp}`}
                   className="relative h-3 overflow-hidden rounded-full"
                   style={{
                     background: "rgba(20,14,6,0.9)",

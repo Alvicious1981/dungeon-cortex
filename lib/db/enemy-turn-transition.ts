@@ -9,6 +9,7 @@ import {
   extractConditions,
   resolveAttackRoll,
   resolveSavingThrow,
+  resolveConcentrationCheck,
   rollDamage,
   rollHitLocation,
 } from "@/lib/rules/combat";
@@ -25,7 +26,9 @@ import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
 import { claimMoveTransition, MoveStateConflictError } from "@/lib/db/move-transition";
 import { setPlayerHp } from "@/lib/db/player-hp";
 import { applyPlayerDowned } from "@/lib/db/player-downed";
+import { effectiveMaxHp, exhaustionEffects } from "@/lib/rules/exhaustion";
 import { TurnStateConflictError } from "@/lib/db/turn-state-conflict";
+import { concentrationOf, endSpellConditions } from "@/lib/db/spell-condition-end";
 
 /**
  * A state the enemy-turn chain must never reach. The action route maps it to
@@ -214,15 +217,89 @@ export async function resolveEnemyTurn(
       stats: true,
       class: true,
       level: true,
+      exhaustionLevel: true,
+      concentrationSpellId: true,
       inventory: { select: { type: true, quantity: true, equippedSlot: true, properties: true } },
     },
   })) as {
     hp: number; maxHp: number; stats: unknown; class: string; level: number;
+    exhaustionLevel?: number | null;
+    concentrationSpellId?: string | null;
     inventory: ArmorInventoryRow[];
   } | null;
   if (!character) {
     throw new EnemyTurnInvariantError(`Character ${ctx.characterId} not found.`);
   }
+  // SRD exhaustion: level 3+ puts the player's saves at disadvantage, and
+  // level 4+ halves the hit point maximum — which is also the massive-damage
+  // threshold, since that rule is written against the hit point maximum.
+  const exhaustion = exhaustionEffects(character.exhaustionLevel);
+  const playerMaxHp = effectiveMaxHp(character.maxHp, character.exhaustionLevel);
+
+  // SRD: taking damage while concentrating forces a Constitution save, DC 10
+  // or half the damage, whichever is higher — one save per source of damage.
+  // Falling unconscious (0 HP) ends concentration outright: an incapacitated
+  // creature cannot concentrate. Until this existed, enemy hits never touched
+  // the player's concentration at all, so a spell the player was holding
+  // survived every blow and the narrator was told it was still active.
+  let concentratingOn = character.concentrationSpellId ?? null;
+
+  // Resolves to true when concentration ended, so a caller mid-turn can
+  // re-read the conditions the spell was holding on this enemy.
+  const checkPlayerConcentration = async (damage: number, hpAfter: number): Promise<boolean> => {
+    if (!concentratingOn || damage <= 0) return false;
+    const spell = concentratingOn;
+    let content: string;
+    let check: ReturnType<typeof resolveConcentrationCheck> | null = null;
+    if (hpAfter <= 0) {
+      content = `${player.name} falls unconscious and loses concentration on ${spell}.`;
+    } else {
+      const conSaveModifier =
+        abilityModifier(((character.stats ?? {}) as Record<string, number>).CON ?? 10) +
+        (isProficientInSave(character.class, "CON") ? proficiencyBonus(character.level) : 0);
+      check = resolveConcentrationCheck(damage, conSaveModifier, exhaustion.savingThrowDisadvantage);
+      content =
+        `Concentration (${spell}): DC ${check.dc} Constitution save, ${player.name} rolls ` +
+        `${check.total} — ${check.success ? "holds" : "concentration broken"}.`;
+    }
+    await tx.gameLog.create({ data: { campaignId: ctx.campaignId, role: "system", content } });
+    if (check?.success) return false;
+
+    concentratingOn = null;
+    // Character first, then its Combatant mirror — the lock order setPlayerHp keeps.
+    await tx.character.update({
+      where: { id: ctx.characterId },
+      data: { concentrationSpellId: null },
+    });
+    await tx.combatant.updateMany({
+      where: { encounterId: ctx.encounterId, isPlayer: true },
+      data: { concentrationSpellId: null },
+    });
+    // The spell ends, and with it every condition it was holding.
+    const ended = await endSpellConditions(tx, {
+      encounterId: ctx.encounterId,
+      shouldEnd: concentrationOf(player.id),
+      reason: check ? "concentration broken" : "caster fell unconscious",
+    });
+    for (const entry of ended) {
+      await tx.gameLog.create({ data: { campaignId: ctx.campaignId, role: "system", content: entry.log } });
+      // This enemy's own attacks for the rest of its turn roll without the
+      // condition that just ended.
+      if (entry.combatantId === enemy.id) enemyConditions = entry.conditions;
+    }
+    if (ctx.collectEvents) {
+      events.push({
+        type: "CONCENTRATION_BROKEN",
+        payload: {
+          targetName: player.name,
+          spellName: spell,
+          reason: check ? "failed_save" : "unconscious",
+          ...(check ? { dc: check.dc, roll: check.total } : {}),
+        },
+      });
+    }
+    return true;
+  };
 
   // The player's current AC, from current inventory — never the Combatant.ac
   // copy, which no in-combat equipment change updates (spec §5.5).
@@ -231,7 +308,7 @@ export async function resolveEnemyTurn(
     inventory: character.inventory,
     dexModifier: abilityModifier(stats.DEX ?? 10),
   }).armorClass;
-  const enemyConditions = extractConditions(enemy.conditions);
+  let enemyConditions = extractConditions(enemy.conditions);
   const playerConditions = extractConditions(player.conditions);
   let hp = character.hp;
 
@@ -280,6 +357,7 @@ export async function resolveEnemyTurn(
       const consequence: SingleTargetConsequence = {
         targetName: player.name,
         targetId: player.id,
+        targetIsPlayer: player.isPlayer,
         damage,
         naturalRoll: roll.roll,
         isCrit: roll.critical,
@@ -287,7 +365,7 @@ export async function resolveEnemyTurn(
         hitLocation: roll.hit ? rollHitLocation() : "chest",
         narrativeTags: [],
         hpAfter: hp,
-        targetMaxHp: character.maxHp,
+        targetMaxHp: playerMaxHp,
         isKill: hp <= 0,
         conditionsApplied: [],
       };
@@ -295,7 +373,11 @@ export async function resolveEnemyTurn(
       // combat-pipeline.ts, which imports this module.
       const consequenceEvent: CombatConsequenceEvent = {
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: enemy.name, targets: [consequence] },
+        payload: {
+          attackerName: enemy.name,
+          attackerIsPlayer: enemy.isPlayer,
+          targets: [consequence],
+        },
       };
       events.push(consequenceEvent);
       // The same per-hit companions executeCombatAction emits for a player attack.
@@ -317,13 +399,15 @@ export async function resolveEnemyTurn(
       }
     }
 
+    await checkPlayerConcentration(damage, hp);
+
     if (hp <= 0) {
       const fall = await applyPlayerDowned(tx, {
         encounterId: ctx.encounterId,
         characterId: ctx.characterId,
         hpBefore: hpBeforeHit,
         damage,
-        maxHp: character.maxHp,
+        maxHp: playerMaxHp,
         collectEvents: ctx.collectEvents,
         events,
       });
@@ -348,7 +432,7 @@ export async function resolveEnemyTurn(
     const saveModifier =
       abilityModifier(saveStats[attack.saveAbility] ?? 10) +
       (isProficientInSave(character.class, attack.saveAbility) ? proficiencyBonus(character.level) : 0);
-    const save = resolveSavingThrow(saveModifier, attack.saveDC);
+    const save = resolveSavingThrow(saveModifier, attack.saveDC, false, exhaustion.savingThrowDisadvantage);
 
     const rolled = attack.damage.reduce(
       (sum, part) => sum + Math.max(0, rollDamage(part.dice, false).total),
@@ -373,24 +457,30 @@ export async function resolveEnemyTurn(
 
     if (ctx.collectEvents) {
       const consequence: SingleTargetConsequence = {
-        targetName: player.name, targetId: player.id, damage,
+        targetName: player.name, targetId: player.id, targetIsPlayer: player.isPlayer, damage,
         naturalRoll: save.roll, isCrit: false, isFumble: false,
         hitLocation: "chest", narrativeTags: [], hpAfter: hp,
-        targetMaxHp: character.maxHp, isKill: hp <= 0, conditionsApplied: [],
+        targetMaxHp: playerMaxHp, isKill: hp <= 0, conditionsApplied: [],
       };
       events.push({
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: enemy.name, targets: [consequence] },
+        payload: {
+          attackerName: enemy.name,
+          attackerIsPlayer: enemy.isPlayer,
+          targets: [consequence],
+        },
       });
       if (damage > 0) {
         events.push({ type: "DAMAGE_DEALT", payload: { damage, naturalRoll: save.roll, targetName: player.name } });
       }
     }
 
+    await checkPlayerConcentration(damage, hp);
+
     if (hp <= 0) {
       const fall = await applyPlayerDowned(tx, {
         encounterId: ctx.encounterId, characterId: ctx.characterId, hpBefore: hpBeforeHit, damage,
-        maxHp: character.maxHp, collectEvents: ctx.collectEvents, events,
+        maxHp: playerMaxHp, collectEvents: ctx.collectEvents, events,
       });
       await tx.gameLog.create({
         data: {

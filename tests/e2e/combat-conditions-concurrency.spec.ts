@@ -82,7 +82,13 @@ function conditionPayload(input: {
     spellEffect: {
       type: "utility",
       hasSavingThrow: false,
-      condition: input.condition,
+      conditions: [input.condition],
+      // A condition without its end is refused (docs/DECISION_SPELL_CONDITIONS.md §4).
+      conditionTerms: {
+        spellIndex: `concurrency-${input.condition}`,
+        concentration: false,
+        durationRounds: 10,
+      },
     },
     collectEvents: false,
   };
@@ -231,7 +237,7 @@ test("@smoke concurrent combat conditions preserve both accepted effects", async
 
     const persistedTarget = await prisma.combatant.findUniqueOrThrow({
       where: { id: targetRow!.id },
-      select: { hp: true, conditions: true },
+      select: { hp: true, conditions: true, spellConditions: true },
     });
 
     // Both accepted actions report a distinct condition as applied. Because
@@ -243,6 +249,15 @@ test("@smoke concurrent combat conditions preserve both accepted effects", async
       expect.arrayContaining(["restrained", "poisoned"])
     );
     expect(persistedTarget.conditions).toHaveLength(2);
+    // The record that says why each condition holds is rebased on the same
+    // locked row, so the stale writer cannot drop the other's record either.
+    expect(persistedTarget.spellConditions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ condition: "restrained", spellIndex: "concurrency-restrained" }),
+        expect.objectContaining({ condition: "poisoned", spellIndex: "concurrency-poisoned" }),
+      ])
+    );
+    expect(persistedTarget.spellConditions).toHaveLength(2);
   } finally {
     resumeFirstWrite();
     await firstAction?.catch(() => undefined);

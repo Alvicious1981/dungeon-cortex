@@ -8,6 +8,7 @@ import {
   NarrativeTextSchema,
 } from './combat-narrative-types';
 import { BLOCKED_NARRATOR_OPERATION_NAMES } from '../ai/tool-policy';
+import { CONDITION_REGISTRY } from '../rules/conditions';
 
 // Build forbidden retro jargon dynamically at runtime to prevent static scan triggers
 const FORBIDDEN_WORDS = [
@@ -40,22 +41,169 @@ const blockedOperationRegex = new RegExp(
   'i',
 );
 
+interface ConditionTerms {
+  /** Any mention rejected on a combat turn unless the backend confirmed it. */
+  mentions: RegExp[];
+  /** Explicit assertions rejected even on a turn without combat facts. */
+  assertions: RegExp[];
+}
+
+/** "is stunned", "queda aturdido": a copula followed by the condition word. */
+function asserted(words: string): RegExp {
+  return new RegExp(`\\b(?:is|becomes?|queda|quedó|quedo)\\s+(?:${words})\\b`, 'i');
+}
+
+// English and Spanish wording for every SRD 2014 condition, keyed by the
+// registry id in lib/rules/conditions.ts. Words that are also ordinary prose
+// are matched only in their mechanical sense: "invisible" only as a change of
+// state ("se vuelve invisible", not "una fuerza invisible"), Exhaustion only as
+// levels of the condition ("un nivel de agotamiento", never "agotado"), and
+// "agarrado a" (holding on to something) is not Grappled. "Encantado" is left
+// out entirely because it usually means "pleased".
+// "Charmed by your wit", "hechizada por la melodía": delight, not the SRD
+// condition. Being charmed by a creature ("by the vampire") is still caught.
+const NOT_CHARMED_BY_PROSE =
+  '(?!\\s+(?:by|with|por|con)\\s+(?:(?:your|his|her|their|its|the|a|an|tu|tus|su|sus|el|la|los|las|un|una)\\s+)?' +
+  '(?:wit|words?|smiles?|charm|voice|melod(?:y|ies)|songs?|music|tales?|stor(?:y|ies)|manners|beauty|performance|jokes?|compliments?|offer|gifts?|humou?r|grace|' +
+  'ingenio|palabras?|sonrisas?|encanto|voz|melodías?|canci(?:ón|ones)|música|historias?|relatos?|modales|belleza|actuación|bromas?|cumplidos?|oferta|regalos?|humor|gracia)\\b)';
+
+const CONDITION_TERMS: Record<string, ConditionTerms> = {
+  blinded: {
+    mentions: [/blinded/i, /cegad[oa]s?/i],
+    assertions: [asserted('blinded|cegad[oa]')],
+  },
+  charmed: {
+    mentions: [
+      new RegExp(`\\bcharmed\\b${NOT_CHARMED_BY_PROSE}`, 'i'),
+      new RegExp(`\\bhechizad[oa]s?\\b${NOT_CHARMED_BY_PROSE}`, 'i'),
+    ],
+    assertions: [asserted(`(?:charmed|hechizad[oa]s?)${NOT_CHARMED_BY_PROSE}`)],
+  },
+  deafened: {
+    mentions: [/deafened/i, /ensordecid[oa]s?/i],
+    assertions: [asserted('deafened|ensordecid[oa]')],
+  },
+  exhaustion: {
+    mentions: [],
+    assertions: [
+      /\b(?:levels?|points?)\s+of\s+exhaustion\b/i,
+      /\bexhaustion\s+(?:levels?|conditions?)\b/i,
+      /\b(?:gains?|gained|suffers?|suffered|takes?|took|receives?|received)\s+exhaustion\b/i,
+      /\bnivel(?:es)?\s+de\s+agotamiento\b/i,
+      /\bcondición\s+de\s+agotamiento\b/i,
+      /\b(?:gana|ganas|ganó|sufre|sufres|sufrió|recibe|recibes|recibió|acumula|acumulas|acumuló)\s+agotamiento\b/i,
+    ],
+  },
+  frightened: {
+    mentions: [/frightened/i, /asustad[oa]s?/i, /aterrad[oa]s?/i],
+    assertions: [asserted('frightened|asustad[oa]|aterrad[oa]')],
+  },
+  grappled: {
+    mentions: [/\bgrappled\b/i, /\bagarrad[oa]s?\b(?!\s+(?:a|al)\b)/i],
+    assertions: [asserted('grappled|agarrad[oa]s?(?!\\s+(?:a|al)\\b)')],
+  },
+  incapacitated: {
+    mentions: [/\bincapacitated\b/i, /\bincapacitad[oa]s?\b/i],
+    assertions: [asserted('incapacitated|incapacitad[oa]s?')],
+  },
+  invisible: {
+    mentions: [],
+    assertions: [
+      /\b(?:becomes?|became|turns?|turned|goes|went|grows?|grew|is\s+now)\s+(?:completely\s+|fully\s+)?invisible\b/i,
+      /\b(?:se\s+(?:vuelve|volvió|vuelven|hace|hizo|hacen|torna|tornó)|te\s+(?:vuelves|volviste|haces|hiciste)|queda|quedó|quedas|quedan)\s+(?:completamente\s+|totalmente\s+)?invisibles?\b/i,
+      /\binvisible\s+condition\b/i,
+      /\bcondición\s+(?:de\s+)?invisible\b/i,
+    ],
+  },
+  paralyzed: {
+    mentions: [/paralyzed/i, /paralizad[oa]s?/i],
+    assertions: [asserted('paralyzed|paralizad[oa]')],
+  },
+  petrified: {
+    mentions: [/petrified/i, /petrificad[oa]s?/i],
+    assertions: [asserted('petrified|petrificad[oa]')],
+  },
+  poisoned: {
+    mentions: [/poisoned/i, /envenenad[oa]s?/i],
+    assertions: [asserted('poisoned|envenenad[oa]')],
+  },
+  prone: {
+    mentions: [/prone/i, /derribad[oa]/i, /cae\s+al\s+suelo/i],
+    assertions: [asserted('prone|derribad[oa]'), /\bcae\s+al\s+suelo\b/i],
+  },
+  restrained: {
+    // "Apresado" is the Spanish SRD's name for Restrained, and the word the
+    // narrator reaches for once Entangle or Web holds a creature.
+    mentions: [/restrained/i, /atrapado/i, /sujeto/i, /\bapresad[oa]s?\b/i],
+    assertions: [asserted('restrained|atrapad[oa]|sujet[oa]|apresad[oa]s?')],
+  },
+  stunned: {
+    mentions: [/stunned/i, /aturdid[oa]s?/i],
+    assertions: [asserted('stunned|aturdid[oa]')],
+  },
+  unconscious: {
+    mentions: [/unconscious/i, /inconsciente/i],
+    assertions: [asserted('unconscious|inconsciente')],
+  },
+};
+
+// The condition list comes from the rules registry, not from this file, so a
+// condition the engine knows can never go unwatched: one without localized
+// wording above is still caught by its canonical English name.
+const conditionMappings = Object.values(CONDITION_REGISTRY).map(entry => ({
+  condition: entry.name,
+  ...(CONDITION_TERMS[entry.id] ?? {
+    mentions: [new RegExp(`\\b${entry.name}\\b`, 'i')],
+    assertions: [asserted(entry.name)],
+  }),
+}));
+
+/** Where each pattern matches in the text, in order. */
+function matchIndexes(text: string, patterns: readonly RegExp[]): number[] {
+  const indexes: number[] = [];
+  for (const pattern of patterns) {
+    const global = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+    for (const match of text.matchAll(global)) indexes.push(match.index ?? 0);
+  }
+  return indexes.sort((a, b) => a - b);
+}
+
+/**
+ * Whether the condition word at `index` is said to have ended: "no longer
+ * restrained", "ya no está apresado", "deja de estar paralizado". Up to three
+ * words may sit between the phrase and the condition ("is no longer held
+ * restrained" reads oddly, "ya no está del todo apresado" does not).
+ */
+const ENDED_BEFORE = /(?:\bno\s+longer|\bya\s+no|\bdej(?:a|an|ó|aron)\s+de\s+(?:estar|ser))\s+(?:[\p{L}]+\s+){0,3}$/iu;
+
+function endsCondition(text: string, index: number): boolean {
+  return ENDED_BEFORE.test(text.slice(Math.max(0, index - 60), index));
+}
+
 /**
  * Validates AI narrative text against backend combat context to prevent hallucinations,
  * rule inventions, and retro jargon leakage.
  *
  * Rules:
  * - Reject any HP, damage, or healing numerical values (always blocked).
+ * - Reject AC and DC figures (always blocked).
  * - Reject XP gains.
  * - Reject unauthorized loot.
  * - Reject unconfirmed death descriptions.
  * - Reject mechanical hit/miss contradictions.
- * - Reject unconfirmed conditions.
+ * - Reject conditions neither applied this action nor held in the backend's
+ *   state after it, and reject narrating the end of one that is still held.
  * - Reject forbidden terms in runtime.
  */
 export function validateNarrativeText(
   text: string,
-  context?: CombatNarrativeContext
+  context?: CombatNarrativeContext,
+  /**
+   * What the backend's state holds after the action, read by the caller from
+   * the same campaign context the narrator is shown. `activeConditions` are
+   * the condition names any combatant carries (Combatant.conditions).
+   */
+  backendState?: { activeConditions?: readonly string[] }
 ): NarrativeValidationResult {
   const issues: NarrativeValidationIssue[] = [];
 
@@ -195,6 +343,41 @@ export function validateNarrativeText(
     });
   }
 
+  // 6b. Reject AC, DC and HP figures in every turn (DECISION_5E_SRD_API.md §7).
+  // The narrator sees each combatant's AC and HP in the campaign state; like
+  // HP amounts, those figures stay on the character sheet, never in the prose.
+  // Qualitative wording ("una armadura gruesa") remains valid.
+  // Spanish "once" (eleven) is also English "once": "hit points once more".
+  const mechanicNumber = `(?:\\d+|(?!(?:un|uno|una|one)\\b|once\\s+(?:more|again|and|upon|in|or|before|twice|a)\\b)${numberWord})`;
+  const acDcLabel = '(?:AC|DC|CA|CD|armou?r\\s+class|difficulty\\s+class|clase\\s+de\\s+armadura|clase\\s+de\\s+dificultad)';
+  // The label must end at a separator or a digit, so "catres" is not "CA tres".
+  const labelSeparator = '(?:\\s*[:=]\\s*|\\s+|(?=\\d))';
+  const acDcFigureRegex = new RegExp(
+    `\\b${acDcLabel}${labelSeparator}(?:of\\s+|de\\s+)?${mechanicNumber}\\b|\\b${mechanicNumber}\\s+(?:de\\s+)?(?:AC|DC|CA|CD)\\b`,
+    'i',
+  );
+  const acDcMatch = text.match(acDcFigureRegex);
+  if (acDcMatch) {
+    issues.push({
+      code: 'invented_ac_dc',
+      message: 'Armor Class or Difficulty Class figures are not permitted in AI narration.',
+      severity: 'error',
+      matchedText: acDcMatch[0],
+    });
+  }
+
+  const labelledHpRegex = new RegExp(
+    `\\b(?:HP|PV|PG|hit\\s+points|puntos\\s+de\\s+(?:vida|golpe))${labelSeparator}${mechanicNumber}\\b`,
+    'i',
+  );
+  if (labelledHpRegex.test(text) && !issues.some(issue => issue.code === 'invented_hp')) {
+    issues.push({
+      code: 'invented_hp',
+      message: 'Numerical HP, damage, or healing values are not permitted in AI narration.',
+      severity: 'error'
+    });
+  }
+
   // 7. Muerte no confirmada
   const deathWords = /\b(?:muere|dies|slain|killed|muerto|defeated|derrotad[oa]|cae\s+muerto|morir|die|slay)\b/i;
   const negatedDeathRegex = /\b(?:no\s+one|nobody)\s+(?:dies|is\s+(?:killed|slain))\b|\b(?:does|did)\s+not\s+die\b|\b(?:nadie|ningun[oa])\s+muere\b|\bno\s+muere\b/gi;
@@ -248,43 +431,60 @@ export function validateNarrativeText(
   }
 
   // 9. Condiciones no confirmadas
-  const conditionMappings = [
-    { names: [/stunned/i, /aturdido/i], condition: 'Stunned' },
-    { names: [/prone/i, /derribad[oa]/i, /cae\s+al\s+suelo/i], condition: 'Prone' },
-    { names: [/poisoned/i, /envenenado/i], condition: 'Poisoned' },
-    { names: [/blinded/i, /cegado/i], condition: 'Blinded' },
-    { names: [/deafened/i, /ensordecido/i], condition: 'Deafened' },
-    { names: [/frightened/i, /asustado/i, /aterrado/i], condition: 'Frightened' },
-    { names: [/paralyzed/i, /paralizado/i], condition: 'Paralyzed' },
-    { names: [/petrified/i, /petrificado/i], condition: 'Petrified' },
-    { names: [/restrained/i, /atrapado/i, /sujeto/i], condition: 'Restrained' },
-    { names: [/unconscious/i, /inconsciente/i], condition: 'Unconscious' }
-  ];
-
-  const explicitFactlessConditionRegex = /(?:\b(?:is|becomes?|queda|quedó|quedo)\s+(?:stunned|aturdid[oa]|prone|derribad[oa]|poisoned|envenenad[oa]|blinded|cegad[oa]|deafened|ensordecid[oa]|frightened|asustad[oa]|aterrad[oa]|paralyzed|paralizad[oa]|petrified|petrificad[oa]|restrained|atrapad[oa]|sujet[oa]|unconscious|inconsciente)\b|\bcae\s+al\s+suelo\b)/i;
-  if (!context && explicitFactlessConditionRegex.test(text)) {
-    issues.push({
-      code: 'unconfirmed_condition',
-      message: 'Narrated condition is not confirmed by backend consequences.',
-      severity: 'error',
-    });
-  }
+  // Death-save facts that state, by themselves, that the player is unconscious
+  // (combat-fact-adapter: "falls unconscious at 0 HP", "stable but
+  // unconscious"). PLAYER_DOWNED carries no condition_applied companion.
+  const unconsciousFactTypes = new Set(['player_downed', 'player_stabilized']);
+  // Conditions a combatant holds in the backend's state after this action. A
+  // condition that lasts across turns (Entangle, Hold Person) is confirmed by
+  // that state even on a turn that applied nothing, and a condition no one
+  // holds any more may be narrated as ended.
+  const active = new Set(
+    (backendState?.activeConditions ?? []).map((condition) => condition.trim().toLowerCase()),
+  );
 
   for (const mapping of conditionMappings) {
-    const mentionsCondition = mapping.names.some(regex => regex.test(text));
-    if (context && mentionsCondition) {
-      const isConfirmed = context.facts.some(f => 
-        f.type === 'condition_applied' && 
+    const isActive = active.has(mapping.condition.toLowerCase());
+    const confirmedByFacts = Boolean(context?.facts.some(f =>
+      (f.type === 'condition_applied' &&
         typeof f.payload?.conditionName === 'string' &&
-        f.payload.conditionName.toLowerCase() === mapping.condition.toLowerCase()
-      );
-      if (!isConfirmed) {
-        issues.push({
-          code: 'unconfirmed_condition',
-          message: `Narrated condition "${mapping.condition}" is not confirmed by the backend.`,
-          severity: 'error'
-        });
+        f.payload.conditionName.toLowerCase() === mapping.condition.toLowerCase()) ||
+      (mapping.condition === 'Unconscious' && unconsciousFactTypes.has(f.type))
+    ));
+    // On a combat turn any mention needs confirmation; without combat facts
+    // only an explicit assertion does, as before.
+    const patterns = context ? [...mapping.mentions, ...mapping.assertions] : mapping.assertions;
+
+    let unconfirmed = false;
+    let contradicted = false;
+    for (const index of matchIndexes(text, patterns)) {
+      if (endsCondition(text, index)) {
+        // "no longer restrained": true only if nobody still is.
+        if (isActive) contradicted = true;
+      } else if (!confirmedByFacts && !isActive) {
+        unconfirmed = true;
       }
+    }
+
+    if (unconfirmed) {
+      issues.push(context
+        ? {
+            code: 'unconfirmed_condition',
+            message: `Narrated condition "${mapping.condition}" is not confirmed by the backend.`,
+            severity: 'error',
+          }
+        : {
+            code: 'unconfirmed_condition',
+            message: 'Narrated condition is not confirmed by backend consequences.',
+            severity: 'error',
+          });
+    }
+    if (contradicted) {
+      issues.push({
+        code: 'contradicted_condition',
+        message: `Narration ends "${mapping.condition}", which the backend still holds.`,
+        severity: 'error',
+      });
     }
   }
 

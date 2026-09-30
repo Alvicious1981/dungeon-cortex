@@ -870,6 +870,34 @@ describe("una explosión no distingue de quién es", () => {
     expect(updated).toContain("p1");
   });
 
+  it("al narrador le llega el lanzador alcanzado por su propia explosión como el personaje jugador", async () => {
+    // El mismo combatiente es atacante y objetivo. Antes el objetivo salía
+    // marcado como no jugador, así que el narrador recibía al mismo personaje
+    // con dos papeles a la vez.
+    const player = {
+      id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+    };
+    encounterWith([player]);
+
+    const { res, frames } = await post("I cast Fireball", { targetX: 0, targetY: 0 });
+
+    expect(res.status).toBe(200);
+    const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+    expect(narrative?.actor).toMatchObject({ name: "Mira", isPlayer: true });
+    expect(narrative?.targets).toEqual([
+      expect.objectContaining({ id: "p1", name: "Mira", isPlayer: true }),
+    ]);
+
+    // And where it came from: the spell gate and the pipeline each state it.
+    const consequence = frames.find((f) => f.e?.type === "COMBAT_CONSEQUENCE");
+    expect(consequence.e.payload).toMatchObject({
+      attackerName: "Mira",
+      attackerIsPlayer: true,
+      targets: [{ targetId: "p1", targetIsPlayer: true }],
+    });
+  });
+
   it("alcanza a una criatura ya a 0 pv dentro del radio", async () => {
     const downed = {
       id: "t1", name: "Goblin Caído", ...NO_MODIFIERS, isPlayer: false, hp: 0, maxHp: 10, ac: 12,
@@ -885,6 +913,189 @@ describe("una explosión no distingue de quién es", () => {
     const { res } = await post("I cast Fireball", { targetX: 1, targetY: 0 });
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe("el narrador recibe a cada criatura con un solo papel cuando el enemigo contraataca", () => {
+  /** What the encounter route snapshots onto an enemy that can attack. */
+  const GOBLIN_PROFILE = {
+    version: 1,
+    walkSpeedFt: 30,
+    multiattack: null,
+    attacks: [
+      {
+        name: "Scimitar",
+        attackBonus: 4,
+        melee: { reachFt: 5 },
+        ranged: null,
+        damage: [{ dice: "1d6+2", type: "slashing" }],
+      },
+    ],
+  };
+
+  it("un ataque del jugador y el contraataque del goblin llegan con cada uno en su papel", async () => {
+    // The route emits the enemy chain's COMBAT_CONSEQUENCE *before* the
+    // player's own, so the narrator context is built from an enemy-authored and
+    // a player-authored consequence in one request: the case where a literal
+    // role labelled the goblin as the player and the hero as a non-player.
+    const player = {
+      id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 20, maxHp: 20, ac: 14,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 5, y: 5, size: "Medium",
+      initiativeTotal: 20, initiativeOrder: 0, attackProfile: null,
+    };
+    // AC 5 and 40 HP: the player's blow lands (natural 10 + modifier) and the
+    // goblin survives to answer it.
+    const goblin = {
+      id: "g1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 40, maxHp: 40, ac: 5,
+      conditions: [], concentrationSpellId: null, stats: {}, x: 5, y: 6, size: "Small",
+      initiativeTotal: 10, initiativeOrder: 1, attackProfile: GOBLIN_PROFILE,
+    };
+    const roster = [player, goblin];
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants: roster,
+      },
+    });
+    (prisma.combatant.findMany as any).mockResolvedValue(roster);
+    // Natural 10 on every die: neither a fumble nor a critical, and above the
+    // goblin's AC 5 and the player's AC 11.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+    try {
+      const { res, frames } = await post("Attack", { targetIds: ["g1"] });
+
+      expect(res.status).toBe(200);
+
+      // The scenario must really contain both attackers, or the roles below
+      // would be checked against a turn that never had the counter-attack.
+      const consequences = frames
+        .filter((f) => f.e?.type === "COMBAT_CONSEQUENCE")
+        .map((f) => f.e.payload);
+      expect(consequences.map((payload) => payload.attackerName)).toEqual(["Goblin", "Mira"]);
+
+      // What the narrator is told: every creature has one role, the right one.
+      const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+      const named = [narrative.actor, ...narrative.targets] as Array<{ name: string; isPlayer: boolean }>;
+      expect(new Set(named.map((creature) => creature.name))).toEqual(new Set(["Mira", "Goblin"]));
+      for (const creature of named) {
+        expect(creature.isPlayer, `${creature.name} in the narrator context`).toBe(creature.name === "Mira");
+      }
+
+      // And where it came from: each producer stated its own role on the event.
+      expect(consequences.map((payload) => payload.attackerIsPlayer)).toEqual([false, true]);
+    } finally {
+      random.mockRestore();
+    }
+  });
+});
+
+describe("una curación o un conjuro de utilidad llega al narrador como lo que fue, no como un ataque", () => {
+  // Measured with the real pipeline and adapter first, then through the route:
+  // the pipeline built one consequence per creature the spell named, with
+  // damage 0 for a heal or a utility spell, and the adapter read that as
+  // "Attack missed <creature>". The narrator was told of an attack no backend
+  // code had resolved, and the HUD, which applies the `hpAfter` of every
+  // consequence target, was handed the HP from before the heal.
+  const CURE_WOUNDS = {
+    id: "spell_cure_wounds_narrator", indexSlug: "cure-wounds", name: "Cure Wounds",
+    level: 1, concentration: false,
+    data: { heal_at_slot_level: { "1": "1d8" }, range: "Toque" },
+  };
+
+  /** Shield: caster-only, no dice, no save, no condition — a utility spell. */
+  const SHIELD = {
+    id: "spell_shield", indexSlug: "shield", name: "Shield",
+    level: 1, concentration: false,
+    data: { range: "Personal" },
+  };
+
+  const caster = {
+    id: "p1", name: "Mira", ...NO_MODIFIERS, isPlayer: true, hp: 10, maxHp: 20, ac: 14,
+    conditions: [], concentrationSpellId: null, stats: {}, x: 0, y: 0, size: "Medium",
+  };
+
+  /** Alive, so the encounter goes on; `x` says how far from the caster it stands. */
+  const goblinAt = (x: number) => ({
+    id: "t1", name: "Goblin", ...NO_MODIFIERS, isPlayer: false, hp: 20, maxHp: 20, ac: 12,
+    conditions: [], concentrationSpellId: null, stats: { DEX: 10 }, x, y: 0, size: "Medium",
+  });
+
+  function encounterWith(spell: unknown, goblinX = 8) {
+    const combatants = [caster, goblinAt(goblinX)];
+    (buildCampaignContext as any).mockResolvedValue({
+      ...contextFor(),
+      activeEncounter: {
+        id: "enc_1", round: 1, currentTurnIndex: 0, totalDamageDealt: 0,
+        combatants,
+      },
+    });
+    (prisma.srdSpell.findMany as any).mockResolvedValue([spell]);
+    (prisma.combatant.findMany as any).mockResolvedValue(combatants);
+  }
+
+  /** Every fact type in the context the route handed the narrator. */
+  function narratorFactTypes(): string[] {
+    const narrative = (streamNarrative as any).mock.calls.at(-1)?.[2];
+    return (narrative?.facts ?? []).map((fact: { type: string }) => fact.type);
+  }
+
+  it("una curación sobre el propio lanzador cuenta curación y ningún ataque, y el HUD no recibe el PV de antes de curar", async () => {
+    encounterWith(CURE_WOUNDS);
+    // roll("1d8"): 0.45 → 4, so the caster goes from 10 to 14.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+    try {
+      const { res, frames } = await post("I cast Cure Wounds", { targetIds: ["p1"] });
+
+      expect(res.status).toBe(200);
+
+      // The heal resolved, and this event is where the new HP travels.
+      const healed = frames.find((f) => f.e?.type === "HEALING_RECEIVED");
+      expect(healed.e.payload).toMatchObject({ amount: 4, newHp: 14 });
+
+      // What the narrator is told: the heal, and no attack.
+      expect(narratorFactTypes()).toEqual(["healing_confirmed"]);
+
+      // The entry the pipeline used to make for the caster said 10, the HP
+      // from before the heal, and the HUD applies exactly that.
+      expect(frames.filter((f) => f.e?.type === "COMBAT_CONSEQUENCE")).toEqual([]);
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("una curación que el cliente dirige a un enemigo cuenta curación y ningún ataque sobre él", async () => {
+    // A non-area spell takes its targets from the client with no hostile
+    // filter, so a heal can name an enemy. The goblin is adjacent so the touch
+    // range lets the cast through.
+    encounterWith(CURE_WOUNDS, 1);
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.45);
+
+    try {
+      const { res, frames } = await post("I cast Cure Wounds on Goblin", { targetIds: ["t1"] });
+
+      expect(res.status).toBe(200);
+      expect(frames.some((f) => f.e?.type === "HEALING_RECEIVED")).toBe(true);
+      expect(narratorFactTypes()).toEqual(["healing_confirmed"]);
+      expect(frames.filter((f) => f.e?.type === "COMBAT_CONSEQUENCE")).toEqual([]);
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("un conjuro de utilidad lanzador-solo no llega al narrador como un ataque fallado sobre el lanzador", async () => {
+    // The route aims a caster-only spell at the caster's own Combatant.
+    encounterWith(SHIELD);
+
+    const { res, frames } = await post("I cast Shield");
+
+    expect(res.status).toBe(200);
+    // The cast resolved, so an empty result is a decision and not a refusal.
+    expect(frames.some((f) => f.e?.type === "SPELL_CAST")).toBe(true);
+    expect(narratorFactTypes()).toEqual([]);
+    expect(frames.filter((f) => f.e?.type === "COMBAT_CONSEQUENCE")).toEqual([]);
   });
 });
 

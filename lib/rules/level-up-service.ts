@@ -8,6 +8,10 @@ import {
   type LevelUpPayload,
 } from "@/lib/rules/progression";
 import type { CharacterClass } from "@/lib/rules/proficiency";
+import { effectiveMaxHp } from "@/lib/rules/exhaustion";
+import { advanceSpellSlots, isSpellSlots } from "@/lib/rules/magic";
+import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
+import type { Prisma } from "@prisma/client";
 
 export type LevelUpServiceErrorCode =
   | "CAMPAIGN_NOT_FOUND"
@@ -50,10 +54,14 @@ interface LevelUpCharacterRecord {
   maxHp: number;
   hitDiceTotal: number;
   hitDiceRemaining: number;
+  exhaustionLevel?: number | null;
+  spellSlots?: unknown;
 }
 
 interface LevelUpDb {
   $transaction?<T>(fn: (tx: LevelUpDb) => Promise<T>): Promise<T>;
+  /** Present on a real transaction; takes the Character row lock. */
+  $queryRaw?: unknown;
   campaign: {
     findUnique(args: {
       where: { id: string };
@@ -82,6 +90,7 @@ interface LevelUpDb {
         hp: number;
         hitDiceTotal: number;
         hitDiceRemaining: number;
+        spellSlots?: Prisma.InputJsonValue;
       };
     }): Promise<{ count: number }>;
   };
@@ -294,6 +303,15 @@ async function applyLevelUpInTransaction(
     );
   }
 
+  // The level-up now also rewrites `spellSlots`, which a concurrent cast
+  // spends. The row lock makes the read below and the write after it one
+  // step, so the new slots are computed from what was really spent. The
+  // compare-and-set on `level` still decides which of two level-ups wins.
+  await lockCharacterForCombatAction(
+    db as unknown as Prisma.TransactionClient,
+    input.characterId
+  );
+
   const character = await db.character.findUnique({
     where: { id: input.characterId },
     select: {
@@ -306,6 +324,8 @@ async function applyLevelUpInTransaction(
       maxHp: true,
       hitDiceTotal: true,
       hitDiceRemaining: true,
+      exhaustionLevel: true,
+      spellSlots: true,
     },
   });
   if (!character) {
@@ -334,9 +354,21 @@ async function applyLevelUpInTransaction(
 
   // HP policy: the new hit die raises the ceiling and heals the same amount.
   // Damage already suffered is preserved — a level-up is not a rest.
-  const newHp = Math.min(character.hp + payload.hpGained, payload.newMaxHp);
+  // Exhaustion level 4+ halves the maximum; the stored `maxHp` still rises by
+  // the full amount, so the gain is there once the exhaustion is gone.
+  const newHp = Math.min(
+    character.hp + payload.hpGained,
+    effectiveMaxHp(payload.newMaxHp, character.exhaustionLevel)
+  );
   // One new hit die becomes available, capped at the new total.
   const newHitDiceRemaining = Math.min(character.hitDiceRemaining + 1, nextLevel);
+  // The new level's SRD slots; slots already spent stay spent (see
+  // advanceSpellSlots). Null for a class with none, which is left unwritten.
+  const newSpellSlots = advanceSpellSlots(
+    isSpellSlots(character.spellSlots) ? character.spellSlots : null,
+    character.class,
+    nextLevel
+  );
 
   const result = buildResult(input, character, payload, newHp, newHitDiceRemaining);
 
@@ -362,6 +394,9 @@ async function applyLevelUpInTransaction(
       hp: newHp,
       hitDiceTotal: payload.newHitDiceTotal,
       hitDiceRemaining: newHitDiceRemaining,
+      ...(newSpellSlots
+        ? { spellSlots: newSpellSlots as unknown as Prisma.InputJsonValue }
+        : {}),
     },
   });
 

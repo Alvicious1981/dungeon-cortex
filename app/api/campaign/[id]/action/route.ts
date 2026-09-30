@@ -32,8 +32,10 @@ import {
 } from "@/lib/db/equipment-transition";
 import { abilityCheckAdvantageFrom } from "@/lib/rules/item-effects";
 import { stealthDisadvantageFor } from "@/lib/rules/armor-stealth";
+import { targetRefusal } from "@/lib/rules/spell-conditions";
 import {
   evaluateAbilityCheckAdvantage,
+  isImmobilized,
   isUnawareOfSurroundings,
 } from "@/lib/rules/conditions";
 import { resolveRest, RestServiceError } from "@/lib/rules/rest-service";
@@ -87,6 +89,7 @@ import {
   resolveRollCommand,
 } from "@/lib/actions/roll-command";
 import { resolveTravelGate } from "@/lib/actions/travel-command";
+import { exhaustedSpeedFt } from "@/lib/rules/exhaustion";
 import { Prisma } from "@prisma/client";
 import type { ContextCharacter, ContextCombatant } from "@/lib/memory/context";
 import { resolveEncounterTurnAuthority } from "@/lib/rules/turn-authority";
@@ -796,6 +799,9 @@ async function resolveAction(
               inventory: context.character.inventory,
               characterClass: context.character.class,
             }).applies,
+            // Neither travel nor a rest can run during an encounter, so the
+            // level read before the lock is the level in force for this attack.
+            actorExhaustionLevel: context.character.exhaustionLevel,
             targetCombatants: targets,
             weaponName: foundWeapon?.name || "Unarmed",
             weaponDice: attack.weaponDice,
@@ -839,6 +845,8 @@ async function resolveAction(
         if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
+            // A player-action gate: the attacker is the player character.
+            attackerIsPlayer: true,
             targets: committed.attackOutcome.consequences,
           }));
         }
@@ -905,10 +913,34 @@ async function resolveAction(
       const DEFAULT_SPEED_FT = 30;
       const combatantStats = (playerCombatant.stats as Record<string, unknown>) ?? {};
       const rawSpeed = combatantStats.speed;
-      const speedFt = typeof rawSpeed === "number" && rawSpeed > 0
+      const baseSpeedFt = typeof rawSpeed === "number" && rawSpeed > 0
         ? rawSpeed
         : DEFAULT_SPEED_FT;
+      // SRD exhaustion: level 2 halves speed, level 5 reduces it to 0.
+      const speedFt = exhaustedSpeedFt(baseSpeedFt, context.character.exhaustionLevel);
       const speedSquares = Math.floor(speedFt / 5);
+
+      if (speedSquares === 0) {
+        return NextResponse.json(
+          {
+            error: "Exhaustion has reduced your speed to 0. You cannot move.",
+            code: "SPEED_ZERO",
+          },
+          { status: 409 }
+        );
+      }
+
+      // SRD: a grappled or restrained creature's speed is 0 — the player's own
+      // area spell can restrain them as well as their enemies.
+      if (isImmobilized(extractConditions(playerCombatant.conditions))) {
+        return NextResponse.json(
+          {
+            error: "You are held in place and your speed is 0. You cannot move.",
+            code: "SPEED_ZERO",
+          },
+          { status: 409 }
+        );
+      }
 
       // ── Distance validation (Chebyshev — 5e grid diagonal = 1 square) ─────
       const distSquares = chebyshevSquares(from, to);
@@ -1706,6 +1738,23 @@ async function resolveAction(
         targets = requestedTargets;
       }
 
+      // ── Who a condition spell may name ────────────────────────────────────
+      // Hold Person's "choose a humanoid" makes any other target an illegal
+      // cast, refused here before a slot or a turn is spent — the same place
+      // an out-of-range target is. A target of unknown type is refused too,
+      // since the spell's legality or effect depends on it.
+      if (effect.conditionTerms) {
+        for (const target of targets) {
+          const refusal = targetRefusal(effect.conditionTerms, target);
+          if (refusal) {
+            return NextResponse.json(
+              { error: refusal, code: "SPELL_TARGET_INVALID" },
+              { status: 400 }
+            );
+          }
+        }
+      }
+
       const playerCombatant = context.activeEncounter?.combatants.find(c => c.isPlayer);
       const playerConditions = extractConditions(playerCombatant?.conditions);
 
@@ -1780,6 +1829,8 @@ async function resolveAction(
         if (committed.spellOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
+            // A player-action gate: the attacker is the player character.
+            attackerIsPlayer: true,
             targets: committed.spellOutcome.consequences,
           }));
         }
@@ -2068,6 +2119,9 @@ async function resolveAction(
               inventory: context.character.inventory,
               characterClass: context.character.class,
             }).applies,
+            // Neither travel nor a rest can run during an encounter, so the
+            // level read before the lock is the level in force for this attack.
+            actorExhaustionLevel: context.character.exhaustionLevel,
             targetCombatants: targets,
             weaponName: foundWeapon?.name || "Unarmed",
             weaponDice: attack.weaponDice,
@@ -2111,6 +2165,8 @@ async function resolveAction(
         if (committed.attackOutcome.consequences.length > 0) {
           gameEvents.push(buildCombatConsequenceEvent({
             attackerName: context.character.name,
+            // A player-action gate: the attacker is the player character.
+            attackerIsPlayer: true,
             targets: committed.attackOutcome.consequences,
           }));
         }

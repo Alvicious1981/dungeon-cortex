@@ -11,6 +11,9 @@
  * responsible for persisting the returned state via prisma.character.update.
  */
 
+import type { Ability } from "@/lib/rules/ability-check";
+import { spellConditionFor, type SpellConditionEntry } from "@/lib/rules/spell-conditions";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -251,6 +254,80 @@ export function spellSlotsForLevel(
   }
 }
 
+/**
+ * The SRD slot maxima for a class and level as the `Character.spellSlots`
+ * shape, every slot available. Null when the class has no slots at that level
+ * (a fighter; a paladin or ranger at level 1).
+ *
+ * `spellSlotsForLevel` held the right table from the start and had no caller:
+ * characters were created with two 1st-level slots if they were a wizard,
+ * cleric or sorcerer and none otherwise, and levelling up never changed them,
+ * so no character could ever cast a spell above 1st level.
+ *
+ * @pure
+ */
+export function spellSlotsFor(characterClass: string, level: number): SpellSlots | null {
+  const clamped = Math.min(20, Math.max(1, Math.trunc(level)));
+  const row = spellSlotsForLevel(characterClass.trim(), clamped);
+  const slots: SpellSlots = {};
+  row.forEach((max, index) => {
+    if (max > 0) slots[String(index + 1)] = { current: max, max };
+  });
+  return Object.keys(slots).length > 0 ? slots : null;
+}
+
+/**
+ * The slots after gaining a level: the new level's maxima, with every slot
+ * already spent still spent. New slots arrive available — the same policy the
+ * level-up applies to hit points, where the new die raises the ceiling and
+ * heals the same amount but earlier damage stays.
+ *
+ * A warlock's Pact Magic slots are all one level, and that level rises (1st
+ * to 2nd at level 3), so the spent count carries over as a total rather than
+ * per spell level.
+ *
+ * A class with no slots at the new level keeps whatever it had (normally
+ * none). @pure
+ */
+export function advanceSpellSlots(
+  current: SpellSlots | null,
+  characterClass: string,
+  newLevel: number
+): SpellSlots | null {
+  const next = spellSlotsFor(characterClass, newLevel);
+  if (!next) return current;
+
+  const spentAt = (key: string): number => {
+    const entry = current?.[key];
+    return entry ? Math.max(0, entry.max - entry.current) : 0;
+  };
+  const totalSpent = Object.keys(current ?? {}).reduce((sum, key) => sum + spentAt(key), 0);
+  const pact = characterClass.trim().toLowerCase() === "warlock";
+
+  for (const [key, entry] of Object.entries(next)) {
+    const spent = pact ? totalSpent : spentAt(key);
+    entry.current = Math.max(0, entry.max - spent);
+  }
+  return next;
+}
+
+/**
+ * The slots after a long rest: all of them, at the maxima the SRD gives the
+ * character's class and level. Taking the maxima from the table rather than
+ * the stored ones is what repairs a character whose slots were never raised
+ * when they levelled up. A class with no table slots keeps its stored slots,
+ * restored. @pure
+ */
+export function longRestSpellSlots(
+  characterClass: string,
+  level: number,
+  stored: unknown
+): SpellSlots | null {
+  const table = spellSlotsFor(characterClass, level);
+  if (table) return table;
+  return isSpellSlots(stored) ? restoreAllSlots(stored) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Concentration
 // ---------------------------------------------------------------------------
@@ -307,13 +384,36 @@ export interface SpellEffect {
   damageType: string | null;
   /** True when the spell grants a saving throw (damage may be halved on success). */
   hasSavingThrow: boolean;
-  /** Ability score index for the saving throw, e.g. "dex". Null if none. */
-  saveAbility: string | null;
+  /**
+   * Ability for the saving throw, spelled the way `Combatant.stats` keys it
+   * ("DEX"). Null if the spell grants none.
+   */
+  saveAbility: Ability | null;
   /** Damage applied when the target succeeds on its saving throw. */
   saveDamage: "half" | "none";
-  /** Condition to apply on failed save (or non-save spells), e.g. "Blinded". Null if none. */
-  condition: string | null;
+  /**
+   * Conditions to apply on a failed save, as CONDITION_REGISTRY keys. Come
+   * from SPELL_CONDITIONS (lib/rules/spell-conditions.ts), never from the
+   * spell's prose. Empty if none.
+   */
+  conditions: readonly string[];
+  /**
+   * The table row behind those conditions: how they end, whether the target
+   * repeats the save, and who the spell can target or leaves unaffected. Set
+   * exactly when `conditions` is non-empty.
+   */
+  conditionTerms: SpellConditionTerms | null;
 }
+
+export type SpellConditionTerms = { spellIndex: string } & Pick<
+  SpellConditionEntry,
+  | "concentration"
+  | "durationRounds"
+  | "repeatSave"
+  | "onlyTypes"
+  | "unaffectedTypes"
+  | "unaffectedAtIntelligence"
+>;
 
 /**
  * Returns the canonical spellcasting ability ("INT" | "WIS" | "CHA") for a
@@ -340,6 +440,21 @@ export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CH
 }
 
 /**
+ * The SRD's `dc.dc_type.index` values, mapped onto the keys `Combatant.stats`
+ * uses. The data spells the ability "wis"; a creature's scores are stored as
+ * "WIS". Looking one up with the other found nothing, so every creature
+ * rolled its save against a player's spell with the +0 of a score of 10.
+ */
+const SAVE_ABILITY_BY_SRD_INDEX: Record<string, Ability> = {
+  str: "STR",
+  dex: "DEX",
+  con: "CON",
+  int: "INT",
+  wis: "WIS",
+  cha: "CHA",
+};
+
+/**
  * Extracts the mechanical effect of a spell cast at the given slot level from
  * a raw SrdSpell data blob (Spanish 5e SRD format).
  *
@@ -349,6 +464,12 @@ export function spellcastingAbility(characterClass: string): "INT" | "WIS" | "CH
  *   - `heal_at_slot_level[slotLevel]`               → leveled healing dice (may contain "APT")
  *   - `dc.dc_type.index`                         → saving throw ability
  *   - `dc.dc_success`                            → "mitad" = half damage on save
+ *
+ * A `damage` block counts as damage only when it names a `damage_type`. Two
+ * SRD records carry dice there that are not damage of any one type: Sleep's
+ * 5d8 is the hit-point pool it puts to sleep, and Prismatic Spray's 10d6 takes
+ * its type from the ray each target rolls. Read as damage, a Sleep dealt 5d8
+ * to its target. Neither is resolvable as damage, so neither is resolved as it.
  *
  * "APT" in healing formulas is replaced with the numeric `spellcastingMod`
  * so the result is a valid dice expression (e.g. "1d8+3").
@@ -361,9 +482,39 @@ export function resolveSpellEffect(
   spellcastingMod: number,
   characterLevel = slotLevel
 ): SpellEffect {
+  const dc = spellData.dc as Record<string, unknown> | undefined;
+  const dcIndex = (dc?.dc_type as Record<string, unknown> | undefined)?.index;
+  const dcType =
+    typeof dcIndex === "string"
+      ? SAVE_ABILITY_BY_SRD_INDEX[dcIndex.trim().toLowerCase()] ?? null
+      : null;
+
+  // A condition only ever comes from the curated table, keyed by the SRD
+  // index. The table's save fills in for a record whose cache row has no `dc`
+  // (Web); where the cache has one, the table test requires them to agree.
+  const spellIndex = typeof spellData.index === "string" ? spellData.index : null;
+  const conditionEntry = spellConditionFor(spellIndex);
+  const conditions = conditionEntry?.conditions ?? [];
+  const conditionTerms: SpellConditionTerms | null =
+    conditionEntry && spellIndex
+      ? {
+          spellIndex,
+          concentration: conditionEntry.concentration,
+          durationRounds: conditionEntry.durationRounds,
+          ...(conditionEntry.repeatSave ? { repeatSave: conditionEntry.repeatSave } : {}),
+          ...(conditionEntry.onlyTypes ? { onlyTypes: conditionEntry.onlyTypes } : {}),
+          ...(conditionEntry.unaffectedTypes ? { unaffectedTypes: conditionEntry.unaffectedTypes } : {}),
+          ...(conditionEntry.unaffectedAtIntelligence !== undefined
+            ? { unaffectedAtIntelligence: conditionEntry.unaffectedAtIntelligence }
+            : {}),
+        }
+      : null;
+
   // --- Damage spell ---
   const dmg = spellData.damage as Record<string, unknown> | undefined;
-  if (dmg) {
+  const dmgType =
+    ((dmg?.damage_type as Record<string, unknown> | undefined)?.index as string | undefined) ?? null;
+  if (dmg && dmgType) {
     const bySlot = dmg.damage_at_slot_level as Record<string, string> | undefined;
     const byCharacterLevel = dmg.damage_at_character_level as
       | Record<string, string>
@@ -380,9 +531,6 @@ export function resolveSpellEffect(
         tiers.filter((tier) => tier <= requestedLevel).at(-1) ?? tiers[0];
       const dice = bestTier === undefined ? null : scaling[String(bestTier)] ?? null;
 
-      const dmgType = (dmg.damage_type as Record<string, unknown> | undefined)?.index as string ?? null;
-      const dc = spellData.dc as Record<string, unknown> | undefined;
-      const dcType = dc ? ((dc.dc_type as Record<string, unknown> | undefined)?.index as string ?? null) : null;
       const dcSuccess = String(dc?.dc_success ?? "").toLowerCase();
       const saveDamage = /half|mitad/.test(dcSuccess) ? "half" : "none";
 
@@ -393,7 +541,8 @@ export function resolveSpellEffect(
         hasSavingThrow: !!dc,
         saveAbility: dcType,
         saveDamage,
-        condition: null, // To be extracted from SRD description or specialized fields
+        conditions,
+        conditionTerms,
       };
     }
   }
@@ -411,12 +560,27 @@ export function resolveSpellEffect(
         .replace(/\s*\+\s*APT\b/gi, modStr)
         .replace(/\bAPT\b/gi, String(spellcastingMod))
         .replace(/\s+/g, ""); // strip remaining whitespace for dice parser
-      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", condition: null };
+      return { type: "healing", dice, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", conditions: [], conditionTerms: null };
     }
   }
 
+  // --- Condition without damage (Entangle, Web, Hold Person) ---
+  if (conditionEntry) {
+    const saveAbility = dcType ?? conditionEntry.save;
+    return {
+      type: "utility",
+      dice: null,
+      damageType: null,
+      hasSavingThrow: saveAbility !== null,
+      saveAbility,
+      saveDamage: "none",
+      conditions,
+      conditionTerms,
+    };
+  }
+
   // --- Utility spell ---
-  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", condition: null };
+  return { type: "utility", dice: null, damageType: null, hasSavingThrow: false, saveAbility: null, saveDamage: "none", conditions: [], conditionTerms: null };
 }
 
 /**

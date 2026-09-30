@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateFallbackProse } from '../../lib/narrative/fallback-prose';
 import { validateNarrativeText } from '../../lib/narrative/narrative-validator';
+import { adaptCombatEventsToNarrativeContext } from '../../lib/narrative/combat-fact-adapter';
 import { CombatNarrativeContext, NarrativeFact } from '../../lib/narrative/combat-narrative-types';
 
 describe('Fallback Prose Generator Tests (Fase 6A)', () => {
@@ -188,6 +189,60 @@ describe('Fallback Prose Generator Tests (Fase 6A)', () => {
 
     expect(prose).toBe('La escena continúa.');
     expect(validateNarrativeText(prose, context).ok).toBe(true);
+  });
+
+  describe('death-save facts (death-saves spec §6.6)', () => {
+    const deathEvents = [
+      { type: 'PLAYER_DOWNED', payload: {} },
+      { type: 'DEATH_SAVE_ROLLED', payload: { natural: 14, successes: 1, failures: 0, outcome: 'dying' } },
+      { type: 'PLAYER_STABILIZED', payload: {} },
+      { type: 'PLAYER_REVIVED', payload: { hp: 1 } },
+      { type: 'PLAYER_WOKE', payload: { hp: 1 } },
+      { type: 'PLAYER_DIED', payload: { cause: 'death_saves' } },
+    ] as const;
+
+    it.each(deathEvents)('narrates $type without numbers and passes its own validation', (event) => {
+      const context = adaptCombatEventsToNarrativeContext([event]);
+      const prose = generateFallbackProse(context);
+
+      expect(prose).not.toBe('La escena continúa.');
+      expect(prose).not.toMatch(/\d/);
+      expect(validateNarrativeText(prose, context).ok).toBe(true);
+    });
+
+    it.each(deathEvents.filter((event) => event.type !== 'PLAYER_DIED'))(
+      'never states the player died on $type alone',
+      (event) => {
+        const prose = generateFallbackProse(adaptCombatEventsToNarrativeContext([event]));
+
+        expect(prose).not.toMatch(/muert[oa]|mueres|you\s+die/i);
+      },
+    );
+
+    it('states the death once, in place of the dying sentences, when player_died is present', () => {
+      const context = adaptCombatEventsToNarrativeContext([
+        { type: 'PLAYER_DOWNED', payload: {} },
+        { type: 'DEATH_SAVE_ROLLED', payload: { natural: 1, successes: 0, failures: 3, outcome: 'dead' } },
+        { type: 'PLAYER_DIED', payload: { cause: 'death_saves' } },
+      ]);
+      const prose = generateFallbackProse(context);
+
+      expect(prose).toBe('Tu último aliento se apaga: has muerto.');
+      expect(validateNarrativeText(prose, context).ok).toBe(true);
+    });
+
+    it('keeps an enemy hit that downs the player valid alongside the downed sentence', () => {
+      const context: CombatNarrativeContext = {
+        facts: [
+          { type: 'attack_hit', description: 'Attack hit on Aria', payload: { targetName: 'Aria' } },
+          { type: 'player_downed', description: 'The player falls unconscious at 0 HP', payload: {} },
+        ],
+      };
+      const prose = generateFallbackProse(context);
+
+      expect(prose).toContain('inconsciente');
+      expect(validateNarrativeText(prose, context).ok).toBe(true);
+    });
   });
 
 });

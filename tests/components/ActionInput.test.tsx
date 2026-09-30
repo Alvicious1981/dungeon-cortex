@@ -28,10 +28,12 @@ describe("ActionInput shared SSE transport", () => {
       type: "COMBAT_CONSEQUENCE",
       payload: {
         attackerName: "Aldric",
+        attackerIsPlayer: true,
         targets: [
           {
             targetId: "enemy-1",
             targetName: "Goblin",
+            targetIsPlayer: false,
             damage: 4,
             naturalRoll: 16,
             isCrit: false,
@@ -513,7 +515,7 @@ describe("ActionInput retry identity (DC-AUD-003)", () => {
     // silently drop a replay.
     const replayed = [
       { type: "TURN_ADVANCE", payload: { nextTurnIndex: 1, nextRound: 1 } },
-      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", targets: [] } },
+      { type: "COMBAT_CONSEQUENCE", payload: { attackerName: "Hero", attackerIsPlayer: true, targets: [] } },
     ];
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       sse(

@@ -187,10 +187,12 @@ describe('Narrative Prompt Builder Tests (Fase 7A/7B.1)', () => {
         type: 'COMBAT_CONSEQUENCE',
         payload: {
           attackerName: 'Hero',
+          attackerIsPlayer: true,
           targets: [
             {
               targetName: 'Orc',
               targetId: 'orc-1',
+              targetIsPlayer: false,
               damage: 12,
               naturalRoll: 20,
               isCrit: true,
@@ -232,5 +234,13 @@ describe('Narrative Prompt Builder Tests (Fase 7A/7B.1)', () => {
     expect(validationFallback.ok).toBe(true);
     expect(fallbackProse).not.toContain('12');
     expect(fallbackProse.toLowerCase()).not.toContain('morale' + ' ' + 'check');
+  });
+});
+
+describe("buildNarrativePrompt — lasting conditions", () => {
+  it("tells the narrator a condition listed in the campaign state is confirmed and ongoing", () => {
+    const { system } = buildNarrativePrompt({ facts: [] });
+    expect(system).toContain("A condition listed on a combatant in the campaign state is confirmed and ongoing");
+    expect(system).toContain("no longer under a condition only when the campaign state no longer lists it");
   });
 });

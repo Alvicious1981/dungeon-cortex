@@ -30,6 +30,14 @@ describe("migración 20260917140000_add_combatant_character_link", () => {
   const sql = existsSync(MIGRATION_PATH) ? readFileSync(MIGRATION_PATH, "utf8") : "";
   const code = executable(sql);
 
+  it("contiene toda la migración en una única sentencia DO atómica", () => {
+    // Also protects statement-by-statement SQL clients: the column, backfill,
+    // constraints and indexes must all roll back when the duplicate guard fails.
+    expect(code.trim()).toMatch(
+      /^DO \$add_combatant_character_link\$\s+BEGIN\b[\s\S]*\bEND\s+\$add_combatant_character_link\$;$/
+    );
+  });
+
   it("añade characterId como columna nullable, sin default", () => {
     expect(code).toMatch(/ADD COLUMN(?:\s+IF NOT EXISTS)?\s+"characterId"\s+TEXT\s*;/);
     expect(code).not.toMatch(/"characterId"[^;]*DEFAULT/);
@@ -112,7 +120,7 @@ describe("migración 20260917140000_add_combatant_character_link", () => {
     // El backfill copia el mismo characterId a todas las filas isPlayer de un
     // encuentro: si hubiera duplicadas, también chocarían aquí. La guarda
     // debe informar primero, con su propio mensaje.
-    const guard = code.search(/DO \$combatant_one_player_per_encounter\$/);
+    const guard = code.search(/IF EXISTS \(/);
     const index = code.search(/CREATE UNIQUE INDEX "Combatant_encounterId_characterId_key"/);
     expect(guard).toBeGreaterThan(-1);
     expect(index).toBeGreaterThan(guard);

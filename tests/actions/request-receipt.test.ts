@@ -382,7 +382,11 @@ describe("replayEvents snapshot", () => {
     const fat = [
       {
         type: "COMBAT_CONSEQUENCE",
-        payload: { attackerName: "x".repeat(ACTION_REPLAY_EVENTS_MAX_BYTES + 1_000), targets: [] },
+        payload: {
+          attackerName: "x".repeat(ACTION_REPLAY_EVENTS_MAX_BYTES + 1_000),
+          attackerIsPlayer: true,
+          targets: [],
+        },
       } as unknown as GameEvent,
     ];
 

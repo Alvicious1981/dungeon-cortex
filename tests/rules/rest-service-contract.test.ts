@@ -533,6 +533,32 @@ describe("resolveRest service contract", () => {
     });
   });
 
+  it("long rest restores a caster's slots at its class and level's SRD maxima", async () => {
+    // A level 3 wizard whose slots were never raised past level 1 — every
+    // character levelled before spell-slot progression existed.
+    const staleWizard = {
+      ...baseCharacters[0]!,
+      class: "Wizard",
+      level: 3,
+      spellSlots: { "1": { current: 0, max: 2 } },
+    };
+    const { characters, tx } = createTx({
+      characters: [staleWizard, ...baseCharacters.slice(1)],
+    });
+
+    await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "long",
+      tx,
+    });
+
+    expect(characters.find((character) => character.id === "character-1")?.spellSlots).toEqual({
+      "1": { current: 4, max: 4 },
+      "2": { current: 2, max: 2 },
+    });
+  });
+
   it("does not allow HP above maxHp", async () => {
     const characters = baseCharacters.map((character) =>
       character.id === "character-1" ? { ...character, hp: 11, maxHp: 12 } : character
@@ -549,6 +575,50 @@ describe("resolveRest service contract", () => {
     });
 
     expect(nextCharacters.find((character) => character.id === "character-1")?.hp).toBe(12);
+  });
+
+  // SRD exhaustion level 4 halves the hit point maximum. `maxHp` keeps the
+  // real value; the halved one is what healing may reach.
+  it("caps a short rest at the halved maximum from exhaustion level 4", async () => {
+    const characters = baseCharacters.map((character) =>
+      character.id === "character-1" ? { ...character, hp: 4, maxHp: 12, exhaustionLevel: 4 } : character
+    );
+    const { tx, characters: nextCharacters } = createTx({ characters });
+
+    await resolveRest({
+      campaignId: "campaign-1",
+      characterId: "character-1",
+      restType: "short",
+      hitDiceToSpend: 1,
+      roll: deterministicRoll(10),
+      tx,
+    });
+
+    expect(nextCharacters.find((character) => character.id === "character-1")?.hp).toBe(6);
+  });
+
+  it("restores the full maximum when a long rest lowers exhaustion from 4 to 3", async () => {
+    const characters = baseCharacters.map((character) =>
+      character.id === "character-1" ? { ...character, hp: 4, maxHp: 12, exhaustionLevel: 4 } : character
+    );
+    const { tx, characters: nextCharacters } = createTx({ characters });
+
+    await resolveRest({ campaignId: "campaign-1", characterId: "character-1", restType: "long", tx });
+
+    const after = nextCharacters.find((character) => character.id === "character-1");
+    expect(after).toMatchObject({ hp: 12, exhaustionLevel: 3 });
+  });
+
+  it("stops a long rest at the halved maximum while exhaustion stays at 4 or more", async () => {
+    const characters = baseCharacters.map((character) =>
+      character.id === "character-1" ? { ...character, hp: 4, maxHp: 12, exhaustionLevel: 5 } : character
+    );
+    const { tx, characters: nextCharacters } = createTx({ characters });
+
+    await resolveRest({ campaignId: "campaign-1", characterId: "character-1", restType: "long", tx });
+
+    const after = nextCharacters.find((character) => character.id === "character-1");
+    expect(after).toMatchObject({ hp: 6, exhaustionLevel: 4 });
   });
 
   it("does not allow HP below 0", async () => {

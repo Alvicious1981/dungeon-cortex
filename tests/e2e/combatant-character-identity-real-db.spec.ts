@@ -129,7 +129,86 @@ class BackfillProofRolledBack extends Error {
   }
 }
 
-test("the migration's own backfill links the player row, leaves the enemy row NULL, is idempotent, and must precede the CHECK", async ({
+test("@smoke the complete migration rolls back its DDL when duplicate player rows exist", async () => {
+  assertSafeE2EDatabase();
+  const prisma = new PrismaClient();
+  const schema = `dc_identity_${randomUUID().replaceAll("-", "")}`;
+  // Test only the migration's tables, in an isolated schema. No outer
+  // transaction may hide whether the migration itself is atomic.
+  const isolatedMigration = MIGRATION_SQL.replace(
+    /"(Combatant|Character|Encounter|Campaign)"/g,
+    (_match, table: string) => `"${schema}"."${table}"`
+  );
+
+  try {
+    await prisma.$executeRawUnsafe(`
+      DO $fixture$
+      BEGIN
+        CREATE SCHEMA "${schema}";
+        CREATE TABLE "${schema}"."Character" ("id" TEXT PRIMARY KEY);
+        CREATE TABLE "${schema}"."Campaign" ("id" TEXT PRIMARY KEY, "characterId" TEXT);
+        CREATE TABLE "${schema}"."Encounter" ("id" TEXT PRIMARY KEY, "campaignId" TEXT);
+        CREATE TABLE "${schema}"."Combatant" (
+          "id" TEXT PRIMARY KEY, "encounterId" TEXT, "isPlayer" BOOLEAN NOT NULL
+        );
+        INSERT INTO "${schema}"."Character" VALUES ('character');
+        INSERT INTO "${schema}"."Campaign" VALUES ('campaign', 'character');
+        INSERT INTO "${schema}"."Encounter" VALUES ('encounter', 'campaign');
+        INSERT INTO "${schema}"."Combatant" VALUES
+          ('player-a', 'encounter', true), ('player-b', 'encounter', true);
+      END
+      $fixture$;
+    `);
+
+    await expect(prisma.$executeRawUnsafe(isolatedMigration)).rejects.toThrow(
+      "Cannot enforce single-player-per-encounter invariant: duplicate isPlayer rows already exist"
+    );
+    const columns = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint AS count FROM information_schema.columns
+      WHERE table_schema = ${schema} AND table_name = 'Combatant' AND column_name = 'characterId'
+    `;
+    expect(Number(columns[0].count)).toBe(0);
+    const rows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+      `SELECT COUNT(*)::bigint AS count FROM "${schema}"."Combatant"`
+    );
+    expect(Number(rows[0].count)).toBe(2);
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await prisma.$disconnect();
+  }
+});
+
+test("@smoke the encounter route links its player to the campaign character and leaves enemies unlinked", async ({
+  request,
+}) => {
+  assertSafeE2EDatabase();
+  const prisma = new PrismaClient();
+  const created: E2ECreatedRecords = {};
+
+  try {
+    await createCharacterAndCampaign(request, created, `Combatant route ${randomUUID().slice(0, 8)}`);
+    const encounterId = await createdId(await request.post(
+      `/api/campaign/${created.campaignId}/encounter`,
+      { data: { enemies: [{ name: "Goblin", hp: 7, maxHp: 7, dexModifier: 2 }] } }
+    ));
+    const combatants = await prisma.combatant.findMany({ where: { encounterId } });
+    const players = combatants.filter((combatant) => combatant.isPlayer);
+    expect(players).toHaveLength(1);
+    expect(players[0].characterId).toBe(created.characterId);
+    const enemies = combatants.filter((combatant) => !combatant.isPlayer);
+    expect(enemies).toHaveLength(1);
+    expect(enemies[0].characterId).toBeNull();
+  } finally {
+    if (created.campaignId) {
+      await prisma.combatant.deleteMany({ where: { encounter: { campaignId: created.campaignId } } });
+      await prisma.encounter.deleteMany({ where: { campaignId: created.campaignId } });
+    }
+    await prisma.$disconnect();
+    await cleanupE2ERecords(created);
+  }
+});
+
+test("@smoke the migration's own backfill links the player row, leaves the enemy row NULL, is idempotent, and must precede the CHECK", async ({
   request,
 }) => {
   test.setTimeout(60_000);
@@ -254,7 +333,7 @@ test("the migration's own backfill links the player row, leaves the enemy row NU
   }
 });
 
-test("a second isPlayer:true Combatant in the same encounter is rejected by the database", async ({
+test("@smoke a second isPlayer:true Combatant in the same encounter is rejected by the database", async ({
   request,
 }) => {
   test.setTimeout(60_000);
@@ -330,7 +409,7 @@ test("a second isPlayer:true Combatant in the same encounter is rejected by the 
   }
 });
 
-test("one encounter cannot link the same characterId twice, while unlinked enemies and later encounters are unconstrained", async ({
+test("@smoke one encounter cannot link the same characterId twice, while unlinked enemies and later encounters are unconstrained", async ({
   request,
 }) => {
   test.setTimeout(60_000);
@@ -414,7 +493,7 @@ test("one encounter cannot link the same characterId twice, while unlinked enemi
   }
 });
 
-test("an isPlayer:true Combatant without a characterId is rejected by the database", async ({
+test("@smoke an isPlayer:true Combatant without a characterId is rejected by the database", async ({
   request,
 }) => {
   test.setTimeout(60_000);
