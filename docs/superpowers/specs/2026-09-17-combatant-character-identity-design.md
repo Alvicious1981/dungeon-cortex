@@ -164,13 +164,22 @@ constraints and both unique indexes all roll back together if any operation fail
 even in a SQL client that normally commits statements individually.
 
 **Deploy order:** pause campaign writes and drain all old application instances first.
-The maintainer then applies the migration with its backfill, deploys the new application
-and its matching generated Prisma Client, and resumes writes. This is a coordinated
-maintenance deployment: old code cannot create a player combatant once the new CHECK
-exists, and new code cannot select `characterId` before its column exists.
+The maintainer then applies all pending migrations in order, including the identity
+backfill and the forward `20260930220000_reconcile_party_main_members` migration,
+deploys the new application and its matching generated Prisma Client, validates, and
+resumes writes. Keep writes paused if a migration fails. This is a coordinated maintenance
+deployment: old code cannot create a player combatant once the new CHECK exists, and
+new code cannot select `characterId` before its column exists.
 Generating the client validates the schema locally; it does not check or migrate the
 live database. Per `AGENTS.md`, the migration is committed but left unapplied against
 the real save; only disposable test databases are used for automated validation.
+
+The party reconciliation must run **after the last old instance stops writing**. The
+original DC-PARTY-001 backfill cannot cover Campaigns created by old code between its
+execution and the new route's deployment. The new forward migration fills those MAIN
+memberships without changing the already-applied foundation migration, and preserves
+existing members and control modes. It fails atomically on conflicting memberships;
+see `docs/PARTY_AND_COMPANIONS.md` §7 for the complete rollout contract.
 
 **Deploy order, the reverse direction** (added in the final whole-branch review). The paragraph
 above covers new code meeting the old schema. The opposite window exists too: between

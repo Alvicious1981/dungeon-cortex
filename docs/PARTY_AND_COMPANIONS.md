@@ -122,7 +122,7 @@ Constraints and why each lives where it does:
 | Invariant | Enforcement |
 |---|---|
 | A Character cannot appear twice in the same Party | `@@unique([campaignId, characterId])` — database |
-| Exactly one MAIN per Campaign | Backfill and atomic campaign creation supply the MAIN row; partial unique index `PartyMember_one_main_per_campaign_key` on `(campaignId) WHERE role = 'MAIN'` prevents a second one. The index alone enforces at most one, not the existence of a row. It is migration-only because Prisma cannot express filtered `@@unique` indexes. |
+| Exactly one MAIN per Campaign | Backfill, post-drain reconciliation and atomic campaign creation supply the MAIN row; partial unique index `PartyMember_one_main_per_campaign_key` on `(campaignId) WHERE role = 'MAIN'` prevents a second one. The index alone enforces at most one, not the existence of a row. It is migration-only because Prisma cannot express filtered `@@unique` indexes. |
 | Up to 3 active members | `MAX_ACTIVE_PARTY_MEMBERS` in `lib/party/roster.ts` — **application layer**, deliberately not a DB trigger. A hard cap enforced by a trigger is fragile and disproportionate for a foundation PR with no code path that can yet add a 4th member; a future recruitment task enforces this at the point where membership can actually grow. |
 | Role explicit / Control explicit | Real Postgres enums (`PartyRole`, `PartyControlMode`), not `String` + comment. Closed-set classification on a narrow join entity, matching this schema's `CharacterChangeSource` precedent rather than the broad-lifecycle `String @default("active")` convention used by `Campaign`/`Encounter`/`Quest`. An enum makes an illegal value structurally unrepresentable. |
 | Character/user ownership cannot be bypassed | `PartyMember` rows are only ever created after the existing `character.userId !== user.id` ownership check in `app/api/campaign/route.ts` |
@@ -137,7 +137,7 @@ column would have zero real writer or reader today. A future task adds either th
 **unchanged by this decision** and **stays authoritative** for "the current main Character." Every
 existing reader of `Campaign.characterId` continues to work exactly as before.
 
-`PartyMember` is an additive, normalized mirror of the same fact, kept in sync by two mechanisms:
+`PartyMember` is an additive, normalized mirror of the same fact, kept in sync by three mechanisms:
 
 1. **Backfill** — migration `20260917130000_add_party_members` inserts a `role=MAIN, control=USER`
    `PartyMember` row for every Campaign that already existed when it runs, idempotently
@@ -145,12 +145,22 @@ existing reader of `Campaign.characterId` continues to work exactly as before.
 2. **Campaign creation** — `app/api/campaign/route.ts` now creates the Campaign row and its MAIN
    `PartyMember` row inside one `$transaction`, so every Campaign created after this PR ships also
    satisfies the invariant immediately, not just historical data.
+3. **Post-drain reconciliation** — the forward migration
+   `20260930220000_reconcile_party_main_members` repeats the insert after old instances are drained.
+   This repairs Campaigns accepted by old code after the original one-shot backfill, without editing
+   that already-applied migration. Existing MAIN control modes, companions and timestamps are
+   preserved. Missing rows get `MAIN/USER` and the Campaign's original creation time. The complete
+   statement is atomic and idempotent; incompatible existing memberships abort the batch for
+   maintainer inspection rather than being overwritten or silently left without the expected MAIN.
 
-**Deployment:** apply `20260917130000_add_party_members` before serving the new campaign-creation
-route. Its transaction always inserts into `PartyMember`; atomicity does not make a missing table
-optional. For DC-PARTY-002's Combatant link, pause writes and drain old application instances before
-applying its migration, deploy the matching code/client, and then resume writes (see the identity
-design's deployment section). No migration is applied to the real save during agent validation.
+**Deployment:** pause campaign writes and drain all old application instances before applying
+pending migrations, including `20260930220000_reconcile_party_main_members`. The original
+`20260917130000_add_party_members` must run first if pending; the new campaign-creation route always
+inserts into its table. The reconciliation must run after the last old instance has stopped writing,
+even when the original backfill was already applied. Deploy the matching code/client and validate
+before resuming writes. Keep writes paused if any migration fails. This same maintenance window
+covers DC-PARTY-002's Combatant link (see the identity design's deployment section). No migration is
+applied to the real save during agent validation.
 
 This compatibility phase ends when a future task switches some reader from `Campaign.characterId` to
 `PartyMember` as its source of truth. No such switch happens in this decision.
