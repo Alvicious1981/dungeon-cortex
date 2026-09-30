@@ -162,6 +162,58 @@ before resuming writes. Keep writes paused if any migration fails. This same mai
 covers DC-PARTY-002's Combatant link (see the identity design's deployment section). No migration is
 applied to the real save during agent validation.
 
+**Operator checks for that maintenance window:** Confirm the target database in the deployment
+system before running any command; a locally configured connection is not proof that it is the
+intended target. With writes paused and every old instance stopped, inspect pending migrations with
+`pnpm exec prisma migrate status`, then have the maintainer run
+`pnpm exec prisma migrate deploy` against that verified target. Do not start the new application
+until all three migrations below have finished successfully, in timestamp order. The
+reconciliation is required even if the foundation migration finished during an earlier rollout.
+
+Run these read-only checks against the same database before resuming writes. The first query must
+return exactly three rows, each with a non-null `finished_at` and a null `rolled_back_at`;
+each count must be zero. The last query
+checks active encounters, whose player link must match the Campaign's current main Character.
+
+```sql
+SELECT migration_name, finished_at, rolled_back_at
+FROM "_prisma_migrations"
+WHERE migration_name IN (
+  '20260917130000_add_party_members',
+  '20260917140000_add_combatant_character_link',
+  '20260930220000_reconcile_party_main_members'
+)
+ORDER BY migration_name;
+
+SELECT COUNT(*) AS campaigns_without_matching_main
+FROM "Campaign" AS c
+WHERE NOT EXISTS (
+  SELECT 1 FROM "PartyMember" AS pm
+  WHERE pm."campaignId" = c.id
+    AND pm."characterId" = c."characterId"
+    AND pm.role = 'MAIN'
+);
+
+SELECT COUNT(*) AS unlinked_player_combatants
+FROM "Combatant"
+WHERE "isPlayer" = true AND "characterId" IS NULL;
+
+SELECT COUNT(*) AS active_player_links_not_matching_main
+FROM "Combatant" AS cb
+JOIN "Encounter" AS e ON e.id = cb."encounterId"
+JOIN "Campaign" AS c ON c.id = e."campaignId"
+WHERE e.status = 'active' AND cb."isPlayer" = true
+  AND cb."characterId" IS DISTINCT FROM c."characterId";
+```
+
+After deploying the application with the Prisma Client generated from this schema, verify a
+read-only campaign and active-encounter request through the new application, then resume writes
+and monitor the first campaign creation and encounter action. If a migration fails, a check is
+nonzero, or the new application fails validation, keep writes paused and inspect the failed
+migration or conflicting rows. Do not automatically restart old code against the changed schema,
+delete data, edit an applied migration, or mark a failed migration resolved merely to proceed.
+Repair the cause and repeat the checks before resuming writes.
+
 This compatibility phase ends when a future task switches some reader from `Campaign.characterId` to
 `PartyMember` as its source of truth. No such switch happens in this decision.
 
