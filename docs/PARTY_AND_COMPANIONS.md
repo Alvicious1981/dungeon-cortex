@@ -206,9 +206,10 @@ WHERE e.status = 'active' AND cb."isPlayer" = true
   AND cb."characterId" IS DISTINCT FROM c."characterId";
 ```
 
-After deploying the application with the Prisma Client generated from this schema, verify a
-read-only campaign and active-encounter request through the new application, then resume writes
-and monitor the first campaign creation and encounter action. If a migration fails, a check is
+After deploying the application with the Prisma Client generated from this schema, open an
+existing campaign page through the new application and check its Character and, if present,
+active encounter without submitting an action. Then resume writes and monitor the first campaign
+creation and encounter action. If a migration fails, a check is
 nonzero, or the new application fails validation, keep writes paused and inspect the failed
 migration or conflicting rows. Do not automatically restart old code against the changed schema,
 delete data, edit an applied migration, or mark a failed migration resolved merely to proceed.
