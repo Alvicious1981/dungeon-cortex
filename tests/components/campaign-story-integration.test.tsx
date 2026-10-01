@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ActionInput from "@/app/campaign/[id]/ActionInput";
 import StoryLog, { type StoryLogEntry } from "@/app/campaign/[id]/StoryLog";
-import { CampaignStoryProvider } from "@/app/campaign/[id]/CampaignStoryProvider";
+import { CampaignStoryProvider, useCampaignStory } from "@/app/campaign/[id]/CampaignStoryProvider";
 import { prepareDungeonAction } from "@/lib/events/campaign-ui";
 import type { ActionStreamFrame, GameEvent } from "@/lib/events/game-events";
 
@@ -66,6 +66,54 @@ describe("campaign story through the real action stream", () => {
     fireEvent.click(screen.getByRole("button", { name: "Volver al presente" }));
     expect(search).toHaveValue("");
     expect(screen.getByText("Abro la puerta")).toBeInTheDocument();
+  });
+  // Assistive technology only speaks a live region when it changes, so the same sentence set
+  // twice is silent. These tests watch the region itself rather than the text it holds.
+  it("changes the live region for every response, even when the announcement text repeats", () => {
+    let actions!: NonNullable<ReturnType<typeof useCampaignStory>>["actions"];
+    function Probe() { actions = useCampaignStory()!.actions; return null; }
+    render(<CampaignStoryProvider>
+      <StoryLog campaignId="campaign-1" initialLogs={[]} initialHasMore={false} />
+      <Probe />
+    </CampaignStoryProvider>);
+    const region = within(screen.getByRole("region", { name: "Bitácora de aventura" })).getByRole("status");
+    const observer = new MutationObserver(() => {});
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    try {
+      act(() => { actions.begin("request-1", "Ataco"); actions.text("request-1", "Primer relato"); });
+      expect(region).toHaveTextContent("Nueva respuesta en la bitácora");
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+
+      const spoken = region.textContent;
+      act(() => {
+        actions.finish("request-1", "received");
+        actions.begin("request-2", "Ataco");
+        actions.text("request-2", "Segundo relato");
+      });
+      expect(region.textContent).toBe(spoken);
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+    } finally {
+      observer.disconnect();
+    }
+  });
+  it("changes the live region each time the server window brings new entries", () => {
+    const first = row("one", "assistant", "Uno");
+    const second = row("two", "user", "Dos", 1);
+    const { rerender } = render(<Campaign logs={[first]} />);
+    const region = within(screen.getByRole("region", { name: "Bitácora de aventura" })).getByRole("status");
+    const observer = new MutationObserver(() => {});
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    try {
+      rerender(<Campaign logs={[first, second]} />);
+      expect(region).toHaveTextContent("Hay nuevas entradas en la bitácora.");
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+
+      rerender(<Campaign logs={[first, second, row("three", "assistant", "Tres", 2)]} />);
+      expect(region).toHaveTextContent("Hay nuevas entradas en la bitácora.");
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+    } finally {
+      observer.disconnect();
+    }
   });
   it("does not present the zero sentinel for an unrolled consequence as a natural die", async () => {
     const incoming = stream();

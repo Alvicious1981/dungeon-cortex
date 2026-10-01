@@ -125,7 +125,12 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
   const [filter, setFilter] = useState<StoryFilter>("Todo");
   const [search, setSearch] = useState("");
   const [presentSequence, setPresentSequence] = useState(0);
-  const [announcement, setAnnouncement] = useState("");
+  // A live region is only spoken when it changes, so the same sentence set twice would be
+  // silent. Each announcement is a keyed element: repeating it replaces the node.
+  const [announcement, setAnnouncement] = useState<{ id: number; text: string } | null>(null);
+  const announce = useCallback((text: string) => {
+    setAnnouncement((previous) => ({ id: (previous?.id ?? 0) + 1, text }));
+  }, []);
   const announcedRequests = useRef(new Set<string>());
   const [accumulated, setAccumulated] = useState<Map<string, StoryLogEntry>>(
     () => new Map(initialLogs.map((log) => [log.id, log]))
@@ -149,13 +154,13 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
     const signature = windowSignature(initialLogs);
     if (signature === lastMergedSignatureRef.current) return;
     lastMergedSignatureRef.current = signature;
-    setAnnouncement("Hay nuevas entradas en la bitácora.");
+    announce("Hay nuevas entradas en la bitácora.");
     setAccumulated((prev) => {
       const next = new Map(prev);
       for (const log of initialLogs) next.set(log.id, log);
       return next;
     });
-  }, [initialLogs]);
+  }, [initialLogs, announce]);
 
   const sorted = useMemo(
     () => [...accumulated.values()].sort(compareChronological),
@@ -176,10 +181,10 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
     for (const entry of story?.entries ?? []) {
       if ((entry.events.length || entry.narrative) && !announcedRequests.current.has(entry.requestId)) {
         announcedRequests.current.add(entry.requestId);
-        setAnnouncement("Nueva respuesta en la bitácora. Puedes volver al presente.");
+        announce("Nueva respuesta en la bitácora. Puedes volver al presente.");
       }
     }
-  }, [story?.entries]);
+  }, [story?.entries, announce]);
 
   useLayoutEffect(() => {
     const anchor = readingAnchorRef.current;
@@ -262,7 +267,9 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
             className={`min-h-11 rounded border px-4 text-sm ${filter === option ? "border-amber-700 bg-amber-950/40 text-amber-100" : "border-neutral-700 text-neutral-300"}`}>{option}</button>
         ))}
       </div>
-      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</p>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement && <p key={announcement.id}>{announcement.text}</p>}
+      </div>
       <div className="mb-4 space-y-2">
         <label htmlFor="story-search" className="block text-xs text-[var(--dc-text-muted)]">Buscar en las entradas cargadas</label>
         <div className="flex gap-2">
