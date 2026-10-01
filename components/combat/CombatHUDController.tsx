@@ -36,21 +36,47 @@ export default function CombatHUDController({
   const [localCombatants, setLocalCombatants] = useState(combatants);
   const [localTurnIndex, setLocalTurnIndex] = useState(activeTurnIndex);
   const pendingRequests = useRef(new Set<string>());
+  const latestProps = useRef({ combatants, activeTurnIndex });
+  // Props that arrived while a request was pending, and whether the stream
+  // changed local state since the current run of pending requests began.
+  const syncDeferred = useRef(false);
+  const streamChangedState = useRef(false);
 
+  // Props are the server's snapshot. While a request is pending the stream is
+  // newer than any snapshot that lands (it can be the previous action's
+  // refresh), so the snapshot waits for the end of the request. Depending on
+  // `isPending` here instead would apply it at the end event, which fires before
+  // this request's own `router.refresh()` has landed, and show stale values.
   useEffect(() => {
+    latestProps.current = { combatants, activeTurnIndex };
+    if (pendingRequests.current.size > 0) {
+      syncDeferred.current = true;
+      return;
+    }
     setLocalCombatants(combatants);
     setLocalTurnIndex(activeTurnIndex);
   }, [combatants, activeTurnIndex]);
 
   useEffect(() => {
     function handleActionStart(event: Event) {
+      if (pendingRequests.current.size === 0) streamChangedState.current = false;
       pendingRequests.current.add((event as CustomEvent<{ requestId: string }>).detail?.requestId ?? "legacy");
       setIsPending(true);
     }
 
     function handleActionEnd(event: Event) {
       pendingRequests.current.delete((event as CustomEvent<{ requestId: string }>).detail?.requestId ?? "legacy");
-      setIsPending(pendingRequests.current.size > 0);
+      const stillPending = pendingRequests.current.size > 0;
+      setIsPending(stillPending);
+
+      if (stillPending || !syncDeferred.current) return;
+      syncDeferred.current = false;
+      // If the stream changed something, this request's own refresh is about to
+      // bring the newer snapshot. If it changed nothing (a refused request has
+      // no refresh), the snapshot that landed meanwhile is all there is.
+      if (streamChangedState.current) return;
+      setLocalCombatants(latestProps.current.combatants);
+      setLocalTurnIndex(latestProps.current.activeTurnIndex);
     }
 
     function handleGameEvent(event: Event) {
@@ -59,6 +85,7 @@ export default function CombatHUDController({
       ).detail;
 
       if (gameEvent.type === "COMBAT_CONSEQUENCE") {
+        streamChangedState.current = true;
         setLocalCombatants((current) =>
           applyCombatTargetsToCombatants(current, gameEvent.payload.targets)
         );
@@ -71,6 +98,7 @@ export default function CombatHUDController({
       ) {
         const nextTurnIndex = gameEvent.payload.nextTurnIndex;
         if (typeof nextTurnIndex === "number") {
+          streamChangedState.current = true;
           setLocalTurnIndex(nextTurnIndex);
         }
       }
