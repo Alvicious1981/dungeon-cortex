@@ -642,6 +642,42 @@ describe("J. LevelUpConfirmation — accessible postponement", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("keeps a postponement when the backend announces the same pending level-up on the next turn", () => {
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable(AVAILABLE_MULTI);
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Every turn re-detects whatever is still pending and emits the same frame again.
+    emitAvailable(AVAILABLE_MULTI);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retomar subida al nivel 3/i })).toBeInTheDocument();
+  });
+
+  it("resumes a postponed level-up with the freshest payload the backend announced", () => {
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable(AVAILABLE_MULTI);
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+
+    emitAvailable({ ...AVAILABLE_MULTI, currentMaxHp: 25 });
+    fireEvent.click(screen.getByRole("button", { name: /retomar subida/i }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("25")).toBeInTheDocument();
+  });
+
+  it("reopens the dialog when what is pending is a different level-up", () => {
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable(AVAILABLE_MULTI);
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+
+    emitAvailable(AVAILABLE_AFTER_APPLY);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("3 → 4")).toBeInTheDocument();
+  });
+
   it("cannot close or lose its modal focus while confirmation is pending", async () => {
     let resolve!: (response: Response) => void;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>((done) => { resolve = done; }));

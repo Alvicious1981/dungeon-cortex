@@ -311,6 +311,8 @@ export default function LevelUpConfirmationController({ campaignId }: Props) {
   const [payload, setPayload] = useState<LevelUpAvailablePayload | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [postponed, setPostponed] = useState(false);
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
   const busyRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -324,9 +326,14 @@ export default function LevelUpConfirmationController({ campaignId }: Props) {
       if (!document.querySelector('[aria-labelledby="level-up-confirmation-title"]')) {
         returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       }
+      // The backend re-detects whatever is still pending on every turn and emits it again. A
+      // postponement belongs to that decision: keep it for the same level-up, reopen for another.
+      const current = payloadRef.current;
+      const sameDecision =
+        current !== null && current.characterId === detail.characterId && current.toLevel === detail.toLevel;
       setNotice(null);
       setPayload(detail);
-      setPostponed(false);
+      if (!sameDecision) setPostponed(false);
     }
 
     window.addEventListener(DUNGEON_LEVEL_UP_AVAILABLE, handleAvailable);
