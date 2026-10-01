@@ -58,7 +58,7 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
     await expect(
       page.getByRole("heading", { name: campaignTitle })
     ).toBeVisible();
-    await expect(page.getByLabel(/^Hit points:/)).toBeVisible();
+    await expect(page.getByLabel(/^Puntos de golpe:/)).toBeVisible();
     await expect(page.getByLabel("Tu acción")).toBeVisible();
 
     const actionResponsePromise = page.waitForResponse(
@@ -67,7 +67,11 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
         response.request().method() === "POST"
     );
     await page.getByLabel("Tu acción").fill("/roll 1d20");
-    await page.getByRole("button", { name: "Actuar" }).click();
+    // "Actuar" also names the shortcut in the status bar; submit the form that owns the input.
+    await page
+      .locator("form", { has: page.getByLabel("Tu acción") })
+      .getByRole("button", { name: "Actuar", exact: true })
+      .click();
 
     const actionResponse = await actionResponsePromise;
     expect(actionResponse.status()).toBe(202);
