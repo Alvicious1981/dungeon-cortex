@@ -51,15 +51,35 @@ El orden por defecto es el de la tabla. La columna "Prioridad" sale de `docs/UI_
 | UI-09 Descanso corto | `prompts/START-UI-09.md` | sin clasificar |
 | UI-10 Descanso largo | `prompts/START-UI-10.md` | sin clasificar |
 
-Fíjate en que el orden por defecto pone dos tareas P2 (UI-06, UI-07) **antes** de una P0 (UI-08). Tú puedes cambiarlo; Claude nunca
-lo hará por su cuenta. Las dos decisiones que se admiten son:
+UI-06 y UI-07 son P2: puedes **aplazarlas**. Para registrarlo, escribe tu decisión en la sección **Maintainer decisions** al
+final del prompt START antes de pegarlo, por ejemplo: `UI-06 y UI-07 se aplazan.` Claude nunca lo hará por su cuenta.
+(La otra opción que existía, hacer UI-08 justo después de UI-04, ya no hace falta: UI-08 está entregada.)
 
-- **Aplazar** UI-06 y/o UI-07.
-- **Hacer UI-08 justo después de UI-04.**
+## Estado tras la PR #251
 
-Para registrarlo, escribe tu decisión en la sección **Maintainer decisions** al final del prompt START antes de pegarlo, por
-ejemplo: `UI-06 y UI-07 se aplazan; UI-08 va justo después de UI-04.` Si te importa más la bitácora narrativa en móvil que el
-minimapa, esa es la combinación natural.
+La PR #251 entregó de una vez buena parte de esta lista, con un título que no empieza por `UI-0N:`. Por eso el estado real ya
+no es "todo por hacer". Cada tarea tiene ahora una sección "Baseline after PR #251" con lo que existe, medido contra el código.
+
+| Tarea | Estado | Qué hacer |
+| --- | --- | --- |
+| UI-01 | Residual | Queda pasar clases de paleta y colores sueltos a tokens `--dc-*`. Tres componentes sin uso quedan fuera. |
+| UI-02 | Residual (pequeña) | Solo faltan los recursos del jugador en el HUD. |
+| UI-03 | Residual, cambió la premisa | Los botones de acción ahora están en `MacroDeck`. **Decide antes** si aún quieres una barra aparte. |
+| UI-04 | Residual | Falta reorganizar la hoja en sí; la sección "Equipo" ya existe. |
+| UI-05 | **Entregada** | No la lances. |
+| UI-06 | Sin tocar | Igual que antes. |
+| UI-07 | Sin tocar | Igual que antes. |
+| UI-08 | **Entregada** | No la lances; hay seguimientos abiertos. |
+| UI-09, UI-10 | Sin tocar | Igual que antes; el resultado de un descanso ya sale como texto en la bitácora. |
+
+Qué significa para ti:
+
+- Una tarea **entregada** cuenta como hecha para la siguiente (UI-06 ya no espera a UI-05). Si pegas su prompt, Claude se
+  detendrá en el plan y te dirá que ya está entregada.
+- Una tarea **residual** sigue siendo tuya: decide si la lanzas, la recortas o la saltas y escríbelo en **Maintainer
+  decisions**. Claude nunca cierra una tarea por su cuenta.
+- Una tarea residual que es prerrequisito de otra sigue siéndolo: UI-02 espera a UI-01 salvo que tú aplaces UI-01.
+- La lista de hallazgos abiertos de la revisión de la #251 está en `docs/ui/UI-WORKFLOW.md` §3.1.
 
 ## Si Claude se detiene (STOP)
 

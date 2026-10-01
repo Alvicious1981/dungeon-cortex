@@ -13,7 +13,7 @@ task **UI-08 — Unified Narrative Panel**. Do not start any other UI task.
 1. Run the preflight in `docs/ui/UI-WORKFLOW.md` §5 (gate 1) and report repository, branch, HEAD, `origin/master`, working tree
    and divergence.
 2. Prerequisite: UI-07 must already be in `origin/master`. Check `git log origin/master --oneline --grep "^UI-07:"`. No match and
-   no deviation under "Maintainer decisions" → `STOP-PREREQ`. If a deviation is recorded (for example "UI-08 runs right after
+   no deviation under "Maintainer decisions" → `STOP-PREREQ`, unless the baseline rule in `docs/ui/UI-WORKFLOW.md` §3.1 applies (PR #251). If a deviation is recorded (for example "UI-08 runs right after
    UI-04", or UI-06/UI-07 deferred), the prerequisite is the last task merged in that chosen order, and you must confirm in the
    plan that this task has no code dependency on the tasks it skips.
 3. Read, in this order: `AGENTS.md`, `docs/DECISION_5E_SRD_API.md`, `MASTER_ARCH_GUIDE.md`, `PROJECT_CONTEXT.md`,
@@ -21,6 +21,10 @@ task **UI-08 — Unified Narrative Panel**. Do not start any other UI task.
    code and tests that task file lists.
 4. Report the real state, the files you expect to change, the risks, and a bounded plan that states this task's `UI_SPEC` tier.
    Do not edit anything until I approve the plan.
+
+**Baseline:** this scope was delivered by PR #251 (`docs/ui/UI-WORKFLOW.md` §3.1; "Baseline after PR #251" in the task file).
+Do not rebuild it. Unless "Maintainer decisions" below names a specific open follow-up, stop at the plan with `STOP-SCOPE` and
+say the task is already delivered.
 
 Task reminders: this is **P0** (`UI_SPEC` P0.4). There is no `AiNarrativeTerminal`; evolve `StoryLog` and `ActionInput`.
 `ActionInput` stays the only campaign-action SSE consumer. No typewriter effect, no AI-layer, endpoint or protocol change.

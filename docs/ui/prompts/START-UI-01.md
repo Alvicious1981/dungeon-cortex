@@ -19,8 +19,9 @@ task **UI-01 — Design System Normalization**. Do not start any other UI task.
 4. Report the real state, the files you expect to change, the risks, and a bounded plan that states this task's `UI_SPEC` tier.
    Do not edit anything until I approve the plan.
 
-Task reminders: `components/downtime/HavenHUD.tsx` has no live caller — do not touch it. Tokens and shared primitives only; no
-layout redesign.
+Task reminders: `components/downtime/HavenHUD.tsx`, `components/character/InventoryPanel.tsx` and
+`components/inventory/InventoryItem.tsx` have no live caller — do not touch them. The scope is **residual** after PR #251:
+read "Baseline after PR #251" in the task file first. Tokens and shared primitives only; no layout redesign.
 
 ## 2. Authorization (this task and this session only)
 

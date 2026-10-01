@@ -13,7 +13,7 @@ task **UI-10 — Long Rest Interface**. Do not start any other UI task.
 1. Run the preflight in `docs/ui/UI-WORKFLOW.md` §5 (gate 1) and report repository, branch, HEAD, `origin/master`, working tree
    and divergence.
 2. Prerequisite: UI-09 must already be in `origin/master`. Check `git log origin/master --oneline --grep "^UI-09:"`. No match and
-   no deviation under "Maintainer decisions" → `STOP-PREREQ`. If a deviation is recorded, the prerequisite is the last task merged
+   no deviation under "Maintainer decisions" → `STOP-PREREQ`, unless the baseline rule in `docs/ui/UI-WORKFLOW.md` §3.1 applies (PR #251). If a deviation is recorded, the prerequisite is the last task merged
    in that chosen order.
 3. Read, in this order: `AGENTS.md`, `docs/DECISION_5E_SRD_API.md`, `MASTER_ARCH_GUIDE.md`, `PROJECT_CONTEXT.md`,
    `docs/UI_SPEC.md`, `docs/DESIGN.md`, `.claude/rules/ui-frontend.md`, `docs/ui/UI-WORKFLOW.md`, `docs/ui/tasks/UI-10.md`; then the

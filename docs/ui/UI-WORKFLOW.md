@@ -49,7 +49,7 @@ Default execution order, one task per Desktop session, no stacked UI PRs:
 
 A task starts from a version of `origin/master` that already contains the previous task. Check a prerequisite with
 `git log origin/master --oneline --grep "^UI-0N:"` (squash merges keep the PR title as the subject). No match →
-`STOP-PREREQ`.
+`STOP-PREREQ`, unless the baseline rule in §3.1 applies: PR #251 delivered part of this sequence under a different title.
 
 The sequence is **not** the product priority. `docs/UI_SPEC.md` §2 is. Each task is anchored to it:
 
@@ -71,10 +71,56 @@ product scope: the order stays as the maintainer prepared it, a P2 task states i
 maintainer — never the agent — may deviate**, by writing it under "Maintainer decisions" in the START prompt:
 
 - **Defer** UI-06 and/or UI-07 (P2). The next task's prerequisite becomes the most recent task actually merged in the chosen order.
-- **Run UI-08 immediately after UI-04.** UI-08 has no code dependency on UI-05 → UI-07; verify that in its plan.
+- **Run UI-08 immediately after UI-04.** UI-08 has no code dependency on UI-05 → UI-07; verify that in its plan. (Moot since
+  PR #251: UI-08 is delivered, see §3.1.)
 
 UI-09 and UI-10 have no tier in `UI_SPEC` §2. They are presentation of rest mechanics the backend already owns and add
 no product scope; if the maintainer wants them classified, that is a `docs/UI_SPEC.md` decision, not a workflow edit.
+
+### 3.1 Baseline after PR #251
+
+PR #251 (`f923082`, "implement the UX/UI audit for the campaign screen") delivered much of this sequence **as one change
+and under a title that does not start with `UI-0N:`**, so the `--grep` check in §3 cannot see it. Each task file now has a
+"Baseline after PR #251" section with what exists, measured against `f923082` on 2026-10-01. Read it before the task's
+objective: the objective text predates the merge.
+
+| Task | After #251 | What remains |
+| --- | --- | --- |
+| UI-01 | **Residual** | palette classes and literals → `--dc-*` tokens; three unrendered surfaces to report, not touch |
+| UI-02 | **Residual (small)** | player resources in the HUD; two open review items |
+| UI-03 | **Residual, premise changed** | the action buttons now live in `MacroDeck`, not `CombatHUD`; the bar may no longer be wanted |
+| UI-04 | **Residual** | the sheet reorganization itself; the "Equipo" section already exists |
+| UI-05 | **Delivered by #251** | nothing, unless the backend exposes equip legality (a backend task first) |
+| UI-06 | Untouched | unchanged; `InventoryGrid` gained a partial presentational contract |
+| UI-07 | Untouched | unchanged; `MapSurface` and the map fixes exist |
+| UI-08 | **Delivered by #251** | open follow-ups only (below) |
+| UI-09 | Untouched | unchanged; rest results already render as text in the story log |
+| UI-10 | Untouched | unchanged; same |
+
+Rules:
+
+- A task marked **Delivered by #251** counts as merged for prerequisite purposes once
+  `git merge-base --is-ancestor f923082 origin/master` succeeds. Do not rebuild it.
+- A task marked **Residual** is still to be run, scoped to the residual list in its task file and not to the original objective.
+- Whether to run, trim or skip a residual task is the maintainer's decision, recorded under "Maintainer decisions" in the
+  START prompt. The agent never closes a task on its own.
+- A prerequisite that is a *residual* task is still a prerequisite: `UI-02` still waits for `UI-01` unless the maintainer defers it.
+
+Open follow-ups from the review of #251 (none blocks; each is real and was left unfixed on purpose). Fixed within #251
+before it merged: the dungeon map centering, "PV" → "PG", the repeated `aria-live` text, the unannounced loading state, the level-up
+postponement and the E2E/unit tests that the merge broke.
+
+- `StoryLog`: a persisted `system` row for the same action renders next to the live result card (ability and social checks).
+- `StoryLog` / stream: live and persisted rows are matched by exact text; the root fix is a stable id carried from the stream
+  to the persisted rows (a backend contract change, so a separate decision).
+- `StoryLog`: live entries are never pruned; each render is O(entries × loaded logs).
+- `CombatHUDController`: props overwrite the optimistic combat state mid-request (the `!isPending` guard was removed).
+- `BattleGrid`: after a legal move the token snaps back to its origin until `router.refresh()` lands.
+- `lib/hooks/useModalFocus.ts`: a `MutationObserver` on `document.body` re-runs the isolation pass on every DOM mutation.
+- `ExplorationMap`: the accessible name of an adjacent room lost the room feature (treasure, hazard, NPC).
+- `ConsequenceLog`: `ConsequenceEntry` has an unused `index` prop, and `components/combat/hit-points.ts` has no production caller.
+- `lib/character-sheet/condition-labels.ts`: no test binds the label map to `CONDITION_REGISTRY`.
+- `tests/components/CampaignChrome.test.tsx`: the `scrollIntoView` patch is not restored if an assertion fails early.
 
 ## 4. Desktop session model
 
