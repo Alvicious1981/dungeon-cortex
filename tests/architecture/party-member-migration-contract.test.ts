@@ -94,3 +94,37 @@ describe("migración 20260917130000_add_party_members", () => {
     expect(code.toUpperCase()).not.toMatch(/\bTRUNCATE\b/);
   });
 });
+
+describe("reconciliación posterior al drenaje de instancias antiguas", () => {
+  const path = join(
+    ROOT,
+    "prisma",
+    "migrations",
+    "20260930220000_reconcile_party_main_members",
+    "migration.sql"
+  );
+  const code = executable(existsSync(path) ? readFileSync(path, "utf8") : "");
+
+  it("repara en una sola sentencia atómica sin modificar ni borrar miembros existentes", () => {
+    expect(code.trim()).toMatch(
+      /^DO \$reconcile_party_main_members\$\s+BEGIN\b[\s\S]*\bEND\s+\$reconcile_party_main_members\$;$/
+    );
+    expect(code).not.toMatch(/\b(?:UPDATE\s+"|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE)\b/i);
+    expect(code).toMatch(/ON CONFLICT \("campaignId",\s*"characterId"\)\s*DO NOTHING;/);
+  });
+
+  it("recupera el MAIN desde Campaign.characterId y conserva la antigüedad de la campaña", () => {
+    expect(code).toMatch(/INSERT INTO "PartyMember"[\s\S]*?SELECT[\s\S]*?"Campaign"\."characterId"/);
+    expect(code).toMatch(/'MAIN',\s*'USER',\s*"Campaign"\."createdAt",\s*"Campaign"\."createdAt"/);
+    expect(code).toContain('FROM "Campaign"');
+  });
+
+  it("rechaza una membresía incompatible en vez de dejar una campaña sin su MAIN", () => {
+    const insert = code.indexOf('INSERT INTO "PartyMember"');
+    const guard = code.indexOf("IF EXISTS (");
+    expect(insert).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(insert);
+    expect(code).toMatch(/WHERE NOT EXISTS \([\s\S]*?"campaignId" = "Campaign"\."id"[\s\S]*?"characterId" = "Campaign"\."characterId"[\s\S]*?"role" = 'MAIN'/);
+    expect(code).toContain("RAISE EXCEPTION 'Cannot reconcile party MAIN memberships:");
+  });
+});

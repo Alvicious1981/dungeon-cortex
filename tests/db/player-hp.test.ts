@@ -20,7 +20,7 @@ describe("setPlayerHp", () => {
       data: { hp: 7 },
     });
     expect(t.combatant.updateMany).toHaveBeenCalledWith({
-      where: { encounterId: "enc-1", isPlayer: true },
+      where: { encounterId: "enc-1", characterId: "char-1" },
       // Every player HP write also resets the death state (death-saves spec §4).
       data: { hp: 7, deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
     });
@@ -45,7 +45,7 @@ describe("setPlayerHp", () => {
 
   it("mirrors nothing without an encounter", async () => {
     const t = tx();
-    await mirrorPlayerCombatantHp(t, null, 5);
+    await mirrorPlayerCombatantHp(t, null, "char-1", 5);
     expect(t.combatant.updateMany).not.toHaveBeenCalled();
   });
 });

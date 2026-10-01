@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { expect, test } from "@playwright/test";
 
@@ -11,6 +13,11 @@ import {
 // Mirrors lib/auth/session.ts's PRIVATE_USER_ID (not exported) — the one
 // user every private-mode record in this database is owned by.
 const PRIVATE_USER_ID = "00000000-0000-0000-0000-000000000000";
+
+const RECONCILIATION_SQL = readFileSync(
+  join(process.cwd(), "prisma", "migrations", "20260930220000_reconcile_party_main_members", "migration.sql"),
+  "utf8"
+);
 
 async function createdId(response: {
   status(): number;
@@ -297,5 +304,103 @@ test("the backfill INSERT is correct and idempotent against a campaign that pred
     if (campaignId) await prisma.campaign.deleteMany({ where: { id: campaignId } });
     await deleteStandaloneCharacter(prisma, characterId);
     await prisma.$disconnect();
+  }
+});
+
+test("@smoke the post-drain migration repairs late campaigns and preserves existing members on retry", async ({
+  request,
+}) => {
+  test.setTimeout(60_000);
+  assertSafeE2EDatabase();
+  const prisma = new PrismaClient();
+  const existing: E2ECreatedRecords = {};
+  const late: E2ECreatedRecords = {};
+  let companionId: string | undefined;
+  const unique = randomUUID().slice(0, 8);
+
+  try {
+    await createCharacterAndCampaign(request, existing, `Party preserved ${unique}`);
+    await prisma.partyMember.updateMany({
+      where: { campaignId: existing.campaignId, role: "MAIN" },
+      data: { control: "AI" },
+    });
+    companionId = await createStandaloneCharacter(request, `Party companion ${unique}`);
+    await prisma.partyMember.create({
+      data: { campaignId: existing.campaignId!, characterId: companionId, role: "COMPANION", control: "AI" },
+    });
+    const before = await prisma.partyMember.findMany({
+      where: { campaignId: existing.campaignId }, orderBy: { id: "asc" },
+    });
+    expect(before).toHaveLength(2);
+
+    // CI has already applied the original one-shot backfill. Bypass the new
+    // route to reproduce a campaign accepted by an old instance afterward.
+    late.characterId = await createStandaloneCharacter(request, `Party late ${unique}`);
+    const campaign = await prisma.campaign.create({
+      data: {
+        userId: PRIVATE_USER_ID, characterId: late.characterId,
+        title: `Party late ${unique}`, createdAt: new Date("2026-09-17T14:00:00Z"),
+      },
+    });
+    late.campaignId = campaign.id;
+    expect(await prisma.partyMember.count({ where: { campaignId: campaign.id } })).toBe(0);
+
+    // Execute the complete committed statement, unscoped and without an
+    // outer transaction, exactly as the maintenance migration executes it.
+    await prisma.$executeRawUnsafe(RECONCILIATION_SQL);
+    const repaired = await prisma.partyMember.findMany({ where: { campaignId: campaign.id } });
+    expect(repaired).toHaveLength(1);
+    expect(repaired[0]).toMatchObject({
+      campaignId: campaign.id, characterId: late.characterId, role: "MAIN", control: "USER",
+      createdAt: campaign.createdAt, updatedAt: campaign.createdAt,
+    });
+    expect(await prisma.partyMember.findMany({
+      where: { campaignId: existing.campaignId }, orderBy: { id: "asc" },
+    })).toEqual(before);
+
+    await prisma.$executeRawUnsafe(RECONCILIATION_SQL);
+    expect(await prisma.partyMember.findMany({ where: { campaignId: campaign.id } })).toEqual(repaired);
+    expect(await prisma.partyMember.findMany({
+      where: { campaignId: existing.campaignId }, orderBy: { id: "asc" },
+    })).toEqual(before);
+  } finally {
+    if (companionId) await prisma.partyMember.deleteMany({ where: { characterId: companionId } });
+    await deleteStandaloneCharacter(prisma, companionId);
+    await prisma.$disconnect();
+    await cleanupE2ERecords(late);
+    await cleanupE2ERecords(existing);
+  }
+});
+
+test("@smoke the post-drain migration rolls back all repairs when an existing membership conflicts", async ({
+  request,
+}) => {
+  test.setTimeout(60_000);
+  assertSafeE2EDatabase();
+  const prisma = new PrismaClient();
+  const conflict: E2ECreatedRecords = {};
+  const late: E2ECreatedRecords = {};
+  const unique = randomUUID().slice(0, 8);
+
+  try {
+    await createCharacterAndCampaign(request, conflict, `Party conflict ${unique}`);
+    const main = await prisma.partyMember.findFirstOrThrow({ where: { campaignId: conflict.campaignId } });
+    const before = await prisma.partyMember.update({
+      where: { id: main.id }, data: { role: "COMPANION", control: "AI" },
+    });
+    late.characterId = await createStandaloneCharacter(request, `Party rollback ${unique}`);
+    late.campaignId = (await prisma.campaign.create({
+      data: { userId: PRIVATE_USER_ID, characterId: late.characterId, title: `Party rollback ${unique}` },
+    })).id;
+
+    await expect(prisma.$executeRawUnsafe(RECONCILIATION_SQL)).rejects.toThrow(
+      "Cannot reconcile party MAIN memberships: current campaign character is not MAIN"
+    );
+    expect(await prisma.partyMember.count({ where: { campaignId: late.campaignId } })).toBe(0);
+    expect(await prisma.partyMember.findUniqueOrThrow({ where: { id: main.id } })).toEqual(before);
+  } finally {
+    await prisma.$disconnect();
+    await cleanupE2ERecords(late);
+    await cleanupE2ERecords(conflict);
   }
 });

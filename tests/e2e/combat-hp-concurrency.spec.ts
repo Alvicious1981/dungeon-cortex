@@ -108,6 +108,7 @@ test("@smoke concurrent combat damage preserves both accepted hits", async ({ re
             {
               name: "Concurrency Caster",
               isPlayer: true,
+              characterId: created.characterId,
               hp: 20,
               maxHp: 20,
               ac: 12,

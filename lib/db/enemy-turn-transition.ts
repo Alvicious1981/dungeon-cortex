@@ -404,6 +404,7 @@ export async function resolveEnemyTurn(
     if (hp <= 0) {
       const fall = await applyPlayerDowned(tx, {
         encounterId: ctx.encounterId,
+        characterId: ctx.characterId,
         hpBefore: hpBeforeHit,
         damage,
         maxHp: playerMaxHp,
@@ -478,7 +479,7 @@ export async function resolveEnemyTurn(
 
     if (hp <= 0) {
       const fall = await applyPlayerDowned(tx, {
-        encounterId: ctx.encounterId, hpBefore: hpBeforeHit, damage,
+        encounterId: ctx.encounterId, characterId: ctx.characterId, hpBefore: hpBeforeHit, damage,
         maxHp: playerMaxHp, collectEvents: ctx.collectEvents, events,
       });
       await tx.gameLog.create({
