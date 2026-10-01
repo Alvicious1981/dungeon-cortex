@@ -384,12 +384,19 @@ describe("E. LevelUpConfirmation — stale payload closes and resynchronises", (
   );
 
   it("E5. the notice is dismissible and never reopens the panel", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "gone" }, 409));
+    // While it waits, the panel itself shows a role=status message, so "a status exists" no longer
+    // means the stale notice is up. Hold the request open to show that, then wait for the dialog.
+    let respond!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>((done) => { respond = done; }));
     const { container } = render(<LevelUpConfirmationController campaignId="campaign-1" />);
     emitAvailable();
     fireEvent.click(rollButton());
 
-    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /cerrar aviso/i })).toBeNull();
+
+    await act(async () => { respond(jsonResponse({ error: "gone" }, 409)); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: /cerrar aviso/i }));
 
     expect(container).toBeEmptyDOMElement();
