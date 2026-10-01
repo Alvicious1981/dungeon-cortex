@@ -52,6 +52,14 @@ pnpm prisma migrate dev
 pnpm prisma studio
 ```
 
+## Claude Code Desktop — UI tasks
+
+For UI implementation tasks, read `AGENTS.md` first, then `docs/UI_SPEC.md`, `docs/DESIGN.md`, `docs/ui/UI-WORKFLOW.md` and the active `docs/ui/tasks/UI-XX.md`. `.claude/rules/ui-frontend.md` loads for UI files.
+
+- `docs/ui/*` is execution scaffolding only. It never overrides `AGENTS.md`, the domain and architecture documents, `docs/UI_SPEC.md` or `docs/DESIGN.md`.
+- Validate UI tasks as `AGENTS.md` says (`pnpm exec vitest run --maxWorkers=2`, not plain `pnpm test`). The command list above is an inventory, not permission to run migrations or seeds.
+- Commits, pushes and PRs for a UI task need the authorization block in its `docs/ui/prompts/START-UI-XX.md`. Never merge a UI task PR or enable auto-merge; stop for human review.
+
 ## Note for maintainers
 
 Keep this file short. Codex-facing workflow belongs in `AGENTS.md` and `docs/CODEX_WORKFLOW.md`.
