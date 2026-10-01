@@ -132,6 +132,7 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
     setAnnouncement((previous) => ({ id: (previous?.id ?? 0) + 1, text }));
   }, []);
   const announcedRequests = useRef(new Set<string>());
+  const lastStatus = useRef(new Map<string, LiveStoryEntry["status"]>());
   const [accumulated, setAccumulated] = useState<Map<string, StoryLogEntry>>(
     () => new Map(initialLogs.map((log) => [log.id, log]))
   );
@@ -179,6 +180,11 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
   useEffect(() => { story?.actions.rememberLogs(sorted); }, [sorted, story?.actions]);
   useEffect(() => {
     for (const entry of story?.entries ?? []) {
+      // Entering "receiving" (a first submit or an explicit retry) is when the player needs to
+      // hear that something is happening. A response already present in this pass supersedes it.
+      const previous = lastStatus.current.get(entry.requestId);
+      lastStatus.current.set(entry.requestId, entry.status);
+      if (entry.status === "receiving" && previous !== "receiving") announce("Resolviendo tu acción…");
       if ((entry.events.length || entry.narrative) && !announcedRequests.current.has(entry.requestId)) {
         announcedRequests.current.add(entry.requestId);
         announce("Nueva respuesta en la bitácora. Puedes volver al presente.");

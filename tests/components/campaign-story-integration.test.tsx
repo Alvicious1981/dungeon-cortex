@@ -96,6 +96,68 @@ describe("campaign story through the real action stream", () => {
       observer.disconnect();
     }
   });
+  it("announces that the action is being resolved before any response arrives", () => {
+    let actions!: NonNullable<ReturnType<typeof useCampaignStory>>["actions"];
+    function Probe() { actions = useCampaignStory()!.actions; return null; }
+    render(<CampaignStoryProvider>
+      <StoryLog campaignId="campaign-1" initialLogs={[]} initialHasMore={false} />
+      <Probe />
+    </CampaignStoryProvider>);
+    const region = within(screen.getByRole("region", { name: "Bitácora de aventura" })).getByRole("status");
+    expect(region).toBeEmptyDOMElement();
+
+    act(() => actions.begin("request-1", "Ataco"));
+    expect(region).toHaveTextContent("Resolviendo tu acción");
+
+    act(() => actions.text("request-1", "Primer relato"));
+    expect(region).toHaveTextContent("Nueva respuesta en la bitácora");
+  });
+  it("stays quiet while the same request keeps streaming", () => {
+    let actions!: NonNullable<ReturnType<typeof useCampaignStory>>["actions"];
+    function Probe() { actions = useCampaignStory()!.actions; return null; }
+    render(<CampaignStoryProvider>
+      <StoryLog campaignId="campaign-1" initialLogs={[]} initialHasMore={false} />
+      <Probe />
+    </CampaignStoryProvider>);
+    const region = within(screen.getByRole("region", { name: "Bitácora de aventura" })).getByRole("status");
+    const observer = new MutationObserver(() => {});
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    try {
+      act(() => actions.begin("request-1", "Ataco"));
+      act(() => actions.text("request-1", "Primer"));
+      observer.takeRecords();
+
+      act(() => actions.text("request-1", "Primer relato, ya más largo"));
+      act(() => actions.text("request-1", "Primer relato, ya más largo y completo"));
+      expect(observer.takeRecords()).toHaveLength(0);
+    } finally {
+      observer.disconnect();
+    }
+  });
+  it("announces again when the same request is retried after an interruption", () => {
+    let actions!: NonNullable<ReturnType<typeof useCampaignStory>>["actions"];
+    function Probe() { actions = useCampaignStory()!.actions; return null; }
+    render(<CampaignStoryProvider>
+      <StoryLog campaignId="campaign-1" initialLogs={[]} initialHasMore={false} />
+      <Probe />
+    </CampaignStoryProvider>);
+    const region = within(screen.getByRole("region", { name: "Bitácora de aventura" })).getByRole("status");
+    const observer = new MutationObserver(() => {});
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    try {
+      act(() => actions.begin("request-1", "Ataco"));
+      expect(region).toHaveTextContent("Resolviendo tu acción");
+      act(() => actions.finish("request-1", "uncertain"));
+      observer.takeRecords();
+
+      // An explicit retry reuses the request id; the player still needs to hear it start.
+      act(() => actions.begin("request-1", "Ataco"));
+      expect(region).toHaveTextContent("Resolviendo tu acción");
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+    } finally {
+      observer.disconnect();
+    }
+  });
   it("changes the live region each time the server window brings new entries", () => {
     const first = row("one", "assistant", "Uno");
     const second = row("two", "user", "Dos", 1);
