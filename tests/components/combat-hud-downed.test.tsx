@@ -28,7 +28,7 @@ describe("CombatHUD for a downed player (death-saves spec §7.4)", () => {
     expect(screen.getByText(/Estás inconsciente/)).toBeTruthy();
   });
 
-  it("keeps the ordinary actions for a conscious player", () => {
+  it("shows shortcuts without duplicating the command buttons for a conscious player", () => {
     render(
       <CombatHUD
         combatants={COMBATANTS}
@@ -38,7 +38,8 @@ describe("CombatHUD for a downed player (death-saves spec §7.4)", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Attack (F1)" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "End Turn (F2)" })).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText(/F1 atacar · F2 finalizar turno/)).toBeInTheDocument();
+    expect(screen.getAllByRole("region", { name: "Orden de iniciativa" })).toHaveLength(1);
   });
 });

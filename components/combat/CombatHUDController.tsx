@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import CombatHUD from "./CombatHUD";
 import type { GameEvent } from "@/lib/events/game-events";
 import {
@@ -18,35 +18,39 @@ interface Props {
     maxHp: number;
     initiativeTotal: number;
     conditions: string[];
+    isPlayer?: boolean;
   }>;
   activeTurnIndex: number;
   /** The player is at 0 HP (death-saves spec §7.4). */
   playerDown?: boolean;
+  children?: ReactNode;
 }
 
 export default function CombatHUDController({
   combatants,
   activeTurnIndex,
   playerDown = false,
+  children,
 }: Props) {
   const [isPending, setIsPending] = useState(false);
   const [localCombatants, setLocalCombatants] = useState(combatants);
   const [localTurnIndex, setLocalTurnIndex] = useState(activeTurnIndex);
+  const pendingRequests = useRef(new Set<string>());
 
   useEffect(() => {
-    if (!isPending) {
-      setLocalCombatants(combatants);
-      setLocalTurnIndex(activeTurnIndex);
-    }
-  }, [combatants, activeTurnIndex, isPending]);
+    setLocalCombatants(combatants);
+    setLocalTurnIndex(activeTurnIndex);
+  }, [combatants, activeTurnIndex]);
 
   useEffect(() => {
-    function handleActionStart() {
+    function handleActionStart(event: Event) {
+      pendingRequests.current.add((event as CustomEvent<{ requestId: string }>).detail?.requestId ?? "legacy");
       setIsPending(true);
     }
 
-    function handleActionEnd() {
-      setIsPending(false);
+    function handleActionEnd(event: Event) {
+      pendingRequests.current.delete((event as CustomEvent<{ requestId: string }>).detail?.requestId ?? "legacy");
+      setIsPending(pendingRequests.current.size > 0);
     }
 
     function handleGameEvent(event: Event) {
@@ -95,6 +99,8 @@ export default function CombatHUDController({
       isPending={isPending}
       onActionTrigger={handleAction}
       playerDown={playerDown}
-    />
+    >
+      {children}
+    </CombatHUD>
   );
 }

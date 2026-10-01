@@ -384,12 +384,19 @@ describe("E. LevelUpConfirmation — stale payload closes and resynchronises", (
   );
 
   it("E5. the notice is dismissible and never reopens the panel", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ error: "gone" }, 409));
+    // While it waits, the panel itself shows a role=status message, so "a status exists" no longer
+    // means the stale notice is up. Hold the request open to show that, then wait for the dialog.
+    let respond!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>((done) => { respond = done; }));
     const { container } = render(<LevelUpConfirmationController campaignId="campaign-1" />);
     emitAvailable();
     fireEvent.click(rollButton());
 
-    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /cerrar aviso/i })).toBeNull();
+
+    await act(async () => { respond(jsonResponse({ error: "gone" }, 409)); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: /cerrar aviso/i }));
 
     expect(container).toBeEmptyDOMElement();
@@ -611,5 +618,81 @@ describe("I. LevelUpConfirmation — concurrent level_up_available frames", () =
       resolve(jsonResponse({ payload: { ...APPLIED, previousLevel: 2, newLevel: 3 } }));
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+describe("J. LevelUpConfirmation — accessible postponement", () => {
+  it("moves focus, postpones without applying and reopens the same backend payload", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    render(<><button>Volver a la campaña</button><LevelUpConfirmationController campaignId="campaign-1" /></>);
+    const trigger = screen.getByRole("button", { name: "Volver a la campaña" });
+    trigger.focus();
+    emitAvailable(AVAILABLE_MULTI);
+    expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+    expect(trigger.closest("[inert]")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    const reopen = screen.getByRole("button", { name: /retomar subida/i });
+    fireEvent.click(reopen);
+    expect(screen.getByText("2 → 3")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(reopen).toHaveFocus();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a postponement when the backend announces the same pending level-up on the next turn", () => {
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable(AVAILABLE_MULTI);
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Every turn re-detects whatever is still pending and emits the same frame again.
+    emitAvailable(AVAILABLE_MULTI);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retomar subida al nivel 3/i })).toBeInTheDocument();
+  });
+
+  it("resumes a postponed level-up with the freshest payload the backend announced", () => {
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable(AVAILABLE_MULTI);
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+
+    emitAvailable({ ...AVAILABLE_MULTI, currentMaxHp: 25 });
+    fireEvent.click(screen.getByRole("button", { name: /retomar subida/i }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("25")).toBeInTheDocument();
+  });
+
+  it("reopens the dialog when what is pending is a different level-up", () => {
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable(AVAILABLE_MULTI);
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+
+    emitAvailable(AVAILABLE_AFTER_APPLY);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("3 → 4")).toBeInTheDocument();
+  });
+
+  it("cannot close or lose its modal focus while confirmation is pending", async () => {
+    let resolve!: (response: Response) => void;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>((done) => { resolve = done; }));
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable();
+    fireEvent.click(averageButton());
+    expect(screen.getByRole("button", { name: "Decidir más tarde" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+    expect(screen.getByRole("status")).toHaveTextContent(/confirmando/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve(jsonResponse({ error: "boom" }, 500)); });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

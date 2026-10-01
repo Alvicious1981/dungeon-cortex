@@ -94,6 +94,9 @@ const EDGE_W: Record<string, number> = {
 const EDGE_OPACITY: Record<string, number> = {
   hidden: 0.45,
 };
+const PASSAGE_LABEL: Record<string, string> = {
+  open: "abierto", door: "puerta", locked: "cerrado", hidden: "oculto", collapsed: "derrumbado",
+};
 
 // ─── Feature icons ────────────────────────────────────────────────────────────
 
@@ -169,12 +172,12 @@ export default function ExplorationMap({
     if (e.toIndex   === currentNodeIndex) adjacentSet.add(e.fromIndex);
   }
 
-  const currentNodeName = nodeByIndex.get(currentNodeIndex)?.name ?? "unknown";
+  const currentNodeName = nodeByIndex.get(currentNodeIndex)?.name ?? "desconocido";
 
   return (
     <div
       role="region"
-      aria-label={`Exploration map: ${location.name}`}
+      aria-label={`Mapa de exploración: ${location.name}`}
       style={{ background: "rgba(10,10,14,0.95)", borderRadius: 8, border: "1px solid rgba(228,168,50,0.18)", overflow: "hidden" }}
     >
       {/* ── Header ── */}
@@ -217,7 +220,7 @@ export default function ExplorationMap({
         viewBox={`0 0 ${SVG_W} ${SVG_H}`}
         preserveAspectRatio="xMidYMid meet"
         style={{ display: "block" }}
-        aria-label={`Node graph for ${location.name}. Current location: ${currentNodeName}`}
+        aria-label={`Lugares de ${location.name}. Posición actual: ${currentNodeName}`}
       >
         {/* Pulse animation + focus ring */}
         <style>{`
@@ -305,7 +308,7 @@ export default function ExplorationMap({
             : undefined;
 
           const ariaLabel = isAdjacent
-            ? `Move to ${node.name}, ${node.feature !== "empty" ? node.feature + ", " : ""}${connectingEdge?.passageType ?? "open"} passage`
+            ? `Ir a ${node.name}. Paso: ${PASSAGE_LABEL[connectingEdge?.passageType ?? "open"] ?? "desconocido"}`
             : undefined;
 
           const GroupEl = isAdjacent ? "g" : "g";
@@ -395,7 +398,7 @@ export default function ExplorationMap({
                   fill="hsl(40 100% 70%)"
                   style={{ userSelect: "none", pointerEvents: "none" }}
                 >
-                  ★ HERE
+                  ★ AQUÍ
                 </text>
               )}
             </GroupEl>
@@ -409,7 +412,7 @@ export default function ExplorationMap({
         aria-atomic="true"
         style={{ position: "absolute", left: -9999, top: 0, width: 1, height: 1, overflow: "hidden" }}
       >
-        {isMoving ? "Moving…" : `Currently in: ${currentNodeName}`}
+        {isMoving ? "Comprobando desplazamiento…" : `Posición actual: ${currentNodeName}`}
       </div>
     </div>
   );

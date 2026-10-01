@@ -88,7 +88,7 @@ function findByType(node: unknown, target: unknown): Found | null {
   }
   if (isValidElement(node)) {
     if ((node as { type: unknown }).type === target) return node as unknown as Found;
-    return findByType((node as { props?: { children?: unknown } }).props?.children, target);
+    return findByType(Object.values(node.props as Record<string, unknown>), target);
   }
   return null;
 }
@@ -98,7 +98,7 @@ function textOf(node: unknown): string {
   if (node === null || node === undefined || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");
-  if (isValidElement(node)) return textOf((node as { props?: { children?: unknown } }).props?.children);
+  if (isValidElement(node)) return textOf(Object.values(node.props as Record<string, unknown>));
   return "";
 }
 

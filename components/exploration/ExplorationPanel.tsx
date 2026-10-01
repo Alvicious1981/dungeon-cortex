@@ -151,14 +151,14 @@ export default function ExplorationPanel({
           fontSize: 13,
         }}
       >
-        Exploration data unavailable.
+        No se pudo cargar la información de exploración.
       </div>
     );
   }
 
   return (
     <section
-      aria-label={`Exploring: ${location.name}`}
+      aria-label={`Explorando: ${location.name}`}
       style={{ borderRadius: 8, overflow: "hidden", border: "1px solid rgba(228,168,50,0.18)" }}
     >
       <ExplorationMap

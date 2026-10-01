@@ -57,7 +57,7 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
         {memories.length > 0 && (
           <span
             className="text-[9px] tabular-nums"
-            style={{ color: "#756EB0" }}
+            style={{ color: "var(--dc-text-muted)" }}
           >
             {memories.length} {memories.length === 1 ? "registro" : "registros"}
           </span>
@@ -71,7 +71,7 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
           style={{
             fontFamily: "var(--font-crimson)",
             fontStyle: "italic",
-            color: "#3A3860",
+            color: "var(--dc-text-muted)",
           }}
         >
           Aún no hay recuerdos consolidados.
@@ -97,7 +97,7 @@ export default function MemoryJournal({ memories }: MemoryJournalProps) {
                 {/* Timestamp */}
                 <p
                   className="text-[9px] uppercase tracking-widest"
-                  style={{ color: isHighImportance ? "#B8921E" : "#756EB0" }}
+                  style={{ color: isHighImportance ? "#B8921E" : "var(--dc-text-muted)" }}
                 >
                   {formatRelative(entry.createdAt)}
                 </p>

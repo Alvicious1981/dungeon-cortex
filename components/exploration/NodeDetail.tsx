@@ -14,11 +14,11 @@ import type { ContextExplorationNode } from "@/lib/memory/context";
 // ─── Passage type labels + colors ────────────────────────────────────────────
 
 const PASSAGE_LABEL: Record<string, string> = {
-  open:      "Open",
-  door:      "Door",
-  locked:    "Locked",
-  hidden:    "Hidden",
-  collapsed: "Collapsed",
+  open:      "Abierto",
+  door:      "Puerta",
+  locked:    "Cerrado",
+  hidden:    "Oculto",
+  collapsed: "Derrumbado",
 };
 
 const PASSAGE_ICON: Record<string, string> = {
@@ -51,14 +51,14 @@ const FEATURE_ICONS: Record<string, string> = {
 };
 
 const FEATURE_LABELS: Record<string, string> = {
-  npc:        "NPC Present",
-  hazard:     "Hazard",
-  treasure:   "Treasure",
-  quest_hook: "Quest Hook",
-  rest:       "Rest Point",
-  shop:       "Vendor",
-  exit:       "Exit",
-  empty:      "Empty",
+  npc:        "Personaje presente",
+  hazard:     "Peligro",
+  treasure:   "Tesoro",
+  quest_hook: "Pista de misión",
+  rest:       "Lugar de descanso",
+  shop:       "Comerciante",
+  exit:       "Salida",
+  empty:      "Vacío",
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ export default function NodeDetail({
   return (
     <div
       role="complementary"
-      aria-label={`Details for current room: ${currentNode.name}`}
+      aria-label={`Detalles de la sala actual: ${currentNode.name}`}
       style={{
         background: "rgba(12,12,22,0.96)",
         borderTop: "1px solid rgba(100,70,14,0.3)",
@@ -132,7 +132,7 @@ export default function NodeDetail({
             marginBottom: 10,
           }}
         >
-          Feature: {featureLabel}
+          Lugar: {featureLabel}
           {currentNode.npcSeed && (
             <span style={{ color: "#6060A0", marginLeft: 6 }}>
               [{currentNode.npcSeed}]
@@ -151,7 +151,7 @@ export default function NodeDetail({
             color: "#5A5040",
           }}
         >
-          No exits. Dead end.
+          No hay salidas. Es un callejón sin salida.
         </p>
       ) : (
         <div>
@@ -165,7 +165,7 @@ export default function NodeDetail({
               marginBottom: 6,
             }}
           >
-            Exits ({adjacentNodes.length})
+            Salidas ({adjacentNodes.length})
           </p>
           <ul
             role="list"
@@ -183,10 +183,11 @@ export default function NodeDetail({
                     type="button"
                     disabled={isMoving || isBlocked}
                     onClick={() => !isBlocked && onMoveToNode(node.index)}
-                    aria-label={`Move to ${node.name} via ${pLabel} passage${isBlocked ? " (blocked)" : ""}`}
-                    title={isBlocked ? `${pLabel} — cannot pass` : `Move to ${node.name}`}
+                    aria-label={`Ir a ${node.name}: ${pLabel}${isBlocked ? " (bloqueado)" : ""}`}
+                    title={isBlocked ? `${pLabel}: no se puede pasar` : `Ir a ${node.name}`}
                     style={{
                       display: "inline-flex",
+                      minHeight: 44,
                       alignItems: "center",
                       gap: 5,
                       padding: "4px 9px",

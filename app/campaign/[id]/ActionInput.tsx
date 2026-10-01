@@ -1,27 +1,14 @@
 "use client";
 
-/**
- * ActionInput.tsx — Milestone I upgrade
- *
- * Consumes the SSE action stream from /api/campaign/[id]/action:
- *   1.  On submit: dispatches "dungeon-action-start" so GameEventHandler can
- *       create / resume AudioContext inside the user gesture.
- *   2.  Reads SSE frames:
- *         t:"evt"  → dispatches "dungeon-game-event" CustomEvent (audio + FX)
- *         t:"txt"  → appends delta to the optimistic narrative bubble
- *         t:"done" → calls router.refresh() to sync server state
- *   3.  Shows a pulsing "DM is narrating…" skeleton while Phase 1 events
- *       arrive and Phase 2 tokens have not yet started flowing.
- *   4.  Reserves min-height on the narrative bubble to prevent layout shift
- *       (ui-ux-pro-max: content-jumping rule).
- *
- * Error handling: JSON error bodies from 4xx responses are surfaced; network
- * failures fall through to a generic message.
- */
+/** The sole action transport. Received story content belongs to CampaignStoryProvider. */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import { StatusMessage } from "@/components/ui/StatusMessage";
 import type { ActionStreamFrame } from "@/lib/events/game-events";
+import { DUNGEON_PREPARE_ACTION, type PrepareActionDetail } from "@/lib/events/campaign-ui";
+import { useCampaignStory } from "./CampaignStoryProvider";
 import {
   ATTACK_SINGLE_TARGET_REQUIRED,
   DUNGEON_ACTION_REQUEST,
@@ -46,18 +33,19 @@ interface Props {
   }>;
   /** Why free-text actions are unavailable, e.g. an unconscious player (death-saves spec §7.4). */
   disabledReason?: string;
+  controls?: ReactNode;
 }
 
-export default function ActionInput({ campaignId, selectableTargets = [], disabledReason }: Props) {
+export default function ActionInput({ campaignId, selectableTargets = [], disabledReason, controls }: Props) {
   const router = useRouter();
+  const story = useCampaignStory()?.actions;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preparedAction, setPreparedAction] = useState<string | null>(null);
   const [action, setAction] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
-  /** null  = idle; ""    = events received, waiting for first token;
-   *  string = partial or complete optimistic narrative text           */
-  const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   /**
    * The submission whose outcome is still uncertain, kept verbatim so an
@@ -138,7 +126,7 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
     submittingRef.current = true;
     setError(null);
     setSubmitting(true);
-    setStreamingText("");
+    story?.begin(detail.requestId, pendingAction);
     setStreamError(null);
     dispatchDungeonActionStart({ ...detail, request });
 
@@ -162,6 +150,7 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
           // reuses the recovery panel, which already offers a state refresh.
           setRetryable({ detail, mode: "recheck" });
           setStreamError(errorMessage);
+          story?.finish(detail.requestId, "uncertain");
           dispatchDungeonActionError({ ...detail, request, error: errorMessage });
           return;
         }
@@ -174,13 +163,13 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
           current && current.detail.requestId === detail.requestId ? null : current
         );
         setError(errorMessage);
-        setStreamingText(null);
+        story?.finish(detail.requestId, "refused");
         dispatchDungeonActionError({ ...detail, request, error: errorMessage });
         return;
       }
 
       if (!res.body) {
-        setStreamingText(null);
+        story?.finish(detail.requestId, "received");
         router.refresh();
         return;
       }
@@ -189,6 +178,8 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
       const decoder = new TextDecoder();
       let buffer = "";
       let done = false;
+      let receivedText = "";
+      let eventIndex = 0;
 
       while (!done) {
         const { value, done: streamDone } = await reader.read();
@@ -211,11 +202,13 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
           }
 
           if (parsed.t === "evt") {
+            story?.event(detail.requestId, parsed.e, eventIndex++);
             window.dispatchEvent(
               new CustomEvent("dungeon-game-event", { detail: { event: parsed.e } })
             );
           } else if (parsed.t === "txt") {
-            setStreamingText((prev) => (prev ?? "") + parsed.d);
+            receivedText += parsed.d;
+            story?.text(detail.requestId, receivedText);
             window.dispatchEvent(
               new CustomEvent("dungeon-token", { detail: { chunk: parsed.d } })
             );
@@ -249,7 +242,7 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
       setRetryable((current) =>
         current && current.detail.requestId === detail.requestId ? null : current
       );
-      setStreamingText(null);
+      story?.finish(detail.requestId, "received");
       router.refresh();
     } catch {
       const errorMessage =
@@ -259,13 +252,14 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
       // automatic; the player decides.
       setRetryable({ detail, mode: "retry" });
       setStreamError(errorMessage);
+      story?.finish(detail.requestId, "uncertain");
       dispatchDungeonActionError({ ...detail, request, error: errorMessage });
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
       dispatchDungeonActionEnd({ ...detail, request });
     }
-  }, [campaignId, router]);
+  }, [campaignId, router, story]);
 
   useEffect(() => {
     function handleRequestedAction(event: Event) {
@@ -307,184 +301,102 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
       window.removeEventListener(DUNGEON_ACTION_REQUEST, handleRequestedAction);
   }, [executeAction, selectedTargetIds]);
 
+  function focusAction() {
+    // The equipment sheet can close in this same event. Focus after it unmounts.
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.scrollIntoView?.({ block: "nearest", behavior: "auto" });
+    });
+  }
+
+  useEffect(() => {
+    function handlePrepare(event: Event) {
+      const proposed = (event as CustomEvent<PrepareActionDetail>).detail?.action?.trim();
+      if (!proposed) return;
+      if (submittingRef.current || action.trim() || disabledReason) {
+        setPreparedAction(proposed);
+        return;
+      }
+      setAction(proposed);
+      focusAction();
+    }
+    window.addEventListener(DUNGEON_PREPARE_ACTION, handlePrepare);
+    return () => window.removeEventListener(DUNGEON_PREPARE_ACTION, handlePrepare);
+  }, [action, disabledReason]);
+
   return (
-    <div className="space-y-3">
-
-      {/* ── Optimistic narrative bubble ──────────────────────────────────────
-          Visible while the stream is active.
-          - Min-height is reserved immediately to prevent layout shift.
-          - Shows a pulsing skeleton before the first token arrives.
-          - Matches the DM log entry style from the chronicle.
-      ────────────────────────────────────────────────────────────────────── */}
-      {streamingText !== null && (
-        <div
-          className="rounded-lg px-4 py-3"
-          style={{
-            background: "rgba(12,12,22,0.92)",
-            border: "1px solid rgba(100,70,14,0.25)",
-            minHeight: "4.5rem",  // reserve space — prevents layout shift
-          }}
-        >
-          <span
-            className="mb-1.5 block text-[9px] font-semibold uppercase tracking-[0.2em]"
-            style={{ fontFamily: "var(--font-cinzel)", color: "#8A6B1A" }}
-          >
-            Director de Mazmorras
-          </span>
-
-          {streamingText === "" && !streamError ? (
-            /* Skeleton: DM is generating — show pulsing placeholder lines */
-            <div className="space-y-2 animate-pulse" aria-label="El Director de Mazmorras está narrando…" role="status">
-              <div
-                className="h-3 rounded"
-                style={{ background: "rgba(228,168,50,0.08)", width: "85%" }}
-              />
-              <div
-                className="h-3 rounded"
-                style={{ background: "rgba(228,168,50,0.06)", width: "70%" }}
-              />
-              <div
-                className="h-3 rounded"
-                style={{ background: "rgba(228,168,50,0.04)", width: "50%" }}
-              />
-            </div>
-          ) : (
-            <>
-              {streamingText !== "" && (
-                <p
-                  className="text-sm leading-relaxed"
-                  style={{
-                    fontFamily: "var(--font-crimson)",
-                    fontSize: "0.9375rem",
-                    lineHeight: "1.75",
-                    color: "#C8BEA0",
-                    marginBottom: streamError ? "0.75rem" : "0"
-                  }}
-                >
-                  {streamingText}
-                  {/* Blinking cursor while stream is active */}
-                  {!streamError && (
-                    <span
-                      aria-hidden="true"
-                      className="inline-block w-0.5 h-4 ml-0.5 align-middle motion-safe:animate-pulse"
-                      style={{ background: "#8A6B1A", verticalAlign: "middle" }}
-                    />
-                  )}
-                </p>
-              )}
-              {streamError && (
-                <div className="mt-3 rounded border border-red-900/50 bg-red-950/20 p-3">
-                  <p className="text-sm text-red-400 mb-2">{streamError}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {/*
-                      Resends the retained detail unchanged, so the server sees
-                      the SAME requestId and can recognise the repeat instead of
-                      resolving it a second time. Explicit, never automatic.
-                    */}
-                    {retryable && (
-                      <button
-                        onClick={() => {
-                          void executeAction(retryable.detail);
-                        }}
-                        type="button"
-                        disabled={submitting}
-                        className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider disabled:opacity-50"
-                        style={{ fontFamily: "var(--font-cinzel), serif" }}
-                      >
-                        {retryable.mode === "recheck" ? "Comprobar de nuevo" : "Reintentar"}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        setStreamError(null);
-                        setStreamingText(null);
-                        router.refresh();
-                      }}
-                      type="button"
-                      className="text-xs bg-red-900/40 hover:bg-red-900/60 transition-colors px-2 py-1.5 rounded text-red-200 cursor-pointer uppercase font-semibold tracking-wider"
-                      style={{ fontFamily: "var(--font-cinzel), serif" }}
-                    >
-                      Descartar y sincronizar
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Input form ────────────────────────────────────────────────────── */}
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <p className="dc-kicker">Declara tu intención</p>
+    <div className="min-w-0 space-y-3">
+      <form onSubmit={handleSubmit} className="min-w-0 space-y-3">
         {aliveHostileTargets.length > 0 && (
           <fieldset className="rounded-md border border-neutral-700/80 bg-neutral-900/60 px-3 py-2">
-            <legend
-              className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400"
-              style={{ fontFamily: "var(--font-cinzel), serif" }}
-            >
-              Objetivos
-            </legend>
+            <legend className="px-1 text-sm font-semibold text-neutral-200">Objetivos</legend>
+            <p className="mb-2 text-xs text-neutral-400">Selecciona un objetivo para atacar.</p>
             <div className="flex flex-wrap gap-2">
               {aliveHostileTargets.map((target) => {
                 const selected = selectedTargetIds.includes(target.id);
                 return (
                   <label
                     key={target.id}
-                    className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                    className={`flex min-h-11 cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm transition-colors ${
                       selected
                         ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
                         : "border-neutral-700 bg-neutral-950/30 text-neutral-300 hover:border-neutral-500"
                     }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      disabled={submitting}
-                      onChange={() => toggleTarget(target.id)}
-                      className="h-3.5 w-3.5 accent-amber-500"
-                    />
+                    <input type="checkbox" checked={selected} disabled={submitting}
+                      onChange={() => toggleTarget(target.id)} className="h-4 w-4 accent-amber-500" />
                     <span className="font-medium">{target.name}</span>
-                    <span className="text-neutral-500">
-                      {target.hp}/{target.maxHp}
-                    </span>
+                    <span className="text-neutral-400">{target.hp}/{target.maxHp}</span>
                   </label>
                 );
               })}
             </div>
           </fieldset>
         )}
-
-        <div className="flex gap-2">
-          <label htmlFor="action-input" className="sr-only">
-            Tu acción
-          </label>
+        {controls}
+        <label htmlFor="action-input" className="block text-sm font-semibold text-amber-200">Tu acción</label>
+        <div className="flex min-w-0 gap-2">
           <input
-            id="action-input"
-            type="text"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-            disabled={submitting || Boolean(disabledReason)}
-            maxLength={500}
-            placeholder={disabledReason ?? "¿Qué intentas hacer?"}
-            className="dc-field min-h-12 flex-1 rounded-sm px-3 py-2 text-sm placeholder:text-[#675c4a] disabled:opacity-50"
+            ref={inputRef} id="action-input" type="text" value={action}
+            onChange={(e) => setAction(e.target.value)} disabled={submitting || Boolean(disabledReason)}
+            maxLength={500} placeholder={disabledReason ?? "¿Qué intentas hacer?"}
+            className="dc-field min-h-12 min-w-0 flex-1 rounded-sm px-3 py-2 text-base placeholder:text-neutral-400 disabled:opacity-50"
           />
-          <button
-            type="submit"
-            disabled={submitting || !action.trim() || Boolean(disabledReason)}
-            className="dc-button-primary min-w-20 rounded-sm px-4 py-3 text-sm uppercase tracking-wider"
-          >
-            {submitting ? "…" : "Actuar"}
-          </button>
+          <Button type="submit" loading={submitting} disabled={!action.trim() || Boolean(disabledReason)}
+            className="shrink-0 text-sm">
+            {submitting ? "Resolviendo…" : "Actuar"}
+          </Button>
         </div>
-
-        {error && (
-          <p role="alert" className="text-sm text-red-400 bg-red-950/40 rounded px-3 py-2">
-            {error}
-          </p>
+        {disabledReason && <p className="text-sm text-neutral-300">{disabledReason}</p>}
+        {preparedAction && (
+          <div role="status" className="rounded border border-amber-900/50 p-3 text-sm text-amber-100">
+            <p>Acción preparada: {preparedAction}</p>
+            {submitting && <p className="mt-1 text-neutral-300">Podrás usarla cuando termine la acción actual.</p>}
+            {action.trim() && <p className="mt-1 text-neutral-300">Tu borrador sigue en el campo.</p>}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button variant="secondary" size="compact" disabled={submitting || Boolean(disabledReason)}
+                onClick={() => { setAction(preparedAction); setPreparedAction(null); focusAction(); }}>
+                {action.trim() ? "Sustituir borrador" : "Usar acción preparada"}
+              </Button>
+              <Button variant="ghost" size="compact" onClick={() => setPreparedAction(null)}>Descartar preparación</Button>
+            </div>
+          </div>
         )}
+        {error && <StatusMessage tone="error" title="No se pudo realizar la acción">{error}</StatusMessage>}
       </form>
-
+      {streamError && (
+        <StatusMessage tone="error" title="No se pudo completar la respuesta">
+          <p className="mb-2 text-sm">{streamError}</p>
+          <div className="flex flex-wrap gap-2">
+            {retryable && (
+              <Button onClick={() => { void executeAction(retryable.detail); }} variant="secondary" size="compact" disabled={submitting}>
+                {retryable.mode === "recheck" ? "Comprobar de nuevo" : "Reintentar"}
+              </Button>
+            )}
+            <Button onClick={() => { setStreamError(null); router.refresh(); }} variant="ghost" size="compact">Descartar y sincronizar</Button>
+          </div>
+        </StatusMessage>
+      )}
     </div>
   );
 }

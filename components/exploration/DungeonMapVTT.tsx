@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent, WheelEvent } from "react";
 import { useDungeon } from "../../lib/hooks/useDungeon";
 import type { TileType } from "../../lib/rules/dungeon";
@@ -31,12 +32,26 @@ export function DungeonMapVTT({ seed, playerX, playerY, currentNodeIndex, visite
   const centeredRef = useRef(false);
 
   useEffect(() => {
-    if (isReady && !centeredRef.current && svgRef.current) {
+    const svg = svgRef.current;
+    if (!isReady || centeredRef.current || !svg) return;
+
+    /** Returns true once the map has been centered. */
+    const centerOnceVisible = () => {
+      if (centeredRef.current) return true;
+      const rect = svg.getBoundingClientRect();
+      // A hidden tab panel (display:none) measures 0x0. Centering on that would pin the
+      // character to the top-left corner for good, so wait until the map has a size.
+      if (rect.width <= 0 || rect.height <= 0) return false;
       centeredRef.current = true;
-      const rect = svgRef.current.getBoundingClientRect();
       const tileSize = TILE_SIZE * zoom;
       setOffset({ x: rect.width / 2 - playerX * tileSize - tileSize / 2, y: rect.height / 2 - playerY * tileSize - tileSize / 2 });
-    }
+      return true;
+    };
+
+    if (centerOnceVisible() || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => { if (centerOnceVisible()) observer.disconnect(); });
+    observer.observe(svg);
+    return () => observer.disconnect();
   }, [isReady, playerX, playerY, zoom]);
 
   const handlePointerDown = useCallback((event: PointerEvent<SVGSVGElement>) => {
@@ -82,12 +97,12 @@ export function DungeonMapVTT({ seed, playerX, playerY, currentNodeIndex, visite
   const visitedSet = new Set(visitedNodeIndices);
 
   if (!isReady || !dungeon) {
-    return <div role="status" className="relative flex h-full w-full items-center justify-center rounded-sm border border-amber-900/30 bg-[#060606]"><span className="animate-pulse text-sm font-medium tracking-widest text-amber-500/70 motion-reduce:animate-none">Conjuring dungeon…</span></div>;
+    return <div role="status" className="relative flex h-full w-full items-center justify-center rounded-sm border border-amber-900/30 bg-[#060606]"><span className="animate-pulse text-sm font-medium tracking-widest text-amber-500/70 motion-reduce:animate-none">Preparando el mapa…</span></div>;
   }
 
   return (
-    <div role="region" aria-label={`Dungeon map. Player at grid position ${playerX}, ${playerY}.`} tabIndex={0} onKeyDown={handleKeyDown} className="relative h-full w-full overflow-hidden rounded-sm border border-amber-900/30 bg-[#060606]">
-      <p className="sr-only">Use arrow keys to pan, plus and minus to zoom, and Home to center the player.</p>
+    <div role="region" aria-label={`Mapa de la mazmorra. Personaje en la posición ${playerX}, ${playerY}.`} tabIndex={0} onKeyDown={handleKeyDown} className="relative h-full w-full overflow-hidden rounded-sm border border-amber-900/30 bg-[#060606]">
+      <p className="sr-only">Usa las flechas para desplazar el mapa, más y menos para acercar o alejar, e Inicio para centrar el personaje.</p>
       <svg ref={svgRef} aria-hidden="true" width="100%" height="100%" className="block cursor-grab active:cursor-grabbing" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onWheel={handleWheel} style={{ touchAction: "none" }}>
         <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
           {dungeon.tiles.map((row, y) => row.map((tileType, x) => {
@@ -119,11 +134,24 @@ export function DungeonMapVTT({ seed, playerX, playerY, currentNodeIndex, visite
         </g>
       </svg>
 
+      <div className="absolute left-2 top-2 z-10 grid grid-cols-3 gap-1" role="group" aria-label="Desplazar vista del mapa">
+        {[
+          { label: "arriba", x: 0, y: 64, icon: ArrowUp, position: "col-start-2" },
+          { label: "izquierda", x: 64, y: 0, icon: ArrowLeft, position: "col-start-1 row-start-2" },
+          { label: "abajo", x: 0, y: -64, icon: ArrowDown, position: "col-start-2 row-start-2" },
+          { label: "derecha", x: -64, y: 0, icon: ArrowRight, position: "col-start-3 row-start-2" },
+        ].map(({ label, x, y, icon: Icon, position }) => <button key={label} type="button"
+          aria-label={`Desplazar vista hacia ${label}`}
+          onClick={() => setOffset(previous => ({ x: previous.x + x, y: previous.y + y }))}
+          className={`flex min-h-11 min-w-11 items-center justify-center rounded border border-amber-900/40 bg-black/90 text-amber-200 focus-visible:ring-2 focus-visible:ring-blue-400 ${position}`}>
+          <Icon size={18} aria-hidden="true" />
+        </button>)}
+      </div>
       <div className="absolute bottom-4 right-4 z-10 flex flex-wrap justify-end gap-2">
-        <button type="button" onClick={() => adjustZoom(0.85)} className="flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-amber-900/40 bg-black/70 px-3 text-amber-200 hover:bg-amber-900/30" aria-label="Zoom out">−</button>
-        <button type="button" onClick={() => adjustZoom(1.15)} className="flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-amber-900/40 bg-black/70 px-3 text-amber-200 hover:bg-amber-900/30" aria-label="Zoom in">+</button>
-        <button type="button" onClick={() => setZoom(1)} className="min-h-11 rounded-sm border border-amber-900/40 bg-black/70 px-3 font-mono text-xs text-amber-200 hover:bg-amber-900/30" aria-label="Reset zoom to one to one">1:1</button>
-        <button type="button" onClick={centerOnPlayer} className="min-h-11 rounded-sm border border-amber-900/40 bg-black/70 px-3 font-mono text-xs text-amber-200 hover:bg-amber-900/30">Center</button>
+        <button type="button" onClick={() => adjustZoom(0.85)} className="flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-amber-900/40 bg-black/70 px-3 text-amber-200 hover:bg-amber-900/30" aria-label="Alejar mapa">−</button>
+        <button type="button" onClick={() => adjustZoom(1.15)} className="flex min-h-11 min-w-11 items-center justify-center rounded-sm border border-amber-900/40 bg-black/70 px-3 text-amber-200 hover:bg-amber-900/30" aria-label="Acercar mapa">+</button>
+        <button type="button" onClick={() => setZoom(1)} className="min-h-11 rounded-sm border border-amber-900/40 bg-black/70 px-3 font-mono text-xs text-amber-200 hover:bg-amber-900/30" aria-label="Restablecer escala original">1:1</button>
+        <button type="button" onClick={centerOnPlayer} className="min-h-11 rounded-sm border border-amber-900/40 bg-black/70 px-3 font-mono text-xs text-amber-200 hover:bg-amber-900/30">Centrar</button>
       </div>
     </div>
   );

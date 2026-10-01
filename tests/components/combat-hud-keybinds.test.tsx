@@ -278,7 +278,7 @@ describe("CombatHUD keyboard shortcuts", () => {
     act(() => {
       window.dispatchEvent(new CustomEvent(DUNGEON_ACTION_START));
     });
-    expect((getByRole("button", { name: "Attack (F1)" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(getByRole("region", { name: "Panel de combate" })).toHaveAttribute("aria-busy", "true");
 
     const event = new KeyboardEvent("keydown", { key: "F1", bubbles: true, cancelable: true });
     window.dispatchEvent(event);

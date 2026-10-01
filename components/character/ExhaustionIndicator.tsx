@@ -85,7 +85,7 @@ export default function ExhaustionIndicator({ exhaustionLevel }: ExhaustionIndic
         </p>
       )}
       {!effects.dead && (
-        <p className="mt-1 text-[10px]" style={{ color: "#8A7A5A" }}>
+        <p className="mt-1 text-[10px]" style={{ color: "var(--dc-text-muted)" }}>
           Cada descanso largo reduce un nivel.
         </p>
       )}

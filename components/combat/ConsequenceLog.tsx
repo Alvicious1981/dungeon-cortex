@@ -2,7 +2,7 @@
 
 import React, { memo } from "react";
 import type { CombatConsequencePayload } from "@/lib/events/game-events";
-import { hpColor, hpRatio } from "./hit-points";
+import { conditionLabel } from "@/lib/character-sheet/condition-labels";
 
 // ---------------------------------------------------------------------------
 // Beat catalogue
@@ -48,185 +48,29 @@ export function deriveBeat(
 
 export const ConsequenceEntry = memo(function ConsequenceEntry({
   entry,
-  index,
 }: {
   entry: CombatConsequencePayload;
   index: number;
 }) {
-  const isNew = index === 0;
-  const targets = entry.targets;
-
-  const overallCrit = targets.some(t => t.isCrit);
-  const overallKill = targets.some(t => t.isKill);
-
   return (
-    <li
-      style={{
-        background: overallKill
-          ? "rgba(30,8,8,0.85)"
-          : overallCrit
-          ? "rgba(22,14,38,0.85)"
-          : "rgba(10,10,20,0.75)",
-        border: overallKill
-          ? "1px solid rgba(239,68,68,0.3)"
-          : overallCrit
-          ? "1px solid rgba(167,139,250,0.3)"
-          : "1px solid rgba(60,46,20,0.35)",
-        borderRadius: "4px",
-        padding: "7px 9px",
-        opacity: isNew ? 1 : Math.max(0.4, 1 - index * 0.15),
-        transition: "opacity 0.4s",
-        animation: isNew ? "consequence-appear 0.35s ease-out" : "none",
-      }}
-    >
-      {/* Attacker Header */}
-      <div className="flex items-center gap-1.5 mb-2 pb-1 border-b border-white/5">
-        <span
-          style={{
-            fontFamily: "var(--font-cinzel)",
-            fontSize: "0.7rem",
-            color: overallCrit ? "#C4B5FD" : overallKill ? "#F87171" : "#B38B2D",
-          }}
-          aria-hidden="true"
-        >
-          {overallKill ? "☠" : overallCrit ? "✦" : "⚔"}
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--font-cinzel)",
-            fontSize: "0.6rem",
-            fontWeight: 600,
-            color: "#C49A2A",
-            letterSpacing: "0.04em",
-          }}
-        >
-          {entry.attackerName}
-        </span>
-        <span className="ml-2 text-[10px] text-white/30 uppercase tracking-tighter">
-          Action Outcome ({targets.length} {targets.length === 1 ? "Target" : "Targets"})
-        </span>
-      </div>
-
-      {/* Target List */}
-      <div className="space-y-3">
-        {targets.map((t, tIdx) => {
-          const barPct = hpRatio(t.hpAfter, t.targetMaxHp);
-          const barColor = hpColor(t.hpAfter, t.targetMaxHp);
-          const visibleTags = t.narrativeTags.slice(0, 3);
-          const hiddenTagCount = Math.max(0, t.narrativeTags.length - visibleTags.length);
-
-          return (
-            <div key={`${t.targetId}-${tIdx}`} className="group">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span
-                  style={{
-                    fontFamily: "var(--font-cinzel)",
-                    fontSize: "0.6rem",
-                    fontWeight: 600,
-                    color: t.isKill ? "#F87171" : "#D1918A",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {t.targetName}
-                </span>
-                <span style={{ fontSize: "0.55rem", color: "rgba(179,139,45,0.4)" }}>→</span>
-                <span
-                  className="ml-auto shrink-0 rounded px-1.5 py-0.5"
-                  style={{
-                    fontFamily: "var(--font-cinzel)",
-                    fontSize: "0.65rem",
-                    fontWeight: 700,
-                    background: t.isCrit
-                      ? "rgba(124,58,237,0.25)"
-                      : "rgba(60,30,6,0.6)",
-                    border: t.isCrit
-                      ? "1px solid rgba(167,139,250,0.35)"
-                      : "1px solid rgba(179,139,45,0.3)",
-                    color: t.isCrit ? "#C4B5FD" : "#E8C84A",
-                  }}
-                >
-                  {t.damage}
-                  {t.isCrit && (
-                    <span
-                      style={{
-                        marginLeft: "3px",
-                        fontSize: "0.5rem",
-                        color: "#A78BFA",
-                        verticalAlign: "super",
-                      }}
-                    >
-                      CRIT
-                    </span>
-                  )}
-                </span>
-              </div>
-
-              <div className="mt-1 flex items-center gap-2">
-                <span
-                  style={{
-                    fontFamily: "var(--font-crimson)",
-                    fontSize: "0.6rem",
-                    fontStyle: "italic",
-                    color: "rgba(200,184,152,0.6)",
-                    width: "45px",
-                    textAlign: "right"
-                  }}
-                >
-                  {t.hitLocation}
-                </span>
-                <div
-                  className="flex-1 h-1 rounded-full overflow-hidden"
-                  style={{ background: "rgba(20,14,6,0.7)" }}
-                  aria-hidden="true"
-                >
-                  <div
-                    className="h-full w-full rounded-full motion-safe:transition-transform motion-safe:duration-500"
-                    style={{
-                      transform: `scaleX(${barPct})`,
-                      transformOrigin: "left center",
-                      background: `linear-gradient(90deg, ${barColor}77, ${barColor})`,
-                    }}
-                  />
-                </div>
-                <span
-                  style={{
-                    fontFamily: "var(--font-crimson)",
-                    fontSize: "0.55rem",
-                    color: "rgba(179,139,45,0.5)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {t.hpAfter}/{t.targetMaxHp}
-                </span>
-              </div>
-
-              {t.narrativeTags.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1" aria-label="Narrative tags">
-                  {visibleTags.map((tag, tagIndex) => (
-                    <span
-                      key={`${tag}-${tagIndex}`}
-                      style={{
-                        fontFamily: "var(--font-crimson)",
-                        fontSize: "0.5rem",
-                        fontStyle: "italic",
-                        color: "rgba(214,193,148,0.9)",
-                        background: "rgba(42,30,10,0.6)",
-                        border: "1px solid rgba(120,90,30,0.3)",
-                        padding: "0px 4px",
-                        borderRadius: "2px"
-                      }}
-                    >
-                      {tag.replace(/_/g, " ")}
-                    </span>
-                  ))}
-                  {hiddenTagCount > 0 && (
-                    <span style={{ fontSize: "0.5rem", opacity: 0.5 }}>+{hiddenTagCount}</span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+    <li className="rounded border border-amber-900/40 bg-black/15 px-3 py-2 text-sm text-neutral-200">
+      <p className="mb-1 font-semibold text-amber-200">{entry.attackerName}</p>
+      <div className="space-y-2">
+        {entry.targets.map((target, index) => (
+          <div key={`${target.targetId}-${index}`} className="space-y-1">
+            <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="font-medium">{target.targetName}</span>
+              <span>{target.damage} de daño</span>
+              <span className="tabular-nums">{target.hpAfter}/{target.targetMaxHp} PG</span>
+              {target.isCrit && <strong className="text-violet-300">Crítico</strong>}
+              {target.isFumble && <strong className="text-orange-300">Pifia</strong>}
+              {target.isKill && <strong className="text-red-300">Derrotado</strong>}
+            </p>
+            {target.conditionsApplied.length > 0 && (
+              <p className="text-neutral-300">Condiciones aplicadas: {target.conditionsApplied.map(conditionLabel).join(", ")}</p>
+            )}
+          </div>
+        ))}
       </div>
     </li>
   );

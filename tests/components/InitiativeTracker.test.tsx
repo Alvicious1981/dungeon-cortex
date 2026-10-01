@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import InitiativeTracker from "@/components/combat/InitiativeTracker";
 import {
   DUNGEON_ACTION_REQUEST,
@@ -15,30 +15,8 @@ vi.mock("next/navigation", () => ({
 
 describe("InitiativeTracker Smoke Test", () => {
   const mockEntries = [
-    {
-      id: "c1",
-      name: "Aldric",
-      dexModifier: 2,
-      naturalRoll: 13,
-      initiative: 15,
-      roll: {
-        dice: [{ result: 13, sides: 20 }],
-        total: 13,
-        type: "1d20",
-      } as any,
-    },
-    {
-      id: "c2",
-      name: "Goblin",
-      dexModifier: 1,
-      naturalRoll: 11,
-      initiative: 12,
-      roll: {
-        dice: [{ result: 11, sides: 20 }],
-        total: 11,
-        type: "1d20",
-      } as any,
-    },
+    { id: "c1", name: "Aldric", initiativeTotal: 15 },
+    { id: "c2", name: "Goblin", initiativeTotal: 12 },
   ];
 
   it("renders correctly with entries", () => {
@@ -52,6 +30,31 @@ describe("InitiativeTracker Smoke Test", () => {
     expect(
       screen.getByRole("button", { name: "Siguiente turno" })
     ).toBeInTheDocument();
+  });
+
+  it("labels persisted totals without displaying a reconstructed die or modifier", () => {
+    render(
+      <InitiativeTracker
+        entries={[
+          { id: "pc", name: "Mira", initiativeTotal: 23, unconscious: true },
+          { id: "enemy", name: "Goblin", initiativeTotal: -2 },
+        ]}
+        activeId="pc"
+      />
+    );
+
+    const rows = screen.getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute("aria-current", "true");
+    expect(rows[1]).not.toHaveAttribute("aria-current");
+    expect(rows[0]).toHaveTextContent("Mira");
+    expect(rows[1]).toHaveTextContent("Goblin");
+    expect(within(rows[0]).getByText("Inconsciente")).toBeInTheDocument();
+    expect(within(rows[0]).getByText("Iniciativa:")).toBeInTheDocument();
+    expect(within(rows[0]).getAllByText("23")).toHaveLength(1);
+    expect(within(rows[1]).getAllByText("-2")).toHaveLength(1);
+    expect(rows[0]).not.toHaveTextContent(/\+0|undefined|NaN/);
+    expect(rows[1]).not.toHaveTextContent(/\+0|undefined|NaN/);
   });
 
   it("requests canonical End Turn through the shared action transport", () => {

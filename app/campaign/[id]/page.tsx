@@ -4,13 +4,15 @@ import { prisma } from "@/lib/db/prisma";
 import ActionInput from "./ActionInput";
 import StoryLog from "./StoryLog";
 import MacroDeck from "@/components/combat/MacroDeck";
-import InitiativeTracker from "@/components/combat/InitiativeTracker";
 import GameEventHandler from "@/components/combat/GameEventHandler";
 import ExplorationPanel from "@/components/exploration/ExplorationPanel";
 import MemoryJournal from "@/components/MemoryJournal";
 import QuestTracker from "@/components/QuestTracker";
+import EquipmentLink from "@/components/campaign/EquipmentLink";
+import MapSurface from "@/components/campaign/MapSurface";
+import CampaignAdventure from "@/components/campaign/CampaignAdventure";
+import CampaignJournal from "@/components/campaign/CampaignJournal";
 import NPCRoster from "@/components/NPCRoster";
-import type { InitiativeEntry } from "@/lib/rules/combat";
 import { derivePlayerLifeState, type PlayerLifeState } from "@/lib/rules/death-save";
 import type {
   WeaponProperties,
@@ -31,7 +33,9 @@ import CharacterSheetController from "@/components/character/CharacterSheetContr
 import CombatHUDController from "@/components/combat/CombatHUDController";
 import BattleGrid from "@/components/combat/BattleGrid";
 import { COMBATANT_INITIATIVE_ORDER } from "@/lib/rules/turn-authority";
-import CampaignMobileNav from "@/components/campaign/CampaignMobileNav";
+import CampaignLayout, { CampaignActionLink } from "@/components/campaign/CampaignLayout";
+import { CampaignStoryProvider } from "./CampaignStoryProvider";
+import { conditionLabel } from "@/lib/character-sheet/condition-labels";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
 import { resolveInventoryWeaponProfiles } from "@/lib/rules/weapon-profile-service";
@@ -343,24 +347,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
     ? Math.max(0, Math.min(100, Math.round((character.hp / currentMaxHp) * 100)))
     : 0;
 
-  const initiativeEntries: InitiativeEntry[] = activeEncounter
-    ? activeEncounter.combatants.map((c) => ({
-        id: c.id,
-        name: c.name,
-        dexModifier: 0,
-        naturalRoll: c.initiativeTotal,
-        initiative: c.initiativeTotal,
-        unconscious: c.isPlayer && c.hp <= 0,
-        roll: {
-          notation: "1d20",
-          dice: [{ faces: 20, result: c.initiativeTotal }],
-          diceTotal: c.initiativeTotal,
-          modifier: 0,
-          total: c.initiativeTotal,
-        },
-      }))
-    : [];
-
   const activeCombatantId =
     activeEncounter?.combatants[activeEncounter.currentTurnIndex]?.id;
 
@@ -396,9 +382,57 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         ) ?? null)
       : null;
 
+  const commandContent = (character.diedAt ? (
+                // Permanent death (death-saves spec §9): no action remains.
+                <div role="status" className="space-y-3 py-2 text-center">
+                  <p className="text-lg" style={{ fontFamily: "var(--font-cinzel, serif)", color: "#FCA5A5" }}>
+                    {character.name} ha caído.
+                  </p>
+                  <Link
+                    href="/character/create"
+                    className="inline-flex min-h-[44px] items-center rounded-md border border-amber-700/50 bg-amber-900/20 px-4 text-sm font-semibold text-amber-300 hover:bg-amber-900/40"
+                  >
+                    Crear otro personaje
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <ActionInput
+                    campaignId={campaign.id}
+                    controls={<MacroDeck
+                    inCombat={!!activeEncounter}
+                    lifeState={lifeState}
+                    deathSaves={
+                      playerCombatant && lifeState && lifeState !== "conscious"
+                        ? {
+                            successes: playerCombatant.deathSaveSuccesses,
+                            failures: playerCombatant.deathSaveFailures,
+                          }
+                        : undefined
+                    }
+                  />}
+                    disabledReason={
+                      playerDown
+                        ? "Estás inconsciente: solo puedes usar «Tirada de muerte» o «Esperar»."
+                        : undefined
+                    }
+                    selectableTargets={
+                      activeEncounter?.combatants.map((c) => ({
+                        id: c.id,
+                        name: c.name,
+                        hp: c.hp,
+                        maxHp: c.maxHp,
+                        isPlayer: c.isPlayer,
+                      })) ?? []
+                    }
+                  />
+                </>
+              ));
+
   return (
+    <CampaignStoryProvider>
     <div
-      className="dc-campaign-shell dc-page-shell min-h-screen pb-20 lg:pb-0"
+      className="dc-campaign-shell dc-page-shell min-h-screen pb-24 md:pb-0"
     >
       {/* Level-up confirmation — listens for dungeon-level-up-available and asks
           the player how to resolve hit points before anything is applied */}
@@ -409,13 +443,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       <TradeOverlayController campaignId={campaign.id} initialGold={campaign.gold} playerInventory={character.inventory} />
       {/* Dialogue Overlay — self-wiring, listens for dungeon-npc-selected events */}
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
-      
-      {/* Detailed Character Sheet — Floating toggle (mobile / expanded view) */}
-      <CharacterSheetController
-        sheet={sheetViewModel}
-        profile={characterProfile}
-        nameLocked={activeEncounter !== null}
-      />
 
       {/* Ambient glow — purely decorative */}
       <div
@@ -435,20 +462,6 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         className="relative z-10 mx-auto max-w-[100rem] px-3 py-5 sm:px-5 sm:py-7 xl:px-8"
         id="main-content"
       >
-        {activeEncounter && (
-          <CombatHUDController
-            playerDown={playerDown}
-            activeTurnIndex={activeEncounter.currentTurnIndex}
-            combatants={activeEncounter.combatants.map((c) => ({
-              id: c.id,
-              name: c.name,
-              hp: c.hp,
-              maxHp: c.isPlayer ? currentMaxHp : c.maxHp,
-              initiativeTotal: c.initiativeTotal,
-              conditions: (c.conditions as string[]) || [],
-            }))}
-          />
-        )}
         {/* ── Skip link (accessibility) ── */}
         <a
           href="#chronicle"
@@ -461,7 +474,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
         {/* ════════════════
             HEADER
         ════════════════ */}
-        <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <header className="dc-campaign-hero mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
             <p
               className="mb-1 text-[10px] uppercase tracking-[0.3em]"
@@ -486,18 +499,31 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             }}
           >
             {/* A dead character's campaign stays "active" in the database (death-saves spec §9). */}
-            {character.diedAt ? "Caída" : campaign.status}
+            {character.diedAt ? "Caída" : campaign.status === "active" ? "Activa" : campaign.status === "completed" ? "Terminada" : "Pausada"}
           </span>
         </header>
+
+        <div className="dc-campaign-status mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--dc-border)] bg-[var(--dc-canvas-soft)] p-2 shadow-lg">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="font-semibold">{character.name}</span>
+            <span className="tabular-nums">PG {character.hp} / {currentMaxHp}</span>
+            {playerCombatant && (playerCombatant.conditions as string[]).map((condition) => (
+              <span key={condition} className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-200">{conditionLabel(condition)}</span>
+            ))}
+            {character.concentrationSpellId && <span className="text-xs text-violet-200">Concentración</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            {!character.diedAt && <CampaignActionLink />}
+            <GameEventHandler inCombat={!!activeEncounter} />
+            <CharacterSheetController sheet={sheetViewModel} profile={characterProfile} nameLocked={activeEncounter !== null} />
+          </div>
+        </div>
 
         {/* ════════════════
             MAIN GRID
         ════════════════ */}
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)_300px] xl:gap-6">
-
-          {/* ════════════════════════════════════
-              LEFT COLUMN — Character Status Panel
-          ════════════════════════════════════ */}
+        <CampaignLayout
+          character={
           <aside
             id="character"
             className="order-3 scroll-mt-20 space-y-4 lg:order-1"
@@ -586,7 +612,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   </span>
                   <span className="text-sm font-semibold tabular-nums">
                     <span style={{ color: barColor }}>{character.hp}</span>
-                    <span style={{ color: "#7A6A50" }}> / {currentMaxHp}</span>
+                    <span style={{ color: "var(--dc-text-muted)" }}> / {currentMaxHp}</span>
                   </span>
                 </div>
                 {maxHpReduced && (
@@ -604,7 +630,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   aria-valuenow={character.hp}
                   aria-valuemin={0}
                   aria-valuemax={currentMaxHp}
-                  aria-label={`Hit points: ${character.hp} of ${currentMaxHp}`}
+                  aria-label={`Puntos de golpe: ${character.hp} de ${currentMaxHp}`}
                   className="relative h-3 overflow-hidden rounded-full"
                   style={{
                     background: "rgba(20,14,6,0.9)",
@@ -623,7 +649,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
                 <p
                   className="mt-1 text-right text-[10px] tabular-nums"
-                  style={{ color: "#3A3020" }}
+                  style={{ color: "var(--dc-text-muted)" }}
                 >
                   {hpPercent}%
                 </p>
@@ -646,7 +672,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               >
                 <p
                   className="text-[10px] uppercase tracking-[0.3em]"
-                  style={{ fontFamily: "var(--font-cinzel)", color: "#6B63C0" }}
+                  style={{ fontFamily: "var(--font-cinzel)", color: "var(--dc-text-muted)" }}
                 >
                   Recursos mágicos
                 </p>
@@ -660,7 +686,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                         <div key={level} className="flex items-center gap-2.5">
                           <span
                             className="w-10 shrink-0 text-[10px] uppercase tracking-widest"
-                            style={{ fontFamily: "var(--font-cinzel)", color: "#6B63C0" }}
+                            style={{ fontFamily: "var(--font-cinzel)", color: "var(--dc-text-muted)" }}
                           >
                             Nv {level}
                           </span>
@@ -669,7 +695,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                           <div
                             className="flex flex-wrap gap-1.5"
                             role="group"
-                            aria-label={`Level ${level}: ${available} of ${slot.total} available`}
+                            aria-label={`Nivel ${level}: ${available} de ${slot.total} disponibles`}
                           >
                             {Array.from({ length: slot.total }).map((_, i) => {
                               const filled = i < available;
@@ -697,7 +723,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
 
                           <span
                             className="ml-auto shrink-0 text-xs tabular-nums"
-                            style={{ color: "#4A4870" }}
+                            style={{ color: "var(--dc-text-muted)" }}
                           >
                             {available}/{slot.total}
                           </span>
@@ -723,11 +749,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               >
                 Inventario
               </p>
+              <EquipmentLink />
 
               {!hasInventory ? (
                 <p
                   className="text-xs"
-                  style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50" }}
+                  style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "var(--dc-text-muted)" }}
                 >
                   No hay objetos registrados.
                 </p>
@@ -773,7 +800,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                                   {statLine && (
                                     <span
                                       className="block truncate text-xs"
-                                      style={{ color: "#5A5040", fontFamily: "var(--font-crimson)", fontStyle: "italic" }}
+                                      style={{ color: "var(--dc-text-muted)", fontFamily: "var(--font-crimson)", fontStyle: "italic" }}
                                     >
                                       {statLine}
                                     </span>
@@ -787,7 +814,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                                         border: "1px solid rgba(179,139,45,0.35)",
                                         boxShadow: "0 0 6px rgba(179,139,45,0.1)",
                                       }}
-                                      aria-label={`Equipped: ${SLOT_LABELS[item.equippedSlot].label}`}
+                                      aria-label={`Equipado: ${SLOT_LABELS[item.equippedSlot].label}`}
                                     >
                                       <span aria-hidden="true" className="text-[8px]" style={{ color: "#B38B2D" }}>
                                         {SLOT_LABELS[item.equippedSlot].glyph}
@@ -806,7 +833,7 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                                 {item.quantity > 1 && (
                                   <span
                                     className="shrink-0 text-xs tabular-nums"
-                                    style={{ color: "#5A5040" }}
+                                    style={{ color: "var(--dc-text-muted)" }}
                                   >
                                     ×{item.quantity}
                                   </span>
@@ -823,28 +850,32 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
             </section>
 
           </aside>
+          }
+          journal={
+          <aside id="journal" tabIndex={-1} aria-label="Misiones, personajes y diario" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
+            <CampaignJournal quests={<QuestTracker quests={quests} />} characters={<NPCRoster npcs={npcs} />} memories={<MemoryJournal memories={memories} />} />
+          </aside>
+          }
+        >
+<CampaignAdventure scene={
 
-          {/* ════════════════════════════════════
-              CENTRE — Chronicle + Action
-          ════════════════════════════════════ */}
-          <div className="order-1 min-w-0 space-y-5 lg:order-2">
-
-            <section id="scene" aria-labelledby="scene-heading" className="scroll-mt-20 overflow-hidden rounded-sm border border-[#4a3b24] bg-[#090811] shadow-2xl">
+            <section id="scene" tabIndex={-1} aria-labelledby="scene-heading" className="scroll-mt-20 overflow-hidden rounded-sm border border-[#4a3b24] bg-[#090811] shadow-2xl">
               <header className="flex items-center justify-between border-b border-[#3b3150] bg-[#15121e]/95 px-4 py-3">
                 <div>
                   <p className="dc-kicker">Contexto actual</p>
                   <h2 id="scene-heading" className="dc-heading mt-1 text-lg font-bold text-[#eadcab]">La escena</h2>
                 </div>
-                <span className="rounded-full border border-[#4f4264] px-2 py-1 text-[10px] uppercase tracking-wider text-[#a78bfa]">Estado confirmado</span>
+
               </header>
-              <div className="relative min-h-56 bg-[linear-gradient(rgba(7,7,16,.42),rgba(7,7,16,.72)),url('/assets/atmosphere/tactical-table-idle.webp')] bg-cover bg-center p-3 sm:p-4">
+              <div className="relative p-3 sm:p-4">
                 {!explorationData && !activeEncounter && (
-                  <div className="flex min-h-56 items-center justify-center text-center">
-                    <p className="dc-copy max-w-sm rounded-sm bg-[#070710]/80 px-5 py-4 text-sm italic">La bitácora mantiene el contexto hasta que el servidor confirme una localización táctica.</p>
+                  <div className="text-center">
+                    <p className="dc-copy max-w-sm rounded-sm bg-[#070710]/80 px-5 py-4 text-sm italic">Sin mapa disponible. Continúa la aventura en la bitácora.</p>
                   </div>
                 )}
             {/* ── Exploration map — visible when campaign has an active location ── */}
             {explorationData && (
+              <MapSurface title="Mapa de exploración">
               <ExplorationPanel
                 location={explorationData.location}
                 nodes={explorationData.nodes}
@@ -852,10 +883,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                 initialCurrentNodeIndex={explorationData.initialCurrentNodeIndex}
                 initialVisitedNodeIndices={explorationData.initialVisitedNodeIndices}
               />
+              </MapSurface>
             )}
 
             {/* ── Dungeon VTT — visible when in a dungeon location with a seed and current node ── */}
             {dungeonCurrentNode && explorationData && (
+              <MapSurface title="Plano de mazmorra">
               <div className="w-full h-96">
                 <DungeonMapVTT
                   seed={explorationData.location.seed!}
@@ -865,10 +898,12 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   visitedNodeIndices={explorationData.initialVisitedNodeIndices}
                 />
               </div>
+              </MapSurface>
             )}
 
             {/* Legacy zone-based combat map removed in Phase 1.5. */}
             {activeEncounter && (
+              <MapSurface title="Mapa de combate">
               <BattleGrid
                 activeCombatantId={activeCombatantId}
                 combatants={activeEncounter.combatants.map((c) => ({
@@ -883,90 +918,47 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
                   size: c.size ?? "Medium",
                 }))}
               />
+              </MapSurface>
             )}
 
               </div>
             </section>
-
-            <StoryLog
+} story={
+<StoryLog
               campaignId={campaign.id}
               initialLogs={logs}
               initialHasMore={initialHasMore}
             />
-
-            <section id="commands" aria-label="Acciones disponibles" className="sticky bottom-[4.5rem] z-30 space-y-3 rounded-lg border border-[var(--dc-border-strong)] bg-[var(--dc-canvas-soft)]/95 p-3 shadow-2xl backdrop-blur lg:bottom-3">
-              {character.diedAt ? (
-                // Permanent death (death-saves spec §9): no action remains.
-                <div role="status" className="space-y-3 py-2 text-center">
-                  <p className="text-lg" style={{ fontFamily: "var(--font-cinzel, serif)", color: "#FCA5A5" }}>
-                    {character.name} ha caído.
-                  </p>
-                  <Link
-                    href="/character/create"
-                    className="inline-flex min-h-[44px] items-center rounded-md border border-amber-700/50 bg-amber-900/20 px-4 text-sm font-semibold text-amber-300 hover:bg-amber-900/40"
-                  >
-                    Crear otro personaje
-                  </Link>
-                </div>
-              ) : (
-                <>
-                  <MacroDeck
-                    inCombat={!!activeEncounter}
-                    lifeState={lifeState}
-                    deathSaves={
-                      playerCombatant && lifeState && lifeState !== "conscious"
-                        ? {
-                            successes: playerCombatant.deathSaveSuccesses,
-                            failures: playerCombatant.deathSaveFailures,
-                          }
-                        : undefined
-                    }
-                  />
-                  <ActionInput
-                    campaignId={campaign.id}
-                    disabledReason={
-                      playerDown
-                        ? "Estás inconsciente: solo puedes usar «Tirada de muerte» o «Esperar»."
-                        : undefined
-                    }
-                    selectableTargets={
-                      activeEncounter?.combatants.map((c) => ({
-                        id: c.id,
-                        name: c.name,
-                        hp: c.hp,
-                        maxHp: c.maxHp,
-                        isPlayer: c.isPlayer,
-                      })) ?? []
-                    }
-                  />
-                </>
-              )}
+}>
+<section id="commands" tabIndex={-1} aria-label="Acciones disponibles" className="space-y-3 rounded-lg border border-[var(--dc-border-strong)] bg-[var(--dc-canvas-soft)]/95 p-3 shadow-2xl">
+              {activeEncounter ? (
+<CombatHUDController
+            playerDown={playerDown}
+            activeTurnIndex={activeEncounter.currentTurnIndex}
+            combatants={activeEncounter.combatants.map((c) => ({
+              id: c.id,
+              isPlayer: c.isPlayer,
+              name: c.name,
+              hp: c.hp,
+              maxHp: c.isPlayer ? currentMaxHp : c.maxHp,
+              initiativeTotal: c.initiativeTotal,
+              conditions: (c.conditions as string[]) || [],
+            }))}
+          >
+            {commandContent}
+          </CombatHUDController>
+              ) : commandContent}
             </section>
 
-          </div>
-
-          {/* ════════════════════════════════════
-              RIGHT COLUMN — Combat + Memory
-          ════════════════════════════════════ */}
-          <aside id="journal" aria-label="Combate, misiones, personajes y diario" className="order-2 scroll-mt-20 space-y-4 lg:order-3">
-            <InitiativeTracker
-              playerDown={playerDown}
-              entries={initiativeEntries}
-              activeId={activeCombatantId}
-            />
-            <QuestTracker quests={quests} />
-            <NPCRoster npcs={npcs} />
-            <MemoryJournal memories={memories} />
-          </aside>
-
-        </div>
+          </CampaignAdventure>
+</CampaignLayout>
 
         {/* ── Footer nav ── */}
         <nav className="mt-10" aria-label="Navegación de página">
           <Link
             href="/"
             className="inline-flex items-center gap-1.5 rounded text-xs transition-colors duration-200 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
-            style={{ color: "#7A6A50" }}
+            style={{ color: "var(--dc-text-muted)" }}
           >
             <svg
               width="12"
@@ -988,12 +980,10 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           </Link>
         </nav>
 
-        <CampaignMobileNav />
 
-        {/* GameEventHandler renders the mute toggle + wires Web Audio + visual FX */}
-        <GameEventHandler inCombat={!!activeEncounter} />
 
       </main>
     </div>
+    </CampaignStoryProvider>
   );
 }

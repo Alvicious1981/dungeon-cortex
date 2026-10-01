@@ -20,7 +20,7 @@ export default function StatBlock({
   return (
     <article
       className="relative overflow-hidden rounded-xl border border-amber-400/20 bg-slate-950/55 p-3 backdrop-blur-xl"
-      aria-label={`${label} ability score`}
+      aria-label={`Puntuación de ${label}`}
     >
       <div
         aria-hidden="true"
@@ -37,10 +37,10 @@ export default function StatBlock({
         {isProficient && (
           <span
             className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-300"
-            aria-label={`${label} proficiency enabled`}
+            aria-label={`Competencia en ${label}`}
           >
             <ShieldCheck size={10} aria-hidden="true" />
-            Prof
+            Comp.
           </span>
         )}
       </div>
