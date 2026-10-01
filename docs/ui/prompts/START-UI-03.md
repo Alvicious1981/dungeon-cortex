@@ -13,7 +13,7 @@ task **UI-03 — Reusable Action Bar**. Do not start any other UI task.
 1. Run the preflight in `docs/ui/UI-WORKFLOW.md` §5 (gate 1) and report repository, branch, HEAD, `origin/master`, working tree
    and divergence.
 2. Prerequisite: UI-02 must already be in `origin/master`. Check `git log origin/master --oneline --grep "^UI-02:"`. No match and
-   no deviation under "Maintainer decisions" → `STOP-PREREQ`. If a deviation is recorded, the prerequisite is the last task merged
+   no deviation under "Maintainer decisions" → `STOP-PREREQ`, unless the baseline rule in `docs/ui/UI-WORKFLOW.md` §3.1 applies (PR #251). If a deviation is recorded, the prerequisite is the last task merged
    in that chosen order.
 3. Read, in this order: `AGENTS.md`, `docs/DECISION_5E_SRD_API.md`, `MASTER_ARCH_GUIDE.md`, `PROJECT_CONTEXT.md`,
    `docs/UI_SPEC.md`, `docs/DESIGN.md`, `.claude/rules/ui-frontend.md`, `docs/ui/UI-WORKFLOW.md`, `docs/ui/tasks/UI-03.md`; then the
@@ -21,8 +21,10 @@ task **UI-03 — Reusable Action Bar**. Do not start any other UI task.
 4. Report the real state, the files you expect to change, the risks, and a bounded plan that states this task's `UI_SPEC` tier.
    Do not edit anything until I approve the plan.
 
-Task reminders: slots exist only for backend-resolved actions (today `Attack` and `End Turn`); one keyboard listener, never a
-duplicate; `components/combat/ActionBar.tsx` is the only declared future path.
+Task reminders: the premise changed after PR #251 — the action buttons now live in `MacroDeck`, and `CombatHUD` keeps only the
+F1/F2 listener (read "Baseline after PR #251" in the task file). Before planning, ask me whether a separate Action Bar is still
+wanted. If it is: slots exist only for backend-resolved actions; one keyboard listener, never a duplicate;
+`components/combat/ActionBar.tsx` is the only declared future path.
 
 ## 2. Authorization (this task and this session only)
 
