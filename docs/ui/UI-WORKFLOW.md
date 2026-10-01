@@ -106,8 +106,8 @@ Rules:
   START prompt. The agent never closes a task on its own.
 - A prerequisite that is a *residual* task is still a prerequisite: `UI-02` still waits for `UI-01` unless the maintainer defers it.
 
-Open follow-ups from the review of #251 (none blocks; each is real and was left unfixed on purpose). Fixed in the same PR:
-the dungeon map centering, "PV" → "PG", the repeated `aria-live` text, the unannounced loading state, the level-up
+Open follow-ups from the review of #251 (none blocks; each is real and was left unfixed on purpose). Fixed within #251
+before it merged: the dungeon map centering, "PV" → "PG", the repeated `aria-live` text, the unannounced loading state, the level-up
 postponement and the E2E/unit tests that the merge broke.
 
 - `StoryLog`: a persisted `system` row for the same action renders next to the live result card (ability and social checks).
