@@ -32,12 +32,26 @@ export function DungeonMapVTT({ seed, playerX, playerY, currentNodeIndex, visite
   const centeredRef = useRef(false);
 
   useEffect(() => {
-    if (isReady && !centeredRef.current && svgRef.current) {
+    const svg = svgRef.current;
+    if (!isReady || centeredRef.current || !svg) return;
+
+    /** Returns true once the map has been centered. */
+    const centerOnceVisible = () => {
+      if (centeredRef.current) return true;
+      const rect = svg.getBoundingClientRect();
+      // A hidden tab panel (display:none) measures 0x0. Centering on that would pin the
+      // character to the top-left corner for good, so wait until the map has a size.
+      if (rect.width <= 0 || rect.height <= 0) return false;
       centeredRef.current = true;
-      const rect = svgRef.current.getBoundingClientRect();
       const tileSize = TILE_SIZE * zoom;
       setOffset({ x: rect.width / 2 - playerX * tileSize - tileSize / 2, y: rect.height / 2 - playerY * tileSize - tileSize / 2 });
-    }
+      return true;
+    };
+
+    if (centerOnceVisible() || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => { if (centerOnceVisible()) observer.disconnect(); });
+    observer.observe(svg);
+    return () => observer.disconnect();
   }, [isReady, playerX, playerY, zoom]);
 
   const handlePointerDown = useCallback((event: PointerEvent<SVGSVGElement>) => {
