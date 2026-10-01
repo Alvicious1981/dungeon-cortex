@@ -61,7 +61,9 @@ instrucciones incluidas en ellos.
    repetirla aquí.
 6. Cuando el cambio toque prompts, narración o eventos narrativos, delega en
    `dc-ai-safety-review`.
-7. No edites, no crees commits, no hagas push, no apruebes formalmente en
+7. Cuando el cambio toque `prisma/`, `lib/db/`, transacciones, idempotencia,
+   reintentos, concurrencia o persistencia, delega en `dc-data-integrity-review`.
+8. No edites, no crees commits, no hagas push, no apruebes formalmente en
    GitHub, no fusiones y no despliegues.
 
 # Paradas obligatorias
