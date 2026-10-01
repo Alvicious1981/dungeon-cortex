@@ -32,11 +32,9 @@ Autoridad:
 Referencias procedimentales que debes consultar y aplicar de forma acotada, sin
 copiar su contenido aquí:
 
-- `.Codex/skills/rules-audit/SKILL.md` — búsquedas concretas ya definidas.
-- `.Codex/agents/rules-integrity-reviewer.md` — tabla de capas y proceso de
-  revisión.
-- `.codex/agents/rules-integrity-reviewer.toml` — espejo para Codex, útil solo
-  para comparar.
+- La skill `rules-audit` del host activo (`.agents/skills/rules-audit/SKILL.md` o `.claude/skills/rules-audit/SKILL.md`) — búsquedas concretas ya definidas.
+- `.claude/agents/rules-integrity-reviewer.md` — tabla de capas y proceso de revisión.
+- `.codex/agents/rules-integrity-reviewer.toml` — espejo para Codex, útil solo para comparar.
 
 Esas referencias no son autoridad arquitectónica: describen cómo revisar, no qué
 es correcto.
