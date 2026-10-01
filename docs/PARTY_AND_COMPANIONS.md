@@ -122,7 +122,7 @@ Constraints and why each lives where it does:
 | Invariant | Enforcement |
 |---|---|
 | A Character cannot appear twice in the same Party | `@@unique([campaignId, characterId])` — database |
-| Exactly one MAIN per Campaign | Partial unique index `PartyMember_one_main_per_campaign_key` on `(campaignId) WHERE role = 'MAIN'` — database, migration-only (Prisma's schema DSL cannot express a filtered `@@unique`; same limitation as the existing `Encounter_one_active_per_campaign_key`) |
+| Exactly one MAIN per Campaign | Backfill, post-drain reconciliation and atomic campaign creation supply the MAIN row; partial unique index `PartyMember_one_main_per_campaign_key` on `(campaignId) WHERE role = 'MAIN'` prevents a second one. The index alone enforces at most one, not the existence of a row. It is migration-only because Prisma cannot express filtered `@@unique` indexes. |
 | Up to 3 active members | `MAX_ACTIVE_PARTY_MEMBERS` in `lib/party/roster.ts` — **application layer**, deliberately not a DB trigger. A hard cap enforced by a trigger is fragile and disproportionate for a foundation PR with no code path that can yet add a 4th member; a future recruitment task enforces this at the point where membership can actually grow. |
 | Role explicit / Control explicit | Real Postgres enums (`PartyRole`, `PartyControlMode`), not `String` + comment. Closed-set classification on a narrow join entity, matching this schema's `CharacterChangeSource` precedent rather than the broad-lifecycle `String @default("active")` convention used by `Campaign`/`Encounter`/`Quest`. An enum makes an illegal value structurally unrepresentable. |
 | Character/user ownership cannot be bypassed | `PartyMember` rows are only ever created after the existing `character.userId !== user.id` ownership check in `app/api/campaign/route.ts` |
@@ -137,7 +137,7 @@ column would have zero real writer or reader today. A future task adds either th
 **unchanged by this decision** and **stays authoritative** for "the current main Character." Every
 existing reader of `Campaign.characterId` continues to work exactly as before.
 
-`PartyMember` is an additive, normalized mirror of the same fact, kept in sync by two mechanisms:
+`PartyMember` is an additive, normalized mirror of the same fact, kept in sync by three mechanisms:
 
 1. **Backfill** — migration `20260917130000_add_party_members` inserts a `role=MAIN, control=USER`
    `PartyMember` row for every Campaign that already existed when it runs, idempotently
@@ -145,6 +145,75 @@ existing reader of `Campaign.characterId` continues to work exactly as before.
 2. **Campaign creation** — `app/api/campaign/route.ts` now creates the Campaign row and its MAIN
    `PartyMember` row inside one `$transaction`, so every Campaign created after this PR ships also
    satisfies the invariant immediately, not just historical data.
+3. **Post-drain reconciliation** — the forward migration
+   `20260930220000_reconcile_party_main_members` repeats the insert after old instances are drained.
+   This repairs Campaigns accepted by old code after the original one-shot backfill, without editing
+   that already-applied migration. Existing MAIN control modes, companions and timestamps are
+   preserved. Missing rows get `MAIN/USER` and the Campaign's original creation time. The complete
+   statement is atomic and idempotent; incompatible existing memberships abort the batch for
+   maintainer inspection rather than being overwritten or silently left without the expected MAIN.
+
+**Deployment:** pause campaign writes and drain all old application instances before applying
+pending migrations, including `20260930220000_reconcile_party_main_members`. The original
+`20260917130000_add_party_members` must run first if pending; the new campaign-creation route always
+inserts into its table. The reconciliation must run after the last old instance has stopped writing,
+even when the original backfill was already applied. Deploy the matching code/client and validate
+before resuming writes. Keep writes paused if any migration fails. This same maintenance window
+covers DC-PARTY-002's Combatant link (see the identity design's deployment section). No migration is
+applied to the real save during agent validation.
+
+**Operator checks for that maintenance window:** Confirm the target database in the deployment
+system before running any command; a locally configured connection is not proof that it is the
+intended target. With writes paused and every old instance stopped, inspect pending migrations with
+`pnpm exec prisma migrate status`, then have the maintainer run
+`pnpm exec prisma migrate deploy` against that verified target. Do not start the new application
+until all three migrations below have finished successfully, in timestamp order. The
+reconciliation is required even if the foundation migration finished during an earlier rollout.
+
+Run these read-only checks against the same database before resuming writes. The first query must
+return exactly three rows, each with a non-null `finished_at` and a null `rolled_back_at`;
+each count must be zero. The last query
+checks active encounters, whose player link must match the Campaign's current main Character.
+
+```sql
+SELECT migration_name, finished_at, rolled_back_at
+FROM "_prisma_migrations"
+WHERE migration_name IN (
+  '20260917130000_add_party_members',
+  '20260917140000_add_combatant_character_link',
+  '20260930220000_reconcile_party_main_members'
+)
+ORDER BY migration_name;
+
+SELECT COUNT(*) AS campaigns_without_matching_main
+FROM "Campaign" AS c
+WHERE NOT EXISTS (
+  SELECT 1 FROM "PartyMember" AS pm
+  WHERE pm."campaignId" = c.id
+    AND pm."characterId" = c."characterId"
+    AND pm.role = 'MAIN'
+);
+
+SELECT COUNT(*) AS unlinked_player_combatants
+FROM "Combatant"
+WHERE "isPlayer" = true AND "characterId" IS NULL;
+
+SELECT COUNT(*) AS active_player_links_not_matching_main
+FROM "Combatant" AS cb
+JOIN "Encounter" AS e ON e.id = cb."encounterId"
+JOIN "Campaign" AS c ON c.id = e."campaignId"
+WHERE e.status = 'active' AND cb."isPlayer" = true
+  AND cb."characterId" IS DISTINCT FROM c."characterId";
+```
+
+After deploying the application with the Prisma Client generated from this schema, open an
+existing campaign page through the new application and check its Character and, if present,
+active encounter without submitting an action. Then resume writes and monitor the first campaign
+creation and encounter action. If a migration fails, a check is
+nonzero, or the new application fails validation, keep writes paused and inspect the failed
+migration or conflicting rows. Do not automatically restart old code against the changed schema,
+delete data, edit an applied migration, or mark a failed migration resolved merely to proceed.
+Repair the cause and repeat the checks before resuming writes.
 
 This compatibility phase ends when a future task switches some reader from `Campaign.characterId` to
 `PartyMember` as its source of truth. No such switch happens in this decision.
@@ -160,8 +229,10 @@ can have, not additional human players. This decision does not conflict with tha
 
 **Combat** — `Combatant.isPlayer` semantics, the enemy-turn chain (`resolveEnemyTurn`,
 `finalizeEncounterTurn`), initiative, action economy, target selection, encounter-turn ownership,
-death saves, HP combat authority. `Combatant` has no `characterId` FK at all today; `PartyMember`
-introduces none. Nothing in combat reads this table.
+death saves, HP combat authority. `PartyMember` introduces no link from `Combatant`, and nothing in
+combat reads this table. (`Combatant` had no `characterId` FK when this decision was written;
+DC-PARTY-002 has since added one — `Combatant.characterId`, a nullable FK to `Character` set on the
+player's row — see `docs/superpowers/specs/2026-09-17-combatant-character-identity-design.md`.)
 
 **Companion AI** — LLM companion agents, prompts, autonomous tactical decisions, automatic spell
 selection or movement, AI personalities, AI tool calling.
@@ -185,8 +256,9 @@ of an encounter are authoritative for an XP award and how it splits among them.
 ## 11. Future work not authorized by this decision
 
 Control routing (switching a companion between AI and USER control in a live session), companion AI
-behavior, recruitment/dismissal flows, party UI, combat integration (`Combatant` gaining a reference
-to the `Character`/`PartyMember` it represents, multi-Combatant turn ownership), and rest/magic/XP
+behavior, recruitment/dismissal flows, party UI, combat integration (multi-Combatant turn
+ownership, and `Combatant` gaining a reference to the `PartyMember` it represents — its reference
+to the `Character` it represents has since landed, in DC-PARTY-002), and rest/magic/XP
 guards becoming party-aware (`lib/rules/rest-service.ts` and `lib/rules/magic-service.ts` already
 accept an optional `characterId`, but their membership guard only accepts `campaign.characterId` —
 extending it to "any party member" is future work, not this decision).

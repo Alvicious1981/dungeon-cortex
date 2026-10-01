@@ -194,6 +194,7 @@ for (const race of TURN_RACES) {
               {
                 name: "Turn Racer",
                 isPlayer: true,
+                characterId: created.characterId,
                 hp: 20,
                 maxHp: 20,
                 ac: 16,

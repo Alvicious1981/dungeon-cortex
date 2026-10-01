@@ -64,6 +64,7 @@ test("@smoke equal initiative totals keep one deterministic active combatant", a
               id: playerId,
               name: "Tie Player",
               isPlayer: true,
+              characterId: created.characterId,
               hp: 20,
               maxHp: 20,
               ac: 16,

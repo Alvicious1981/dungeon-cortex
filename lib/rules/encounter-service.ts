@@ -270,6 +270,7 @@ export async function spawnCombatEncounter(
       return {
         name: campaign.character.name,
         isPlayer: true,
+        characterId: campaign.character.id,
         hp: campaign.character.hp,
         maxHp: campaign.character.maxHp,
         ac: playerAC,

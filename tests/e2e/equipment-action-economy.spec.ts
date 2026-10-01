@@ -125,6 +125,7 @@ async function createEquipmentFixture(
           {
             name: "Equipment Hero",
             isPlayer: true,
+            characterId: created.characterId,
             hp: 30,
             maxHp: 30,
             ac: 16,

@@ -147,13 +147,13 @@ describe("POST /api/campaign/[id]/encounter — SRD snapshot", () => {
     });
   });
 
-  it("records the player as a humanoid", async () => {
+  it("records the player as a humanoid linked to the campaign's character", async () => {
     const { createMany } = mockTransaction();
 
     await post({ enemies: [{ name: "Goblin", hp: 7, maxHp: 7, dexModifier: 2 }] });
 
     const player = persisted(createMany).find((c: any) => c.isPlayer);
-    expect(player.creatureType).toBe("humanoid");
+    expect(player).toMatchObject({ creatureType: "humanoid", characterId: CAMPAIGN.character.id });
   });
 
   it("claims no type and no modifiers for an enemy with no SRD record", async () => {

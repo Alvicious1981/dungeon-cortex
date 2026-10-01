@@ -116,6 +116,7 @@ export async function createGoblinFixture(
           {
             name: "Combat E2E Hero",
             isPlayer: true,
+            characterId: created.characterId,
             hp: playerHp,
             maxHp: 200,
             ac: 16,
