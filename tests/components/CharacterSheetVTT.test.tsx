@@ -87,6 +87,15 @@ describe("CharacterSheetVTT Component", () => {
     expect(core.getByText("30 pies")).toBeInTheDocument(); // Speed
   });
 
+  it("labels hit points 'PG', the abbreviation used by the rest of the interface", () => {
+    render(<CharacterSheetVTT {...mockProps} />);
+
+    const core = within(screen.getByLabelText(/Estadísticas de combate/i));
+
+    expect(core.getByText("PG")).toBeInTheDocument();
+    expect(core.queryByText("PV")).not.toBeInTheDocument();
+  });
+
   it("renders ability scores and modifiers", () => {
     render(<CharacterSheetVTT {...mockProps} />);
     

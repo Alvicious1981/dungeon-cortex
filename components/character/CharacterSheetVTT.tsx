@@ -175,7 +175,7 @@ export default function CharacterSheetVTT({
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Shield size={15} />{core.armorClass}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">PV</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">PG</p>
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><HeartPulse size={15} />{core.hitPoints.current}/{core.hitPoints.max}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
