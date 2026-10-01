@@ -71,29 +71,29 @@ describe("CharacterSheetVTT Component", () => {
     render(<CharacterSheetVTT {...mockProps} />);
     
     expect(screen.getByText("Valerius the Brave")).toBeInTheDocument();
-    expect(screen.getByText(/Level 5 Human Fighter/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nivel 5 Human Fighter/i)).toBeInTheDocument();
     expect(screen.getByText(/Soldier • Lawful Good/i)).toBeInTheDocument();
   });
 
   it("renders core combat metrics", () => {
     render(<CharacterSheetVTT {...mockProps} />);
     
-    const coreSection = screen.getByLabelText(/Core combat metrics/i);
+    const coreSection = screen.getByLabelText(/Estadísticas de combate/i);
     const core = within(coreSection);
     
     expect(core.getByText("18")).toBeInTheDocument(); // AC
     expect(core.getByText("45/52")).toBeInTheDocument(); // HP
     expect(core.getByText("+2")).toBeInTheDocument(); // Initiative
-    expect(core.getByText("30 ft")).toBeInTheDocument(); // Speed
+    expect(core.getByText("30 pies")).toBeInTheDocument(); // Speed
   });
 
   it("renders ability scores and modifiers", () => {
     render(<CharacterSheetVTT {...mockProps} />);
     
-    const strBlock = screen.getByLabelText(/STR ability score/i);
+    const strBlock = screen.getByLabelText(/Puntuación de Fuerza/i);
     const str = within(strBlock);
     
-    expect(str.getByText("STR")).toBeInTheDocument();
+    expect(str.getByText("Fuerza")).toBeInTheDocument();
     expect(str.getByText("18")).toBeInTheDocument();
     expect(str.getByText("+4")).toBeInTheDocument();
   });
@@ -102,7 +102,7 @@ describe("CharacterSheetVTT Component", () => {
     render(<CharacterSheetVTT {...mockProps} />);
     
     expect(screen.getByText("Longsword")).toBeInTheDocument();
-    expect(screen.getByText("+7 to hit")).toBeInTheDocument();
+    expect(screen.getByText("+7 al ataque")).toBeInTheDocument();
     expect(screen.getByText(/1d8\+4 slashing/i)).toBeInTheDocument();
   });
 
@@ -112,7 +112,7 @@ describe("CharacterSheetVTT Component", () => {
     expect(screen.getByText("Plate Armor")).toBeInTheDocument();
     expect(screen.getByText("Health Potion")).toBeInTheDocument();
     expect(screen.getByText("x3")).toBeInTheDocument(); // Quantity
-    expect(screen.getByText("Equipped")).toBeInTheDocument();
+    expect(screen.getByText("Equipado")).toBeInTheDocument();
   });
 
   it("renders character notes", () => {

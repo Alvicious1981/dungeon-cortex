@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { BookOpenText, History, LockKeyhole, PencilLine, User, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { BookOpenText, History, LockKeyhole, PencilLine, Shield, User, X } from "lucide-react";
 import CharacterSheetVTT, { type CharacterSheetProps } from "./CharacterSheetVTT";
 import CharacterProfileEditor from "./sheet/CharacterProfileEditor";
 import type { CharacterEditableSnapshot } from "@/lib/character-sheet/contracts";
 import { useModalFocus } from "@/lib/hooks/useModalFocus";
+import { DUNGEON_OPEN_CHARACTER, prepareDungeonAction } from "@/lib/events/campaign-ui";
+import EquipmentTab from "./sheet/EquipmentTab";
 
 interface CharacterSheetControllerProps {
   sheet: CharacterSheetProps;
@@ -13,10 +16,11 @@ interface CharacterSheetControllerProps {
   nameLocked: boolean;
 }
 
-type SheetTab = "mechanics" | "profile" | "history";
+type SheetTab = "mechanics" | "equipment" | "profile" | "history";
 
 const tabs: Array<{ id: SheetTab; label: string; icon: typeof User }> = [
   { id: "mechanics", label: "Mecánica", icon: LockKeyhole },
+  { id: "equipment", label: "Equipo", icon: Shield },
   { id: "profile", label: "Perfil", icon: PencilLine },
   { id: "history", label: "Historial", icon: History },
 ];
@@ -30,10 +34,31 @@ export default function CharacterSheetController({
   const [tab, setTab] = useState<SheetTab>("mechanics");
   const [profile, setProfile] = useState(initialProfile);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const pendingActionRef = useRef<string | null>(null);
   const closeSheet = useCallback(() => setIsOpen(false), []);
-  useModalFocus({ open: isOpen, onClose: closeSheet, dialogRef, initialFocusRef: closeRef, returnFocusRef: triggerRef });
+  useModalFocus({ open: isOpen, onClose: closeSheet, dialogRef, initialFocusRef: closeRef, returnFocusRef });
+
+  useEffect(() => {
+    const openSheet = (event: Event) => {
+      returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : triggerRef.current;
+      if ((event as CustomEvent<{ tab?: string }>).detail?.tab === "equipment") setTab("equipment");
+      setIsOpen(true);
+    };
+    window.addEventListener(DUNGEON_OPEN_CHARACTER, openSheet);
+    return () => window.removeEventListener(DUNGEON_OPEN_CHARACTER, openSheet);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen && pendingActionRef.current) {
+      const action = pendingActionRef.current;
+      pendingActionRef.current = null;
+      // The modal has released focus before the action input receives this intent.
+      prepareDungeonAction(action);
+    }
+  }, [isOpen]);
 
   const currentSheet: CharacterSheetProps = {
     ...sheet,
@@ -45,15 +70,17 @@ export default function CharacterSheetController({
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-amber-300/40 bg-amber-700 text-amber-50 shadow-xl transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 lg:bottom-6 lg:right-6"
+        onClick={(event) => { returnFocusRef.current = event.currentTarget; setIsOpen(true); }}
+        className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-amber-300/30 bg-amber-700/20 px-3 text-sm font-medium text-amber-100 hover:bg-amber-700/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
         aria-label="Abrir hoja de personaje"
-        title="Abrir hoja de personaje"
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
       >
-        <BookOpenText className="h-7 w-7" aria-hidden="true" />
+        <BookOpenText className="h-5 w-5" aria-hidden="true" />
+        Personaje
       </button>
 
-      {isOpen && (
+      {isOpen && createPortal(
         <div
           ref={dialogRef}
           role="dialog"
@@ -84,13 +111,13 @@ export default function CharacterSheetController({
               </button>
             </header>
 
-            <nav className="grid grid-cols-3 border-b border-neutral-800" aria-label="Secciones de la hoja">
+            <nav className="grid grid-cols-4 border-b border-neutral-800" aria-label="Secciones de la hoja">
               {tabs.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setTab(id)}
-                  className={`flex min-h-12 items-center justify-center gap-2 border-b-2 px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-300 ${
+                  className={`flex min-h-12 flex-col items-center justify-center gap-1 border-b-2 px-1 py-2 text-xs font-medium sm:flex-row sm:gap-2 sm:px-3 sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-300 ${
                     tab === id
                       ? "border-amber-400 bg-amber-400/10 text-amber-100"
                       : "border-transparent text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
@@ -106,12 +133,17 @@ export default function CharacterSheetController({
             <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
               {tab === "mechanics" ? (
                 <div>
-                  <div className="mb-3 flex items-center gap-2 text-sm text-neutral-400" role="status">
+                  <div className="mb-3 flex items-center gap-2 text-sm text-neutral-400">
                     <LockKeyhole size={16} aria-hidden="true" />
-                    <span>Valores calculados y controlados por el servidor</span>
+                    <span>Consulta los valores actuales de tu personaje.</span>
                   </div>
                   <CharacterSheetVTT {...currentSheet} />
                 </div>
+              ) : tab === "equipment" ? (
+                <EquipmentTab items={sheet.inventory} onPrepare={(action) => {
+                  pendingActionRef.current = action;
+                  closeSheet();
+                }} />
               ) : (
                 <CharacterProfileEditor
                   characterId={profile.id}
@@ -123,7 +155,7 @@ export default function CharacterSheetController({
               )}
             </div>
           </div>
-        </div>
+        </div>, document.body
       )}
     </>
   );

@@ -54,6 +54,13 @@ function truncate(value: string, max = 180): string {
   return value.length > max ? `${value.slice(0, max)}...` : value || "Sin contenido";
 }
 
+const SOURCE_LABELS: Record<CharacterAuditDto["source"], string> = {
+  PLAYER: "Edición manual",
+  AI_PROPOSAL: "Propuesta de IA",
+  PDF_IMPORT: "Importación PDF",
+  UNDO: "Deshacer",
+};
+
 export default function CharacterProfileEditor({
   characterId,
   initialSnapshot,
@@ -233,18 +240,18 @@ export default function CharacterProfileEditor({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <strong className="text-sm text-neutral-100">{CHARACTER_FIELD_LABELS[event.field]}</strong>
-                    <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-xs text-neutral-400">{event.source}</span>
+                    <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-xs text-neutral-400">{SOURCE_LABELS[event.source]}</span>
                     <time className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleString("es-ES")}</time>
                   </div>
                   <p className="mt-2 text-sm text-neutral-400"><span className="text-rose-300">Antes:</span> {truncate(event.previousValue)}</p>
                   <p className="mt-1 text-sm text-neutral-300"><span className="text-emerald-300">Después:</span> {truncate(event.newValue)}</p>
+                  {!event.canUndo && <p className="mt-2 text-xs text-neutral-400">No se puede deshacer: existe un cambio posterior en este campo.</p>}
                 </div>
                 <button
                   type="button"
                   onClick={() => void undoEvent(event.id)}
                   disabled={!event.canUndo || busy !== null}
                   className="flex h-11 items-center justify-center gap-2 rounded-md border border-neutral-700 px-3 text-sm text-neutral-200 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                  title={event.canUndo ? "Deshacer mediante un nuevo cambio" : "Existe un cambio posterior en este campo"}
                 >
                   {busy === `undo:${event.id}` ? <LoaderCircle className="animate-spin" size={17} /> : <RotateCcw size={17} />}
                   Deshacer

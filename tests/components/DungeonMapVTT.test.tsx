@@ -16,6 +16,20 @@ vi.mock("@/lib/hooks/useDungeon", () => ({
 }));
 
 describe("DungeonMapVTT", () => {
+  it("allows all four pan directions by click without moving the character", () => {
+    const onNodeClick = vi.fn();
+    render(<DungeonMapVTT seed="test-seed" playerX={0} playerY={0} currentNodeIndex={0} visitedNodeIndices={[]} onNodeClick={onNodeClick} />);
+    const region = screen.getByRole("region");
+    const viewport = region.querySelector("svg > g")!;
+    const position = () => viewport.getAttribute("transform")!.match(/translate\(([-\d.]+), ([-\d.]+)\)/)!.slice(1).map(Number);
+    for (const [direction, dx, dy] of [["arriba", 0, 64], ["izquierda", 64, 0], ["abajo", 0, -64], ["derecha", -64, 0]] as const) {
+      const [x, y] = position();
+      fireEvent.click(screen.getByRole("button", { name: `Desplazar vista hacia ${direction}` }));
+      expect(position()).toEqual([x! + dx, y! + dy]);
+    }
+    expect(onNodeClick).not.toHaveBeenCalled();
+    expect(region).toHaveAccessibleName("Mapa de la mazmorra. Personaje en la posición 0, 0.");
+  });
   it("exposes a textual map region and supports keyboard panning", () => {
     render(
       <div style={{ width: 640, height: 360 }}>
@@ -23,11 +37,11 @@ describe("DungeonMapVTT", () => {
       </div>
     );
 
-    const region = screen.getByRole("region", { name: "Dungeon map. Player at grid position 0, 0." });
+    const region = screen.getByRole("region", { name: "Mapa de la mazmorra. Personaje en la posición 0, 0." });
     expect(region).toHaveAttribute("tabindex", "0");
-    expect(screen.getByText(/Use arrow keys to pan/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+    expect(screen.getByText(/Usa las flechas para desplazar/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Alejar mapa" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Acercar mapa" })).toBeInTheDocument();
 
     const viewport = region.querySelector("svg > g");
     const before = viewport?.getAttribute("transform");

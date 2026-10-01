@@ -74,12 +74,12 @@ export interface CharacterSheetProps {
 }
 
 const ABILITY_ORDER: Array<{ key: keyof CharacterSheetProps["abilities"]; label: string }> = [
-  { key: "str", label: "STR" },
-  { key: "dex", label: "DEX" },
-  { key: "con", label: "CON" },
-  { key: "int", label: "INT" },
-  { key: "wis", label: "WIS" },
-  { key: "cha", label: "CHA" },
+  { key: "str", label: "Fuerza" },
+  { key: "dex", label: "Destreza" },
+  { key: "con", label: "Constitución" },
+  { key: "int", label: "Inteligencia" },
+  { key: "wis", label: "Sabiduría" },
+  { key: "cha", label: "Carisma" },
 ];
 
 function formatSigned(value: number): string {
@@ -136,7 +136,7 @@ export default function CharacterSheetVTT({
 
   return (
     <section
-      aria-label="Character Sheet VTT"
+      aria-label="Ficha de personaje"
       className="relative overflow-hidden rounded-2xl border border-amber-300/25 bg-slate-950/65 p-4 text-amber-50 shadow-2xl shadow-black/60 backdrop-blur-xl sm:p-5"
     >
       <div
@@ -150,7 +150,7 @@ export default function CharacterSheetVTT({
             className="text-[10px] font-semibold uppercase tracking-[0.3em] text-amber-200/75"
             style={{ fontFamily: "var(--font-cinzel)" }}
           >
-            Adventurer Record
+            Ficha de aventurero
           </p>
           <h2
             className="mt-1 text-2xl font-bold text-amber-100 sm:text-3xl"
@@ -159,39 +159,39 @@ export default function CharacterSheetVTT({
             {identity.name}
           </h2>
           <p className="mt-1 text-sm text-amber-100/80" style={{ fontFamily: "var(--font-crimson)" }}>
-            Level {identity.level} {identity.race} {identity.className}
+            Nivel {identity.level} {identity.race} {identity.className}
           </p>
           <p className="text-xs text-amber-100/55" style={{ fontFamily: "var(--font-crimson)" }}>
-            {[identity.background, identity.alignment].filter(Boolean).join(" • ") || "No lineage notes"}
+            {[identity.background, identity.alignment].filter(Boolean).join(" • ") || "Sin datos de trasfondo"}
           </p>
         </header>
 
         <section
-          aria-label="Core combat metrics"
+          aria-label="Estadísticas de combate"
           className="grid grid-cols-2 gap-2 rounded-xl border border-amber-300/20 bg-black/25 p-3 sm:grid-cols-3 lg:grid-cols-6"
         >
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">AC</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">CA</p>
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Shield size={15} />{core.armorClass}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">HP</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">PV</p>
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><HeartPulse size={15} />{core.hitPoints.current}/{core.hitPoints.max}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Init</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Iniciativa</p>
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Activity size={15} />{formatSigned(core.initiative)}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Speed</p>
-            <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Wind size={15} />{core.speedFeet === null ? "N/D" : `${core.speedFeet} ft`}</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Velocidad</p>
+            <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Wind size={15} />{core.speedFeet === null ? "N/D" : `${core.speedFeet} pies`}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Prof</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Competencia</p>
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><Target size={15} />{formatSigned(core.proficiencyBonus)}</p>
           </div>
           <div className="rounded-lg bg-white/5 px-2 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Passive</p>
+            <p className="text-[10px] uppercase tracking-widest text-amber-200/70">Percepción pasiva</p>
             <p className="mt-1 flex items-center gap-1.5 text-lg font-bold"><WandSparkles size={15} />{core.passivePerception}</p>
           </div>
 
@@ -224,15 +224,15 @@ export default function CharacterSheetVTT({
           </section>
 
           <section className="space-y-3">
-            <SheetList title="Saving Throws" rows={savingThrows} />
-            <SheetList title="Skills" rows={skills} />
+            <SheetList title="Salvaciones" rows={savingThrows} />
+            <SheetList title="Habilidades" rows={skills} />
 
             <section className="rounded-xl border border-amber-400/20 bg-slate-950/55 p-3 backdrop-blur-xl">
               <p
                 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-200/80"
                 style={{ fontFamily: "var(--font-cinzel)" }}
               >
-                Attacks & Actions
+                Ataques y acciones
               </p>
               <ul className="space-y-1.5">
                 {attacks.map((attack) => (
@@ -242,7 +242,7 @@ export default function CharacterSheetVTT({
                         <Swords size={13} aria-hidden="true" />
                         {attack.name}
                       </span>
-                      <span className="font-semibold text-amber-100/90">{formatSigned(attack.bonus)} to hit</span>
+                      <span className="font-semibold text-amber-100/90">{formatSigned(attack.bonus)} al ataque</span>
                     </div>
                     <p className="mt-0.5 text-xs text-amber-100/65">
                       {attack.damage}
@@ -260,18 +260,18 @@ export default function CharacterSheetVTT({
                 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-200/80"
                 style={{ fontFamily: "var(--font-cinzel)" }}
               >
-                Spell Slots
+                Espacios de conjuro
               </p>
               {spellSlots.length === 0 ? (
-                <p className="text-sm text-amber-100/60">No prepared slot data.</p>
+                <p className="text-sm text-amber-100/60">Sin datos de espacios de conjuro.</p>
               ) : (
                 <div className="space-y-2">
                   {spellSlots.map((slot) => {
                     const available = Math.max(0, slot.total - slot.used);
                     return (
                       <div key={slot.level} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-1.5">
-                        <span className="w-10 text-xs font-semibold text-amber-100/80">Lv {slot.level}</span>
-                        <div className="flex flex-wrap gap-1" aria-label={`Level ${slot.level} slots`}>
+                        <span className="w-10 text-xs font-semibold text-amber-100/80">Niv. {slot.level}</span>
+                        <div className="flex flex-wrap gap-1" aria-label={`Espacios de nivel ${slot.level}`}>
                           {Array.from({ length: slot.total }).map((_, index) => (
                             <span
                               key={`${slot.level}-${index}`}
@@ -296,7 +296,7 @@ export default function CharacterSheetVTT({
                 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-200/80"
                 style={{ fontFamily: "var(--font-cinzel)" }}
               >
-                Inventory
+                Inventario
               </p>
               <InventoryGrid items={inventory} />
             </section>
@@ -307,7 +307,7 @@ export default function CharacterSheetVTT({
                   className="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-200/80"
                   style={{ fontFamily: "var(--font-cinzel)" }}
                 >
-                  Notes
+                  Notas
                 </p>
                 <ul className="space-y-1.5 text-sm text-amber-100/80">
                   {notes.map((note, index) => (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { InitiativeEntry } from "@/lib/rules/combat";
+import { conditionLabel } from "@/lib/character-sheet/condition-labels";
 import {
   DUNGEON_ACTION_END,
   DUNGEON_ACTION_ERROR,
@@ -11,15 +11,26 @@ import {
   type DungeonActionRequestDetail,
 } from "@/lib/events/action-transport";
 
+export interface InitiativeDisplayEntry {
+  id: string;
+  name: string;
+  initiativeTotal: number;
+  unconscious?: boolean;
+  hp?: number;
+  maxHp?: number;
+  conditions?: string[];
+}
+
 interface Props {
-  entries: InitiativeEntry[];
+  entries: InitiativeDisplayEntry[];
   /** id of the combatant whose turn it currently is, if combat is active. */
   activeId?: string;
   /** The player is at 0 HP: turns advance only through the death-save action. */
   playerDown?: boolean;
+  showTurnControl?: boolean;
 }
 
-export default function InitiativeTracker({ entries, activeId, playerDown = false }: Props) {
+export default function InitiativeTracker({ entries, activeId, playerDown = false, showTurnControl = true }: Props) {
   const [advancing, setAdvancing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pendingRequestId = useRef<string | null>(null);
@@ -88,14 +99,13 @@ export default function InitiativeTracker({ entries, activeId, playerDown = fals
       <ol className="space-y-1.5">
         {entries.map((entry, index) => {
           const isActive = entry.id === activeId;
-          const modSign = entry.dexModifier >= 0 ? "+" : "";
 
           return (
             <li
               key={entry.id}
               aria-current={isActive ? "true" : undefined}
               className={[
-                "flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2.5 text-sm motion-safe:transition-colors",
+                "flex min-h-[44px] flex-wrap items-center gap-2 rounded-md px-3 py-2.5 text-sm motion-safe:transition-colors",
                 isActive
                   ? "bg-amber-900/40 border border-amber-700/60 text-amber-100"
                   : "bg-neutral-900 border border-neutral-800 text-neutral-300",
@@ -122,7 +132,7 @@ export default function InitiativeTracker({ entries, activeId, playerDown = fals
               />
 
               {/* Name */}
-              <span className="flex-1 truncate font-medium">
+              <span className="min-w-0 flex-1 break-words font-medium">
                 {entry.name}
                 {entry.unconscious && (
                   <span className="ml-2 rounded border border-red-800/60 bg-red-950/50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-300">
@@ -131,28 +141,32 @@ export default function InitiativeTracker({ entries, activeId, playerDown = fals
                 )}
               </span>
 
-              {/* Roll breakdown: natural + modifier = total */}
-              <span className="shrink-0 font-mono text-xs text-neutral-500">
-                {entry.naturalRoll}
-                <span className="mx-0.5 text-neutral-600">{modSign}{entry.dexModifier}</span>
-              </span>
-
-              {/* Initiative total */}
+              <span className="text-xs text-[var(--dc-text-muted)]">Iniciativa:</span>
               <span
                 className={[
                   "w-8 shrink-0 text-right font-mono text-base font-bold",
                   isActive ? "text-amber-300" : "text-neutral-100",
                 ].join(" ")}
               >
-                {entry.initiative}
+                {entry.initiativeTotal}
               </span>
+              {(entry.hp !== undefined || Boolean(entry.conditions?.length)) && (
+                <div className="flex w-full flex-wrap items-center gap-2 pl-7 text-xs text-[var(--dc-text-muted)]">
+                  {entry.hp !== undefined && <span>{entry.hp} / {entry.maxHp} PG</span>}
+                  {entry.conditions?.map((condition) => (
+                    <span key={condition} className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-slate-200">
+                      {conditionLabel(condition)}
+                    </span>
+                  ))}
+                </div>
+              )}
             </li>
           );
         })}
       </ol>
 
       {/* Next Turn button */}
-      <div className="mt-3 space-y-2">
+      {showTurnControl && <div className="mt-3 space-y-2">
         {playerDown ? (
           <p className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">
             Estás inconsciente: el turno avanza con «Tirada de muerte» o «Esperar».
@@ -173,7 +187,7 @@ export default function InitiativeTracker({ entries, activeId, playerDown = fals
             {error}
           </p>
         )}
-      </div>
+      </div>}
     </section>
   );
 }

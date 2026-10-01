@@ -28,7 +28,7 @@ describe("ExplorationPanel action transport", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Move to Vault via Open passage" })
+      screen.getByRole("button", { name: "Ir a Vault: Abierto" })
     );
 
     expect(requestListener).toHaveBeenCalledOnce();

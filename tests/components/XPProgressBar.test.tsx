@@ -11,7 +11,7 @@ import XPProgressBar from "@/components/character/XPProgressBar";
 describe("XPProgressBar — render", () => {
   it("renders an Experience label", () => {
     render(<XPProgressBar xp={500} level={2} />);
-    expect(screen.getByText(/Experience/i)).toBeDefined();
+    expect(screen.getByText(/Experiencia/i)).toBeDefined();
   });
 
   it("renders a meter element with correct aria attributes", () => {
@@ -40,12 +40,12 @@ describe("XPProgressBar — render", () => {
 
   it("shows 'Ascended' label at max level (20)", () => {
     render(<XPProgressBar xp={355000} level={20} />);
-    expect(screen.getByText(/Ascended/i)).toBeDefined();
+    expect(screen.getByText(/Nivel máximo/i)).toBeDefined();
   });
 
   it("does NOT show 'Ascended' for non-max levels", () => {
     render(<XPProgressBar xp={500} level={2} />);
-    expect(screen.queryByText(/Ascended/i)).toBeNull();
+    expect(screen.queryByText(/Nivel máximo/i)).toBeNull();
   });
 
   it("displays XP value formatted with locale separators for large numbers", () => {
@@ -74,14 +74,14 @@ describe("XPProgressBar — render", () => {
     render(<XPProgressBar xp={500} level={2} />);
     const meter = screen.getByRole("meter");
     const label = meter.getAttribute("aria-label") ?? "";
-    expect(label).toContain("level 3");
+    expect(label).toContain("nivel 3");
   });
 
   it("aria-label describes max level reached", () => {
     render(<XPProgressBar xp={355000} level={20} />);
     const meter = screen.getByRole("meter");
     const label = meter.getAttribute("aria-label") ?? "";
-    expect(label.toLowerCase()).toContain("maximum");
+    expect(label.toLowerCase()).toContain("máximo");
   });
 });
 
@@ -146,36 +146,36 @@ describe("XPProgressBar — pending ascensions (Model E)", () => {
 
   it("announces the pending ascension count instead of 'Ascended'", () => {
     render(<XPProgressBar xp={6500} level={1} />);
-    expect(screen.getByText(/4 Level-Ups Pending/i)).toBeDefined();
-    expect(screen.queryByText(/Ascended/i)).toBeNull();
+    expect(screen.getByText(/4 subidas pendientes/i)).toBeDefined();
+    expect(screen.queryByText(/Nivel máximo/i)).toBeNull();
   });
 
   it("aria-label mentions the pending count and the level the XP supports", () => {
     render(<XPProgressBar xp={6500} level={1} />);
     const meter = screen.getByRole("meter");
     const label = meter.getAttribute("aria-label") ?? "";
-    expect(label).toContain("4 level-up(s) pending");
-    expect(label).toContain("level 5");
+    expect(label).toContain("4 subidas pendientes");
+    expect(label).toContain("nivel 5");
   });
 
   it("uses singular phrasing for exactly one pending level-up", () => {
     // xp=300 supports level 2; level=1 applied -> exactly 1 pending.
     render(<XPProgressBar xp={300} level={1} />);
-    expect(screen.getByText(/^1 Level-Up Pending$/)).toBeDefined();
+    expect(screen.getByText(/^1 subida pendiente$/)).toBeDefined();
   });
 
   it("does not enter the pending state when XP has not yet crossed the next threshold", () => {
     // xp=299 does not reach the level-2 threshold (300) -> no pending.
     render(<XPProgressBar xp={299} level={1} />);
-    expect(screen.queryByText(/Pending/i)).toBeNull();
+    expect(screen.queryByText(/pendiente/i)).toBeNull();
   });
 
   it("level 20 stays 'Ascended' rather than reporting pending ascensions", () => {
     // getLevelFromXP caps at 20, so a level-20 character can never have
     // pendingLevels > 0 — this guards against a future off-by-one regression.
     render(<XPProgressBar xp={500_000} level={20} />);
-    expect(screen.getByText(/Ascended/i)).toBeDefined();
-    expect(screen.queryByText(/Pending/i)).toBeNull();
+    expect(screen.getByText(/Nivel máximo/i)).toBeDefined();
+    expect(screen.queryByText(/pendiente/i)).toBeNull();
 
     const meter = screen.getByRole("meter");
     expect(meter.getAttribute("aria-valuenow")).toBe("500000");

@@ -98,7 +98,7 @@ const DISPOSITION_ICONS: Record<NpcAttitude, string> = {
 
 const DISPOSITION_COLORS: Record<NpcAttitude, string> = {
   Hostile: "#ef4444",
-  Indifferent: "#71717a",
+  Indifferent: "#b6bec8",
   Friendly: "#22c55e"
 };
 
@@ -166,7 +166,7 @@ export default function NPCRoster({ npcs }: NPCRosterProps) {
         >
           Personajes conocidos
         </h2>
-        <span className="text-[9px] tabular-nums" style={{ color: "#6A5A38" }}>
+        <span className="text-[9px] tabular-nums" style={{ color: "var(--dc-text-muted)" }}>
           {npcs.length} {npcs.length === 1 ? "persona" : "personas"}
         </span>
       </div>
@@ -203,7 +203,7 @@ function NPCCard({ npc }: { npc: NPC }) {
         <button
           type="button"
           aria-label={`Hablar con ${npc.name}`}
-          className="font-semibold leading-snug text-left"
+          className="min-h-11 font-semibold leading-snug text-left"
           style={{
             fontFamily: "var(--font-cinzel)",
             color: "#E8C84A",
@@ -223,7 +223,7 @@ function NPCCard({ npc }: { npc: NPC }) {
             )
           }
         >
-          {npc.name}
+          <span className="block">{npc.name}</span><span className="text-xs text-[var(--dc-text-muted)]">Hablar</span>
         </button>
         <span
           className="shrink-0 rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider leading-none"
@@ -241,7 +241,7 @@ function NPCCard({ npc }: { npc: NPC }) {
             }}
           >
             <span>{DISPOSITION_ICONS[attitudeFor(npc.disposition)]}</span>
-            <span>{attitudeFor(npc.disposition)}</span>
+            <span>{{ Hostile: "Hostil", Indifferent: "Indiferente", Friendly: "Amistoso" }[attitudeFor(npc.disposition)]}</span>
           </span>
         )}
       </div>
@@ -266,20 +266,23 @@ function NPCCard({ npc }: { npc: NPC }) {
         </p>
       )}
 
+      <details>
+        <summary className="min-h-11 cursor-pointer py-3 text-sm text-[var(--dc-text-muted)]">Detalles de {npc.name}</summary>
+      <div className="space-y-3">
       {/* ── HP bar + AC ── */}
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-baseline gap-1.5 min-w-0">
             <span
               className="shrink-0 text-[9px] uppercase tracking-widest"
-              style={{ fontFamily: "var(--font-cinzel)", color: "#6A5A38" }}
+              style={{ fontFamily: "var(--font-cinzel)", color: "var(--dc-text-muted)" }}
             >
-              HP
+              PG
             </span>
             <span className="text-xs tabular-nums" style={{ color: barColor }}>
               {npc.hp}
             </span>
-            <span className="text-[10px] tabular-nums" style={{ color: "#3A3020" }}>
+            <span className="text-[10px] tabular-nums" style={{ color: "var(--dc-text-muted)" }}>
               /{npc.maxHp}
             </span>
           </div>
@@ -294,7 +297,7 @@ function NPCCard({ npc }: { npc: NPC }) {
             }}
             aria-label={`Clase de armadura ${npc.ac}`}
           >
-            AC {npc.ac}
+            CA {npc.ac}
           </span>
         </div>
 
@@ -337,9 +340,9 @@ function NPCCard({ npc }: { npc: NPC }) {
             >
               <span
                 className="text-[8px] font-bold uppercase tracking-wide"
-                style={{ fontFamily: "var(--font-cinzel)", color: "#6A5A38" }}
+                style={{ fontFamily: "var(--font-cinzel)", color: "var(--dc-text-muted)" }}
               >
-                {key}
+                {{ STR: "FUE", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" }[key]}
               </span>
               <span
                 className="text-[11px] font-semibold tabular-nums leading-tight"
@@ -349,7 +352,7 @@ function NPCCard({ npc }: { npc: NPC }) {
               </span>
               <span
                 className="text-[9px] tabular-nums"
-                style={{ color: "#7A6A50" }}
+                style={{ color: "var(--dc-text-muted)" }}
               >
                 {modStr(abilities[key])}
               </span>
@@ -374,7 +377,7 @@ function NPCCard({ npc }: { npc: NPC }) {
           className="text-[11px] leading-snug pt-0.5"
           style={{
             fontFamily: "var(--font-crimson)",
-            color: "#7A6A50",
+            color: "var(--dc-text-muted)",
             borderTop: "1px solid rgba(228,168,50,0.08)",
             paddingTop: "0.375rem",
           }}
@@ -382,6 +385,8 @@ function NPCCard({ npc }: { npc: NPC }) {
           {npc.notes}
         </p>
       )}
+      </div>
+      </details>
       </div>
     </li>
   );
@@ -394,13 +399,13 @@ function TraitRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-baseline gap-1.5">
       <dt
         className="shrink-0 text-[8px] uppercase tracking-widest"
-        style={{ fontFamily: "var(--font-cinzel)", color: "#5A4830" }}
+        style={{ fontFamily: "var(--font-cinzel)", color: "var(--dc-text-muted)" }}
       >
         {label}
       </dt>
       <dd
         className="text-[10px] leading-snug"
-        style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "#7A6A50", margin: 0 }}
+        style={{ fontFamily: "var(--font-crimson)", fontStyle: "italic", color: "var(--dc-text-muted)", margin: 0 }}
       >
         {value}
       </dd>

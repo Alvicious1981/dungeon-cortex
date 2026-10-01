@@ -71,7 +71,7 @@ describe("ExplorationMap — location header", () => {
 describe("ExplorationMap — current node", () => {
   it("shows the '★ HERE' marker for the current node", () => {
     render(<ExplorationMap {...makeProps()} />);
-    expect(screen.getByText(/★ HERE/)).toBeTruthy();
+    expect(screen.getByText(/★ AQUÍ/)).toBeTruthy();
   });
 
   it("renders the current node name (not '???')", () => {
@@ -91,7 +91,7 @@ describe("ExplorationMap — adjacent node", () => {
 
   it("button aria-label includes passage type", () => {
     render(<ExplorationMap {...makeProps()} />);
-    const btn = screen.getByRole("button", { name: /open passage/i });
+    const btn = screen.getByRole("button", { name: /paso: abierto/i });
     expect(btn).toBeTruthy();
   });
 
@@ -151,11 +151,11 @@ describe("ExplorationMap — aria-live region", () => {
   it("announces the current room name via aria-live", () => {
     render(<ExplorationMap {...makeProps()} />);
     // The aria-live div contains the current room name
-    expect(screen.getByText(/Currently in: Entry Hall/)).toBeTruthy();
+    expect(screen.getByText(/Posición actual: Entry Hall/)).toBeTruthy();
   });
 
   it("announces 'Moving…' while isMoving is true", () => {
     render(<ExplorationMap {...makeProps({ isMoving: true })} />);
-    expect(screen.getByText("Moving…")).toBeTruthy();
+    expect(screen.getByText("Comprobando desplazamiento…")).toBeTruthy();
   });
 });

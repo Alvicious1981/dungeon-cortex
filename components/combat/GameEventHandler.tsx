@@ -24,6 +24,7 @@
  *   The context (and drone) are created there, satisfying the browser policy.
  */
 
+import { Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { GameEvent } from "@/lib/events/game-events";
 
@@ -408,16 +409,16 @@ export default function GameEventHandler({ inCombat }: Props) {
   return (
     <button
       type="button"
-      aria-label={isMuted ? "Unmute audio" : "Mute audio"}
+      aria-label={isMuted ? "Activar audio" : "Silenciar audio"}
       onClick={handleMuteToggle}
-      className="fixed bottom-3 right-3 z-50 flex h-8 w-8 items-center justify-center rounded-full text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
       style={{
         background: "rgba(12,12,22,0.88)",
         border: `1px solid ${isMuted ? "rgba(107,114,128,0.3)" : "rgba(228,168,50,0.22)"}`,
-        color: isMuted ? "#6B7280" : "#C49A2A",
+        color: isMuted ? "var(--dc-text-muted)" : "#C49A2A",
       }}
     >
-      {isMuted ? "🔇" : "🔊"}
+      {isMuted ? <VolumeX size={19} aria-hidden="true" /> : <Volume2 size={19} aria-hidden="true" />}
     </button>
   );
 }

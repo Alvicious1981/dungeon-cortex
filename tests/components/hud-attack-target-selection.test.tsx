@@ -62,7 +62,7 @@ function tick(name: string) {
 }
 
 function pressHudAttack() {
-  fireEvent.click(screen.getByRole("button", { name: "Attack (F1)" }));
+  fireEvent.keyDown(window, { key: "F1" });
 }
 
 describe("HUD Attack (F1) needs exactly one target", () => {
@@ -104,7 +104,7 @@ describe("HUD Attack (F1) needs exactly one target", () => {
     // The HUD leaves its pending state once the refusal ends the request.
     expect(onEnd).toHaveBeenCalledTimes(1);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Attack (F1)" })).not.toBeDisabled()
+      expect(screen.getByRole("region", { name: "Panel de combate" })).toHaveAttribute("aria-busy", "false")
     );
     expect(fetchMock).not.toHaveBeenCalled();
 

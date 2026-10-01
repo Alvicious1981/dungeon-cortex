@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ATTACK_SINGLE_TARGET_REQUIRED,
   DUNGEON_ACTION_END,
+  DUNGEON_ACTION_START,
   DUNGEON_ACTION_ERROR,
   DUNGEON_TARGET_SELECTION_CHANGE,
   createDungeonActionRequestId,
@@ -181,6 +182,8 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
   const pendingRequestId = useRef<string | null>(null);
+  const pendingRequests = useRef(new Set<string>());
+  const [transportBusy, setTransportBusy] = useState(false);
 
   // A downed player acts only through the death-save action; the backend
   // refuses everything else with 409 PLAYER_UNCONSCIOUS (death-saves spec §7.1).
@@ -192,9 +195,14 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
         ? ["Esperar"]
         : COMBAT_ACTIONS;
   const downed = inCombat && (lifeState === "dying" || lifeState === "stable");
-  const isAnyLoading = loadingAction !== null;
+  const isAnyLoading = loadingAction !== null || transportBusy;
 
   useEffect(() => {
+    function handleActionStart(event: Event) {
+      const detail = (event as CustomEvent<DungeonActionRequestDetail>).detail;
+      pendingRequests.current.add(detail.requestId);
+      setTransportBusy(true);
+    }
     function handleActionError(event: Event) {
       const detail = (event as CustomEvent<DungeonActionErrorDetail>).detail;
       if (detail.requestId === pendingRequestId.current) {
@@ -204,6 +212,8 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
 
     function handleActionEnd(event: Event) {
       const detail = (event as CustomEvent<DungeonActionRequestDetail>).detail;
+      pendingRequests.current.delete(detail.requestId);
+      setTransportBusy(pendingRequests.current.size > 0);
       if (detail.requestId === pendingRequestId.current) {
         pendingRequestId.current = null;
         setLoadingAction(null);
@@ -216,6 +226,7 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
     }
 
     window.addEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+    window.addEventListener(DUNGEON_ACTION_START, handleActionStart);
     window.addEventListener(DUNGEON_ACTION_END, handleActionEnd);
     window.addEventListener(
       DUNGEON_TARGET_SELECTION_CHANGE,
@@ -225,6 +236,7 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
     requestDungeonTargetSelectionSync();
     return () => {
       window.removeEventListener(DUNGEON_ACTION_ERROR, handleActionError);
+      window.removeEventListener(DUNGEON_ACTION_START, handleActionStart);
       window.removeEventListener(DUNGEON_ACTION_END, handleActionEnd);
       window.removeEventListener(
         DUNGEON_TARGET_SELECTION_CHANGE,
@@ -267,7 +279,7 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
           className="text-[10px] uppercase tracking-[0.3em] font-semibold"
           style={{ color: modeLabelColor, fontFamily: "var(--font-cinzel, serif)" }}
         >
-          {modeLabel} Quick Actions
+          {modeLabel} · Acciones
         </span>
         {inCombat && (
           <span
@@ -280,7 +292,7 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
 
       {/* Button grid: 2 cols on mobile, 4 cols on sm+ */}
       <div
-        className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+        className={`grid grid-cols-2 gap-2 ${inCombat ? "" : "sm:grid-cols-4"}`}
         role="group"
         aria-label={sectionLabel}
       >

@@ -57,23 +57,23 @@ export default function XPProgressBar({ xp, level }: XPProgressBarProps) {
   // a full bar — instead of a max that valuenow would exceed.
   const meterMax = isMaxLevel ? xp : hasPending ? xp : nextLevelThreshold ?? xp;
 
-  const pendingLabel = `${pendingLevels} Level-Up${pendingLevels === 1 ? "" : "s"} Pending`;
+  const pendingLabel = `${pendingLevels} subida${pendingLevels === 1 ? "" : "s"} pendiente${pendingLevels === 1 ? "" : "s"}`;
 
   return (
     <div>
       <div className="flex items-baseline justify-between mb-2">
         <span
           className="text-[10px] uppercase tracking-widest font-semibold"
-          style={{ fontFamily: "var(--font-cinzel)", color: "#7A5C1E" }}
+          style={{ fontFamily: "var(--font-cinzel)", color: "var(--dc-text-muted)" }}
         >
-          Experience
+          Experiencia
         </span>
         {isMaxLevel ? (
           <span
             className="text-[10px] font-semibold uppercase tracking-wider"
             style={{ fontFamily: "var(--font-cinzel)", color: "#B38B2D" }}
           >
-            Ascended
+            Nivel máximo
           </span>
         ) : hasPending ? (
           <span
@@ -83,11 +83,11 @@ export default function XPProgressBar({ xp, level }: XPProgressBarProps) {
             {pendingLabel}
           </span>
         ) : (
-          <span className="text-xs tabular-nums" style={{ color: "#7A5C1E" }}>
+          <span className="text-xs tabular-nums" style={{ color: "var(--dc-text-muted)" }}>
             <span style={{ color: "#B38B2D" }}>{xp.toLocaleString()}</span>
-            <span style={{ color: "#3A2E14" }}>
+            <span style={{ color: "var(--dc-text-muted)" }}>
               {" / "}
-              {nextLevelThreshold?.toLocaleString()} xp
+              {nextLevelThreshold?.toLocaleString()} PX
             </span>
           </span>
         )}
@@ -100,10 +100,10 @@ export default function XPProgressBar({ xp, level }: XPProgressBarProps) {
         aria-valuemax={meterMax}
         aria-label={
           isMaxLevel
-            ? "Experience: maximum level reached"
+            ? "Experiencia: nivel máximo alcanzado"
             : hasPending
-            ? `Experience: ${xp.toLocaleString()} XP — ${pendingLevels} level-up(s) pending backend resolution (supports level ${targetLevel})`
-            : `Experience: ${xp.toLocaleString()} of ${nextLevelThreshold?.toLocaleString()} XP toward level ${level + 1}`
+            ? `Experiencia: ${xp.toLocaleString()} PX — ${pendingLevels} subidas pendientes hasta el nivel ${targetLevel}`
+            : `Experiencia: ${xp.toLocaleString()} de ${nextLevelThreshold?.toLocaleString()} PX hacia el nivel ${level + 1}`
         }
         className="relative h-2.5 overflow-hidden rounded-full"
         style={{
@@ -124,7 +124,7 @@ export default function XPProgressBar({ xp, level }: XPProgressBarProps) {
 
       <p
         className="mt-1 text-right text-[10px] tabular-nums"
-        style={{ color: "#3A2E14" }}
+        style={{ color: "var(--dc-text-muted)" }}
       >
         {fillPercent}%
       </p>

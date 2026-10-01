@@ -8,7 +8,7 @@ interface CharacterSheetSidebarProps {
 export default function CharacterSheetSidebar({ viewModel, className }: CharacterSheetSidebarProps) {
   return (
     <aside
-      aria-label="Persistent character sheet"
+      aria-label="Ficha de personaje permanente"
       className={["h-screen w-80 overflow-y-auto p-3 xl:w-96", className]
         .filter(Boolean)
         .join(" ")}

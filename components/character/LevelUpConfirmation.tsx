@@ -20,11 +20,13 @@
  * or decrements a payload.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { CircleAlert, Dices, Divide, LoaderCircle, Sparkles, X } from "lucide-react";
 import type { LevelUpAvailablePayload } from "@/lib/actions/backend-presentation-resolution";
 import type { LevelUpPayload } from "@/lib/rules/progression";
+import { useModalFocus } from "@/lib/hooks/useModalFocus";
 
 export const DUNGEON_LEVEL_UP_AVAILABLE = "dungeon-level-up-available";
 export const DUNGEON_LEVEL_UP = "dungeon-level-up";
@@ -72,6 +74,8 @@ interface DecisionPanelProps extends Props {
   onApplied(applied: LevelUpPayload): void;
   onStale(status: number): void;
   onBusyChange(busy: boolean): void;
+  onPostpone(): void;
+  returnFocusRef: RefObject<HTMLElement | null>;
 }
 
 export function LevelUpDecisionPanel({
@@ -80,14 +84,24 @@ export function LevelUpDecisionPanel({
   onApplied,
   onStale,
   onBusyChange,
+  onPostpone,
+  returnFocusRef,
 }: DecisionPanelProps) {
   const [pending, setPending] = useState<"average" | "roll" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const pendingRef = useRef(false);
 
   const busy = pending !== null;
+  const postpone = useCallback(() => {
+    if (!pendingRef.current) onPostpone();
+  }, [onPostpone]);
+  useModalFocus({ open: true, onClose: postpone, dialogRef, initialFocusRef: headingRef, returnFocusRef });
 
   async function confirm(useAverage: boolean) {
-    if (busy) return;
+    if (pendingRef.current) return;
+    pendingRef.current = true;
     setPending(useAverage ? "average" : "roll");
     onBusyChange(true);
     setError(null);
@@ -127,20 +141,26 @@ export function LevelUpDecisionPanel({
     } catch {
       setError("Se perdió la conexión al confirmar la subida. Vuelve a intentarlo.");
     } finally {
+      pendingRef.current = false;
       setPending(null);
       onBusyChange(false);
     }
   }
 
-  return (
+  return createPortal(
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="level-up-confirmation-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      aria-busy={busy}
+      tabIndex={-1}
+      className="fixed inset-0 z-[2100] flex items-center justify-center overflow-y-auto bg-black/80 p-4"
     >
-      <div className="w-full max-w-md rounded-lg border border-amber-500/40 bg-neutral-950 p-6 shadow-2xl">
+      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-amber-500/40 bg-neutral-950 p-6 shadow-2xl">
         <h2
+          ref={headingRef}
+          tabIndex={-1}
           id="level-up-confirmation-title"
           className="flex items-center gap-2 text-lg font-semibold text-amber-100"
         >
@@ -149,7 +169,7 @@ export function LevelUpDecisionPanel({
         </h2>
 
         <p className="mt-2 text-sm text-neutral-400">
-          El servidor ha confirmado que tu personaje alcanzó el nivel {payload.toLevel}. La
+          Tu personaje puede subir al nivel {payload.toLevel}. La
           subida <strong className="text-neutral-200">todavía no se ha aplicado</strong>: elige
           cómo determinar los puntos de golpe.
         </p>
@@ -189,7 +209,7 @@ export function LevelUpDecisionPanel({
             emits them again. */}
         {payload.pendingLevels > 1 && (
           <p className="mt-3 text-xs text-neutral-500">
-            Ascensiones pendientes según el servidor: {payload.pendingLevels} (nivel objetivo{" "}
+            Subidas pendientes: {payload.pendingLevels} (nivel objetivo{" "}
             {payload.targetLevel}). Esta confirmación aplica solo una.
           </p>
         )}
@@ -231,8 +251,14 @@ export function LevelUpDecisionPanel({
             Tirar el dado
           </button>
         </div>
+        {busy && <p role="status" className="mt-3 text-sm text-amber-200">Confirmando la subida de nivel… Espera a que termine.</p>}
+        <button type="button" onClick={postpone} disabled={busy}
+          className="mt-3 min-h-11 w-full rounded-md px-4 text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+          Decidir más tarde
+        </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -251,7 +277,7 @@ export function StaleLevelUpNotice({
   return (
     <div
       role="status"
-      className="fixed bottom-4 left-1/2 z-40 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-amber-700/50 bg-neutral-950/95 p-3 shadow-xl"
+      className="fixed bottom-24 left-1/2 z-40 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-amber-700/50 bg-neutral-950/95 p-3 shadow-xl md:bottom-4"
     >
       <div className="flex items-start gap-2">
         <CircleAlert size={17} className="mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
@@ -260,7 +286,7 @@ export function StaleLevelUpNotice({
           type="button"
           onClick={onDismiss}
           aria-label="Cerrar aviso"
-          className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
         >
           <X size={15} aria-hidden="true" />
         </button>
@@ -284,7 +310,10 @@ export default function LevelUpConfirmationController({ campaignId }: Props) {
   const router = useRouter();
   const [payload, setPayload] = useState<LevelUpAvailablePayload | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [postponed, setPostponed] = useState(false);
   const busyRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     function handleAvailable(event: Event) {
@@ -292,8 +321,12 @@ export default function LevelUpConfirmationController({ campaignId }: Props) {
       if (!detail) return;
       // Never swap the payload out from under an in-flight confirmation.
       if (busyRef.current) return;
+      if (!document.querySelector('[aria-labelledby="level-up-confirmation-title"]')) {
+        returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
       setNotice(null);
       setPayload(detail);
+      setPostponed(false);
     }
 
     window.addEventListener(DUNGEON_LEVEL_UP_AVAILABLE, handleAvailable);
@@ -328,16 +361,27 @@ export default function LevelUpConfirmationController({ campaignId }: Props) {
   );
 
   const dismissNotice = useCallback(() => setNotice(null), []);
+  const postpone = useCallback(() => setPostponed(true), []);
 
   if (payload) {
     return (
-      <LevelUpDecisionPanel
+      <>
+      <button ref={triggerRef} type="button" onClick={() => {
+        returnFocusRef.current = triggerRef.current;
+        setPostponed(false);
+      }} className="fixed bottom-24 left-4 z-40 min-h-11 rounded-md border border-amber-500/40 bg-neutral-950 px-4 text-sm text-amber-100 shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+        Retomar subida al nivel {payload.toLevel}
+      </button>
+      {!postponed && <LevelUpDecisionPanel
         campaignId={campaignId}
         payload={payload}
         onApplied={handleApplied}
         onStale={handleStale}
         onBusyChange={handleBusyChange}
-      />
+        onPostpone={postpone}
+        returnFocusRef={returnFocusRef}
+      />}
+      </>
     );
   }
 

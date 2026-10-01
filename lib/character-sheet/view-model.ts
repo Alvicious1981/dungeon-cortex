@@ -88,6 +88,53 @@ function getObject(raw: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Display only stored properties. This does not infer effects or equipment costs. */
+function itemDetails(raw: unknown): { summary?: string; tooltipLines: string[] } {
+  const properties = getObject(raw);
+  const description = typeof properties.description === "string"
+    ? properties.description.trim()
+    : Array.isArray(properties.description)
+      ? properties.description.filter((part): part is string => typeof part === "string").join("\n")
+      : undefined;
+  const lines: string[] = [];
+  if (typeof properties.damageDice === "string") {
+    const damageType = typeof properties.damageType === "string" ? ` ${properties.damageType}` : "";
+    lines.push(`Daño base: ${properties.damageDice}${damageType}`);
+  }
+  const fields: Array<[string, string, string?]> = [
+    ["damageBonus", "Bonificación de daño"], ["attackBonus", "Bonificación al ataque"],
+    ["baseAC", "CA del objeto"], ["ac_bonus", "Bonificación de CA"],
+    ["armorClass", "Tipo de armadura"], ["strengthRequirement", "Fuerza requerida"],
+    ["maxDexBonus", "Bonificación máxima de Destreza"],
+    ["weaponCategory", "Categoría de arma"], ["weaponRange", "Tipo de alcance"],
+    ["rangeNormal", "Alcance normal", " pies"], ["rangeLong", "Alcance largo", " pies"],
+    ["healingDice", "Dados de curación"], ["healingBonus", "Bonificación de curación"],
+    ["charges", "Cargas"], ["spellLevel", "Nivel de conjuro"],
+    ["castingTime", "Tiempo de lanzamiento"], ["range", "Alcance"],
+    ["savingThrow", "Salvación"], ["duration", "Duración"],
+    ["weightLbs", "Peso", " lb"], ["valueGP", "Valor", " po"],
+  ];
+  for (const [key, label, suffix = ""] of fields) {
+    const value = properties[key];
+    if (typeof value === "string" || (typeof value === "number" && Number.isFinite(value))) {
+      lines.push(`${label}: ${value}${suffix}`);
+    }
+  }
+  for (const [key, label] of [["weaponProperties", "Propiedades"], ["effects", "Efectos"], ["components", "Componentes"]]) {
+    const value = properties[key];
+    if (Array.isArray(value)) {
+      const entries = value.filter((entry): entry is string => typeof entry === "string");
+      if (entries.length) lines.push(`${label}: ${entries.join(", ")}`);
+    }
+  }
+  if (typeof properties.addDexModifier === "boolean") lines.push(`Añade Destreza a la CA: ${properties.addDexModifier ? "sí" : "no"}`);
+  if (typeof properties.stealthDisadvantage === "boolean") lines.push(`Sigilo: ${properties.stealthDisadvantage ? "desventaja" : "sin desventaja por este objeto"}`);
+  for (const [key, label] of [["magical", "Mágico"], ["silvered", "Plateado"], ["adamantine", "Adamantino"]]) {
+    if (typeof properties[key] === "boolean") lines.push(`${label}: ${properties[key] ? "sí" : "no"}`);
+  }
+  return { summary: description || undefined, tooltipLines: lines };
+}
+
 export function buildSheetViewModel({
   character,
   inventory,
@@ -126,20 +173,20 @@ export function buildSheetViewModel({
       cha: { score: stats.CHA, modifier: abilityModifier(stats.CHA) },
     },
     savingThrows: [
-      { label: "Strength", value: formatModifier(abilityModifier(stats.STR)) },
-      { label: "Dexterity", value: formatModifier(dexMod) },
-      { label: "Constitution", value: formatModifier(abilityModifier(stats.CON)) },
-      { label: "Intelligence", value: formatModifier(abilityModifier(stats.INT)) },
-      { label: "Wisdom", value: formatModifier(wisMod) },
-      { label: "Charisma", value: formatModifier(abilityModifier(stats.CHA)) },
+      { label: "Fuerza", value: formatModifier(abilityModifier(stats.STR)) },
+      { label: "Destreza", value: formatModifier(dexMod) },
+      { label: "Constitución", value: formatModifier(abilityModifier(stats.CON)) },
+      { label: "Inteligencia", value: formatModifier(abilityModifier(stats.INT)) },
+      { label: "Sabiduría", value: formatModifier(wisMod) },
+      { label: "Carisma", value: formatModifier(abilityModifier(stats.CHA)) },
     ],
     skills: [
-      { label: "Athletics", value: formatModifier(abilityModifier(stats.STR)) },
-      { label: "Acrobatics", value: formatModifier(dexMod) },
-      { label: "Stealth", value: formatModifier(dexMod) },
-      { label: "Perception", value: formatModifier(wisMod) },
-      { label: "Insight", value: formatModifier(wisMod) },
-      { label: "Persuasion", value: formatModifier(abilityModifier(stats.CHA)) },
+      { label: "Atletismo", value: formatModifier(abilityModifier(stats.STR)) },
+      { label: "Acrobacias", value: formatModifier(dexMod) },
+      { label: "Sigilo", value: formatModifier(dexMod) },
+      { label: "Percepción", value: formatModifier(wisMod) },
+      { label: "Perspicacia", value: formatModifier(wisMod) },
+      { label: "Persuasión", value: formatModifier(abilityModifier(stats.CHA)) },
     ],
     attacks: inventory.filter((item) => item.type === "weapon").map((weapon) => {
       // The bonus comes from the same pure rule the action route resolves with.
@@ -181,7 +228,8 @@ export function buildSheetViewModel({
       quantity: item.quantity,
       category: item.type as ItemType,
       equipped: item.equippedSlot !== null && item.equippedSlot !== undefined,
-      summary: item.name,
+      equippedSlot: item.equippedSlot ?? null,
+      ...itemDetails(item.properties),
     })),
     notes: [],
   };

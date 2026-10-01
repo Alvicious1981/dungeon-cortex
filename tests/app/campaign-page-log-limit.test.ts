@@ -3,6 +3,7 @@ import { isValidElement } from "react";
 
 import CampaignPage from "@/app/campaign/[id]/page";
 import StoryLog from "@/app/campaign/[id]/StoryLog";
+import CombatHUDController from "@/components/combat/CombatHUDController";
 import { prisma } from "@/lib/db/prisma";
 import { getAuthUser } from "@/lib/auth/session";
 
@@ -93,7 +94,11 @@ function findElementByType(node: unknown, target: unknown): { props: Record<stri
     if ((node as { type: unknown }).type === target) {
       return node as unknown as { props: Record<string, unknown> };
     }
-    return findElementByType((node as { props?: { children?: unknown } }).props?.children, target);
+    const props = node.props as Record<string, unknown>;
+    for (const slot of ["children", "story", "scene", "character", "journal"]) {
+      const found = findElementByType(props[slot], target);
+      if (found) return found;
+    }
   }
   return null;
 }
@@ -175,5 +180,32 @@ describe("campaign page — bounded initial log history (DC-AUD-005 / DC-AUD-006
 
     expect(storyLog!.props.initialLogs).toEqual([]);
     expect(storyLog!.props.initialHasMore).toBe(false);
+  });
+
+  it("projects only persisted initiative totals, preserving turn order and unconscious state", async () => {
+    const campaign = buildCampaign([]);
+    campaign.encounters = [{
+      id: "enc-1",
+      currentTurnIndex: 1,
+      combatants: [
+        { id: "enemy", name: "Goblin", initiativeTotal: 23, isPlayer: false, hp: 7, maxHp: 7, conditions: [] },
+        {
+          id: "pc", name: "Mira", initiativeTotal: -2, isPlayer: true, hp: 0, maxHp: 10,
+          conditions: [], deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null,
+        },
+      ],
+    }];
+    vi.mocked(prisma.campaign.findFirst).mockResolvedValue(campaign as never);
+
+    const tree = await CampaignPage({ params });
+    const initiative = findElementByType(tree, CombatHUDController);
+
+    expect(initiative).not.toBeNull();
+    expect(initiative!.props.combatants).toEqual([
+      { id: "enemy", name: "Goblin", initiativeTotal: 23, isPlayer: false, hp: 7, maxHp: 7, conditions: [] },
+      { id: "pc", name: "Mira", initiativeTotal: -2, isPlayer: true, hp: 0, maxHp: 10, conditions: [] },
+    ]);
+    expect(initiative!.props.activeTurnIndex).toBe(1);
+    expect(initiative!.props.playerDown).toBe(true);
   });
 });

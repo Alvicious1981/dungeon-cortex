@@ -613,3 +613,43 @@ describe("I. LevelUpConfirmation — concurrent level_up_available frames", () =
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
+
+describe("J. LevelUpConfirmation — accessible postponement", () => {
+  it("moves focus, postpones without applying and reopens the same backend payload", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    render(<><button>Volver a la campaña</button><LevelUpConfirmationController campaignId="campaign-1" /></>);
+    const trigger = screen.getByRole("button", { name: "Volver a la campaña" });
+    trigger.focus();
+    emitAvailable(AVAILABLE_MULTI);
+    expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+    expect(trigger.closest("[inert]")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    const reopen = screen.getByRole("button", { name: /retomar subida/i });
+    fireEvent.click(reopen);
+    expect(screen.getByText("2 → 3")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(reopen).toHaveFocus();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("cannot close or lose its modal focus while confirmation is pending", async () => {
+    let resolve!: (response: Response) => void;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>((done) => { resolve = done; }));
+    render(<LevelUpConfirmationController campaignId="campaign-1" />);
+    emitAvailable();
+    fireEvent.click(averageButton());
+    expect(screen.getByRole("button", { name: "Decidir más tarde" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+    expect(screen.getByRole("status")).toHaveTextContent(/confirmando/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve(jsonResponse({ error: "boom" }, 500)); });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Decidir más tarde" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
