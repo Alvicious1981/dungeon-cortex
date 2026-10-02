@@ -57,6 +57,21 @@ describe("InitiativeTracker Smoke Test", () => {
     expect(rows[1]).not.toHaveTextContent(/\+0|undefined|NaN/);
   });
 
+  it("marks the active turn with text, not only with colour", () => {
+    render(<InitiativeTracker entries={mockEntries} activeId="c2" />);
+
+    const rows = screen.getAllByRole("listitem");
+    expect(within(rows[1]).getByText("Turno actual")).toBeInTheDocument();
+    expect(within(rows[0]).queryByText("Turno actual")).toBeNull();
+    expect(screen.getAllByText("Turno actual")).toHaveLength(1);
+  });
+
+  it("marks no row when nobody holds the turn", () => {
+    render(<InitiativeTracker entries={mockEntries} />);
+
+    expect(screen.queryByText("Turno actual")).toBeNull();
+  });
+
   it("requests canonical End Turn through the shared action transport", () => {
     const requestListener = vi.fn();
     window.addEventListener(DUNGEON_ACTION_REQUEST, requestListener);

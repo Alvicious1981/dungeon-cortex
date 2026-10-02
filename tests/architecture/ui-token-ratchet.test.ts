@@ -20,6 +20,8 @@ const NORMALIZED_FILES = [
   "components/character/sheet/InventoryGrid.tsx",
   "components/character/LevelUpConfirmation.tsx",
   "components/campaign/CampaignLayout.tsx",
+  "components/combat/CombatHUD.tsx",
+  "components/combat/InitiativeTracker.tsx",
 ];
 
 const PALETTES =

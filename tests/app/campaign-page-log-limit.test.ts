@@ -208,4 +208,49 @@ describe("campaign page — bounded initial log history (DC-AUD-005 / DC-AUD-006
     expect(initiative!.props.activeTurnIndex).toBe(1);
     expect(initiative!.props.playerDown).toBe(true);
   });
+
+  it("hands the HUD the player's spell slots and concentration, read from the row the sheet reads", async () => {
+    const campaign = {
+      ...buildCampaign([]),
+      character: {
+        ...baseCharacter,
+        spellSlots: { "2": { total: 2, used: 0 }, "1": { total: 3, used: 1 } },
+        concentrationSpellId: "bless",
+      },
+    };
+    campaign.encounters = [{
+      id: "enc-1",
+      currentTurnIndex: 0,
+      combatants: [
+        { id: "pc", name: "Mira", initiativeTotal: 10, isPlayer: true, hp: 10, maxHp: 10, conditions: [], deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
+      ],
+    }];
+    vi.mocked(prisma.campaign.findFirst).mockResolvedValue(campaign as never);
+
+    const hud = findElementByType(await CampaignPage({ params }), CombatHUDController);
+
+    expect(hud).not.toBeNull();
+    const resources = hud!.props.playerResources as { spellSlots: Array<{ level: number }>; concentrating: boolean };
+    expect(resources.concentrating).toBe(true);
+    expect([...resources.spellSlots].sort((a, b) => a.level - b.level)).toEqual([
+      { level: 1, total: 3, used: 1 },
+      { level: 2, total: 2, used: 0 },
+    ]);
+  });
+
+  it("hands the HUD no slots and no concentration for a character with neither", async () => {
+    const campaign = buildCampaign([]);
+    campaign.encounters = [{
+      id: "enc-1",
+      currentTurnIndex: 0,
+      combatants: [
+        { id: "pc", name: "Mira", initiativeTotal: 10, isPlayer: true, hp: 10, maxHp: 10, conditions: [], deathSaveSuccesses: 0, deathSaveFailures: 0, stableWakeRound: null },
+      ],
+    }];
+    vi.mocked(prisma.campaign.findFirst).mockResolvedValue(campaign as never);
+
+    const hud = findElementByType(await CampaignPage({ params }), CombatHUDController);
+
+    expect(hud!.props.playerResources).toEqual({ spellSlots: [], concentrating: false });
+  });
 });

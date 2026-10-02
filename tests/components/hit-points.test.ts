@@ -3,11 +3,11 @@ import { hpColor, hpRatio } from "@/components/combat/hit-points";
 
 describe("combat hit-point presentation helpers", () => {
   it.each([
-    { hp: 0, maxHp: 20, color: "#EF4444" },
-    { hp: 5, maxHp: 20, color: "#EF4444" },
-    { hp: 10, maxHp: 20, color: "#F59E0B" },
-    { hp: 11, maxHp: 20, color: "#4ADE80" },
-    { hp: 0, maxHp: 0, color: "#4ADE80" },
+    { hp: 0, maxHp: 20, color: "var(--dc-error)" },
+    { hp: 5, maxHp: 20, color: "var(--dc-error)" },
+    { hp: 10, maxHp: 20, color: "var(--dc-warning)" },
+    { hp: 11, maxHp: 20, color: "var(--dc-success)" },
+    { hp: 0, maxHp: 0, color: "var(--dc-success)" },
   ])("maps $hp/$maxHp to $color", ({ hp, maxHp, color }) => {
     expect(hpColor(hp, maxHp)).toBe(color);
   });
