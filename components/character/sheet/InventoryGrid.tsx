@@ -25,13 +25,13 @@ export const INVENTORY_CATEGORY_LABELS: Record<ItemType, string> = {
 
 export function InventoryItemDetails({ item }: { item: InventoryGridItem }) {
   return (
-    <div className="space-y-3 text-sm leading-6 text-neutral-300">
+    <div className="space-y-3 text-sm leading-6 text-[var(--dc-text-muted)]">
       {item.summary && <p className="whitespace-pre-wrap break-words">{item.summary}</p>}
       {item.tooltipLines?.length ? (
         <ul className="space-y-1">
           {item.tooltipLines.map((line, index) => <li key={`${item.id}-${index}`} className="break-words">{line}</li>)}
         </ul>
-      ) : !item.summary ? <p className="text-neutral-400">No hay más detalles disponibles para este objeto.</p> : null}
+      ) : !item.summary ? <p className="text-[var(--dc-text-muted)]">No hay más detalles disponibles para este objeto.</p> : null}
     </div>
   );
 }
@@ -39,7 +39,7 @@ export function InventoryItemDetails({ item }: { item: InventoryGridItem }) {
 export default function InventoryGrid({ items, onSelect, selectedId, label = "Objetos del inventario" }: InventoryGridProps) {
   if (items.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-neutral-700 p-6 text-center text-neutral-400">
+      <div className="rounded-lg border border-dashed border-[var(--dc-border)] p-6 text-center text-[var(--dc-text-muted)]">
         <Backpack className="mx-auto mb-2" size={20} aria-hidden="true" />
         <p className="text-sm">La mochila está vacía.</p>
       </div>
@@ -52,11 +52,11 @@ export default function InventoryGrid({ items, onSelect, selectedId, label = "Ob
         const heading = (
           <span className="flex w-full items-center justify-between gap-3">
             <span className="min-w-0">
-              <span className="block break-words font-medium text-neutral-100">{item.name}</span>
-              <span className="block text-xs text-neutral-400">{INVENTORY_CATEGORY_LABELS[item.category] ?? "Otros"}</span>
+              <span className="block break-words font-medium text-[var(--dc-text)]">{item.name}</span>
+              <span className="block text-xs text-[var(--dc-text-muted)]">{INVENTORY_CATEGORY_LABELS[item.category] ?? "Otros"}</span>
             </span>
-            <span className="flex shrink-0 flex-col items-end gap-1 text-xs text-neutral-300">
-              {item.equipped && <span className="text-amber-200">Equipado</span>}
+            <span className="flex shrink-0 flex-col items-end gap-1 text-xs text-[var(--dc-text-muted)]">
+              {item.equipped && <span className="text-[var(--dc-action-hover)]">Equipado</span>}
               {item.quantity > 1 && <span>x{item.quantity}</span>}
             </span>
           </span>
@@ -69,12 +69,12 @@ export default function InventoryGrid({ items, onSelect, selectedId, label = "Ob
                 onClick={() => onSelect(item)}
                 aria-pressed={selectedId === item.id}
                 aria-controls="equipment-item-details"
-                className={`min-h-14 w-full rounded-lg border px-3 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${selectedId === item.id ? "border-amber-400 bg-amber-400/10" : "border-neutral-800 bg-neutral-900 hover:border-neutral-600"}`}
+                className={`min-h-14 w-full rounded-lg border px-3 py-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--dc-focus)] ${selectedId === item.id ? "border-[var(--dc-action)] bg-[var(--dc-action)]/10" : "border-[var(--dc-border)] bg-[var(--dc-surface)] hover:border-[var(--dc-border-strong)]"}`}
               >{heading}</button>
             ) : (
-              <details className="rounded-lg border border-neutral-700 bg-neutral-900">
-                <summary className="min-h-14 cursor-pointer px-3 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">{heading}<span className="mt-1 block text-xs text-amber-200">Ver detalles</span></summary>
-                <div className="border-t border-neutral-700 p-3"><InventoryItemDetails item={item} /></div>
+              <details className="rounded-lg border border-[var(--dc-border)] bg-[var(--dc-surface)]">
+                <summary className="min-h-14 cursor-pointer px-3 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--dc-focus)]">{heading}<span className="mt-1 block text-xs text-[var(--dc-action-hover)]">Ver detalles</span></summary>
+                <div className="border-t border-[var(--dc-border)] p-3"><InventoryItemDetails item={item} /></div>
               </details>
             )}
           </li>
