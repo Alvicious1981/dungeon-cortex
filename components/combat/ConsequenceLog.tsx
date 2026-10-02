@@ -53,8 +53,8 @@ export const ConsequenceEntry = memo(function ConsequenceEntry({
   index: number;
 }) {
   return (
-    <li className="rounded border border-amber-900/40 bg-black/15 px-3 py-2 text-sm text-neutral-200">
-      <p className="mb-1 font-semibold text-amber-200">{entry.attackerName}</p>
+    <li className="rounded border border-[var(--dc-border)] bg-black/15 px-3 py-2 text-sm text-[var(--dc-text)]">
+      <p className="mb-1 font-semibold text-[var(--dc-text)]">{entry.attackerName}</p>
       <div className="space-y-2">
         {entry.targets.map((target, index) => (
           <div key={`${target.targetId}-${index}`} className="space-y-1">
@@ -62,12 +62,13 @@ export const ConsequenceEntry = memo(function ConsequenceEntry({
               <span className="font-medium">{target.targetName}</span>
               <span>{target.damage} de daño</span>
               <span className="tabular-nums">{target.hpAfter}/{target.targetMaxHp} PG</span>
+              {/* Colores de dominio: resaltan el resultado del golpe, no un estado (éxito/error/aviso), así que ningún token semántico los representa. El texto siempre acompaña al color. */}
               {target.isCrit && <strong className="text-violet-300">Crítico</strong>}
               {target.isFumble && <strong className="text-orange-300">Pifia</strong>}
               {target.isKill && <strong className="text-red-300">Derrotado</strong>}
             </p>
             {target.conditionsApplied.length > 0 && (
-              <p className="text-neutral-300">Condiciones aplicadas: {target.conditionsApplied.map(conditionLabel).join(", ")}</p>
+              <p className="text-[var(--dc-text-muted)]">Condiciones aplicadas: {target.conditionsApplied.map(conditionLabel).join(", ")}</p>
             )}
           </div>
         ))}

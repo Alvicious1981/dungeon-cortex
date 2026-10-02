@@ -70,7 +70,7 @@ const ENUM_FACTS: Record<string, { label: string; values: Record<string, string>
 function FactList({ facts }: { facts: Array<[string, string]> }) {
   return <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
     {facts.map(([label, value], index) => <div key={`${label}-${index}`} className="contents">
-      <dt className="text-neutral-400">{label}</dt><dd className="break-words text-neutral-200">{value}</dd>
+      <dt className="text-[var(--dc-text-muted)]">{label}</dt><dd className="break-words text-[var(--dc-text)]">{value}</dd>
     </div>)}
   </dl>;
 }
@@ -78,7 +78,7 @@ function FactList({ facts }: { facts: Array<[string, string]> }) {
 function EventFacts({ event }: { event: GameEvent }) {
   if (event.type === "COMBAT_CONSEQUENCE") {
     return <div className="space-y-3">
-      <p className="font-medium text-amber-100">{event.payload.attackerName}</p>
+      <p className="font-medium text-[var(--dc-text)]">{event.payload.attackerName}</p>
       {event.payload.targets.map((target, index) => (
         <div key={`${target.targetId}-${index}`}>
           <p className="mb-1 font-medium">{target.targetName}</p>
@@ -106,29 +106,29 @@ function EventFacts({ event }: { event: GameEvent }) {
     const value = event.payload[key];
     if (typeof value === "string" && values[value]) facts.push([label, values[value]]);
   }
-  return facts.length ? <FactList facts={facts} /> : <p className="text-neutral-400">Sin detalles adicionales.</p>;
+  return facts.length ? <FactList facts={facts} /> : <p className="text-[var(--dc-text-muted)]">Sin detalles adicionales.</p>;
 }
 
 export function StoryResults({ events }: { events: GameEvent[] }) {
   if (!events.length) return null;
   return (
-    <div className="space-y-2 border-l-2 border-amber-700/60 py-2 pl-3" aria-label="Resultado de la acción">
-      <p className="text-sm font-semibold text-amber-200">Resultado</p>
+    <div className="space-y-2 border-l-2 border-[var(--dc-mechanical)]/60 py-2 pl-3" aria-label="Resultado de la acción">
+      <p className="text-sm font-semibold text-[var(--dc-mechanical)]">Resultado</p>
       <ul className="space-y-2">
         {events.map((event, index) => event.type === "COMBAT_CONSEQUENCE" ? (
           <ConsequenceEntry key={index} entry={event.payload} index={0} />
         ) : (
-          <li key={index} className="text-sm text-neutral-200">
+          <li key={index} className="text-sm text-[var(--dc-text)]">
             <span className="font-medium">{EVENT_LABELS[event.type]}</span>
             {eventSummary(event) && <span>: {eventSummary(event)}</span>}
           </li>
         ))}
       </ul>
-      <details className="text-sm text-neutral-300">
-        <summary className="flex min-h-11 cursor-pointer items-center underline decoration-neutral-600 underline-offset-4">Ver hechos exactos ({events.length})</summary>
+      <details className="text-sm text-[var(--dc-text-muted)]">
+        <summary className="flex min-h-11 cursor-pointer items-center underline decoration-[var(--dc-border-strong)] underline-offset-4">Ver hechos exactos ({events.length})</summary>
         <div className="space-y-4 rounded bg-black/20 p-3">
           {events.map((event, index) => <div key={index} className="space-y-2">
-            <p className="font-medium text-amber-100">{EVENT_LABELS[event.type]}</p>
+            <p className="font-medium text-[var(--dc-text)]">{EVENT_LABELS[event.type]}</p>
             <EventFacts event={event} />
           </div>)}
         </div>

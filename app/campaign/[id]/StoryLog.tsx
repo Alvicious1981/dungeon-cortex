@@ -111,7 +111,7 @@ function displayEntries(logs: StoryLogEntry[], live: LiveStoryEntry[]): DisplayE
 }
 
 function Narrative({ children }: { children: string }) {
-  return <p className="max-w-[70ch] whitespace-pre-wrap break-words text-[17px] leading-[1.75] text-[#ddd2bb] sm:text-lg"
+  return <p className="max-w-[70ch] whitespace-pre-wrap break-words text-[17px] leading-[1.75] text-[var(--dc-narrative)] sm:text-lg"
     style={{ fontFamily: "var(--font-crimson)" }}>{children}</p>;
 }
 
@@ -262,15 +262,15 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
     <section ref={sectionRef} aria-label="Bitácora de aventura" id="chronicle" tabIndex={-1}
       className="dc-panel dc-panel--narrative min-w-0 scroll-mt-20 rounded-sm p-4 sm:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg text-amber-200" style={{ fontFamily: "var(--font-cinzel)" }}>Bitácora</h2>
+        <h2 className="text-lg text-[var(--dc-narrative)]" style={{ fontFamily: "var(--font-cinzel)" }}>Bitácora</h2>
         {(sorted.length > 0 || Boolean(story?.entries.length)) && (
-          <button type="button" onClick={returnToPresent} className="min-h-11 rounded px-3 text-sm text-amber-200 underline underline-offset-4">Volver al presente</button>
+          <button type="button" onClick={returnToPresent} className="min-h-11 rounded px-3 text-sm text-[var(--dc-action-hover)] underline underline-offset-4">Volver al presente</button>
         )}
       </div>
       <div role="group" aria-label="Filtrar entradas cargadas" className="mb-4 flex flex-wrap gap-2">
         {(["Todo", "Relato", "Sistema"] as const).map((option) => (
           <button key={option} type="button" aria-pressed={filter === option} onClick={() => setFilter(option)}
-            className={`min-h-11 rounded border px-4 text-sm ${filter === option ? "border-amber-700 bg-amber-950/40 text-amber-100" : "border-neutral-700 text-neutral-300"}`}>{option}</button>
+            className={`min-h-11 rounded border px-4 text-sm ${filter === option ? "border-[var(--dc-action)] bg-[var(--dc-action)]/15 text-[var(--dc-text)]" : "border-[var(--dc-border)] text-[var(--dc-text-muted)]"}`}>{option}</button>
         ))}
       </div>
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
@@ -288,47 +288,47 @@ export default function StoryLog({ campaignId, initialLogs, initialHasMore }: St
       {hasMore && (
         <div className="mb-4 flex flex-col items-start gap-2">
           <Button type="button" variant="secondary" loading={loading} onClick={() => void loadOlder()}>Cargar anteriores</Button>
-          {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+          {error && <p role="alert" className="text-sm text-[var(--dc-error)]">{error}</p>}
         </div>
       )}
       {display.length === 0 ? (
-        <p className="py-8 text-base italic leading-relaxed text-neutral-300">Aún no hay entradas. Describe qué intenta hacer tu personaje para comenzar.</p>
+        <p className="py-8 text-base italic leading-relaxed text-[var(--dc-text-muted)]">Aún no hay entradas. Describe qué intenta hacer tu personaje para comenzar.</p>
       ) : visible.length === 0 ? (
-        <p className="py-5 text-sm text-neutral-400">{search ? "No hay coincidencias con los filtros actuales." : "No hay entradas de este tipo entre las que has cargado."}</p>
+        <p className="py-5 text-sm text-[var(--dc-text-muted)]">{search ? "No hay coincidencias con los filtros actuales." : "No hay entradas de este tipo entre las que has cargado."}</p>
       ) : (
         <ul className="space-y-5" role="list">
           {visible.map((row) => {
             if ("live" in row) {
               const entry = row.live;
               return (
-                <li key={row.key} data-story-entry={row.key} className="min-w-0 space-y-3 border-b border-amber-900/25 pb-5">
+                <li key={row.key} data-story-entry={row.key} className="min-w-0 space-y-3 border-b border-[var(--dc-border)] pb-5">
                   {filter !== "Sistema" && (
-                    <div className="border-l-2 border-amber-500/60 pl-3">
-                      <p className="mb-1 text-xs font-semibold text-amber-300">Tu intención</p>
-                      <p className="max-w-[70ch] whitespace-pre-wrap break-words text-sm text-amber-100">{entry.action}</p>
+                    <div className="border-l-2 border-[var(--dc-action)]/60 pl-3">
+                      <p className="mb-1 text-xs font-semibold text-[var(--dc-action-hover)]">Tu intención</p>
+                      <p className="max-w-[70ch] whitespace-pre-wrap break-words text-sm text-[var(--dc-text)]">{entry.action}</p>
                     </div>
                   )}
                   {filter !== "Relato" && <StoryResults events={entry.events} />}
                   {filter !== "Sistema" && (entry.narrative || entry.status === "receiving") && (
                     <div className="min-h-[4.5rem]">
-                      <p className="mb-1 text-xs font-semibold text-[#c5aa74]">Relato</p>
-                      {entry.narrative ? <Narrative>{entry.narrative}</Narrative> : <p className="text-sm text-neutral-400">Esperando el relato…</p>}
+                      <p className="mb-1 text-xs font-semibold text-[var(--dc-narrative)]">Relato</p>
+                      {entry.narrative ? <Narrative>{entry.narrative}</Narrative> : <p className="text-sm text-[var(--dc-text-muted)]">Esperando el relato…</p>}
                     </div>
                   )}
-                  {filter === "Todo" && entry.status === "uncertain" && <p className="text-sm text-amber-200">Conexión interrumpida. Comprueba la acción en los controles.</p>}
-                  {filter === "Todo" && entry.status === "refused" && <p className="text-sm text-red-300">Acción rechazada. Revisa el aviso junto a los controles.</p>}
-                  {filter !== "Sistema" && entry.narrative && entry.status === "receiving" && <p className="text-xs text-neutral-400">Recibiendo relato…</p>}
-                  {filter !== "Sistema" && entry.narrative && entry.status === "received" && !row.persisted && <p className="text-xs text-neutral-400">Relato recibido. Sincronizando la bitácora…</p>}
+                  {filter === "Todo" && entry.status === "uncertain" && <p className="text-sm text-[var(--dc-warning)]">Conexión interrumpida. Comprueba la acción en los controles.</p>}
+                  {filter === "Todo" && entry.status === "refused" && <p className="text-sm text-[var(--dc-error)]">Acción rechazada. Revisa el aviso junto a los controles.</p>}
+                  {filter !== "Sistema" && entry.narrative && entry.status === "receiving" && <p className="text-xs text-[var(--dc-text-muted)]">Recibiendo relato…</p>}
+                  {filter !== "Sistema" && entry.narrative && entry.status === "received" && !row.persisted && <p className="text-xs text-[var(--dc-text-muted)]">Relato recibido. Sincronizando la bitácora…</p>}
                 </li>
               );
             }
             const log = row.log;
             return (
-              <li key={row.key} data-story-entry={row.key} className={`min-w-0 ${log.role === "user" ? "border-l-2 border-amber-500/60 pl-3" : log.role === "assistant" ? "py-1" : "rounded bg-neutral-900/40 px-3 py-2"}`}>
-                <p className={`mb-1 text-xs font-semibold ${log.role === "user" ? "text-amber-300" : "text-[#c5aa74]"}`}>
+              <li key={row.key} data-story-entry={row.key} className={`min-w-0 ${log.role === "user" ? "border-l-2 border-[var(--dc-action)]/60 pl-3" : log.role === "assistant" ? "py-1" : "rounded bg-[var(--dc-surface)]/40 px-3 py-2"}`}>
+                <p className={`mb-1 text-xs font-semibold ${log.role === "user" ? "text-[var(--dc-action-hover)]" : log.role === "assistant" ? "text-[var(--dc-narrative)]" : "text-[var(--dc-mechanical)]"}`}>
                   {log.role === "assistant" ? "Relato" : log.role === "user" ? "Tu intención" : "Sistema"}
                 </p>
-                {log.role === "assistant" ? <Narrative>{log.content}</Narrative> : <p className={`max-w-[70ch] whitespace-pre-wrap break-words text-sm leading-relaxed ${log.role === "user" ? "text-amber-100" : "text-neutral-300"}`}>{log.content}</p>}
+                {log.role === "assistant" ? <Narrative>{log.content}</Narrative> : <p className={`max-w-[70ch] whitespace-pre-wrap break-words text-sm leading-relaxed ${log.role === "user" ? "text-[var(--dc-text)]" : "text-[var(--dc-text-muted)]"}`}>{log.content}</p>}
               </li>
             );
           })}
