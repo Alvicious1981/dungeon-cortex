@@ -934,6 +934,10 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
               {activeEncounter ? (
 <CombatHUDController
             playerDown={playerDown}
+            playerResources={{
+              spellSlots: sheetViewModel.spellSlots,
+              concentrating: Boolean(character.concentrationSpellId),
+            }}
             activeTurnIndex={activeEncounter.currentTurnIndex}
             combatants={activeEncounter.combatants.map((c) => ({
               id: c.id,

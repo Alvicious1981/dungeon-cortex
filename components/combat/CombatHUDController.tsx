@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import CombatHUD from "./CombatHUD";
+import CombatHUD, { type CombatHUDPlayerResources } from "./CombatHUD";
 import type { GameEvent } from "@/lib/events/game-events";
 import {
   DUNGEON_ACTION_END,
@@ -23,6 +23,8 @@ interface Props {
   activeTurnIndex: number;
   /** The player is at 0 HP (death-saves spec §7.4). */
   playerDown?: boolean;
+  /** Server snapshot, passed straight through like `playerDown`: the stream carries none of it. */
+  playerResources?: CombatHUDPlayerResources;
   children?: ReactNode;
 }
 
@@ -30,6 +32,7 @@ export default function CombatHUDController({
   combatants,
   activeTurnIndex,
   playerDown = false,
+  playerResources,
   children,
 }: Props) {
   const [isPending, setIsPending] = useState(false);
@@ -127,6 +130,7 @@ export default function CombatHUDController({
       isPending={isPending}
       onActionTrigger={handleAction}
       playerDown={playerDown}
+      playerResources={playerResources}
     >
       {children}
     </CombatHUD>
