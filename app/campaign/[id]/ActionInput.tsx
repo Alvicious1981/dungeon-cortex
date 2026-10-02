@@ -328,9 +328,9 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
     <div className="min-w-0 space-y-3">
       <form onSubmit={handleSubmit} className="min-w-0 space-y-3">
         {aliveHostileTargets.length > 0 && (
-          <fieldset className="rounded-md border border-neutral-700/80 bg-neutral-900/60 px-3 py-2">
-            <legend className="px-1 text-sm font-semibold text-neutral-200">Objetivos</legend>
-            <p className="mb-2 text-xs text-neutral-400">Selecciona un objetivo para atacar.</p>
+          <fieldset className="rounded-md border border-[var(--dc-border)] bg-[var(--dc-surface)]/60 px-3 py-2">
+            <legend className="px-1 text-sm font-semibold text-[var(--dc-text)]">Objetivos</legend>
+            <p className="mb-2 text-xs text-[var(--dc-text-muted)]">Selecciona un objetivo para atacar.</p>
             <div className="flex flex-wrap gap-2">
               {aliveHostileTargets.map((target) => {
                 const selected = selectedTargetIds.includes(target.id);
@@ -339,14 +339,14 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
                     key={target.id}
                     className={`flex min-h-11 cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm transition-colors ${
                       selected
-                        ? "border-amber-500/70 bg-amber-950/30 text-amber-100"
-                        : "border-neutral-700 bg-neutral-950/30 text-neutral-300 hover:border-neutral-500"
+                        ? "border-[var(--dc-action)]/70 bg-[var(--dc-action)]/15 text-[var(--dc-text)]"
+                        : "border-[var(--dc-border)] bg-[var(--dc-canvas-soft)]/30 text-[var(--dc-text-muted)] hover:border-[var(--dc-border-strong)]"
                     }`}
                   >
                     <input type="checkbox" checked={selected} disabled={submitting}
-                      onChange={() => toggleTarget(target.id)} className="h-4 w-4 accent-amber-500" />
+                      onChange={() => toggleTarget(target.id)} className="h-4 w-4 accent-[var(--dc-action)]" />
                     <span className="font-medium">{target.name}</span>
-                    <span className="text-neutral-400">{target.hp}/{target.maxHp}</span>
+                    <span className="text-[var(--dc-text-muted)]">{target.hp}/{target.maxHp}</span>
                   </label>
                 );
               })}
@@ -354,25 +354,25 @@ export default function ActionInput({ campaignId, selectableTargets = [], disabl
           </fieldset>
         )}
         {controls}
-        <label htmlFor="action-input" className="block text-sm font-semibold text-amber-200">Tu acción</label>
+        <label htmlFor="action-input" className="block text-sm font-semibold text-[var(--dc-action-hover)]">Tu acción</label>
         <div className="flex min-w-0 gap-2">
           <input
             ref={inputRef} id="action-input" type="text" value={action}
             onChange={(e) => setAction(e.target.value)} disabled={submitting || Boolean(disabledReason)}
             maxLength={500} placeholder={disabledReason ?? "¿Qué intentas hacer?"}
-            className="dc-field min-h-12 min-w-0 flex-1 rounded-sm px-3 py-2 text-base placeholder:text-neutral-400 disabled:opacity-50"
+            className="dc-field min-h-12 min-w-0 flex-1 rounded-sm px-3 py-2 text-base disabled:opacity-50"
           />
           <Button type="submit" loading={submitting} disabled={!action.trim() || Boolean(disabledReason)}
             className="shrink-0 text-sm">
             {submitting ? "Resolviendo…" : "Actuar"}
           </Button>
         </div>
-        {disabledReason && <p className="text-sm text-neutral-300">{disabledReason}</p>}
+        {disabledReason && <p className="text-sm text-[var(--dc-text-muted)]">{disabledReason}</p>}
         {preparedAction && (
-          <div role="status" className="rounded border border-amber-900/50 p-3 text-sm text-amber-100">
+          <div role="status" className="rounded border border-[var(--dc-action)]/40 p-3 text-sm text-[var(--dc-text)]">
             <p>Acción preparada: {preparedAction}</p>
-            {submitting && <p className="mt-1 text-neutral-300">Podrás usarla cuando termine la acción actual.</p>}
-            {action.trim() && <p className="mt-1 text-neutral-300">Tu borrador sigue en el campo.</p>}
+            {submitting && <p className="mt-1 text-[var(--dc-text-muted)]">Podrás usarla cuando termine la acción actual.</p>}
+            {action.trim() && <p className="mt-1 text-[var(--dc-text-muted)]">Tu borrador sigue en el campo.</p>}
             <div className="mt-2 flex flex-wrap gap-2">
               <Button variant="secondary" size="compact" disabled={submitting || Boolean(disabledReason)}
                 onClick={() => { setAction(preparedAction); setPreparedAction(null); focusAction(); }}>

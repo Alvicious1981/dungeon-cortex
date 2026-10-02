@@ -27,6 +27,7 @@ import { CircleAlert, Dices, Divide, LoaderCircle, Sparkles, X } from "lucide-re
 import type { LevelUpAvailablePayload } from "@/lib/actions/backend-presentation-resolution";
 import type { LevelUpPayload } from "@/lib/rules/progression";
 import { useModalFocus } from "@/lib/hooks/useModalFocus";
+import { Button } from "@/components/ui/Button";
 
 export const DUNGEON_LEVEL_UP_AVAILABLE = "dungeon-level-up-available";
 export const DUNGEON_LEVEL_UP = "dungeon-level-up";
@@ -157,50 +158,50 @@ export function LevelUpDecisionPanel({
       tabIndex={-1}
       className="fixed inset-0 z-[2100] flex items-center justify-center overflow-y-auto bg-black/80 p-4"
     >
-      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-amber-500/40 bg-neutral-950 p-6 shadow-2xl">
+      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-[var(--dc-action)]/40 bg-[var(--dc-surface)] p-6 shadow-2xl">
         <h2
           ref={headingRef}
           tabIndex={-1}
           id="level-up-confirmation-title"
-          className="flex items-center gap-2 text-lg font-semibold text-amber-100"
+          className="flex items-center gap-2 text-lg font-semibold text-[var(--dc-text)]"
         >
           <Sparkles size={20} aria-hidden="true" />
           Subida de nivel disponible
         </h2>
 
-        <p className="mt-2 text-sm text-neutral-400">
+        <p className="mt-2 text-sm text-[var(--dc-text-muted)]">
           Tu personaje puede subir al nivel {payload.toLevel}. La
-          subida <strong className="text-neutral-200">todavía no se ha aplicado</strong>: elige
+          subida <strong className="text-[var(--dc-text)]">todavía no se ha aplicado</strong>: elige
           cómo determinar los puntos de golpe.
         </p>
 
         {/* Only what is known before applying. No roll, no gain, no new maximum. */}
-        <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-neutral-800 py-4 text-sm">
+        <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-[var(--dc-border)] py-4 text-sm">
           <div>
-            <dt className="text-xs uppercase tracking-wider text-neutral-500">Nivel</dt>
-            <dd className="text-neutral-100">
+            <dt className="text-xs uppercase tracking-wider text-[var(--dc-text-subtle)]">Nivel</dt>
+            <dd className="text-[var(--dc-text)]">
               {payload.fromLevel} → {payload.toLevel}
             </dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-neutral-500">Clase</dt>
-            <dd className="capitalize text-neutral-100">{payload.className}</dd>
+            <dt className="text-xs uppercase tracking-wider text-[var(--dc-text-subtle)]">Clase</dt>
+            <dd className="capitalize text-[var(--dc-text)]">{payload.className}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-neutral-500">Dado de golpe</dt>
-            <dd className="text-neutral-100">{payload.hitDie}</dd>
+            <dt className="text-xs uppercase tracking-wider text-[var(--dc-text-subtle)]">Dado de golpe</dt>
+            <dd className="text-[var(--dc-text)]">{payload.hitDie}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-neutral-500">Mod. CON</dt>
-            <dd className="text-neutral-100">{signed(payload.conModifier)}</dd>
+            <dt className="text-xs uppercase tracking-wider text-[var(--dc-text-subtle)]">Mod. CON</dt>
+            <dd className="text-[var(--dc-text)]">{signed(payload.conModifier)}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-neutral-500">PG máx. actuales</dt>
-            <dd className="text-neutral-100">{payload.currentMaxHp}</dd>
+            <dt className="text-xs uppercase tracking-wider text-[var(--dc-text-subtle)]">PG máx. actuales</dt>
+            <dd className="text-[var(--dc-text)]">{payload.currentMaxHp}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-neutral-500">Dados de golpe</dt>
-            <dd className="text-neutral-100">{payload.currentHitDiceTotal}</dd>
+            <dt className="text-xs uppercase tracking-wider text-[var(--dc-text-subtle)]">Dados de golpe</dt>
+            <dd className="text-[var(--dc-text)]">{payload.currentHitDiceTotal}</dd>
           </div>
         </dl>
 
@@ -208,7 +209,7 @@ export function LevelUpDecisionPanel({
             one level per confirmation; the rest stay pending until the backend
             emits them again. */}
         {payload.pendingLevels > 1 && (
-          <p className="mt-3 text-xs text-neutral-500">
+          <p className="mt-3 text-xs text-[var(--dc-text-subtle)]">
             Subidas pendientes: {payload.pendingLevels} (nivel objetivo{" "}
             {payload.targetLevel}). Esta confirmación aplica solo una.
           </p>
@@ -217,18 +218,18 @@ export function LevelUpDecisionPanel({
         {error && (
           <p
             role="alert"
-            className="mt-4 rounded border border-red-800 bg-red-950/40 px-3 py-2 text-sm text-red-200"
+            className="mt-4 rounded border border-[var(--dc-error)]/60 bg-[var(--dc-error)]/10 px-3 py-2 text-sm text-[var(--dc-text)]"
           >
             {error}
           </p>
         )}
 
         <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={() => void confirm(true)}
             disabled={busy}
-            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-neutral-700 px-4 text-sm font-medium text-neutral-100 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            className="flex-1"
           >
             {pending === "average" ? (
               <LoaderCircle className="animate-spin" size={17} aria-hidden="true" />
@@ -236,12 +237,12 @@ export function LevelUpDecisionPanel({
               <Divide size={17} aria-hidden="true" />
             )}
             Usar el promedio
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => void confirm(false)}
             disabled={busy}
-            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-amber-700 px-4 text-sm font-semibold text-amber-50 hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            className="flex-1"
           >
             {pending === "roll" ? (
               <LoaderCircle className="animate-spin" size={17} aria-hidden="true" />
@@ -249,13 +250,12 @@ export function LevelUpDecisionPanel({
               <Dices size={17} aria-hidden="true" />
             )}
             Tirar el dado
-          </button>
+          </Button>
         </div>
-        {busy && <p role="status" className="mt-3 text-sm text-amber-200">Confirmando la subida de nivel… Espera a que termine.</p>}
-        <button type="button" onClick={postpone} disabled={busy}
-          className="mt-3 min-h-11 w-full rounded-md px-4 text-sm text-neutral-300 hover:bg-neutral-800 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+        {busy && <p role="status" className="mt-3 text-sm text-[var(--dc-action-hover)]">Confirmando la subida de nivel… Espera a que termine.</p>}
+        <Button variant="ghost" onClick={postpone} disabled={busy} className="mt-3 w-full">
           Decidir más tarde
-        </button>
+        </Button>
       </div>
     </div>,
     document.body
@@ -277,16 +277,16 @@ export function StaleLevelUpNotice({
   return (
     <div
       role="status"
-      className="fixed bottom-24 left-1/2 z-40 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-amber-700/50 bg-neutral-950/95 p-3 shadow-xl md:bottom-4"
+      className="fixed bottom-24 left-1/2 z-40 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-[var(--dc-warning)]/50 bg-[var(--dc-canvas-soft)]/95 p-3 shadow-xl md:bottom-4"
     >
       <div className="flex items-start gap-2">
-        <CircleAlert size={17} className="mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
-        <p className="flex-1 text-sm text-neutral-200">{message}</p>
+        <CircleAlert size={17} className="mt-0.5 shrink-0 text-[var(--dc-warning)]" aria-hidden="true" />
+        <p className="flex-1 text-sm text-[var(--dc-text)]">{message}</p>
         <button
           type="button"
           onClick={onDismiss}
           aria-label="Cerrar aviso"
-          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded p-1 text-[var(--dc-text-muted)] hover:bg-[var(--dc-surface-raised)] hover:text-[var(--dc-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--dc-focus)]"
         >
           <X size={15} aria-hidden="true" />
         </button>
@@ -373,12 +373,12 @@ export default function LevelUpConfirmationController({ campaignId }: Props) {
   if (payload) {
     return (
       <>
-      <button ref={triggerRef} type="button" onClick={() => {
+      <Button ref={triggerRef} variant="secondary" onClick={() => {
         returnFocusRef.current = triggerRef.current;
         setPostponed(false);
-      }} className="fixed bottom-24 left-4 z-40 min-h-11 rounded-md border border-amber-500/40 bg-neutral-950 px-4 text-sm text-amber-100 shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+      }} className="fixed bottom-24 left-4 z-40 shadow-xl">
         Retomar subida al nivel {payload.toLevel}
-      </button>
+      </Button>
       {!postponed && <LevelUpDecisionPanel
         campaignId={campaignId}
         payload={payload}
