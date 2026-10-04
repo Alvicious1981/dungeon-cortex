@@ -1,2 +1,13 @@
+# Main development agent: planning, task routing, integration, and final review.
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+
+[agents]
+enabled = true
+# Spawned threads only; the primary agent is excluded. This is not a spending cap.
+max_concurrent_threads_per_session = 3
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "medium"
+
 [mcp_servers.supabase]
 url = "https://mcp.supabase.com/mcp?project_ref=prqzshuudtufanniexxw"
