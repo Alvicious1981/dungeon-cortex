@@ -495,6 +495,27 @@ Retain the lessons from those comparisons when reviewing another module:
 The preceding wilderness note remains a recorded block on reviving that
 subsystem. It is not a request to restore its tools or models.
 
+## Development agent coordination
+
+The main development agent uses `gpt-5.6-sol` with `high` reasoning as configured in `.codex/config.toml`. It owns requirements, truth checks, planning, task routing, integration, and final validation. This configuration concerns development agents; it does not change the application's narrator model.
+
+Use the configured custom roles under `.codex/agents/` when delegation materially helps:
+
+- `explorador`: `gpt-6-luna` / `medium`, read-only code investigation.
+- `implementador`: `gpt-6-luna` / `high`, small and unambiguous changes.
+- `documentacion`: `gpt-6-luna` / `medium`, scoped documentation updates.
+- `revisor_critico`: `gpt-5.6-sol` / `high`, read-only independent review of critical changes.
+
+For trivial tasks, work directly. For larger tasks, these instructions authorize delegation to the configured roles. Keep at most three spawned threads open; this controls concurrency, not monetary spend. Subagents must not delegate further. Use a critical reviewer when authorized work changes rules, combat, persistence, concurrency, schema, or event contracts; keep ambiguous decisions and critical implementation with the main agent.
+
+Before each dispatch, give the subagent a self-contained goal, relevant decisions and evidence, assigned files, acceptance criteria, allowed validation, and a concise return-report requirement. Resolve conversational references into explicit context. Parallelize independent investigations and edits to disjoint files. Use one writer per file, and sequence work that depends on another agent's output.
+
+Subagents must read applicable project instructions, preserve unrelated work, and escalate scope changes or blockers. Their Supabase MCP server is disabled in each role file; they must not access the saved-game database through another tool or command. Existing restrictions on secrets, dependencies, migrations, seeds, Git publication, and deployments remain applicable. A delegated task does not grant extra permissions.
+
+The main agent must inspect the resulting diff and evidence, resolve conflicts, verify acceptance criteria, and perform the smallest relevant final validation. Treat reports as claims to verify. Report skipped checks and their reason. If a configured role or model is unavailable, report the limitation; do not silently fall back to an inherited model or a broader tool surface. Client/runtime overrides can change effective settings; verify model, permissions, and Supabase availability before relying on a role.
+
+See `docs/CODEX_WORKFLOW.md` for activation and a read-only smoke check.
+
 ## Work style
 
 For non-trivial tasks, Codex should:

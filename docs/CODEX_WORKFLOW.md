@@ -101,7 +101,7 @@ pnpm typecheck
 For rules, backend, or utilities:
 
 ```bash
-pnpm test
+pnpm exec vitest run --maxWorkers=2
 ```
 
 For broad app changes:
@@ -132,14 +132,51 @@ Ask Codex to report:
 4. The smallest next fix.
 5. Whether a new task would be cleaner.
 
-## Model selection
+## Development agent setup
 
-Use the most economical Codex model that can safely perform the task:
+The project's main Codex session is the orchestrator: `gpt-5.6-sol` with `high` reasoning. `.codex/config.toml` sets this default and limits concurrently open spawned threads to three, excluding the primary session. Custom agents are standalone TOML files in `.codex/agents/`, with required `name`, `description`, and `developer_instructions` fields.
 
-- Documentation updates: economical model is usually enough.
-- Small UI fixes: economical or standard model is usually enough.
-- Backend rules, migrations, combat, event contracts, or architecture: use the strongest available Codex model.
-- Final QA after a large change: use the strongest available Codex model.
+| Agent name | Model | Reasoning | File sandbox | Use |
+| --- | --- | --- | --- | --- |
+| `explorador` | `gpt-6-luna` | `medium` | Read-only | Trace live code paths and tests. |
+| `implementador` | `gpt-6-luna` | `high` | Workspace write | Small, clearly specified changes. |
+| `documentacion` | `gpt-6-luna` | `medium` | Workspace write | Documentation grounded in implementation. |
+| `revisor_critico` | `gpt-5.6-sol` | `high` | Read-only | Independent review of critical changes. |
+
+The main agent handles simple tasks directly. It delegates when independent work or focused investigation justifies the extra token usage. Ambiguous rules, combat, persistence, concurrency, schema, or event-contract work stays with the main agent; authorized changes in these areas receive independent critical review. Subagents do not spawn another layer.
+
+### Activate the configuration
+
+1. Open a checkout containing these files in a current local Codex client that supports standalone custom agents and the `agents` configuration keys.
+2. Mark the project as trusted after reviewing its configuration. Untrusted project configuration may be ignored.
+3. Confirm your signed-in account or workspace has access to both configured models. Configuration does not grant model access. If a model or role is unavailable, report it and explicitly choose an available replacement; avoid silent fallback.
+4. Start a new session in this checkout and confirm the effective main model and reasoning effort. User settings, command-line options, UI choices, and runtime overrides can take precedence.
+5. Check that all four named roles are discoverable and that their effective model, reasoning, permissions, and MCP settings match their files.
+
+Every custom role disables the existing Supabase MCP server and further delegation. The main session retains the existing Supabase server configuration and the repository's restrictions on database operations. File `read-only` mode alone does not constrain MCP access, and workspace-write mode does not enforce assigned-file ownership; verify effective tool access and follow the ownership policy in `AGENTS.md`. Runtime permission overrides may change sandbox defaults.
+
+### Read-only smoke check
+
+Use a new session with a bounded task such as:
+
+```text
+Use the explorador custom agent to trace where narrator tools are selected.
+Then have revisor_critico independently check that trace.
+Read files only; do not edit files, connect to any database, run setup, or change Git state.
+Wait for both results and report file/symbol evidence and any configuration limitations.
+```
+
+Inspect both subagent threads in the client's agent view. Confirm each configured model and reasoning effort was selected, both agents remained read-only, neither had Supabase access, and neither spawned children. This verifies role loading and read-only delegation; it does not exercise the writer roles or prove application tests pass. Treat the setup as unverified until this check runs in the target client.
+
+### Dispatch and completion
+
+Each dispatch includes the goal, relevant context and decisions, assigned files, acceptance criteria, allowed checks, and a concise return-report requirement. Run independent reads or disjoint-file edits in parallel. Sequence dependent changes and use one writer per file. On ambiguity, scope expansion, or repeated failure, return to the main agent rather than launching more retries.
+
+Subagents return evidence, changes, validation actually run, results, uncertainty, and whether work continues. The main agent inspects their diffs, integrates the work, and runs the smallest relevant final checks from `AGENTS.md`.
+
+The thread limit is a concurrency control, not a token or spending budget. Each subagent consumes additional tokens; use fewer agents for small tasks and review actual account usage before claiming savings. This setup configures development work and does not alter the in-game narrator.
+
+Configuration reference: [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
 ## Final report template
 
