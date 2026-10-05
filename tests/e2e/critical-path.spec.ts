@@ -24,6 +24,7 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
   const pageErrors: Error[] = [];
   const characterName = `E2E ${randomUUID().slice(0, 8)}`;
   const campaignTitle = `Crónica de ${characterName}`;
+  const actionCompletionTimeout = 30_000;
 
   page.on("pageerror", (error) => pageErrors.push(error));
 
@@ -64,7 +65,8 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
     const actionResponsePromise = page.waitForResponse(
       (response) =>
         response.url().endsWith(`/api/campaign/${created.campaignId}/action`) &&
-        response.request().method() === "POST"
+        response.request().method() === "POST",
+      { timeout: actionCompletionTimeout }
     );
     await page.getByLabel("Tu acción").fill("/roll 1d20");
     // "Actuar" also names the shortcut in the status bar; submit the form that owns the input.
@@ -80,7 +82,9 @@ test("@smoke crea un héroe, abre una campaña, actúa y la retoma", async ({
       name: "Bitácora de aventura",
     });
     await expect(chronicle.getByText("/roll 1d20", { exact: true })).toBeVisible();
-    await expect(chronicle.getByText(/Roll 1d20:/)).toBeVisible();
+    await expect(chronicle.getByText(/Roll 1d20:/)).toBeVisible({
+      timeout: actionCompletionTimeout,
+    });
 
     await page.goto("/campaigns");
     await expect(

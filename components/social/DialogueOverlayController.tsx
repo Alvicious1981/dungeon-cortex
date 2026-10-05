@@ -61,6 +61,44 @@ interface Props {
   characterId: string;
 }
 
+const SOCIAL_ERROR_MESSAGES: Record<string, string> = {
+  SOCIAL_ACTION_IN_FLIGHT: "La interacción anterior todavía se está resolviendo. Vuelve a intentarlo en un momento.",
+  REQUEST_ID_REUSED: "Esta solicitud ya se utilizó para otra acción social. Inicia un nuevo intento.",
+  CAMPAIGN_NOT_ACTIVE: "La campaña ya no está activa.",
+  CHARACTER_DEAD: "Este personaje ha muerto y no puede iniciar otra interacción.",
+  PLAYER_UNCONSCIOUS: "El personaje está inconsciente y no puede conversar ahora.",
+  CHARACTER_AT_ZERO_HP: "El personaje no puede conversar mientras tenga 0 puntos de golpe.",
+  NPC_NOT_PRESENT: "Ese personaje ya no está presente en la escena.",
+  NPC_NOT_MET: "Primero debes acercarte y presentarte.",
+  NPC_NOT_FOUND: "No se pudo encontrar ese personaje en la campaña.",
+  CHARACTER_NOT_FOUND: "No se pudo encontrar el personaje jugador.",
+  CAMPAIGN_NOT_FOUND: "No se pudo encontrar la campaña.",
+  CHARACTER_OWNERSHIP_MISMATCH: "El personaje no pertenece a esta campaña.",
+  NPC_OWNERSHIP_MISMATCH: "Ese personaje no pertenece a esta campaña.",
+  LOCATION_NOT_FOUND: "No se pudo determinar la ubicación actual.",
+  INVALID_SOCIAL_APPROACH: "El enfoque social seleccionado no es válido.",
+  SOCIAL_STATE_CONFLICT: "La escena cambió mientras se resolvía la interacción. Vuelve a intentarlo.",
+};
+
+const SOCIAL_SERVER_ERRORS: Record<string, string> = {
+  "Campaign not found.": "No se pudo encontrar la campaña.",
+  "Campaign does not belong to this user.": "No tienes permiso para interactuar en esta campaña.",
+  "NPC not found.": "No se pudo encontrar ese personaje en la campaña.",
+  "Invalid social action.": "La acción social no es válida.",
+  "Invalid rumour request.": "La petición de rumores no es válida.",
+};
+
+function socialErrorMessage(status: number, code?: string, serverMessage?: string): string {
+  if (code && SOCIAL_ERROR_MESSAGES[code]) return SOCIAL_ERROR_MESSAGES[code];
+  if (serverMessage && SOCIAL_SERVER_ERRORS[serverMessage]) return SOCIAL_SERVER_ERRORS[serverMessage];
+  if (status === 401) return "La sesión ha caducado. Vuelve a iniciar sesión.";
+  if (status === 403) return "No tienes permiso para interactuar en esta campaña.";
+  if (status === 404) return "No se pudo encontrar ese personaje en la campaña.";
+  if (status === 409) return "La escena cambió antes de completar la interacción. Vuelve a intentarlo.";
+  if (status >= 500) return "El servidor no pudo resolver la interacción. Vuelve a intentarlo.";
+  return "No se pudo completar la interacción con esos datos.";
+}
+
 export default function DialogueOverlayController({ campaignId, characterId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [npc, setNpc] = useState<DialogueNpc | null>(null);
@@ -156,16 +194,16 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
         body: JSON.stringify({ npcId: npc.id, approach, intent, requestId }),
       });
       if (!response.ok) {
-        let message = "Something went wrong resolving that.";
         let code: string | undefined;
+        let serverMessage: string | undefined;
         try {
           const body = await response.json();
-          if (body && typeof body.error === "string") message = body.error;
           if (body && typeof body.code === "string") code = body.code;
+          if (body && typeof body.error === "string") serverMessage = body.error;
         } catch {
           // Body wasn't JSON, or was empty — keep the generic fallback.
         }
-        setError(message);
+        setError(socialErrorMessage(response.status, code, serverMessage));
         if (code !== "SOCIAL_ACTION_IN_FLIGHT" && code !== "REQUEST_ID_REUSED") {
           pendingSocialSubmission.current = null;
         }
@@ -178,7 +216,7 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
     } catch {
       // Network failure, or fetch rejected for any other reason: the player
       // still deserves feedback rather than a click that silently did nothing.
-      setError("Could not reach the server. Please try again.");
+      setError("No se pudo conectar con el servidor. Vuelve a intentarlo.");
     } finally {
       setIsLoading(false);
     }
@@ -212,12 +250,14 @@ export default function DialogueOverlayController({ campaignId, characterId }: P
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(body?.error ?? "Could not ask for rumours. Please try again.");
+        const code = body && typeof body.code === "string" ? body.code : undefined;
+        const serverMessage = body && typeof body.error === "string" ? body.error : undefined;
+        setError(socialErrorMessage(response.status, code, serverMessage));
         return;
       }
       setRumors(await response.json());
     } catch {
-      setError("Could not reach the server. Please try again.");
+      setError("No se pudo conectar con el servidor. Vuelve a intentarlo.");
     } finally {
       setIsLoading(false);
     }

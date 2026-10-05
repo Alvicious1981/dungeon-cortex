@@ -37,6 +37,14 @@ const wizardPayload: LevelUpPayload = {
   className:       "wizard",
 };
 
+function OverlayHarness() {
+  const [open, setOpen] = React.useState(false);
+  return <div>
+    <button onClick={() => setOpen(true)}>Mostrar celebración</button>
+    <AscensionOverlay payload={fighterPayload} isOpen={open} onAccept={() => setOpen(false)} />
+  </div>;
+}
+
 // ---------------------------------------------------------------------------
 // AscensionOverlay — render
 // ---------------------------------------------------------------------------
@@ -53,7 +61,7 @@ describe("AscensionOverlay — render", () => {
     render(
       <AscensionOverlay payload={fighterPayload} isOpen={true} onAccept={vi.fn()} />
     );
-    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(screen.getByRole("dialog", { name: "Subida de nivel — la Forja te reconoce" })).toBeDefined();
   });
 
   it("displays the previous and new level numbers", () => {
@@ -64,11 +72,11 @@ describe("AscensionOverlay — render", () => {
     expect(screen.getByText("5")).toBeDefined();
   });
 
-  it("displays the class name capitalised", () => {
+  it("displays the class name in Spanish", () => {
     render(
       <AscensionOverlay payload={fighterPayload} isOpen={true} onAccept={vi.fn()} />
     );
-    expect(screen.getByText(/Fighter/)).toBeDefined();
+    expect(screen.getByText(/Guerrero/)).toBeDefined();
   });
 
   it("displays the hit die string", () => {
@@ -85,7 +93,7 @@ describe("AscensionOverlay — render", () => {
       <AscensionOverlay payload={fighterPayload} isOpen={true} onAccept={vi.fn()} />
     );
     const text = screen.getByRole("dialog").textContent ?? "";
-    expect(text).toContain("rolled 7");
+    expect(text).toContain("tirada 7");
   });
 
   it("displays a positive CON modifier with + prefix", () => {
@@ -121,12 +129,12 @@ describe("AscensionOverlay — render", () => {
     expect(text).toContain("45");
   });
 
-  it("displays hit dice total", () => {
+  it("separates the hit-dice total from its die notation", () => {
     render(
       <AscensionOverlay payload={fighterPayload} isOpen={true} onAccept={vi.fn()} />
     );
     const text = screen.getByRole("dialog").textContent ?? "";
-    expect(text).toContain("5");
+    expect(text).toContain("5 × 1d10");
   });
 
   it("stat panel has aria-live polite for screen readers", () => {
@@ -151,13 +159,14 @@ describe("AscensionOverlay — render", () => {
 // ---------------------------------------------------------------------------
 
 describe("AscensionOverlay — confirmation button", () => {
-  it("renders the 'Accept the Forge's Gift' button", () => {
+  it("renders the Spanish acknowledgement button", () => {
     render(
       <AscensionOverlay payload={fighterPayload} isOpen={true} onAccept={vi.fn()} />
     );
     const btn = screen.getByRole("button");
     expect(btn).toBeDefined();
-    expect(btn.textContent).toContain("Accept the Forge");
+    expect(btn.textContent).toContain("Aceptar el don de la Forja");
+    expect(btn).toHaveStyle({ minHeight: "44px" });
   });
 
   it("calls onAccept when button is clicked", () => {
@@ -175,8 +184,8 @@ describe("AscensionOverlay — confirmation button", () => {
     );
     const btn = screen.getByRole("button");
     const label = btn.getAttribute("aria-label") ?? "";
-    expect(label).toContain("level 5");
-    expect(label).toContain("9 hit point");
+    expect(label).toContain("nivel 5");
+    expect(label).toContain("9 puntos de golpe");
   });
 });
 
@@ -210,5 +219,19 @@ describe("AscensionOverlay — keyboard", () => {
     );
     const dialog = screen.getByRole("dialog");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
+  });
+
+  it("isolates the background and returns focus to the trigger after acknowledgement", () => {
+    render(<OverlayHarness />);
+    const trigger = screen.getByRole("button", { name: "Mostrar celebración" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const accept = screen.getByRole("button", { name: /Aceptar la subida al nivel 5/ });
+    expect(accept).toHaveFocus();
+    expect(trigger).toHaveAttribute("inert");
+    fireEvent.click(accept);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(trigger).not.toHaveAttribute("inert");
   });
 });

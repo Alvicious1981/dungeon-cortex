@@ -1,14 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import {
   ABILITY_SCORES,
   STANDARD_ARRAY,
   type AbilityScore,
 } from "@/lib/dnd-api/constants";
 import type { ApiListItem } from "@/lib/dnd-api/client";
+import {
+  classDisplayName,
+  raceDisplayName,
+} from "@/lib/dnd-api/presentation";
 import { Button } from "@/components/ui/Button";
 import { StatusMessage } from "@/components/ui/StatusMessage";
 
@@ -52,6 +56,29 @@ const ABILITY_NAMES: Record<AbilityScore, string> = {
 
 const SCORE_BOUNDS = { min: 3, max: 20 };
 
+function characterErrorMessage(status: number): string {
+  if (status === 400) {
+    return "Revisa el nombre, el linaje, la clase y las características antes de continuar.";
+  }
+  if (status === 401) {
+    return "La sesión ya no está disponible. Vuelve al inicio e inténtalo de nuevo.";
+  }
+  return "No se pudo crear el personaje. Inténtalo de nuevo.";
+}
+
+function campaignErrorMessage(status: number): string {
+  if (status === 401) {
+    return "El personaje se ha guardado, pero la sesión ya no está disponible. Vuelve al inicio para continuar.";
+  }
+  if (status === 403) {
+    return "El personaje se ha guardado, pero esta sesión no puede abrir su campaña.";
+  }
+  if (status === 404) {
+    return "El personaje se ha guardado, pero el servidor no pudo recuperarlo para abrir la campaña.";
+  }
+  return "El personaje se ha guardado, pero no se pudo abrir la campaña.";
+}
+
 async function readResponse(
   response: Response
 ): Promise<{ id?: string; error?: string }> {
@@ -74,10 +101,15 @@ export default function CharacterCreationForm({ races, classes }: Props) {
   const [createdCharacterId, setCreatedCharacterId] = useState<string | null>(
     null
   );
+  const statusRef = useRef<HTMLDivElement>(null);
 
   const submitting =
     step === "creating-character" || step === "creating-campaign";
   const characterLocked = createdCharacterId !== null;
+
+  useEffect(() => {
+    if (error) statusRef.current?.focus();
+  }, [error]);
 
   function handleStatChange(ability: AbilityScore, raw: string) {
     const value = Number.parseInt(raw, 10);
@@ -113,10 +145,7 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       const data = await readResponse(response);
       if (!response.ok || !data.id) {
         setStep("campaign-error");
-        setError(
-          data.error ??
-            "El personaje se ha guardado, pero no se pudo abrir la campaña."
-        );
+        setError(campaignErrorMessage(response.status));
         return;
       }
       router.push(`/campaign/${data.id}`);
@@ -152,7 +181,7 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       const data = await readResponse(response);
       if (!response.ok || !data.id) {
         setStep("idle");
-        setError(data.error ?? "No se pudo crear el personaje.");
+        setError(characterErrorMessage(response.status));
         return;
       }
 
@@ -218,7 +247,7 @@ export default function CharacterCreationForm({ races, classes }: Props) {
             >
               {races.map((entry) => (
                 <option key={entry.index} value={entry.index}>
-                  {entry.name}
+                  {raceDisplayName(entry.index, entry.name)}
                 </option>
               ))}
             </select>
@@ -235,7 +264,7 @@ export default function CharacterCreationForm({ races, classes }: Props) {
             >
               {classes.map((entry) => (
                 <option key={entry.index} value={entry.index}>
-                  {entry.name}
+                  {classDisplayName(entry.index, entry.name)}
                 </option>
               ))}
             </select>
@@ -298,7 +327,13 @@ export default function CharacterCreationForm({ races, classes }: Props) {
         </div>
       </fieldset>
 
-      <div id="creation-status" aria-live="polite" aria-atomic="true">
+      <div
+        ref={statusRef}
+        id="creation-status"
+        tabIndex={error ? -1 : undefined}
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {error && (
           <StatusMessage tone="error" title="No se pudo completar el proceso">
             {error}
@@ -312,13 +347,6 @@ export default function CharacterCreationForm({ races, classes }: Props) {
       </div>
 
       <Button type="submit" loading={submitting} className="w-full">
-        {submitting && (
-          <LoaderCircle
-            aria-hidden="true"
-            className="animate-spin motion-reduce:animate-none"
-            size={18}
-          />
-        )}
         {submitLabel}
       </Button>
       <p id="creation-help" className="dc-help text-center">

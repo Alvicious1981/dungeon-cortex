@@ -17,19 +17,28 @@ export default function CampaignLayout({ character, journal, children }: {
 }) {
   const [auxiliary, setAuxiliary] = useState<"character" | "journal">("journal");
   const [mobileArea, setMobileArea] = useState<"adventure" | "journal">("adventure");
+  const [activeDestination, setActiveDestination] = useState<"scene" | "chronicle" | "commands" | "journal">("chronicle");
   const [preparedActionSequence, setPreparedActionSequence] = useState(0);
   const [navigation, setNavigation] = useState<{ area: string } | null>(null);
 
   useEffect(() => {
     function showPreparedAction() {
       setMobileArea("adventure");
+      setActiveDestination("commands");
       setPreparedActionSequence((sequence) => sequence + 1);
+    }
+    function showAdventureView(event: Event) {
+      setActiveDestination((event as CustomEvent).detail === "scene" ? "scene" : "chronicle");
     }
     window.addEventListener(DUNGEON_PREPARE_ACTION, showPreparedAction);
     window.addEventListener(DUNGEON_SHOW_ACTION, showPreparedAction);
+    window.addEventListener(DUNGEON_ADVENTURE_VIEW, showAdventureView);
+    if (location.hash === "#scene") setActiveDestination("scene");
+    else if (location.hash === "#chronicle") setActiveDestination("chronicle");
     return () => {
       window.removeEventListener(DUNGEON_PREPARE_ACTION, showPreparedAction);
       window.removeEventListener(DUNGEON_SHOW_ACTION, showPreparedAction);
+      window.removeEventListener(DUNGEON_ADVENTURE_VIEW, showAdventureView);
     };
   }, []);
 
@@ -43,16 +52,20 @@ export default function CampaignLayout({ character, journal, children }: {
     target?.focus({ preventScroll: true });
   }, [preparedActionSequence]);
 
-  function navigate(area: "scene" | "chronicle" | "journal") {
+  function navigate(area: "scene" | "chronicle" | "commands" | "journal") {
     if (area !== "journal") window.dispatchEvent(new CustomEvent(DUNGEON_ADVENTURE_VIEW, { detail: area }));
     setMobileArea(area === "journal" ? "journal" : "adventure");
     if (area === "journal") setAuxiliary("journal");
+    setActiveDestination(area);
     setNavigation({ area });
   }
 
   useEffect(() => {
     if (!navigation) return;
-    const target = document.getElementById(navigation.area);
+    const actionInput = document.getElementById("action-input") as HTMLInputElement | null;
+    const target = navigation.area === "commands" && actionInput && !actionInput.disabled
+      ? actionInput
+      : document.getElementById(navigation.area);
     target?.scrollIntoView({ block: "start" });
     target?.focus({ preventScroll: true });
   }, [navigation]);
@@ -68,7 +81,7 @@ export default function CampaignLayout({ character, journal, children }: {
         </div>
         <div className="dc-campaign-journal min-w-0">{journal}</div>
       </div>
-      <CampaignMobileNav onNavigate={navigate} activeArea={mobileArea} />
+      <CampaignMobileNav onNavigate={navigate} activeArea={activeDestination} />
     </>
   );
 }

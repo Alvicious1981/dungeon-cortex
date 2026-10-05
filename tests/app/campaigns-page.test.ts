@@ -56,6 +56,14 @@ function hrefs(html: string): string[] {
   return [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
 }
 
+function linkClassFor(html: string, href: string): string {
+  const escapedHref = href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = html.match(
+    new RegExp(`<a[^>]*class="([^"]*)"[^>]*href="${escapedHref}"|<a[^>]*href="${escapedHref}"[^>]*class="([^"]*)"`)
+  );
+  return match?.[1] ?? match?.[2] ?? "";
+}
+
 describe("biblioteca de campañas", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -92,8 +100,10 @@ describe("biblioteca de campañas", () => {
     const html = await renderToHtml(await CampaignsPage());
 
     expect(visibleText(html)).toContain("Crónica de Mira");
-    expect(visibleText(html)).toContain("barbarian");
+    expect(visibleText(html)).toContain("Bárbaro");
+    expect(visibleText(html)).not.toContain("barbarian");
     expect(hrefs(html)).toContain("/campaign/camp_1");
+    expect(linkClassFor(html, "/character/create")).toContain("dc-button");
   });
 
   it("deja visible pero sin enlace una campaña que no está activa", async () => {
@@ -104,6 +114,8 @@ describe("biblioteca de campañas", () => {
     const html = await renderToHtml(await CampaignsPage());
 
     // La campaña se sigue viendo, con el motivo a la vista, pero no se puede abrir.
+    expect(visibleText(html)).toContain("Archivada");
+    expect(visibleText(html)).not.toContain("archived");
     expect(visibleText(html)).toContain("no está activa");
     expect(hrefs(html)).not.toContain("/campaign/camp_1");
   });

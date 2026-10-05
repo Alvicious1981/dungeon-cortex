@@ -28,12 +28,12 @@ function openUnmet(npcId = "npc_1") {
   });
 }
 
-// The quick-action "Persuade" button and the free-text approach-selector
-// share the accessible name "persuade" — scope to the quick-actions group so
+// The quick-action "Persuadir" button and the free-text approach-selector
+// share the accessible name "persuadir" — scope to the quick-actions group so
 // findByRole doesn't throw on ambiguity.
 function findPersuadeQuickAction() {
-  return within(screen.getByRole("group", { name: /quick actions/i })).findByRole("button", {
-    name: /persuade/i,
+  return within(screen.getByRole("group", { name: /acciones rápidas/i })).findByRole("button", {
+    name: /persuadir/i,
   });
 }
 
@@ -72,6 +72,28 @@ describe("DialogueOverlayController", () => {
     expect(screen.queryByText(/Greta/)).toBeNull();
   });
 
+  it("focuses the dialogue heading and returns focus to the NPC trigger on Escape", async () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "Greta";
+    document.body.appendChild(trigger);
+    trigger.focus();
+
+    try {
+      render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
+      openWith();
+
+      const heading = await screen.findByRole("heading", { name: "Greta" });
+      await waitFor(() => expect(heading).toHaveFocus());
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(trigger).toHaveFocus();
+    } finally {
+      trigger.remove();
+    }
+  });
+
   it("posts the social action to the campaign's social route", async () => {
     render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
     openWith();
@@ -94,15 +116,15 @@ describe("DialogueOverlayController", () => {
     fireEvent.click(await findPersuadeQuickAction());
 
     expect(await screen.findByText(/18/)).toBeTruthy();
-    expect(await screen.findByText(/DC 15/i)).toBeTruthy();
-    expect(await screen.findByText(/\+9 Engagement/)).toBeTruthy();
+    expect(await screen.findByText(/CD 15/i)).toBeTruthy();
+    expect(await screen.findByText(/Disposición \+9/)).toBeTruthy();
   });
 
   it("posts the same route call when approaching an unmet NPC", async () => {
     render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
     openUnmet();
 
-    fireEvent.click(await screen.findByRole("button", { name: /approach/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /acercarse/i }));
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -126,9 +148,9 @@ describe("DialogueOverlayController", () => {
 
     fireEvent.click(await findPersuadeQuickAction());
 
-    expect(await screen.findByText("NPC not found.")).toBeTruthy();
+    expect(await screen.findByText("No se pudo encontrar ese personaje en la campaña.")).toBeTruthy();
     // The disposition meter still reads the value from the selection event.
-    expect(screen.getByText(/\+5 Engagement/)).toBeTruthy();
+    expect(screen.getByText(/Disposición \+5/)).toBeTruthy();
   });
 
   it("shows a generic error and no unhandled rejection when fetch itself fails", async () => {
@@ -141,8 +163,8 @@ describe("DialogueOverlayController", () => {
 
     fireEvent.click(await findPersuadeQuickAction());
 
-    expect(await screen.findByText(/could not reach the server/i)).toBeTruthy();
-    expect(screen.getByText(/\+5 Engagement/)).toBeTruthy();
+    expect(await screen.findByText(/no se pudo conectar con el servidor/i)).toBeTruthy();
+    expect(screen.getByText(/Disposición \+5/)).toBeTruthy();
 
     // Give any unhandled rejection a tick to surface before asserting none did.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -162,7 +184,7 @@ describe("DialogueOverlayController", () => {
     openWith();
 
     fireEvent.click(await findPersuadeQuickAction());
-    await screen.findByText(/could not reach the server/i);
+    await screen.findByText(/no se pudo conectar con el servidor/i);
     fireEvent.click(await findPersuadeQuickAction());
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
 
@@ -177,7 +199,7 @@ describe("DialogueOverlayController", () => {
     openWith();
 
     fireEvent.click(await findPersuadeQuickAction());
-    await screen.findByText("SOCIAL_ACTION_IN_FLIGHT");
+    await screen.findByText(/todavía se está resolviendo/i);
     fireEvent.click(await findPersuadeQuickAction());
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
 
@@ -190,7 +212,7 @@ describe("DialogueOverlayController", () => {
 
     fireEvent.click(await findPersuadeQuickAction());
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
-    await screen.findByText(/DC 15/i);
+    await screen.findByText(/CD 15/i);
     fireEvent.click(await findPersuadeQuickAction());
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
 
@@ -203,11 +225,11 @@ describe("DialogueOverlayController", () => {
     openWith();
 
     fireEvent.click(await findPersuadeQuickAction());
-    await screen.findByText(/could not reach the server/i);
+    await screen.findByText(/no se pudo conectar con el servidor/i);
     fireEvent.click(
-      await within(screen.getByRole("group", { name: /quick actions/i })).findByRole(
+      await within(screen.getByRole("group", { name: /acciones rápidas/i })).findByRole(
         "button",
-        { name: /intimidate/i }
+        { name: /intimidar/i }
       )
     );
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
@@ -221,7 +243,7 @@ describe("DialogueOverlayController", () => {
     openWith();
 
     fireEvent.click(await findPersuadeQuickAction());
-    await screen.findByText("REQUEST_ID_REUSED");
+    await screen.findByText(/ya se utilizó para otra acción social/i);
     await act(async () => { await Promise.resolve(); });
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
@@ -260,7 +282,7 @@ describe("DialogueOverlayController — rumours", () => {
     render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
     openWith("npc_1", 7);
 
-    fireEvent.click(await screen.findByRole("button", { name: /gather rumors/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /preguntar por rumores/i }));
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -285,8 +307,8 @@ describe("DialogueOverlayController — rumours", () => {
     render(<DialogueOverlayController campaignId="camp_1" characterId="char_1" />);
     openWith("npc_1", 0);
 
-    fireEvent.click(await screen.findByRole("button", { name: /gather rumors/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /preguntar por rumores/i }));
 
-    expect(await screen.findByText(/unwilling to share/)).toBeTruthy();
+    expect(await screen.findByText(/no quiere compartir información libremente/i)).toBeTruthy();
   });
 });

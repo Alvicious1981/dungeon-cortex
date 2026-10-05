@@ -22,6 +22,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { LevelUpPayload } from "@/lib/rules/progression";
 import type { LevelUpResolvedPayload } from "@/lib/events/game-events";
+import { classDisplayName } from "@/lib/dnd-api/presentation";
+import { useModalFocus } from "@/lib/hooks/useModalFocus";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -49,46 +51,7 @@ const EMBERS = Array.from({ length: 24 }, (_, i) => ({
 export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlayProps) {
   const acceptBtnRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
-
-  // Focus the accept button when opened
-  useEffect(() => {
-    if (isOpen) {
-      const timeout = setTimeout(() => acceptBtnRef.current?.focus(), 80);
-      return () => clearTimeout(timeout);
-    }
-  }, [isOpen]);
-
-  // Escape key dismissal
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onAccept();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, onAccept]);
-
-  // Focus trap — keep Tab inside the overlay
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const focusable = overlayRef.current?.querySelectorAll<HTMLElement>(
-      'button, [href], input, [tabindex]:not([tabindex="-1"])'
-    );
-    if (!focusable || focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
+  useModalFocus({ open: isOpen, onClose: onAccept, dialogRef: overlayRef, initialFocusRef: acceptBtnRef });
 
   if (!isOpen) return null;
 
@@ -139,9 +102,9 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Level Up — The Forge accepts you"
+        aria-label="Subida de nivel — la Forja te reconoce"
         ref={overlayRef}
-        onKeyDown={handleKeyDown}
+        tabIndex={-1}
         style={{
           position: "fixed",
           inset: 0,
@@ -151,6 +114,7 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
           alignItems: "center",
           justifyContent: "center",
           padding: "1rem",
+          overflowY: "auto",
           animation: "forge-backdrop 0.35s ease forwards",
         }}
       >
@@ -163,8 +127,10 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
             background: "linear-gradient(160deg, #0e0e1c 0%, #0a0a15 60%, #110d08 100%)",
             border: "1px solid rgba(228,168,50,0.55)",
             borderRadius: 4,
-            padding: "2.5rem 2rem 2rem",
-            overflow: "hidden",
+            maxHeight: "calc(100dvh - 2rem)",
+            padding: "clamp(1.25rem, 5vw, 2.5rem) clamp(1rem, 4vw, 2rem) clamp(1rem, 4vw, 2rem)",
+            overflowX: "hidden",
+            overflowY: "auto",
             animation: "forge-panel 0.45s cubic-bezier(0.22,1,0.36,1) forwards, glow-pulse 3s ease-in-out 0.5s infinite",
           }}
         >
@@ -226,7 +192,7 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
                 marginBottom: "0.6rem",
               }}
             >
-              ✦ The Forge Accepts You ✦
+              ✦ La Forja te reconoce ✦
             </p>
 
             {/* Level transition — the hero element */}
@@ -286,9 +252,12 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
                 animation: "level-reveal 0.4s ease 0.5s both",
               }}
             >
-              {payload.className.charAt(0).toUpperCase() + payload.className.slice(1)}
+              {classDisplayName(
+                payload.className,
+                `${payload.className.charAt(0).toLocaleUpperCase("es")}${payload.className.slice(1)}`
+              )}
               {" · "}
-              Level {payload.newLevel}
+              Nivel {payload.newLevel}
             </p>
           </header>
 
@@ -307,32 +276,32 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
           >
             {[
               {
-                label: "Hit Die",
-                value: `${payload.hitDie}  →  rolled ${payload.hpRoll}`,
+                label: "Dado de golpe",
+                value: `${payload.hitDie}  →  tirada ${payload.hpRoll}`,
                 color: "#E2D9C5",
                 delay: "0.55s",
               },
               {
-                label: "CON modifier",
+                label: "Modificador de CON",
                 value: `${conSign}${payload.conModifier}`,
                 color: "rgba(200,184,152,0.7)",
                 delay: "0.7s",
               },
               {
-                label: "HP Gained",
+                label: "PG ganados",
                 value: `+${payload.hpGained}`,
                 color: "#4ADE80",
                 delay: "0.85s",
               },
               {
-                label: "Max HP",
+                label: "PG máximos",
                 value: `${payload.previousMaxHp}  →  ${payload.newMaxHp}`,
                 color: "#4ADE80",
                 delay: "1s",
               },
               {
-                label: "Hit Dice",
-                value: `${payload.newHitDiceTotal}${payload.hitDie}`,
+                label: "Dados de golpe",
+                value: `${payload.newHitDiceTotal} × ${payload.hitDie}`,
                 color: "rgba(200,184,152,0.7)",
                 delay: "1.1s",
               },
@@ -377,7 +346,7 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
             <button
               ref={acceptBtnRef}
               onClick={onAccept}
-              aria-label={`Accept level up to level ${payload.newLevel} — gain ${payload.hpGained} hit points`}
+              aria-label={`Aceptar la subida al nivel ${payload.newLevel}: obtienes ${payload.hpGained} puntos de golpe`}
               style={{
                 fontFamily: "var(--font-cinzel, 'Cinzel', serif)",
                 fontSize: "0.7rem",
@@ -389,6 +358,7 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
                 backgroundSize: "300% auto",
                 border: "none",
                 borderRadius: 2,
+                minHeight: 44,
                 padding: "0.85rem 2.5rem",
                 cursor: "pointer",
                 animation: "btn-shimmer 4s linear 1.2s infinite",
@@ -403,7 +373,7 @@ export function AscensionOverlay({ payload, onAccept, isOpen }: AscensionOverlay
                 e.currentTarget.style.boxShadow = "none";
               }}
             >
-              Accept the Forge&rsquo;s Gift
+              Aceptar el don de la Forja
             </button>
           </div>
         </div>

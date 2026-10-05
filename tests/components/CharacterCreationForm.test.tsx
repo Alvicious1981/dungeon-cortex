@@ -17,6 +17,15 @@ describe("CharacterCreationForm", () => {
     vi.restoreAllMocks();
   });
 
+  it("presenta linajes y clases en español sin cambiar sus valores canónicos", () => {
+    render(<CharacterCreationForm races={races} classes={classes} />);
+
+    expect(screen.getByRole("option", { name: "Humano" })).toHaveValue("human");
+    expect(screen.getByRole("option", { name: "Guerrero" })).toHaveValue("fighter");
+    expect(screen.queryByRole("option", { name: "Human" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Fighter" })).not.toBeInTheDocument();
+  });
+
   it("crea un personaje, crea su campaña y navega al identificador real", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -56,6 +65,26 @@ describe("CharacterCreationForm", () => {
     );
   });
 
+  it("presenta en español los errores de creación recibidos de la API", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "name is required." }), {
+        status: 400,
+      })
+    );
+
+    render(<CharacterCreationForm races={races} classes={classes} />);
+    fireEvent.change(screen.getByLabelText("Nombre del personaje"), {
+      target: { value: "Mira" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comenzar aventura" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Revisa el nombre, el linaje, la clase y las características antes de continuar."
+    );
+    expect(alert).not.toHaveTextContent("name is required.");
+  });
+
   it("reintenta solo la campaña cuando el personaje ya está guardado", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -80,7 +109,13 @@ describe("CharacterCreationForm", () => {
     const retry = await screen.findByRole("button", {
       name: "Reintentar apertura",
     });
-    expect(screen.getByRole("alert")).toHaveTextContent("Unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "El personaje se ha guardado, pero no se pudo abrir la campaña."
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Unavailable");
+    await waitFor(() =>
+      expect(document.getElementById("creation-status")).toHaveFocus()
+    );
     fireEvent.click(retry);
 
     await waitFor(() =>
@@ -126,5 +161,22 @@ describe("CharacterCreationForm", () => {
     expect(
       fetchMock.mock.calls.filter(([url]) => url === "/api/character")
     ).toHaveLength(1);
+  });
+
+  it("muestra un único indicador mientras guarda", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => undefined)
+    );
+
+    render(<CharacterCreationForm races={races} classes={classes} />);
+    fireEvent.change(screen.getByLabelText("Nombre del personaje"), {
+      target: { value: "Mira" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Comenzar aventura" }));
+
+    const submit = await screen.findByRole("button", {
+      name: "Guardando personaje…",
+    });
+    expect(submit.querySelectorAll(".animate-spin")).toHaveLength(1);
   });
 });
