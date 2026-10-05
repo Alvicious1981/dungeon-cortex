@@ -28,6 +28,7 @@ describe("campaign chrome", () => {
       <CampaignLayout character={<aside id="character">Estado</aside>} journal={<aside id="journal" tabIndex={-1}>Misiones</aside>}>
         <section id="scene" tabIndex={-1}>Mapa</section>
         <section id="chronicle" tabIndex={-1}>Relato</section>
+        <section id="commands" tabIndex={-1}>Acciones<input id="action-input" aria-label="Comando" /></section>
       </CampaignLayout>
     );
     const navigation = screen.getByRole("navigation", {
@@ -42,6 +43,10 @@ describe("campaign chrome", () => {
       "href",
       "#chronicle"
     );
+    expect(screen.getByRole("link", { name: "Actuar" })).toHaveAttribute(
+      "href",
+      "#commands"
+    );
     const openSheet = vi.fn();
     window.addEventListener(DUNGEON_OPEN_CHARACTER, openSheet);
     fireEvent.click(screen.getByRole("button", { name: "Personaje" }));
@@ -53,6 +58,10 @@ describe("campaign chrome", () => {
     expect(document.querySelector(".dc-campaign-layout")).toHaveAttribute("data-mobile-area", "adventure");
     fireEvent.click(screen.getByRole("link", { name: "Bitácora" }));
     expect(document.querySelector(".dc-campaign-layout")).toHaveAttribute("data-mobile-area", "adventure");
+    expect(screen.getByRole("link", { name: "Bitácora" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("link", { name: "Actuar" }));
+    expect(screen.getByRole("textbox", { name: "Comando" })).toHaveFocus();
+    expect(screen.getByRole("link", { name: "Actuar" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", { name: "Estado" }));
     expect(document.querySelector(".dc-campaign-layout")).toHaveAttribute("data-auxiliary", "character");
     HTMLElement.prototype.scrollIntoView = oldScroll;

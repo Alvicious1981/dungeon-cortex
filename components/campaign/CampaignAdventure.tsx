@@ -16,13 +16,25 @@ export default function CampaignAdventure({ scene, story, children }: { scene: R
   useEffect(() => {
     const showStory = () => setView("story");
     const navigate = (event: Event) => setView((event as CustomEvent).detail === "scene" ? "scene" : "story");
-    const hash = () => { if (location.hash === "#scene") setView("scene"); else if (location.hash === "#chronicle") setView("story"); };
+    const announceDestination = (destination: "scene" | "chronicle") => {
+      window.dispatchEvent(new CustomEvent(DUNGEON_ADVENTURE_VIEW, { detail: destination }));
+    };
+    const hash = () => {
+      if (location.hash === "#scene") {
+        setView("scene");
+        announceDestination("scene");
+      } else if (location.hash === "#chronicle") {
+        setView("story");
+        announceDestination("chronicle");
+      }
+    };
     const followAnchor = (event: MouseEvent) => {
       if (event.defaultPrevented || !(event.target instanceof Element)) return;
       const link = event.target.closest('a[href="#chronicle"], a[href="#scene"]');
       if (!link) return;
       const id = link.getAttribute("href")!.slice(1);
       setView(id === "scene" ? "scene" : "story");
+      announceDestination(id === "scene" ? "scene" : "chronicle");
       setAnchor({ id });
     };
     hash();
@@ -40,7 +52,10 @@ export default function CampaignAdventure({ scene, story, children }: { scene: R
     };
   }, []);
   return <div className="min-w-0 space-y-4">
-    <Tabs label="Vista de aventura" value={view} onChange={setView} items={[
+    <Tabs label="Vista de aventura" value={view} onChange={next => {
+      setView(next);
+      window.dispatchEvent(new CustomEvent(DUNGEON_ADVENTURE_VIEW, { detail: next === "scene" ? "scene" : "chronicle" }));
+    }} items={[
       { id: "story", label: "Bitácora", content: story },
       { id: "scene", label: "Escena y mapas", content: scene },
     ]} />

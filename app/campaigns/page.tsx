@@ -6,6 +6,7 @@ import { StatusMessage } from "@/components/ui/StatusMessage";
 import { buttonClassName } from "@/components/ui/Button";
 import { getAuthUser, AuthError } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
+import { classDisplayName } from "@/lib/dnd-api/presentation";
 
 export const metadata = {
   title: "Tus campañas",
@@ -40,6 +41,13 @@ function formatUpdatedAt(value: Date): string {
   }).format(value);
 }
 
+function campaignStatusLabel(status: string): string {
+  if (status === "completed") return "Terminada";
+  if (status === "archived") return "Archivada";
+  if (status === "paused") return "Pausada";
+  return "No activa";
+}
+
 function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
   const { character } = campaign;
   // A dead character's campaign stays "active" in the database but cannot be
@@ -54,7 +62,7 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
           {campaign.title}
         </h2>
         <p className="dc-copy mt-2 text-sm">
-          {character.name} · {character.class} · nivel{" "}
+          {character.name} · {classDisplayName(character.class)} · nivel{" "}
           <span className="dc-mechanical-value">{character.level}</span>
         </p>
       </div>
@@ -71,7 +79,9 @@ function CampaignCard({ campaign }: { campaign: CampaignSummary }) {
         {!isActive && (
           <div>
             <dt className="dc-kicker">Estado</dt>
-            <dd className="dc-copy mt-1">{isDead ? "Caída" : campaign.status}</dd>
+            <dd className="dc-copy mt-1">
+              {isDead ? "Caída" : campaignStatusLabel(campaign.status)}
+            </dd>
           </div>
         )}
       </dl>
@@ -168,12 +178,15 @@ export default async function CampaignsPage() {
             ))}
           </ul>
 
-          <p className="dc-help">
-            ¿Quieres empezar otra historia?{" "}
-            <Link href="/character/create" className="underline underline-offset-4">
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+            <p className="dc-help">¿Quieres empezar otra historia?</p>
+            <Link
+              href="/character/create"
+              className={buttonClassName({ variant: "ghost", size: "compact" })}
+            >
               Crear personaje
             </Link>
-          </p>
+          </div>
         </div>
       )}
     </OnboardingShell>

@@ -12,7 +12,10 @@ function Draft() {
   return <input aria-label="Nota local" value={value} onChange={event => setValue(event.target.value)} />;
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
+});
 
 describe("campaign workspace tabs", () => {
   it("supports arrows, Home and End with connected panels, retaining hidden input state", () => {
@@ -45,13 +48,28 @@ describe("campaign workspace tabs", () => {
       fireEvent.click(screen.getByRole("link", { name: "Escena" }));
       expect(screen.getByRole("tabpanel")).toHaveTextContent("Mapa actual");
       expect(screen.getByText("Mapa actual")).toHaveFocus();
+      expect(screen.getByRole("link", { name: "Escena" })).toHaveAttribute("aria-current", "page");
       fireEvent.click(screen.getByRole("link", { name: "Saltar a la bitácora" }));
       expect(screen.getByRole("tabpanel")).toHaveTextContent("Historia actual");
       expect(screen.getByText("Historia actual")).toHaveFocus();
+      expect(screen.getByRole("link", { name: "Bitácora" })).toHaveAttribute("aria-current", "page");
       fireEvent.click(screen.getByRole("link", { name: "Escena" }));
       act(() => prepareDungeonAction("equipar Daga"));
       expect(screen.getByRole("tabpanel")).toHaveTextContent("Historia actual");
       expect(screen.getByRole("textbox", { name: "Comando" })).toHaveFocus();
+      expect(screen.getByRole("link", { name: "Actuar" })).toHaveAttribute("aria-current", "page");
     } finally { HTMLElement.prototype.scrollIntoView = previous; }
+  });
+
+  it("keeps the visible panel and mobile indicator aligned with the initial fragment", () => {
+    window.history.replaceState(null, "", "/#scene");
+    render(<CampaignLayout character={<div>Estado</div>} journal={<aside id="journal">Diario</aside>}>
+      <CampaignAdventure scene={<section id="scene">Mapa inicial</section>} story={<section id="chronicle">Historia inicial</section>}>
+        <div id="commands">Acciones</div>
+      </CampaignAdventure>
+    </CampaignLayout>);
+
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Mapa inicial");
+    expect(screen.getByRole("link", { name: "Escena" })).toHaveAttribute("aria-current", "page");
   });
 });

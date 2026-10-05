@@ -53,6 +53,11 @@
 }
 
 .dc-campaign-mobile-nav button { color: var(--dc-text-muted); }
+.dc-campaign-mobile-nav [aria-current="page"] {
+  color: var(--dc-text);
+  background: var(--dc-surface-soft);
+  box-shadow: inset 0 2px 0 var(--dc-action);
+}
 
 .dc-campaign-layout { display: grid; gap: 1.5rem; }
 .dc-campaign-character, .dc-auxiliary-selector { display: none; }
@@ -68,7 +73,7 @@
   border: 1px solid var(--dc-border-strong);
   border-radius: var(--dc-radius-lg);
   background-color: #090d12;
-  background-image: linear-gradient(90deg, rgb(5 9 14 / .32), rgb(5 9 14 / .08));
+  background-image: linear-gradient(90deg, rgb(5 9 14 / .32), rgb(5 9 14 / .08)), url('/artwork/campaign-journal.webp');
   background-position: center;
   background-size: cover;
 }
@@ -77,7 +82,7 @@
   .dc-campaign-hero {
     min-height: 150px;
     background-position: 60% center;
-    background-image: linear-gradient(90deg, rgb(5 9 14 / .85), rgb(5 9 14 / .45));
+    background-image: linear-gradient(90deg, rgb(5 9 14 / .85), rgb(5 9 14 / .45)), url('/artwork/campaign-journal.webp');
   }
 }
 
