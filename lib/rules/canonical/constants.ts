@@ -207,4 +207,97 @@ export const CANONICAL_BACKGROUND_CODES = [
 
 export type CanonicalBackgroundCode = (typeof CANONICAL_BACKGROUND_CODES)[number];
 
+/** Rasgos y características de clase canónicas (niveles 1–3) del SRD 5.1 */
+export const CANONICAL_FEATURE_CODES = [
+  // Barbarian
+  "rage",
+  "unarmored-defense-barbarian",
+  "reckless-attack",
+  "danger-sense",
+  "primal-path",
+
+  // Bard
+  "spellcasting-bard",
+  "bardic-inspiration",
+  "jack-of-all-trades",
+  "song-of-rest",
+  "bard-college",
+  "expertise-bard",
+
+  // Cleric
+  "spellcasting-cleric",
+  "divine-domain",
+  "channel-divinity",
+
+  // Druid
+  "druidic",
+  "spellcasting-druid",
+  "wild-shape",
+  "druid-circle",
+
+  // Fighter
+  "fighting-style",
+  "second-wind",
+  "action-surge",
+  "martial-archetype",
+
+  // Monk
+  "unarmored-defense-monk",
+  "martial-arts",
+  "ki",
+  "unarmored-movement",
+  "monastic-tradition",
+  "deflect-missiles",
+
+  // Paladin
+  "divine-sense",
+  "lay-on-hands",
+  "fighting-style-paladin",
+  "spellcasting-paladin",
+  "divine-smite",
+  "divine-health",
+  "sacred-oath",
+
+  // Ranger
+  "favored-enemy",
+  "natural-explorer",
+  "fighting-style-ranger",
+  "spellcasting-ranger",
+  "primeval-awareness",
+  "ranger-archetype",
+
+  // Rogue
+  "expertise-rogue",
+  "sneak-attack",
+  "thieves-cant",
+  "cunning-action",
+  "roguish-archetype",
+
+  // Sorcerer
+  "spellcasting-sorcerer",
+  "sorcerous-origin",
+  "font-of-magic",
+  "metamagic",
+
+  // Warlock
+  "otherworldly-patron",
+  "pact-magic",
+  "eldritch-invocations",
+  "pact-boon",
+
+  // Wizard
+  "spellcasting-wizard",
+  "arcane-recovery",
+  "arcane-tradition",
+] as const;
+
+export type CanonicalFeatureCode = (typeof CANONICAL_FEATURE_CODES)[number];
+
+/** Dotes oficiales del SRD 5.1 */
+export const CANONICAL_FEAT_CODES = [
+  "grappler",
+] as const;
+
+export type CanonicalFeatCode = (typeof CANONICAL_FEAT_CODES)[number];
+
 

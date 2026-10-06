@@ -165,6 +165,8 @@ export function classNameToCanonicalCode(name: string): CanonicalClassCode | nul
   return CLASS_NAME_TO_CODE[normalized] ?? null;
 }
 
+export const normalizeCanonicalClass = classNameToCanonicalCode;
+
 /**
  * Retorna el nombre estándar en inglés con mayúsculas del SRD (ej. "Fighter").
  */

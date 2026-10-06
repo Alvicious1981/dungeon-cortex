@@ -126,6 +126,8 @@ model Character {
   proficiencies    CharacterProficiency[]
   classLevels      CharacterClassLevel[]
   origin           CharacterOrigin?
+  features         CharacterFeature[]
+  feats            CharacterFeat[]
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -844,6 +846,8 @@ model Ruleset {
   races       CanonicalRace[]
   traits      CanonicalTrait[]
   backgrounds CanonicalBackground[]
+  features    CanonicalFeature[]
+  feats       CanonicalFeat[]
 }
 
 /// An authoritative source document for rules within a ruleset (e.g. SRD 5.1).
@@ -1022,6 +1026,7 @@ model CanonicalClass {
   ruleset             Ruleset             @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
   subclasses          CanonicalSubclass[]
   characterClassLevels CharacterClassLevel[]
+  features            CanonicalFeature[]
 
   @@id([rulesetId, code])
   @@index([rulesetId])
@@ -1037,6 +1042,7 @@ model CanonicalSubclass {
 
   canonicalClass       CanonicalClass        @relation(fields: [rulesetId, classCode], references: [rulesetId, code], onDelete: Cascade)
   characterClassLevels CharacterClassLevel[]
+  features            CanonicalFeature[]
 
   @@id([rulesetId, classCode, code])
   @@index([rulesetId, classCode])
@@ -1141,6 +1147,82 @@ model CharacterOrigin {
   @@index([characterId])
   @@index([rulesetId, raceCode])
   @@index([rulesetId, backgroundCode])
+}
+
+enum FeatureType {
+  CLASS
+  SUBCLASS
+  FEAT
+  RACIAL
+}
+
+/// Master catalog of canonical features granted by class, subclass, feat or race.
+model CanonicalFeature {
+  rulesetId     String
+  code          String
+  name          String
+  description   String?
+  classCode     String?
+  subclassCode  String?
+  requiredLevel Int         @default(1)
+  featureType   FeatureType @default(CLASS)
+
+  ruleset           Ruleset             @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  canonicalClass    CanonicalClass?     @relation(fields: [rulesetId, classCode], references: [rulesetId, code], onDelete: Cascade)
+  canonicalSubclass CanonicalSubclass?  @relation(fields: [rulesetId, classCode, subclassCode], references: [rulesetId, classCode, code], onDelete: Cascade)
+  characterFeatures CharacterFeature[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+  @@index([rulesetId, classCode, requiredLevel])
+}
+
+/// Master catalog of canonical feats partitioned by Ruleset.
+model CanonicalFeat {
+  rulesetId    String
+  code         String
+  name         String
+  description  String
+  prerequisite String?
+
+  ruleset        Ruleset         @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  characterFeats CharacterFeat[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Feature possessed by a Character, referencing CanonicalFeature with source provenance.
+model CharacterFeature {
+  id          String   @id @default(cuid())
+  characterId String
+  rulesetId   String
+  featureCode String
+  source      String   // e.g. "class:fighter:1", "subclass:champion:3"
+  createdAt   DateTime @default(now())
+
+  character Character        @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  feature   CanonicalFeature @relation(fields: [rulesetId, featureCode], references: [rulesetId, code], onDelete: Restrict)
+
+  @@unique([characterId, featureCode])
+  @@index([characterId])
+  @@index([rulesetId, featureCode])
+}
+
+/// Feat selected by a Character, referencing CanonicalFeat.
+model CharacterFeat {
+  id          String   @id @default(cuid())
+  characterId String
+  rulesetId   String
+  featCode    String
+  createdAt   DateTime @default(now())
+
+  character Character     @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  feat      CanonicalFeat @relation(fields: [rulesetId, featCode], references: [rulesetId, code], onDelete: Restrict)
+
+  @@unique([characterId, featCode])
+  @@index([characterId])
+  @@index([rulesetId, featCode])
 }
 
 

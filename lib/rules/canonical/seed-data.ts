@@ -19,8 +19,10 @@ import {
   type CanonicalRaceCode,
   type CanonicalTraitCode,
   type CanonicalBackgroundCode,
+  type CanonicalFeatureCode,
+  type CanonicalFeatCode,
 } from "./constants";
-import { ProficiencyType } from "@prisma/client";
+import { ProficiencyType, FeatureType } from "@prisma/client";
 
 export interface CanonicalAbilityDefinition {
   rulesetId: string;
@@ -99,6 +101,25 @@ export interface CanonicalBackgroundDefinition {
   name: string;
   description?: string;
   featureName?: string;
+}
+
+export interface CanonicalFeatureDefinition {
+  rulesetId: string;
+  code: CanonicalFeatureCode;
+  name: string;
+  description?: string;
+  classCode?: CanonicalClassCode | null;
+  subclassCode?: CanonicalSubclassCode | null;
+  requiredLevel: number;
+  featureType: FeatureType;
+}
+
+export interface CanonicalFeatDefinition {
+  rulesetId: string;
+  code: CanonicalFeatCode;
+  name: string;
+  description: string;
+  prerequisite?: string | null;
 }
 
 
@@ -686,6 +707,555 @@ export const SRD_2014_BACKGROUNDS: readonly CanonicalBackgroundDefinition[] = [
     name: "Acolyte",
     description: "You have spent your life in the service of a temple to a specific god or pantheon.",
     featureName: "Shelter of the Faithful",
+  },
+] as const;
+
+export const SRD_2014_FEATURES: readonly CanonicalFeatureDefinition[] = [
+  // Barbarian
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "rage",
+    name: "Rage",
+    description: "In battle, you fight with primal ferocity entering a rage that grants bonus damage and damage resistance.",
+    classCode: "barbarian",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "unarmored-defense-barbarian",
+    name: "Unarmored Defense",
+    description: "While you are not wearing any armor, your Armor Class equals 10 + your Dexterity modifier + your Constitution modifier.",
+    classCode: "barbarian",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "reckless-attack",
+    name: "Reckless Attack",
+    description: "You can throw aside all concern for defense to attack with fierce desperation gaining advantage on melee weapon attack rolls.",
+    classCode: "barbarian",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "danger-sense",
+    name: "Danger Sense",
+    description: "You gain an uncanny sense of when things nearby aren't as they should be, giving you advantage on Dexterity saving throws.",
+    classCode: "barbarian",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "primal-path",
+    name: "Primal Path",
+    description: "You choose a path that shapes the nature of your rage, such as the Path of the Berserker.",
+    classCode: "barbarian",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Bard
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-bard",
+    name: "Spellcasting",
+    description: "You have learned to untangle and reshape the fabric of reality in harmony with your wishes and music.",
+    classCode: "bard",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "bardic-inspiration",
+    name: "Bardic Inspiration",
+    description: "You can inspire others through stirring words or music granting an inspiration die.",
+    classCode: "bard",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "jack-of-all-trades",
+    name: "Jack of All Trades",
+    description: "You can add half your proficiency bonus to any ability check you make that doesn't already include your proficiency bonus.",
+    classCode: "bard",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "song-of-rest",
+    name: "Song of Rest",
+    description: "You can use soothing music or oration to help revitalize your wounded allies during a short rest.",
+    classCode: "bard",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "bard-college",
+    name: "Bard College",
+    description: "You delve into the advanced techniques of a bard college, such as the College of Lore.",
+    classCode: "bard",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "expertise-bard",
+    name: "Expertise",
+    description: "Your proficiency bonus is doubled for any ability check you make that uses either of the chosen skill proficiencies.",
+    classCode: "bard",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Cleric
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-cleric",
+    name: "Spellcasting",
+    description: "As a conduit for divine power, you can cast cleric spells.",
+    classCode: "cleric",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "divine-domain",
+    name: "Divine Domain",
+    description: "You choose a domain shaped by your deity, such as the Life Domain.",
+    classCode: "cleric",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "channel-divinity",
+    name: "Channel Divinity",
+    description: "You gain the ability to channel divine energy directly from your deity to turn undead and fuel domain effects.",
+    classCode: "cleric",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+
+  // Druid
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "druidic",
+    name: "Druidic",
+    description: "You know Druidic, the secret language of druids.",
+    classCode: "druid",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-druid",
+    name: "Spellcasting",
+    description: "Drawing on the divine essence of nature itself, you can cast spells to shape that essence to your will.",
+    classCode: "druid",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "wild-shape",
+    name: "Wild Shape",
+    description: "You can use your action to magically assume the shape of a beast that you have seen before.",
+    classCode: "druid",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "druid-circle",
+    name: "Druid Circle",
+    description: "You choose to identify with a circle of closely related druids, such as the Circle of the Land.",
+    classCode: "druid",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+
+  // Fighter
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "fighting-style",
+    name: "Fighting Style",
+    description: "You adopt a particular style of fighting as your specialty.",
+    classCode: "fighter",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "second-wind",
+    name: "Second Wind",
+    description: "You have a limited well of stamina that you can draw on to protect yourself from harm, regaining 1d10 + fighter level HP.",
+    classCode: "fighter",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "action-surge",
+    name: "Action Surge",
+    description: "You can push yourself beyond your normal limits for a moment taking an additional action on your turn.",
+    classCode: "fighter",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "martial-archetype",
+    name: "Martial Archetype",
+    description: "You choose an archetype that you strive to emulate in your combat styles and techniques, such as the Champion.",
+    classCode: "fighter",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Monk
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "unarmored-defense-monk",
+    name: "Unarmored Defense",
+    description: "Beginning at 1st level, while you are wearing no armor and not wielding a shield, your AC equals 10 + Dexterity modifier + Wisdom modifier.",
+    classCode: "monk",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "martial-arts",
+    name: "Martial Arts",
+    description: "Your practice of martial arts gives you mastery of combat styles that use unarmed strikes and monk weapons.",
+    classCode: "monk",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "ki",
+    name: "Ki",
+    description: "Starting at 2nd level, your training allows you to harness the mystic energy of ki.",
+    classCode: "monk",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "unarmored-movement",
+    name: "Unarmored Movement",
+    description: "Starting at 2nd level, your speed increases by 10 feet while you are not wearing armor or wielding a shield.",
+    classCode: "monk",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "monastic-tradition",
+    name: "Monastic Tradition",
+    description: "When you reach 3rd level, you commit yourself to a monastic tradition, such as the Way of the Open Hand.",
+    classCode: "monk",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "deflect-missiles",
+    name: "Deflect Missiles",
+    description: "Starting at 3rd level, you can use your reaction to deflect or catch the missile when you are hit by a ranged weapon attack.",
+    classCode: "monk",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Paladin
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "divine-sense",
+    name: "Divine Sense",
+    description: "The presence of strong evil registers on your senses like a noxious odor, and powerful good rings like heavenly music in your ears.",
+    classCode: "paladin",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "lay-on-hands",
+    name: "Lay on Hands",
+    description: "Your blessed touch can heal wounds, drawing from a pool of healing power equal to your paladin level × 5.",
+    classCode: "paladin",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "fighting-style-paladin",
+    name: "Fighting Style",
+    description: "At 2nd level, you adopt a style of fighting as your specialty.",
+    classCode: "paladin",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-paladin",
+    name: "Spellcasting",
+    description: "By 2nd level, you have learned to draw on divine magic through meditation and prayer to cast spells as a cleric does.",
+    classCode: "paladin",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "divine-smite",
+    name: "Divine Smite",
+    description: "Starting at 2nd level, when you hit a creature with a melee weapon attack, you can expend one spell slot to deal radiant damage.",
+    classCode: "paladin",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "divine-health",
+    name: "Divine Health",
+    description: "By 3rd level, the divine magic flowing through you makes you immune to disease.",
+    classCode: "paladin",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "sacred-oath",
+    name: "Sacred Oath",
+    description: "When you reach 3rd level, you swear the oath that binds you as a paladin forever, such as the Oath of Devotion.",
+    classCode: "paladin",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Ranger
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "favored-enemy",
+    name: "Favored Enemy",
+    description: "Beginning at 1st level, you have significant experience studying, tracking, hunting, and even talking to a certain type of enemy.",
+    classCode: "ranger",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "natural-explorer",
+    name: "Natural Explorer",
+    description: "You are particularly familiar with one type of natural environment and are adept at traveling and surviving in such regions.",
+    classCode: "ranger",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "fighting-style-ranger",
+    name: "Fighting Style",
+    description: "At 2nd level, you adopt a particular style of fighting as your specialty.",
+    classCode: "ranger",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-ranger",
+    name: "Spellcasting",
+    description: "By the time you reach 2nd level, you have learned to use the magical essence of nature to cast spells, much as a druid does.",
+    classCode: "ranger",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "primeval-awareness",
+    name: "Primeval Awareness",
+    description: "Starting at 3rd level, you can use your action and expend one ranger spell slot to sense certain creature types within 1 mile.",
+    classCode: "ranger",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "ranger-archetype",
+    name: "Ranger Archetype",
+    description: "At 3rd level, you choose an archetype that you strive to emulate, such as the Hunter.",
+    classCode: "ranger",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Rogue
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "expertise-rogue",
+    name: "Expertise",
+    description: "At 1st level, choose two of your skill proficiencies; your proficiency bonus is doubled for any ability check you make that uses either.",
+    classCode: "rogue",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "sneak-attack",
+    name: "Sneak Attack",
+    description: "Beginning at 1st level, you know how to strike subtly and exploit a foe's distraction dealing extra damage once per turn.",
+    classCode: "rogue",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "thieves-cant",
+    name: "Thieves' Cant",
+    description: "During your rogue training you learned thieves' cant, a secret mix of dialect, jargon, and code.",
+    classCode: "rogue",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "cunning-action",
+    name: "Cunning Action",
+    description: "Starting at 2nd level, your quick thinking and agility allow you to move and act quickly taking Dash, Disengage or Hide as a bonus action.",
+    classCode: "rogue",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "roguish-archetype",
+    name: "Roguish Archetype",
+    description: "At 3rd level, you choose an archetype that you emulate in the exercise of your rogue abilities, such as the Thief.",
+    classCode: "rogue",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Sorcerer
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-sorcerer",
+    name: "Spellcasting",
+    description: "An event in your past or in the life of a parent or ancestor left an indelible mark on you, infusing you with arcane magic.",
+    classCode: "sorcerer",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "sorcerous-origin",
+    name: "Sorcerous Origin",
+    description: "Choose a sorcerous origin, which describes the source of your innate magical power, such as the Draconic Bloodline.",
+    classCode: "sorcerer",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "font-of-magic",
+    name: "Font of Magic",
+    description: "At 2nd level, you tap into a deep wellspring of magic within yourself represented by sorcery points.",
+    classCode: "sorcerer",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "metamagic",
+    name: "Metamagic",
+    description: "At 3rd level, you gain the ability to twist your spells to suit your needs.",
+    classCode: "sorcerer",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Warlock
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "otherworldly-patron",
+    name: "Otherworldly Patron",
+    description: "At 1st level, you have struck a bargain with an otherworldly being of your choice, such as The Fiend.",
+    classCode: "warlock",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "pact-magic",
+    name: "Pact Magic",
+    description: "Your arcane research and the magic bestowed on you by your patron have given you facility with spells.",
+    classCode: "warlock",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "eldritch-invocations",
+    name: "Eldritch Invocations",
+    description: "In your study of occult lore, you have unearned eldritch invocations, fragments of forbidden knowledge that imbue you with an abiding magical ability.",
+    classCode: "warlock",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "pact-boon",
+    name: "Pact Boon",
+    description: "At 3rd level, your otherworldly patron bestows a gift upon you for your loyal service.",
+    classCode: "warlock",
+    requiredLevel: 3,
+    featureType: "CLASS",
+  },
+
+  // Wizard
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "spellcasting-wizard",
+    name: "Spellcasting",
+    description: "As a student of arcane magic, you have a spellbook containing spells that show the first glimmerings of your true power.",
+    classCode: "wizard",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "arcane-recovery",
+    name: "Arcane Recovery",
+    description: "You have learned to regain some of your magical energy by studying your spellbook once per day during a short rest.",
+    classCode: "wizard",
+    requiredLevel: 1,
+    featureType: "CLASS",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "arcane-tradition",
+    name: "Arcane Tradition",
+    description: "When you reach 2nd level, you choose an arcane tradition, shaping your practice of magic, such as the School of Evocation.",
+    classCode: "wizard",
+    requiredLevel: 2,
+    featureType: "CLASS",
+  },
+] as const;
+
+export const SRD_2014_FEATS: readonly CanonicalFeatDefinition[] = [
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "grappler",
+    name: "Grappler",
+    description: "You've developed the skills necessary to hold your own in close-quarters grappling.",
+    prerequisite: "Strength 13 or higher",
   },
 ] as const;
 

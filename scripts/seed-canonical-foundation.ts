@@ -28,6 +28,8 @@ import {
   SRD_2014_TRAITS,
   SRD_2014_RACE_TRAITS,
   SRD_2014_BACKGROUNDS,
+  SRD_2014_FEATURES,
+  SRD_2014_FEATS,
 } from "../lib/rules/canonical/seed-data";
 
 export interface CanonicalSeedResult {
@@ -43,6 +45,8 @@ export interface CanonicalSeedResult {
   traitsUpserted: number;
   raceTraitsUpserted: number;
   backgroundsUpserted: number;
+  featuresUpserted: number;
+  featsUpserted: number;
 }
 
 
@@ -62,6 +66,8 @@ export async function seedCanonicalFoundation(
     traitsUpserted: 0,
     raceTraitsUpserted: 0,
     backgroundsUpserted: 0,
+    featuresUpserted: 0,
+    featsUpserted: 0,
   };
 
   // 1. Ruleset
@@ -283,6 +289,47 @@ export async function seedCanonicalFoundation(
     result.backgroundsUpserted++;
   }
 
+  // 13. Features
+  for (const feat of SRD_2014_FEATURES) {
+    await client.canonicalFeature.upsert({
+      where: {
+        rulesetId_code: {
+          rulesetId: feat.rulesetId,
+          code: feat.code,
+        },
+      },
+      create: feat,
+      update: {
+        name: feat.name,
+        description: feat.description,
+        classCode: feat.classCode,
+        subclassCode: feat.subclassCode,
+        requiredLevel: feat.requiredLevel,
+        featureType: feat.featureType,
+      },
+    });
+    result.featuresUpserted++;
+  }
+
+  // 14. Feats
+  for (const f of SRD_2014_FEATS) {
+    await client.canonicalFeat.upsert({
+      where: {
+        rulesetId_code: {
+          rulesetId: f.rulesetId,
+          code: f.code,
+        },
+      },
+      create: f,
+      update: {
+        name: f.name,
+        description: f.description,
+        prerequisite: f.prerequisite,
+      },
+    });
+    result.featsUpserted++;
+  }
+
   return result;
 }
 
@@ -304,7 +351,9 @@ async function main() {
         `races=${result.racesUpserted}, ` +
         `traits=${result.traitsUpserted}, ` +
         `raceTraits=${result.raceTraitsUpserted}, ` +
-        `backgrounds=${result.backgroundsUpserted}`
+        `backgrounds=${result.backgroundsUpserted}, ` +
+        `features=${result.featuresUpserted}, ` +
+        `feats=${result.featsUpserted}`
     );
   } catch (error) {
     console.error("✗ Error durante la siembra canónica:", error);

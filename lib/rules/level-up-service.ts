@@ -11,6 +11,7 @@ import type { CharacterClass } from "@/lib/rules/proficiency";
 import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import { advanceSpellSlots, isSpellSlots } from "@/lib/rules/magic";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
+import { buildNewLevelCharacterFeatures } from "@/lib/rules/canonical/character-features";
 import type { Prisma } from "@prisma/client";
 
 export type LevelUpServiceErrorCode =
@@ -103,6 +104,17 @@ interface LevelUpDb {
       data: {
         level: number;
       };
+    }): Promise<{ count: number }>;
+  };
+  characterFeature?: {
+    createMany?(args: {
+      data: Array<{
+        characterId: string;
+        rulesetId: string;
+        featureCode: string;
+        source: string;
+      }>;
+      skipDuplicates?: boolean;
     }): Promise<{ count: number }>;
   };
 }
@@ -430,6 +442,18 @@ async function applyLevelUpInTransaction(
         data: {
           level: nextLevel,
         },
+      });
+    }
+
+    const newFeatures = buildNewLevelCharacterFeatures(
+      input.characterId,
+      character.class,
+      nextLevel
+    );
+    if (db.characterFeature?.createMany && newFeatures.length > 0) {
+      await db.characterFeature.createMany({
+        data: newFeatures,
+        skipDuplicates: true,
       });
     }
   } catch (err) {

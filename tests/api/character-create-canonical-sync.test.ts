@@ -37,6 +37,9 @@ vi.mock("@/lib/db/prisma", () => ({
     characterOrigin: {
       create: vi.fn(async () => ({ id: "co-1" })),
     },
+    characterFeature: {
+      createMany: vi.fn(async () => ({ count: 2 })),
+    },
   },
 }));
 
@@ -178,6 +181,25 @@ describe("POST /api/character — Dual-write a tablas canónicas", () => {
       rulesetId: "dnd_5e_2014",
       raceCode: "human",
       backgroundCode: null,
+    });
+
+    // 8. Verifica dual-write en CharacterFeature (fighter lvl 1 -> fighting-style, second-wind)
+    const featureCalls = (prisma.characterFeature.createMany as ReturnType<typeof vi.fn>).mock.calls;
+    expect(featureCalls).toHaveLength(1);
+    const featurePayload = featureCalls[0][0].data;
+
+    expect(featurePayload).toHaveLength(2);
+    expect(featurePayload).toContainEqual({
+      characterId: "char-canonical-test",
+      rulesetId: "dnd_5e_2014",
+      featureCode: "fighting-style",
+      source: "class:fighter:1",
+    });
+    expect(featurePayload).toContainEqual({
+      characterId: "char-canonical-test",
+      rulesetId: "dnd_5e_2014",
+      featureCode: "second-wind",
+      source: "class:fighter:1",
     });
   });
 
