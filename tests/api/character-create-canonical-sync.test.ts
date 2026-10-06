@@ -31,6 +31,9 @@ vi.mock("@/lib/db/prisma", () => ({
     characterProficiency: {
       createMany: vi.fn(async () => ({ count: 8 })),
     },
+    characterClassLevel: {
+      create: vi.fn(async () => ({ id: "ccl-1" })),
+    },
   },
 }));
 
@@ -146,6 +149,20 @@ describe("POST /api/character — Dual-write a tablas canónicas", () => {
       rulesetId: "dnd_5e_2014",
       type: "SAVING_THROW",
       code: "STR",
+    });
+
+    // 6. Verifica dual-write en CharacterClassLevel (fighter -> nivel 1, isPrimary: true)
+    const classLevelCalls = (prisma.characterClassLevel.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(classLevelCalls).toHaveLength(1);
+    const classLevelPayload = classLevelCalls[0][0].data;
+
+    expect(classLevelPayload).toEqual({
+      characterId: "char-canonical-test",
+      rulesetId: "dnd_5e_2014",
+      classCode: "fighter",
+      subclassCode: null,
+      level: 1,
+      isPrimary: true,
     });
   });
 

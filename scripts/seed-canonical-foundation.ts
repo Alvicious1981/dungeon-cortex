@@ -22,6 +22,8 @@ import {
   SRD_2014_SKILLS,
   SRD_2014_LANGUAGES,
   SRD_2014_PROFICIENCIES,
+  SRD_2014_CLASSES,
+  SRD_2014_SUBCLASSES,
 } from "../lib/rules/canonical/seed-data";
 
 export interface CanonicalSeedResult {
@@ -31,6 +33,8 @@ export interface CanonicalSeedResult {
   skillsUpserted: number;
   languagesUpserted: number;
   proficienciesUpserted: number;
+  classesUpserted: number;
+  subclassesUpserted: number;
 }
 
 
@@ -44,6 +48,8 @@ export async function seedCanonicalFoundation(
     skillsUpserted: 0,
     languagesUpserted: 0,
     proficienciesUpserted: 0,
+    classesUpserted: 0,
+    subclassesUpserted: 0,
   };
 
   // 1. Ruleset
@@ -152,6 +158,46 @@ export async function seedCanonicalFoundation(
     result.proficienciesUpserted++;
   }
 
+  // 7. Classes
+  for (const cls of SRD_2014_CLASSES) {
+    await client.canonicalClass.upsert({
+      where: {
+        rulesetId_code: {
+          rulesetId: cls.rulesetId,
+          code: cls.code,
+        },
+      },
+      create: cls,
+      update: {
+        name: cls.name,
+        hitDie: cls.hitDie,
+        primaryAbility: cls.primaryAbility,
+        spellcastingAbility: cls.spellcastingAbility,
+        subclassLevel: cls.subclassLevel,
+      },
+    });
+    result.classesUpserted++;
+  }
+
+  // 8. Subclasses
+  for (const sub of SRD_2014_SUBCLASSES) {
+    await client.canonicalSubclass.upsert({
+      where: {
+        rulesetId_classCode_code: {
+          rulesetId: sub.rulesetId,
+          classCode: sub.classCode,
+          code: sub.code,
+        },
+      },
+      create: sub,
+      update: {
+        name: sub.name,
+        description: sub.description,
+      },
+    });
+    result.subclassesUpserted++;
+  }
+
   return result;
 }
 
@@ -167,7 +213,9 @@ async function main() {
         `abilities=${result.abilitiesUpserted}, ` +
         `skills=${result.skillsUpserted}, ` +
         `languages=${result.languagesUpserted}, ` +
-        `proficiencies=${result.proficienciesUpserted}`
+        `proficiencies=${result.proficienciesUpserted}, ` +
+        `classes=${result.classesUpserted}, ` +
+        `subclasses=${result.subclassesUpserted}`
     );
   } catch (error) {
     console.error("✗ Error durante la siembra canónica:", error);

@@ -14,6 +14,8 @@ import {
   buildCanonicalCharacterLanguages,
 } from "@/lib/rules/canonical/character-languages";
 import { buildBaselineClassProficiencies } from "@/lib/rules/canonical/character-proficiencies";
+import { buildCanonicalCharacterClassLevel } from "@/lib/rules/canonical/character-classes";
+
 
 
 interface CreateCharacterBody {
@@ -119,6 +121,12 @@ export async function POST(req: NextRequest) {
       character.id,
       character.class ?? characterClass
     );
+    const canonicalClassLevel = buildCanonicalCharacterClassLevel({
+      characterId: character.id,
+      className: character.class ?? characterClass,
+      level: 1,
+      isPrimary: true,
+    });
 
     if (prisma.characterAbility?.createMany && canonicalAbilities.length > 0) {
       await prisma.characterAbility.createMany({ data: canonicalAbilities });
@@ -131,6 +139,9 @@ export async function POST(req: NextRequest) {
     }
     if (prisma.characterProficiency?.createMany && canonicalProficiencies.length > 0) {
       await prisma.characterProficiency.createMany({ data: canonicalProficiencies });
+    }
+    if (prisma.characterClassLevel?.create && canonicalClassLevel) {
+      await prisma.characterClassLevel.create({ data: canonicalClassLevel });
     }
   } catch (canonicalErr) {
     // Declarado, no silencioso. Si el catálogo maestro aún no está sembrado en el entorno,

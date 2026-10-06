@@ -124,6 +124,7 @@ model Character {
   skills           CharacterSkillProficiency[]
   languages        CharacterLanguage[]
   proficiencies    CharacterProficiency[]
+  classLevels      CharacterClassLevel[]
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -838,6 +839,7 @@ model Ruleset {
   skills      CanonicalSkill[]
   languages   CanonicalLanguage[]
   proficiencies CanonicalProficiency[]
+  classes     CanonicalClass[]
 }
 
 /// An authoritative source document for rules within a ruleset (e.g. SRD 5.1).
@@ -1002,6 +1004,62 @@ model CharacterProficiency {
   @@index([characterId])
   @@index([rulesetId, type, code])
 }
+
+/// Master catalog of canonical character classes partitioned by Ruleset.
+model CanonicalClass {
+  rulesetId           String
+  code                String
+  name                String
+  hitDie              Int
+  primaryAbility      String
+  spellcastingAbility String?
+  subclassLevel       Int      @default(3)
+
+  ruleset             Ruleset             @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  subclasses          CanonicalSubclass[]
+  characterClassLevels CharacterClassLevel[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Master catalog of canonical subclasses partitioned by Ruleset and Class.
+model CanonicalSubclass {
+  rulesetId   String
+  classCode   String
+  code        String
+  name        String
+  description String?
+
+  canonicalClass       CanonicalClass        @relation(fields: [rulesetId, classCode], references: [rulesetId, code], onDelete: Cascade)
+  characterClassLevels CharacterClassLevel[]
+
+  @@id([rulesetId, classCode, code])
+  @@index([rulesetId, classCode])
+}
+
+/// Normalized progression of a Character in a specific class.
+model CharacterClassLevel {
+  id           String   @id @default(cuid())
+  characterId  String
+  rulesetId    String
+  classCode    String
+  subclassCode String?
+  level        Int      @default(1)
+  isPrimary    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  character      Character          @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  canonicalClass CanonicalClass     @relation(fields: [rulesetId, classCode], references: [rulesetId, code], onDelete: Restrict)
+  subclass       CanonicalSubclass? @relation(fields: [rulesetId, classCode, subclassCode], references: [rulesetId, classCode, code], onDelete: Restrict)
+
+  @@unique([characterId, classCode])
+  @@index([characterId])
+  @@index([rulesetId, classCode])
+  @@index([rulesetId, classCode, subclassCode])
+}
+
 
 
 

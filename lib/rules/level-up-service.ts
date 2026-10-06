@@ -94,6 +94,17 @@ interface LevelUpDb {
       };
     }): Promise<{ count: number }>;
   };
+  characterClassLevel?: {
+    updateMany?(args: {
+      where: {
+        characterId: string;
+        classCode: string;
+      };
+      data: {
+        level: number;
+      };
+    }): Promise<{ count: number }>;
+  };
 }
 
 export interface ApplyLevelUpInput {
@@ -405,6 +416,26 @@ async function applyLevelUpInTransaction(
     throw new LevelUpServiceError(
       "LEVEL_UP_ALREADY_APPLIED",
       `Character ${input.characterId} is no longer at level ${fromLevel}; a concurrent request applied this level-up first.`
+    );
+  }
+
+  // Dual-write: sincronizar nivel canónico en CharacterClassLevel si el delegado existe
+  try {
+    if (db.characterClassLevel?.updateMany) {
+      await db.characterClassLevel.updateMany({
+        where: {
+          characterId: input.characterId,
+          classCode: character.class.toLowerCase(),
+        },
+        data: {
+          level: nextLevel,
+        },
+      });
+    }
+  } catch (err) {
+    console.warn(
+      `[level-up] No se pudo sincronizar CharacterClassLevel para ${input.characterId}:`,
+      err
     );
   }
 

@@ -124,3 +124,40 @@ export const CANONICAL_TOOL_CODES = [
 
 export type CanonicalToolCode = (typeof CANONICAL_TOOL_CODES)[number];
 
+/** Las 12 clases oficiales del SRD 5.1 */
+export const CANONICAL_CLASS_CODES = [
+  "barbarian",
+  "bard",
+  "cleric",
+  "druid",
+  "fighter",
+  "monk",
+  "paladin",
+  "ranger",
+  "rogue",
+  "sorcerer",
+  "warlock",
+  "wizard",
+] as const;
+
+export type CanonicalClassCode = (typeof CANONICAL_CLASS_CODES)[number];
+
+/** Las 12 subclases canónicas del SRD 5.1 (una por clase) */
+export const CANONICAL_SUBCLASS_CODES = [
+  "path-of-the-berserker",
+  "college-of-lore",
+  "life-domain",
+  "circle-of-the-land",
+  "champion",
+  "way-of-the-open-hand",
+  "oath-of-devotion",
+  "hunter",
+  "thief",
+  "draconic-bloodline",
+  "the-fiend",
+  "school-of-evocation",
+] as const;
+
+export type CanonicalSubclassCode = (typeof CANONICAL_SUBCLASS_CODES)[number];
+
+

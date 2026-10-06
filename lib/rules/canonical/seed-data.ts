@@ -14,6 +14,8 @@ import {
   type CanonicalAbilityCode,
   type CanonicalSkillCode,
   type CanonicalLanguageCode,
+  type CanonicalClassCode,
+  type CanonicalSubclassCode,
 } from "./constants";
 import { ProficiencyType } from "@prisma/client";
 
@@ -47,6 +49,25 @@ export interface CanonicalProficiencyDefinition {
   name: string;
   description?: string;
 }
+
+export interface CanonicalClassDefinition {
+  rulesetId: string;
+  code: CanonicalClassCode;
+  name: string;
+  hitDie: number;
+  primaryAbility: string;
+  spellcastingAbility?: string | null;
+  subclassLevel: number;
+}
+
+export interface CanonicalSubclassDefinition {
+  rulesetId: string;
+  classCode: CanonicalClassCode;
+  code: CanonicalSubclassCode;
+  name: string;
+  description?: string;
+}
+
 
 
 export const SRD_2014_RULESET = {
@@ -191,4 +212,203 @@ export const SRD_2014_PROFICIENCIES: readonly CanonicalProficiencyDefinition[] =
   { rulesetId: RULESET_2014_ID, type: "TOOL", code: "disguise-kit", name: "Disguise Kit", description: "Cosmetics and props for creating illusions of appearance." },
   { rulesetId: RULESET_2014_ID, type: "TOOL", code: "forgery-kit", name: "Forgery Kit", description: "Tools and inks for falsifying documents and seals." },
 ] as const;
+
+export const SRD_2014_CLASSES: readonly CanonicalClassDefinition[] = [
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "barbarian",
+    name: "Barbarian",
+    hitDie: 12,
+    primaryAbility: "STR",
+    spellcastingAbility: null,
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "bard",
+    name: "Bard",
+    hitDie: 8,
+    primaryAbility: "CHA",
+    spellcastingAbility: "CHA",
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "cleric",
+    name: "Cleric",
+    hitDie: 8,
+    primaryAbility: "WIS",
+    spellcastingAbility: "WIS",
+    subclassLevel: 1,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "druid",
+    name: "Druid",
+    hitDie: 8,
+    primaryAbility: "WIS",
+    spellcastingAbility: "WIS",
+    subclassLevel: 2,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "fighter",
+    name: "Fighter",
+    hitDie: 10,
+    primaryAbility: "STR",
+    spellcastingAbility: null,
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "monk",
+    name: "Monk",
+    hitDie: 8,
+    primaryAbility: "DEX",
+    spellcastingAbility: null,
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "paladin",
+    name: "Paladin",
+    hitDie: 10,
+    primaryAbility: "STR",
+    spellcastingAbility: "CHA",
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "ranger",
+    name: "Ranger",
+    hitDie: 10,
+    primaryAbility: "DEX",
+    spellcastingAbility: "WIS",
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "rogue",
+    name: "Rogue",
+    hitDie: 8,
+    primaryAbility: "DEX",
+    spellcastingAbility: null,
+    subclassLevel: 3,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "sorcerer",
+    name: "Sorcerer",
+    hitDie: 6,
+    primaryAbility: "CHA",
+    spellcastingAbility: "CHA",
+    subclassLevel: 1,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "warlock",
+    name: "Warlock",
+    hitDie: 8,
+    primaryAbility: "CHA",
+    spellcastingAbility: "CHA",
+    subclassLevel: 1,
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "wizard",
+    name: "Wizard",
+    hitDie: 6,
+    primaryAbility: "INT",
+    spellcastingAbility: "INT",
+    subclassLevel: 2,
+  },
+] as const;
+
+export const SRD_2014_SUBCLASSES: readonly CanonicalSubclassDefinition[] = [
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "barbarian",
+    code: "path-of-the-berserker",
+    name: "Path of the Berserker",
+    description: "For some barbarians, rage is a means to an end - that end being violence.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "bard",
+    code: "college-of-lore",
+    name: "College of Lore",
+    description: "Bards of the College of Lore know something about most things, collecting bits of knowledge.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "cleric",
+    code: "life-domain",
+    name: "Life Domain",
+    description: "The Life domain focuses on the vibrant positive energy - one of the fundamental forces of the multiverse.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "druid",
+    code: "circle-of-the-land",
+    name: "Circle of the Land",
+    description: "The Circle of the Land is made up of mystics and sages who safeguard ancient knowledge and rites.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "fighter",
+    code: "champion",
+    name: "Champion",
+    description: "The archetypal Champion focuses on the development of raw physical power honed to deadly perfection.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "monk",
+    code: "way-of-the-open-hand",
+    name: "Way of the Open Hand",
+    description: "Monks of the Way of the Open Hand are the masters of martial arts combat, whether armed or unarmed.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "paladin",
+    code: "oath-of-devotion",
+    name: "Oath of Devotion",
+    description: "The Oath of Devotion binds a paladin to the loftiest ideals of justice, virtue, and order.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "ranger",
+    code: "hunter",
+    name: "Hunter",
+    description: "Emulating the Hunter archetype means accepting your place as a bulwark between civilization and the terrors of the wilderness.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "rogue",
+    code: "thief",
+    name: "Thief",
+    description: "You hone your skills in the larcenous arts. Burglars, bandits, cutpurses, and other criminals typically follow this archetype.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "sorcerer",
+    code: "draconic-bloodline",
+    name: "Draconic Bloodline",
+    description: "Your innate magic comes from draconic magic that was mingled with your blood or that of your ancestors.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "warlock",
+    code: "the-fiend",
+    name: "The Fiend",
+    description: "You have made a pact with a fiend from the lower planes of existence.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    classCode: "wizard",
+    code: "school-of-evocation",
+    name: "School of Evocation",
+    description: "You focus your study on magic that creates powerful elemental effects such as bitter cold, searing flame, rolling thunder, and crackling lightning.",
+  },
+] as const;
+
 
