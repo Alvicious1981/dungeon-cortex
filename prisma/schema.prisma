@@ -125,6 +125,7 @@ model Character {
   languages        CharacterLanguage[]
   proficiencies    CharacterProficiency[]
   classLevels      CharacterClassLevel[]
+  origin           CharacterOrigin?
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -840,6 +841,9 @@ model Ruleset {
   languages   CanonicalLanguage[]
   proficiencies CanonicalProficiency[]
   classes     CanonicalClass[]
+  races       CanonicalRace[]
+  traits      CanonicalTrait[]
+  backgrounds CanonicalBackground[]
 }
 
 /// An authoritative source document for rules within a ruleset (e.g. SRD 5.1).
@@ -1058,6 +1062,85 @@ model CharacterClassLevel {
   @@index([characterId])
   @@index([rulesetId, classCode])
   @@index([rulesetId, classCode, subclassCode])
+}
+
+/// Master catalog of canonical races / species partitioned by Ruleset.
+model CanonicalRace {
+  rulesetId   String
+  code        String
+  name        String
+  speed       Int                  @default(30)
+  size        String               @default("Medium")
+  description String?
+
+  ruleset     Ruleset              @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  traits      CanonicalRaceTrait[]
+  origins     CharacterOrigin[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Canonical trait granted by race/species or heritage partitioned by Ruleset.
+model CanonicalTrait {
+  rulesetId   String
+  code        String
+  name        String
+  description String?
+
+  ruleset     Ruleset              @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  raceTraits  CanonicalRaceTrait[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Junction table linking CanonicalRace to its granted CanonicalTraits.
+model CanonicalRaceTrait {
+  rulesetId String
+  raceCode  String
+  traitCode String
+
+  race      CanonicalRace  @relation(fields: [rulesetId, raceCode], references: [rulesetId, code], onDelete: Cascade)
+  trait     CanonicalTrait @relation(fields: [rulesetId, traitCode], references: [rulesetId, code], onDelete: Cascade)
+
+  @@id([rulesetId, raceCode, traitCode])
+  @@index([rulesetId, raceCode])
+  @@index([rulesetId, traitCode])
+}
+
+/// Master catalog of canonical backgrounds partitioned by Ruleset.
+model CanonicalBackground {
+  rulesetId   String
+  code        String
+  name        String
+  description String?
+  featureName String?
+
+  ruleset     Ruleset           @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  origins     CharacterOrigin[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Normalized origin of a Character (biological species/race and social background).
+model CharacterOrigin {
+  id             String   @id @default(cuid())
+  characterId    String   @unique
+  rulesetId      String
+  raceCode       String
+  backgroundCode String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  character      Character            @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  race           CanonicalRace        @relation(fields: [rulesetId, raceCode], references: [rulesetId, code], onDelete: Restrict)
+  background     CanonicalBackground?  @relation(fields: [rulesetId, backgroundCode], references: [rulesetId, code], onDelete: Restrict)
+
+  @@index([characterId])
+  @@index([rulesetId, raceCode])
+  @@index([rulesetId, backgroundCode])
 }
 
 

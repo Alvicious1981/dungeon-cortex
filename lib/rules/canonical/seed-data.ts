@@ -16,6 +16,9 @@ import {
   type CanonicalLanguageCode,
   type CanonicalClassCode,
   type CanonicalSubclassCode,
+  type CanonicalRaceCode,
+  type CanonicalTraitCode,
+  type CanonicalBackgroundCode,
 } from "./constants";
 import { ProficiencyType } from "@prisma/client";
 
@@ -66,6 +69,36 @@ export interface CanonicalSubclassDefinition {
   code: CanonicalSubclassCode;
   name: string;
   description?: string;
+}
+
+export interface CanonicalRaceDefinition {
+  rulesetId: string;
+  code: CanonicalRaceCode;
+  name: string;
+  speed: number;
+  size: string;
+  description?: string;
+}
+
+export interface CanonicalTraitDefinition {
+  rulesetId: string;
+  code: CanonicalTraitCode;
+  name: string;
+  description: string;
+}
+
+export interface CanonicalRaceTraitDefinition {
+  rulesetId: string;
+  raceCode: CanonicalRaceCode;
+  traitCode: CanonicalTraitCode;
+}
+
+export interface CanonicalBackgroundDefinition {
+  rulesetId: string;
+  code: CanonicalBackgroundCode;
+  name: string;
+  description?: string;
+  featureName?: string;
 }
 
 
@@ -408,6 +441,251 @@ export const SRD_2014_SUBCLASSES: readonly CanonicalSubclassDefinition[] = [
     code: "school-of-evocation",
     name: "School of Evocation",
     description: "You focus your study on magic that creates powerful elemental effects such as bitter cold, searing flame, rolling thunder, and crackling lightning.",
+  },
+] as const;
+
+export const SRD_2014_RACES: readonly CanonicalRaceDefinition[] = [
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "human",
+    name: "Human",
+    speed: 30,
+    size: "Medium",
+    description: "Humans are the most adaptable and ambitious people among the common races.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "dwarf",
+    name: "Dwarf",
+    speed: 25,
+    size: "Medium",
+    description: "Bold and hardy, dwarves are known as skilled warriors, miners, and workers of stone and metal.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "elf",
+    name: "Elf",
+    speed: 30,
+    size: "Medium",
+    description: "Elves are a magical people of otherworldly grace, living in the world but not entirely part of it.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "halfling",
+    name: "Halfling",
+    speed: 25,
+    size: "Small",
+    description: "The diminutive halflings survive in a world of larger creatures by avoiding notice or, barring that, avoiding offense.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "dragonborn",
+    name: "Dragonborn",
+    speed: 30,
+    size: "Medium",
+    description: "Born of dragons, as their name proclaims, the dragonborn walk proudly through a world that greets them with fearful incomprehension.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "gnome",
+    name: "Gnome",
+    speed: 25,
+    size: "Small",
+    description: "A gnome's energy and enthusiasm for living shines through every inch of his or her tiny body.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "half-elf",
+    name: "Half-Elf",
+    speed: 30,
+    size: "Medium",
+    description: "Walking in two worlds but truly belonging to neither, half-elves combine what some say are the best qualities of their elf and human parents.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "half-orc",
+    name: "Half-Orc",
+    speed: 30,
+    size: "Medium",
+    description: "Half-orcs' grayish pigmentation, sloping brows, jutting jaws, prominent teeth, and towering builds make their orcish heritage plain for all to see.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "tiefling",
+    name: "Tiefling",
+    speed: 30,
+    size: "Medium",
+    description: "To be greeted with stares and whispers, to suffer violence and insult on the street, to see mistrust and fear in every eye: this is the lot of the tiefling.",
+  },
+] as const;
+
+export const SRD_2014_TRAITS: readonly CanonicalTraitDefinition[] = [
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "darkvision",
+    name: "Darkvision",
+    description: "You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "dwarven-resilience",
+    name: "Dwarven Resilience",
+    description: "You have advantage on saving throws against poison, and you have resistance against poison damage.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "stonecunning",
+    name: "Stonecunning",
+    description: "Whenever you make an Intelligence (History) check related to the origin of stonework, you add double your proficiency bonus to the check.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "fey-ancestry",
+    name: "Fey Ancestry",
+    description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "trance",
+    name: "Trance",
+    description: "Elves don't need to sleep. Instead, they meditate deeply for 4 hours a day.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "keen-senses",
+    name: "Keen Senses",
+    description: "You have proficiency in the Perception skill.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "lucky",
+    name: "Lucky",
+    description: "When you roll a 1 on the d20 for an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "brave",
+    name: "Brave",
+    description: "You have advantage on saving throws against being frightened.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "halfling-nimbleness",
+    name: "Halfling Nimbleness",
+    description: "You can move through the space of any creature that is of a size larger than yours.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "draconic-ancestry",
+    name: "Draconic Ancestry",
+    description: "You have draconic ancestry with a dragon type granting a breath weapon and damage resistance.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "breath-weapon",
+    name: "Breath Weapon",
+    description: "You can use your action to exhale destructive energy determined by your draconic ancestry.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "damage-resistance",
+    name: "Damage Resistance",
+    description: "You have resistance to the damage type associated with your draconic ancestry.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "gnome-cunning",
+    name: "Gnome Cunning",
+    description: "You have advantage on all Intelligence, Wisdom, and Charisma saving throws against magic.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "menacing",
+    name: "Menacing",
+    description: "You gain proficiency in the Intimidation skill.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "relentless-endurance",
+    name: "Relentless Endurance",
+    description: "When you are reduced to 0 hit points but not killed outright, you can drop to 1 hit point instead once per long rest.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "savage-attacks",
+    name: "Savage Attacks",
+    description: "When you score a critical hit with a melee weapon attack, you can roll one of the weapon's damage dice one additional time and add it to the extra damage.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "hellish-resistance",
+    name: "Hellish Resistance",
+    description: "You have resistance to fire damage.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "infernal-legacy",
+    name: "Infernal Legacy",
+    description: "You know the thaumaturgy cantrip and gain hellish rebuke and darkness as you advance in level.",
+  },
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "skill-versatility",
+    name: "Skill Versatility",
+    description: "You gain proficiency in two skills of your choice.",
+  },
+] as const;
+
+export const SRD_2014_RACE_TRAITS: readonly CanonicalRaceTraitDefinition[] = [
+  // Dwarf
+  { rulesetId: RULESET_2014_ID, raceCode: "dwarf", traitCode: "darkvision" },
+  { rulesetId: RULESET_2014_ID, raceCode: "dwarf", traitCode: "dwarven-resilience" },
+  { rulesetId: RULESET_2014_ID, raceCode: "dwarf", traitCode: "stonecunning" },
+
+  // Elf
+  { rulesetId: RULESET_2014_ID, raceCode: "elf", traitCode: "darkvision" },
+  { rulesetId: RULESET_2014_ID, raceCode: "elf", traitCode: "fey-ancestry" },
+  { rulesetId: RULESET_2014_ID, raceCode: "elf", traitCode: "trance" },
+  { rulesetId: RULESET_2014_ID, raceCode: "elf", traitCode: "keen-senses" },
+
+  // Halfling
+  { rulesetId: RULESET_2014_ID, raceCode: "halfling", traitCode: "lucky" },
+  { rulesetId: RULESET_2014_ID, raceCode: "halfling", traitCode: "brave" },
+  { rulesetId: RULESET_2014_ID, raceCode: "halfling", traitCode: "halfling-nimbleness" },
+
+  // Dragonborn
+  { rulesetId: RULESET_2014_ID, raceCode: "dragonborn", traitCode: "draconic-ancestry" },
+  { rulesetId: RULESET_2014_ID, raceCode: "dragonborn", traitCode: "breath-weapon" },
+  { rulesetId: RULESET_2014_ID, raceCode: "dragonborn", traitCode: "damage-resistance" },
+
+  // Gnome
+  { rulesetId: RULESET_2014_ID, raceCode: "gnome", traitCode: "darkvision" },
+  { rulesetId: RULESET_2014_ID, raceCode: "gnome", traitCode: "gnome-cunning" },
+
+  // Half-Elf
+  { rulesetId: RULESET_2014_ID, raceCode: "half-elf", traitCode: "darkvision" },
+  { rulesetId: RULESET_2014_ID, raceCode: "half-elf", traitCode: "fey-ancestry" },
+  { rulesetId: RULESET_2014_ID, raceCode: "half-elf", traitCode: "skill-versatility" },
+
+  // Half-Orc
+  { rulesetId: RULESET_2014_ID, raceCode: "half-orc", traitCode: "darkvision" },
+  { rulesetId: RULESET_2014_ID, raceCode: "half-orc", traitCode: "menacing" },
+  { rulesetId: RULESET_2014_ID, raceCode: "half-orc", traitCode: "relentless-endurance" },
+  { rulesetId: RULESET_2014_ID, raceCode: "half-orc", traitCode: "savage-attacks" },
+
+  // Tiefling
+  { rulesetId: RULESET_2014_ID, raceCode: "tiefling", traitCode: "darkvision" },
+  { rulesetId: RULESET_2014_ID, raceCode: "tiefling", traitCode: "hellish-resistance" },
+  { rulesetId: RULESET_2014_ID, raceCode: "tiefling", traitCode: "infernal-legacy" },
+] as const;
+
+export const SRD_2014_BACKGROUNDS: readonly CanonicalBackgroundDefinition[] = [
+  {
+    rulesetId: RULESET_2014_ID,
+    code: "acolyte",
+    name: "Acolyte",
+    description: "You have spent your life in the service of a temple to a specific god or pantheon.",
+    featureName: "Shelter of the Faithful",
   },
 ] as const;
 

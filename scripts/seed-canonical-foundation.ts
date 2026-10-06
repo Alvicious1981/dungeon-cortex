@@ -24,6 +24,10 @@ import {
   SRD_2014_PROFICIENCIES,
   SRD_2014_CLASSES,
   SRD_2014_SUBCLASSES,
+  SRD_2014_RACES,
+  SRD_2014_TRAITS,
+  SRD_2014_RACE_TRAITS,
+  SRD_2014_BACKGROUNDS,
 } from "../lib/rules/canonical/seed-data";
 
 export interface CanonicalSeedResult {
@@ -35,6 +39,10 @@ export interface CanonicalSeedResult {
   proficienciesUpserted: number;
   classesUpserted: number;
   subclassesUpserted: number;
+  racesUpserted: number;
+  traitsUpserted: number;
+  raceTraitsUpserted: number;
+  backgroundsUpserted: number;
 }
 
 
@@ -50,6 +58,10 @@ export async function seedCanonicalFoundation(
     proficienciesUpserted: 0,
     classesUpserted: 0,
     subclassesUpserted: 0,
+    racesUpserted: 0,
+    traitsUpserted: 0,
+    raceTraitsUpserted: 0,
+    backgroundsUpserted: 0,
   };
 
   // 1. Ruleset
@@ -198,6 +210,79 @@ export async function seedCanonicalFoundation(
     result.subclassesUpserted++;
   }
 
+  // 9. Races
+  for (const race of SRD_2014_RACES) {
+    await client.canonicalRace.upsert({
+      where: {
+        rulesetId_code: {
+          rulesetId: race.rulesetId,
+          code: race.code,
+        },
+      },
+      create: race,
+      update: {
+        name: race.name,
+        speed: race.speed,
+        size: race.size,
+        description: race.description,
+      },
+    });
+    result.racesUpserted++;
+  }
+
+  // 10. Traits
+  for (const trait of SRD_2014_TRAITS) {
+    await client.canonicalTrait.upsert({
+      where: {
+        rulesetId_code: {
+          rulesetId: trait.rulesetId,
+          code: trait.code,
+        },
+      },
+      create: trait,
+      update: {
+        name: trait.name,
+        description: trait.description,
+      },
+    });
+    result.traitsUpserted++;
+  }
+
+  // 11. Race Traits (Junction)
+  for (const rt of SRD_2014_RACE_TRAITS) {
+    await client.canonicalRaceTrait.upsert({
+      where: {
+        rulesetId_raceCode_traitCode: {
+          rulesetId: rt.rulesetId,
+          raceCode: rt.raceCode,
+          traitCode: rt.traitCode,
+        },
+      },
+      create: rt,
+      update: {},
+    });
+    result.raceTraitsUpserted++;
+  }
+
+  // 12. Backgrounds
+  for (const bg of SRD_2014_BACKGROUNDS) {
+    await client.canonicalBackground.upsert({
+      where: {
+        rulesetId_code: {
+          rulesetId: bg.rulesetId,
+          code: bg.code,
+        },
+      },
+      create: bg,
+      update: {
+        name: bg.name,
+        description: bg.description,
+        featureName: bg.featureName,
+      },
+    });
+    result.backgroundsUpserted++;
+  }
+
   return result;
 }
 
@@ -215,7 +300,11 @@ async function main() {
         `languages=${result.languagesUpserted}, ` +
         `proficiencies=${result.proficienciesUpserted}, ` +
         `classes=${result.classesUpserted}, ` +
-        `subclasses=${result.subclassesUpserted}`
+        `subclasses=${result.subclassesUpserted}, ` +
+        `races=${result.racesUpserted}, ` +
+        `traits=${result.traitsUpserted}, ` +
+        `raceTraits=${result.raceTraitsUpserted}, ` +
+        `backgrounds=${result.backgroundsUpserted}`
     );
   } catch (error) {
     console.error("✗ Error durante la siembra canónica:", error);

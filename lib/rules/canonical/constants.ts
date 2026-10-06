@@ -160,4 +160,51 @@ export const CANONICAL_SUBCLASS_CODES = [
 
 export type CanonicalSubclassCode = (typeof CANONICAL_SUBCLASS_CODES)[number];
 
+/** Las 9 razas / especies oficiales del SRD 5.1 */
+export const CANONICAL_RACE_CODES = [
+  "human",
+  "dwarf",
+  "elf",
+  "halfling",
+  "dragonborn",
+  "gnome",
+  "half-elf",
+  "half-orc",
+  "tiefling",
+] as const;
+
+export type CanonicalRaceCode = (typeof CANONICAL_RACE_CODES)[number];
+
+/** Rasgos raciales canónicos clave del SRD 5.1 */
+export const CANONICAL_TRAIT_CODES = [
+  "darkvision",
+  "dwarven-resilience",
+  "stonecunning",
+  "fey-ancestry",
+  "trance",
+  "keen-senses",
+  "lucky",
+  "brave",
+  "halfling-nimbleness",
+  "draconic-ancestry",
+  "breath-weapon",
+  "damage-resistance",
+  "gnome-cunning",
+  "menacing",
+  "relentless-endurance",
+  "savage-attacks",
+  "hellish-resistance",
+  "infernal-legacy",
+  "skill-versatility",
+] as const;
+
+export type CanonicalTraitCode = (typeof CANONICAL_TRAIT_CODES)[number];
+
+/** Trasfondos canónicos del SRD 5.1 */
+export const CANONICAL_BACKGROUND_CODES = [
+  "acolyte",
+] as const;
+
+export type CanonicalBackgroundCode = (typeof CANONICAL_BACKGROUND_CODES)[number];
+
 

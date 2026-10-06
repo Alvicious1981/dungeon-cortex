@@ -328,12 +328,12 @@ describe("extractCreatedTables — comillas opcionales y cualificación de esque
     // las tablas que ya detectaba la versión anterior (todas entrecomilladas,
     // sin prefijo de esquema).
     //
-    // 38: 35 previas + 3 desde 20261007150000_add_canonical_classes_and_subclasses
-    // ("CanonicalClass", "CanonicalSubclass", "CharacterClassLevel").
+    // 43: 38 previas + 5 desde 20261007160000_add_species_traits_and_origins
+    // ("CanonicalRace", "CanonicalTrait", "CanonicalRaceTrait", "CanonicalBackground", "CharacterOrigin").
     // Este número es inventario, no umbral: al crear una tabla se actualiza aquí,
     // y así el recuento no se queda obsoleto en silencio ni deja de vigilar el
     // extractor.
-    expect(createdTables().size).toBe(38);
+    expect(createdTables().size).toBe(43);
   });
 });
 

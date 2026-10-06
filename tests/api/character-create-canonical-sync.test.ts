@@ -34,6 +34,9 @@ vi.mock("@/lib/db/prisma", () => ({
     characterClassLevel: {
       create: vi.fn(async () => ({ id: "ccl-1" })),
     },
+    characterOrigin: {
+      create: vi.fn(async () => ({ id: "co-1" })),
+    },
   },
 }));
 
@@ -163,6 +166,18 @@ describe("POST /api/character — Dual-write a tablas canónicas", () => {
       subclassCode: null,
       level: 1,
       isPrimary: true,
+    });
+
+    // 7. Verifica dual-write en CharacterOrigin (human -> raceCode: "human", backgroundCode: null)
+    const originCalls = (prisma.characterOrigin.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(originCalls).toHaveLength(1);
+    const originPayload = originCalls[0][0].data;
+
+    expect(originPayload).toEqual({
+      characterId: "char-canonical-test",
+      rulesetId: "dnd_5e_2014",
+      raceCode: "human",
+      backgroundCode: null,
     });
   });
 
