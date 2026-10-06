@@ -323,18 +323,17 @@ describe("extractCreatedTables — comillas opcionales y cualificación de esque
     expect(extractCreatedTables(sql)).toEqual([expected]);
   });
 
-  it("sigue reconociendo las 25 tablas reales del historial actual", () => {
+  it("sigue reconociendo las 35 tablas reales del historial actual", () => {
     // No-regresión directa: el cambio de regex no puede perder ni una sola de
     // las tablas que ya detectaba la versión anterior (todas entrecomilladas,
     // sin prefijo de esquema).
     //
-    // 25: 23 desde ActionRequestReceipt, +1 desde 20260917130000_add_party_members
-    // (DC-PARTY-001, "PartyMember"), +1 desde
-    // 20260918120000_add_campaign_scene_participants ("CampaignSceneParticipant").
+    // 35: 32 previas + 3 desde 20261007140000_add_languages_and_generic_proficiencies
+    // ("CanonicalProficiency", "CharacterLanguage", "CharacterProficiency").
     // Este número es inventario, no umbral: al crear una tabla se actualiza aquí,
     // y así el recuento no se queda obsoleto en silencio ni deja de vigilar el
     // extractor.
-    expect(createdTables().size).toBe(25);
+    expect(createdTables().size).toBe(35);
   });
 });
 

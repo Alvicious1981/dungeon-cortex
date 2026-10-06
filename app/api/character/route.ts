@@ -7,6 +7,14 @@ import { hitDieForClass } from "@/lib/rules/progression";
 import { defaultSkillProficiencies } from "@/lib/rules/class-skills";
 import { buildStartingInventory } from "@/lib/rules/starting-inventory";
 import { spellSlotsFor } from "@/lib/rules/magic";
+import { buildCanonicalCharacterAbilities } from "@/lib/rules/canonical/character-abilities";
+import { buildCanonicalCharacterSkills } from "@/lib/rules/canonical/character-skills";
+import {
+  getDefaultLanguagesForRace,
+  buildCanonicalCharacterLanguages,
+} from "@/lib/rules/canonical/character-languages";
+import { buildBaselineClassProficiencies } from "@/lib/rules/canonical/character-proficiencies";
+
 
 interface CreateCharacterBody {
   name: string;
@@ -94,6 +102,44 @@ export async function POST(req: NextRequest) {
       },
     },
   });
+
+  // Dual-write: sincronizar con las tablas canónicas relacionales si están disponibles
+  try {
+    const canonicalAbilities = buildCanonicalCharacterAbilities(character.id, stats);
+    const canonicalSkills = buildCanonicalCharacterSkills(
+      character.id,
+      defaultSkillProficiencies(characterClass)
+    );
+    const defaultLangs = getDefaultLanguagesForRace(character.race ?? race);
+    const canonicalLanguages = buildCanonicalCharacterLanguages(
+      character.id,
+      defaultLangs
+    );
+    const canonicalProficiencies = buildBaselineClassProficiencies(
+      character.id,
+      character.class ?? characterClass
+    );
+
+    if (prisma.characterAbility?.createMany && canonicalAbilities.length > 0) {
+      await prisma.characterAbility.createMany({ data: canonicalAbilities });
+    }
+    if (prisma.characterSkillProficiency?.createMany && canonicalSkills.length > 0) {
+      await prisma.characterSkillProficiency.createMany({ data: canonicalSkills });
+    }
+    if (prisma.characterLanguage?.createMany && canonicalLanguages.length > 0) {
+      await prisma.characterLanguage.createMany({ data: canonicalLanguages });
+    }
+    if (prisma.characterProficiency?.createMany && canonicalProficiencies.length > 0) {
+      await prisma.characterProficiency.createMany({ data: canonicalProficiencies });
+    }
+  } catch (canonicalErr) {
+    // Declarado, no silencioso. Si el catálogo maestro aún no está sembrado en el entorno,
+    // el personaje conserva su validez en las columnas legacy.
+    console.warn(
+      `[character-create] No se pudieron sincronizar las tablas canónicas para el personaje ${character.id}:`,
+      canonicalErr
+    );
+  }
 
   return NextResponse.json({ id: character.id }, { status: 201 });
 }

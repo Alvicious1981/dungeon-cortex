@@ -120,6 +120,10 @@ model Character {
   changeProposals  CharacterChangeProposal[]
   partyMemberships PartyMember[]
   combatants       Combatant[]
+  abilities        CharacterAbility[]
+  skills           CharacterSkillProficiency[]
+  languages        CharacterLanguage[]
+  proficiencies    CharacterProficiency[]
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -806,3 +810,198 @@ model LocationEdge {
   @@unique([fromNodeId, toNodeId])
   @@index([locationId])
 }
+
+enum RulesetStatus {
+  ACTIVE
+  DRAFT
+  DEPRECATED
+}
+
+enum LanguageType {
+  STANDARD
+  EXOTIC
+}
+
+/// A canonical rules system / edition (e.g. D&D 5e 2014 vs D&D 5e 2024).
+/// Guarantees ruleset isolation and versioning across all canonical content.
+model Ruleset {
+  id          String        @id
+  name        String
+  version     String
+  status      RulesetStatus @default(ACTIVE)
+  isDefault   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @default(now()) @updatedAt
+
+  sources     RuleSource[]
+  abilities   CanonicalAbility[]
+  skills      CanonicalSkill[]
+  languages   CanonicalLanguage[]
+  proficiencies CanonicalProficiency[]
+}
+
+/// An authoritative source document for rules within a ruleset (e.g. SRD 5.1).
+model RuleSource {
+  id          String   @id
+  rulesetId   String
+  code        String
+  title       String
+  publisher   String
+  url         String?
+  license     String
+  createdAt   DateTime @default(now())
+
+  ruleset     Ruleset  @relation(fields: [rulesetId], references: [id], onDelete: Restrict)
+
+  @@unique([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Canonical ability score (STR, DEX, CON, INT, WIS, CHA) partitioned by Ruleset.
+model CanonicalAbility {
+  rulesetId   String
+  code        String
+  name        String
+  description String?
+  orderIndex  Int      @default(0)
+
+  ruleset     Ruleset  @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  skills      CanonicalSkill[]
+  characterAbilities CharacterAbility[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+/// Canonical skill (Athletics, Acrobatics, etc.) partitioned by Ruleset,
+/// bound to its governing ability within the same ruleset.
+model CanonicalSkill {
+  rulesetId   String
+  code        String
+  name        String
+  abilityCode String
+
+  ruleset     Ruleset          @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  ability     CanonicalAbility @relation(fields: [rulesetId, abilityCode], references: [rulesetId, code], onDelete: Restrict)
+  characterSkills CharacterSkillProficiency[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId, abilityCode])
+}
+
+/// Canonical language (Common, Elvish, etc.) partitioned by Ruleset.
+model CanonicalLanguage {
+  rulesetId   String
+  code        String
+  name        String
+  type        LanguageType @default(STANDARD)
+  script      String?
+
+  ruleset     Ruleset  @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  characterLanguages CharacterLanguage[]
+
+  @@id([rulesetId, code])
+  @@index([rulesetId])
+}
+
+enum SkillProficiencyLevel {
+  PROFICIENT
+  EXPERTISE
+}
+
+/// Normalized ability score for a Character, tied to CanonicalAbility within a ruleset.
+model CharacterAbility {
+  id          String   @id @default(cuid())
+  characterId String
+  rulesetId   String
+  abilityCode String
+  baseScore   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  character   Character        @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  ability     CanonicalAbility @relation(fields: [rulesetId, abilityCode], references: [rulesetId, code], onDelete: Restrict)
+
+  @@unique([characterId, abilityCode])
+  @@index([characterId])
+  @@index([rulesetId, abilityCode])
+}
+
+/// Normalized skill proficiency for a Character, tied to CanonicalSkill within a ruleset.
+model CharacterSkillProficiency {
+  id          String                @id @default(cuid())
+  characterId String
+  rulesetId   String
+  skillCode   String
+  level       SkillProficiencyLevel @default(PROFICIENT)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @default(now()) @updatedAt
+
+  character   Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  skill       CanonicalSkill @relation(fields: [rulesetId, skillCode], references: [rulesetId, code], onDelete: Restrict)
+
+  @@unique([characterId, skillCode])
+  @@index([characterId])
+  @@index([rulesetId, skillCode])
+}
+
+enum ProficiencyType {
+  ARMOR
+  WEAPON
+  SAVING_THROW
+  TOOL
+}
+
+/// Master catalog of canonical proficiencies (armor categories, weapon categories, saving throws, tools) partitioned by Ruleset.
+model CanonicalProficiency {
+  rulesetId   String
+  type        ProficiencyType
+  code        String
+  name        String
+  description String?
+
+  ruleset     Ruleset  @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  characterProficiencies CharacterProficiency[]
+
+  @@id([rulesetId, type, code])
+  @@index([rulesetId])
+  @@index([rulesetId, type])
+}
+
+/// Normalized language spoken/read by a Character, tied to CanonicalLanguage within a ruleset.
+model CharacterLanguage {
+  id          String   @id @default(cuid())
+  characterId String
+  rulesetId   String
+  languageCode String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  character   Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  language    CanonicalLanguage @relation(fields: [rulesetId, languageCode], references: [rulesetId, code], onDelete: Restrict)
+
+  @@unique([characterId, languageCode])
+  @@index([characterId])
+  @@index([rulesetId, languageCode])
+}
+
+/// Generic proficiency granted to a Character (armor, weapons, saving throws, tools), tied to CanonicalProficiency.
+model CharacterProficiency {
+  id          String          @id @default(cuid())
+  characterId String
+  rulesetId   String
+  type        ProficiencyType
+  code        String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @default(now()) @updatedAt
+
+  character   Character            @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  proficiency CanonicalProficiency @relation(fields: [rulesetId, type, code], references: [rulesetId, type, code], onDelete: Restrict)
+
+  @@unique([characterId, type, code])
+  @@index([characterId])
+  @@index([rulesetId, type, code])
+}
+
+
+
