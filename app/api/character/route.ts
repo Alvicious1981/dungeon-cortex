@@ -17,6 +17,7 @@ import { buildBaselineClassProficiencies } from "@/lib/rules/canonical/character
 import { buildCanonicalCharacterClassLevel } from "@/lib/rules/canonical/character-classes";
 import { buildCanonicalCharacterOrigin } from "@/lib/rules/canonical/character-origins";
 import { buildCanonicalCharacterFeatures } from "@/lib/rules/canonical/character-features";
+import { buildCanonicalCharacterSpellSlots } from "@/lib/rules/canonical/character-magic";
 
 
 
@@ -138,6 +139,11 @@ export async function POST(req: NextRequest) {
       className: character.class ?? characterClass,
       level: 1,
     });
+    const canonicalSpellSlots = buildCanonicalCharacterSpellSlots({
+      characterId: character.id,
+      className: character.class ?? characterClass,
+      level: 1,
+    });
 
     if (prisma.characterAbility?.createMany && canonicalAbilities.length > 0) {
       await prisma.characterAbility.createMany({ data: canonicalAbilities });
@@ -159,6 +165,9 @@ export async function POST(req: NextRequest) {
     }
     if (prisma.characterFeature?.createMany && canonicalFeatures.length > 0) {
       await prisma.characterFeature.createMany({ data: canonicalFeatures });
+    }
+    if (prisma.characterSpellSlot?.createMany && canonicalSpellSlots.length > 0) {
+      await prisma.characterSpellSlot.createMany({ data: canonicalSpellSlots });
     }
   } catch (canonicalErr) {
     // Declarado, no silencioso. Si el catálogo maestro aún no está sembrado en el entorno,

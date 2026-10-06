@@ -12,6 +12,7 @@ import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import { advanceSpellSlots, isSpellSlots } from "@/lib/rules/magic";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
 import { buildNewLevelCharacterFeatures } from "@/lib/rules/canonical/character-features";
+import { legacySpellSlotsToCanonicalRecords } from "@/lib/rules/canonical/character-magic";
 import type { Prisma } from "@prisma/client";
 
 export type LevelUpServiceErrorCode =
@@ -116,6 +117,27 @@ interface LevelUpDb {
       }>;
       skipDuplicates?: boolean;
     }): Promise<{ count: number }>;
+  };
+  characterSpellSlot?: {
+    upsert?(args: {
+      where: {
+        characterId_spellLevel: {
+          characterId: string;
+          spellLevel: number;
+        };
+      };
+      create: {
+        characterId: string;
+        rulesetId: string;
+        spellLevel: number;
+        maxSlots: number;
+        usedSlots: number;
+      };
+      update: {
+        maxSlots: number;
+        usedSlots: number;
+      };
+    }): Promise<unknown>;
   };
 }
 
@@ -456,9 +478,31 @@ async function applyLevelUpInTransaction(
         skipDuplicates: true,
       });
     }
+
+    if (db.characterSpellSlot?.upsert && newSpellSlots) {
+      const canonicalSlots = legacySpellSlotsToCanonicalRecords(
+        input.characterId,
+        newSpellSlots
+      );
+      for (const slot of canonicalSlots) {
+        await db.characterSpellSlot.upsert({
+          where: {
+            characterId_spellLevel: {
+              characterId: input.characterId,
+              spellLevel: slot.spellLevel,
+            },
+          },
+          create: slot,
+          update: {
+            maxSlots: slot.maxSlots,
+            usedSlots: slot.usedSlots,
+          },
+        });
+      }
+    }
   } catch (err) {
     console.warn(
-      `[level-up] No se pudo sincronizar CharacterClassLevel para ${input.characterId}:`,
+      `[level-up] No se pudo sincronizar tablas canónicas para ${input.characterId}:`,
       err
     );
   }

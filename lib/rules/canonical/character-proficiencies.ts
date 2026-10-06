@@ -16,9 +16,6 @@ import {
   DEFAULT_RULESET_ID,
   CANONICAL_ARMOR_PROFICIENCY_CODES,
   CANONICAL_WEAPON_PROFICIENCY_CODES,
-  CANONICAL_SAVING_THROW_CODES,
-  type CanonicalArmorProficiencyCode,
-  type CanonicalWeaponProficiencyCode,
   type CanonicalSavingThrowCode,
 } from "./constants";
 import {

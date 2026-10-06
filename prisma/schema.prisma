@@ -128,6 +128,8 @@ model Character {
   origin           CharacterOrigin?
   features         CharacterFeature[]
   feats            CharacterFeat[]
+  spellSlotRecords CharacterSpellSlot[]
+  spells           CharacterSpell[]
 
   @@index([userId], map: "Character_userId_idx")
 }
@@ -848,6 +850,8 @@ model Ruleset {
   backgrounds CanonicalBackground[]
   features    CanonicalFeature[]
   feats       CanonicalFeat[]
+  characterSpellSlots CharacterSpellSlot[]
+  characterSpells     CharacterSpell[]
 }
 
 /// An authoritative source document for rules within a ruleset (e.g. SRD 5.1).
@@ -1225,6 +1229,41 @@ model CharacterFeat {
   @@index([rulesetId, featCode])
 }
 
+/// Normalized spell slot pool per spell level for a Character.
+model CharacterSpellSlot {
+  id          String   @id @default(cuid())
+  characterId String
+  rulesetId   String
+  spellLevel  Int
+  maxSlots    Int
+  usedSlots   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  ruleset   Ruleset   @relation(fields: [rulesetId], references: [id], onDelete: Restrict)
 
+  @@unique([characterId, spellLevel])
+  @@index([characterId])
+  @@index([rulesetId, spellLevel])
+}
 
+/// Normalized spell known or prepared by a Character.
+model CharacterSpell {
+  id          String   @id @default(cuid())
+  characterId String
+  rulesetId   String
+  spellSlug   String
+  isPrepared  Boolean  @default(true)
+  isKnown     Boolean  @default(true)
+  source      String   // e.g. "class:wizard", "race:elf", "feat:magic-initiate"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  ruleset   Ruleset   @relation(fields: [rulesetId], references: [id], onDelete: Restrict)
+
+  @@unique([characterId, spellSlug])
+  @@index([characterId])
+  @@index([rulesetId, spellSlug])
+}

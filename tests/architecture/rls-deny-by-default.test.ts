@@ -328,12 +328,12 @@ describe("extractCreatedTables — comillas opcionales y cualificación de esque
     // las tablas que ya detectaba la versión anterior (todas entrecomilladas,
     // sin prefijo de esquema).
     //
-    // 47: 43 previas + 4 desde 20261007170000_add_features_feats_and_choices
-    // ("CanonicalFeature", "CanonicalFeat", "CharacterFeature", "CharacterFeat").
+    // 49: 47 previas + 2 desde 20261007180000_add_spell_slots_and_character_spells
+    // ("CharacterSpellSlot", "CharacterSpell").
     // Este número es inventario, no umbral: al crear una tabla se actualiza aquí,
     // y así el recuento no se queda obsoleto en silencio ni deja de vigilar el
     // extractor.
-    expect(createdTables().size).toBe(47);
+    expect(createdTables().size).toBe(49);
   });
 });
 

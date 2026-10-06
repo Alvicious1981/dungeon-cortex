@@ -9,7 +9,6 @@
 
 import {
   DEFAULT_RULESET_ID,
-  CANONICAL_FEATURE_CODES,
   type CanonicalClassCode,
   type CanonicalFeatureCode,
 } from "./constants";

@@ -40,6 +40,9 @@ vi.mock("@/lib/db/prisma", () => ({
     characterFeature: {
       createMany: vi.fn(async () => ({ count: 2 })),
     },
+    characterSpellSlot: {
+      createMany: vi.fn(async () => ({ count: 1 })),
+    },
   },
 }));
 
@@ -226,6 +229,34 @@ describe("POST /api/character — Dual-write a tablas canónicas", () => {
     expect(body.id).toBe("char-canonical-test");
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it("persiste CharacterSpellSlot para clases conjuradoras (ej. wizard)", async () => {
+    const req = new NextRequest("http://localhost/api/character", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Raistlin",
+        race: "human",
+        class: "wizard",
+        stats: STATS,
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+
+    const slotCalls = (prisma.characterSpellSlot.createMany as ReturnType<typeof vi.fn>).mock.calls;
+    expect(slotCalls).toHaveLength(1);
+    const slotPayload = slotCalls[0][0].data;
+
+    expect(slotPayload).toHaveLength(1);
+    expect(slotPayload[0]).toEqual({
+      characterId: "char-canonical-test",
+      rulesetId: "srd-5.1",
+      spellLevel: 1,
+      maxSlots: 2,
+      usedSlots: 0,
+    });
   });
 });
 

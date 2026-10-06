@@ -6,8 +6,8 @@
  * niveles de desbloqueo de subclase y construcción de registros para CharacterClassLevel.
  */
 
+import { hitDieForClass } from "@/lib/rules/progression";
 import {
-  CANONICAL_CLASS_CODES,
   DEFAULT_RULESET_ID,
   RULESET_2024_ID,
   type CanonicalClassCode,
@@ -60,21 +60,6 @@ const CODE_TO_CLASS_NAME: Record<CanonicalClassCode, string> = {
   sorcerer: "Sorcerer",
   warlock: "Warlock",
   wizard: "Wizard",
-};
-
-const CLASS_HIT_DICE: Record<CanonicalClassCode, number> = {
-  barbarian: 12,
-  fighter:   10,
-  paladin:   10,
-  ranger:    10,
-  bard:       8,
-  cleric:     8,
-  druid:      8,
-  monk:       8,
-  rogue:      8,
-  warlock:    8,
-  sorcerer:   6,
-  wizard:     6,
 };
 
 const CLASS_SUBCLASS_LEVEL_2014: Record<CanonicalClassCode, number> = {
@@ -178,7 +163,7 @@ export function canonicalCodeToClassName(code: CanonicalClassCode): string {
  * Retorna el dado de golpe oficial de una clase canónica (d6, d8, d10, d12).
  */
 export function getHitDieForCanonicalClass(code: CanonicalClassCode): number {
-  return CLASS_HIT_DICE[code] ?? 8;
+  return hitDieForClass(code);
 }
 
 /**
