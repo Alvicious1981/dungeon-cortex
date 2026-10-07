@@ -16,6 +16,9 @@ import {
   type CharacterNarrativeField,
   type CharacterNarrativeProfile,
 } from "@/lib/character-sheet/contracts";
+import { buildSheetViewModel } from "@/lib/character-sheet/view-model";
+import { resolveInventoryWeaponProfiles } from "@/lib/rules/weapon-profile-service";
+import type { CharacterSheetProps } from "@/components/character/CharacterSheetVTT";
 
 export type CharacterSheetServiceErrorCode =
   | "CHARACTER_NOT_FOUND"
@@ -684,4 +687,92 @@ export async function undoCharacterChange(input: {
     });
     return { snapshot, idempotent: false };
   });
+}
+
+export const canonicalCharacterSheetInclude = {
+  profile: true,
+  inventory: {
+    orderBy: [{ type: "asc" }, { name: "asc" }],
+  },
+  abilities: true,
+  skills: true,
+  languages: true,
+  proficiencies: true,
+  classLevels: true,
+  origin: {
+    include: {
+      race: true,
+      background: true,
+    },
+  },
+  features: {
+    include: {
+      feature: true,
+    },
+  },
+  feats: {
+    include: {
+      feat: true,
+    },
+  },
+  spellSlotRecords: true,
+  spells: true,
+} as const satisfies Prisma.CharacterInclude;
+
+export type CharacterWithCanonicalSheet = Prisma.CharacterGetPayload<{
+  include: typeof canonicalCharacterSheetInclude;
+}>;
+
+/**
+ * Servicio unificado de consulta y proyección de hoja de personaje.
+ * Consulta el estado relacional canónico completo con sus relaciones asociadas,
+ * resuelve los perfiles de armas mediante el SRD y construye el view-model
+ * con fallback transparente hacia las columnas legacy.
+ */
+export async function getCharacterSheet(params: {
+  characterId: string;
+  userId?: string;
+}): Promise<{
+  sheet: CharacterSheetProps;
+  profile: CharacterNarrativeProfile;
+  character: CharacterWithCanonicalSheet;
+}> {
+  const where: Prisma.CharacterWhereInput = {
+    id: params.characterId,
+    ...(params.userId ? { userId: params.userId } : {}),
+  };
+
+  const character = await prisma.character.findFirst({
+    where,
+    include: canonicalCharacterSheetInclude,
+  });
+
+  if (!character) {
+    throw new CharacterSheetServiceError(
+      "CHARACTER_NOT_FOUND",
+      "Personaje no encontrado."
+    );
+  }
+
+  const weaponProfiles = await resolveInventoryWeaponProfiles(character.inventory);
+  const sheet = buildSheetViewModel({
+    character,
+    inventory: character.inventory,
+    weaponProfiles,
+  });
+
+  const narrativeProfile: CharacterNarrativeProfile = {
+    appearance: character.profile?.appearance ?? "",
+    backstory: character.profile?.backstory ?? "",
+    personalityTraits: character.profile?.personalityTraits ?? "",
+    ideals: character.profile?.ideals ?? "",
+    bonds: character.profile?.bonds ?? "",
+    flaws: character.profile?.flaws ?? "",
+  };
+
+  return {
+    sheet,
+    profile: narrativeProfile,
+    character,
+  };
 }

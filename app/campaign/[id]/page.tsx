@@ -183,6 +183,29 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
           inventory: {
             orderBy: [{ type: "asc" }, { name: "asc" }],
           },
+          abilities: true,
+          skills: true,
+          languages: true,
+          proficiencies: true,
+          classLevels: true,
+          origin: {
+            include: {
+              race: true,
+              background: true,
+            },
+          },
+          features: {
+            include: {
+              feature: true,
+            },
+          },
+          feats: {
+            include: {
+              feat: true,
+            },
+          },
+          spellSlotRecords: true,
+          spells: true,
         },
       },
       // Total order (createdAt DESC, id DESC) — a plain createdAt DESC can
