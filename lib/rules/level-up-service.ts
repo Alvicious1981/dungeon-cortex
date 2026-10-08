@@ -11,6 +11,8 @@ import type { CharacterClass } from "@/lib/rules/proficiency";
 import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import { advanceSpellSlots, isSpellSlots } from "@/lib/rules/magic";
 import { lockCharacterForCombatAction } from "@/lib/db/character-lock";
+import { buildNewLevelCharacterFeatures } from "@/lib/rules/canonical/character-features";
+import { legacySpellSlotsToCanonicalRecords } from "@/lib/rules/canonical/character-magic";
 import type { Prisma } from "@prisma/client";
 
 export type LevelUpServiceErrorCode =
@@ -93,6 +95,49 @@ interface LevelUpDb {
         spellSlots?: Prisma.InputJsonValue;
       };
     }): Promise<{ count: number }>;
+  };
+  characterClassLevel?: {
+    updateMany?(args: {
+      where: {
+        characterId: string;
+        classCode: string;
+      };
+      data: {
+        level: number;
+      };
+    }): Promise<{ count: number }>;
+  };
+  characterFeature?: {
+    createMany?(args: {
+      data: Array<{
+        characterId: string;
+        rulesetId: string;
+        featureCode: string;
+        source: string;
+      }>;
+      skipDuplicates?: boolean;
+    }): Promise<{ count: number }>;
+  };
+  characterSpellSlot?: {
+    upsert?(args: {
+      where: {
+        characterId_spellLevel: {
+          characterId: string;
+          spellLevel: number;
+        };
+      };
+      create: {
+        characterId: string;
+        rulesetId: string;
+        spellLevel: number;
+        maxSlots: number;
+        usedSlots: number;
+      };
+      update: {
+        maxSlots: number;
+        usedSlots: number;
+      };
+    }): Promise<unknown>;
   };
 }
 
@@ -405,6 +450,60 @@ async function applyLevelUpInTransaction(
     throw new LevelUpServiceError(
       "LEVEL_UP_ALREADY_APPLIED",
       `Character ${input.characterId} is no longer at level ${fromLevel}; a concurrent request applied this level-up first.`
+    );
+  }
+
+  // Dual-write: sincronizar nivel canónico en CharacterClassLevel si el delegado existe
+  try {
+    if (db.characterClassLevel?.updateMany) {
+      await db.characterClassLevel.updateMany({
+        where: {
+          characterId: input.characterId,
+          classCode: character.class.toLowerCase(),
+        },
+        data: {
+          level: nextLevel,
+        },
+      });
+    }
+
+    const newFeatures = buildNewLevelCharacterFeatures(
+      input.characterId,
+      character.class,
+      nextLevel
+    );
+    if (db.characterFeature?.createMany && newFeatures.length > 0) {
+      await db.characterFeature.createMany({
+        data: newFeatures,
+        skipDuplicates: true,
+      });
+    }
+
+    if (db.characterSpellSlot?.upsert && newSpellSlots) {
+      const canonicalSlots = legacySpellSlotsToCanonicalRecords(
+        input.characterId,
+        newSpellSlots
+      );
+      for (const slot of canonicalSlots) {
+        await db.characterSpellSlot.upsert({
+          where: {
+            characterId_spellLevel: {
+              characterId: input.characterId,
+              spellLevel: slot.spellLevel,
+            },
+          },
+          create: slot,
+          update: {
+            maxSlots: slot.maxSlots,
+            usedSlots: slot.usedSlots,
+          },
+        });
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[level-up] No se pudo sincronizar tablas canónicas para ${input.characterId}:`,
+      err
     );
   }
 
