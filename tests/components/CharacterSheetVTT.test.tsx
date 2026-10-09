@@ -129,4 +129,88 @@ describe("CharacterSheetVTT Component", () => {
     
     expect(screen.getByText(/Owes 50gp to the local tavern/i)).toBeInTheDocument();
   });
+
+  it("renders full SRD skills list with proficiency indicators", () => {
+    const allSkillsProps: CharacterSheetProps = {
+      ...mockProps,
+      skills: [
+        { label: "Acrobacias", value: "+2", proficient: false },
+        { label: "Atletismo", value: "+7", proficient: true },
+        { label: "Conocimiento arcano", value: "+0", proficient: false },
+        { label: "Engaño", value: "-1", proficient: false },
+        { label: "Historia", value: "+0", proficient: false },
+        { label: "Interpretación", value: "-1", proficient: false },
+        { label: "Intimidación", value: "-1", proficient: false },
+        { label: "Investigación", value: "+0", proficient: false },
+        { label: "Juego de manos", value: "+2", proficient: false },
+        { label: "Medicina", value: "+1", proficient: false },
+        { label: "Naturaleza", value: "+0", proficient: false },
+        { label: "Percepción", value: "+4", proficient: true },
+        { label: "Perspicacia", value: "+1", proficient: false },
+        { label: "Persuasión", value: "-1", proficient: false },
+        { label: "Religión", value: "+0", proficient: false },
+        { label: "Sigilo", value: "+2", proficient: false },
+        { label: "Supervivencia", value: "+1", proficient: false },
+        { label: "Trato con animales", value: "+1", proficient: false },
+      ],
+    };
+
+    render(<CharacterSheetVTT {...allSkillsProps} />);
+
+    expect(screen.getByText("Habilidades")).toBeInTheDocument();
+    expect(screen.getByText("Acrobacias")).toBeInTheDocument();
+    expect(screen.getByText("Atletismo")).toBeInTheDocument();
+    expect(screen.getByText("Percepción")).toBeInTheDocument();
+    expect(screen.getByText("Trato con animales")).toBeInTheDocument();
+  });
+
+  it("renders categorized notes with badges for traits, feats, and languages", () => {
+    const categorizedNotesProps: CharacterSheetProps = {
+      ...mockProps,
+      notes: [
+        "Rasgo: Visión en la oscuridad",
+        "Dote: Alerta",
+        "Idiomas: Común, Élfico",
+        "Nota general de campaña.",
+      ],
+    };
+
+    render(<CharacterSheetVTT {...categorizedNotesProps} />);
+
+    expect(screen.getByText("Rasgos, Idiomas y Notas")).toBeInTheDocument();
+    expect(screen.getByText("Rasgo:")).toBeInTheDocument();
+    expect(screen.getByText("Visión en la oscuridad")).toBeInTheDocument();
+    expect(screen.getByText("Dote:")).toBeInTheDocument();
+    expect(screen.getByText("Alerta")).toBeInTheDocument();
+    expect(screen.getByText("Idioma:")).toBeInTheDocument();
+    expect(screen.getByText("Común, Élfico")).toBeInTheDocument();
+    expect(screen.getByText("Nota general de campaña.")).toBeInTheDocument();
+  });
+
+  it("renders spell slots and handles empty spell slots state", () => {
+    const withSlotsProps: CharacterSheetProps = {
+      ...mockProps,
+      spellSlots: [
+        { level: 1, total: 4, used: 1 },
+        { level: 2, total: 2, used: 0 },
+      ],
+    };
+
+    const { rerender } = render(<CharacterSheetVTT {...withSlotsProps} />);
+
+    expect(screen.getByText("Espacios de conjuro")).toBeInTheDocument();
+    expect(screen.getByText("Niv. 1")).toBeInTheDocument();
+    expect(screen.getByText("3/4")).toBeInTheDocument();
+    expect(screen.getByText("Niv. 2")).toBeInTheDocument();
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+
+    rerender(<CharacterSheetVTT {...mockProps} spellSlots={[]} />);
+    expect(screen.getByText("Sin datos de espacios de conjuro.")).toBeInTheDocument();
+  });
+
+  it("renders empty state when attacks are empty", () => {
+    render(<CharacterSheetVTT {...mockProps} attacks={[]} />);
+    expect(screen.getByText("Sin ataques equipados.")).toBeInTheDocument();
+  });
 });
+
