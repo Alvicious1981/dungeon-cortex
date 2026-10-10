@@ -23,6 +23,7 @@ const NORMALIZED_FILES = [
   "components/combat/CombatHUD.tsx",
   "components/combat/InitiativeTracker.tsx",
   "components/exploration/ContextualMinimap.tsx",
+  "components/campaign/ShortRestModal.tsx",
 ];
 
 const PALETTES =
