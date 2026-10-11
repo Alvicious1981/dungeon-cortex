@@ -25,6 +25,7 @@ const NORMALIZED_FILES = [
   "components/exploration/ContextualMinimap.tsx",
   "components/campaign/ShortRestModal.tsx",
   "components/campaign/LongRestModal.tsx",
+  "components/campaign/RestModalController.tsx",
 ];
 
 const PALETTES =

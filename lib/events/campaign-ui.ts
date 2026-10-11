@@ -21,3 +21,14 @@ export function openCharacterSheet(): void {
 export function openEquipmentSheet(): void {
   window.dispatchEvent(new CustomEvent(DUNGEON_OPEN_CHARACTER, { detail: { tab: "equipment" } }));
 }
+
+export const DUNGEON_OPEN_SHORT_REST = "dungeon-open-short-rest";
+export const DUNGEON_OPEN_LONG_REST = "dungeon-open-long-rest";
+
+export function openShortRest(): void {
+  window.dispatchEvent(new CustomEvent(DUNGEON_OPEN_SHORT_REST));
+}
+
+export function openLongRest(): void {
+  window.dispatchEvent(new CustomEvent(DUNGEON_OPEN_LONG_REST));
+}

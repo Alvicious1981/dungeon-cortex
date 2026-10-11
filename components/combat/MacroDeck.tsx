@@ -16,6 +16,7 @@ import {
   type DungeonTargetSelectionDetail,
 } from "@/lib/events/action-transport";
 import type { PlayerLifeState } from "@/lib/rules/death-save";
+import { openShortRest, openLongRest } from "@/lib/events/campaign-ui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ interface Props {
   lifeState?: PlayerLifeState;
   /** Death-save counters, shown while the player is down (death-saves spec §7.4). */
   deathSaves?: { successes: number; failures: number };
+  onOpenShortRest?: () => void;
+  onOpenLongRest?: () => void;
 }
 
 // ─── Action definitions ───────────────────────────────────────────────────────
@@ -56,6 +59,7 @@ const CANONICAL_ACTION_REQUESTS: Record<string, string> = {
   "Investigar la zona": "investigate the area",
   "Moverse con sigilo": "sneak",
   "Tomar descanso corto": "short rest",
+  "Tomar descanso largo": "long rest",
 };
 
 const EXPLORATION_ACTIONS = [
@@ -63,6 +67,7 @@ const EXPLORATION_ACTIONS = [
   "Moverse con sigilo",
   "Investigar la zona",
   "Tomar descanso corto",
+  "Tomar descanso largo",
 ] as const;
 
 // ─── Per-action icon + accent ─────────────────────────────────────────────────
@@ -173,11 +178,27 @@ const ACTION_META: Record<string, ActionMeta> = {
       </SvgIcon>
     ),
   },
+  "Tomar descanso largo": {
+    accent: "#C4B5FD",
+    icon: (
+      <SvgIcon>
+        {/* Moon with star */}
+        <path d="M12 9.5A5 5 0 016 4a6.5 6.5 0 100 9 5 5 0 006-3.5z" />
+        <circle cx="12" cy="3.5" r="1" fill="currentColor" />
+      </SvgIcon>
+    ),
+  },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
+export default function MacroDeck({
+  inCombat,
+  lifeState,
+  deathSaves,
+  onOpenShortRest,
+  onOpenLongRest,
+}: Props) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
@@ -247,6 +268,22 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
 
   function handleAction(actionText: string) {
     if (isAnyLoading) return;
+    if (actionText === "Tomar descanso corto") {
+      if (onOpenShortRest) {
+        onOpenShortRest();
+      } else {
+        openShortRest();
+      }
+      return;
+    }
+    if (actionText === "Tomar descanso largo") {
+      if (onOpenLongRest) {
+        onOpenLongRest();
+      } else {
+        openLongRest();
+      }
+      return;
+    }
     const canonicalAction = CANONICAL_ACTION_REQUESTS[actionText] ?? actionText;
     if (canonicalAction === "Attack" && selectedTargetIds.length !== 1) {
       setError(ATTACK_SINGLE_TARGET_REQUIRED);
@@ -290,16 +327,17 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
         )}
       </div>
 
-      {/* Button grid: 2 cols on mobile, 4 cols on sm+ */}
+      {/* Button grid: 2 cols on mobile, 5 cols on sm+ */}
       <div
-        className={`grid grid-cols-2 gap-2 ${inCombat ? "" : "sm:grid-cols-4"}`}
+        className={`grid grid-cols-2 gap-2 ${inCombat ? "" : "sm:grid-cols-5"}`}
         role="group"
         aria-label={sectionLabel}
       >
-        {actions.map((actionText) => {
+        {actions.map((actionText, index) => {
           const meta = ACTION_META[actionText];
           const isThisLoading = loadingAction === actionText;
           const isDisabled = isAnyLoading;
+          const isLastSingle = !inCombat && actions.length === 5 && index === 4;
 
           return (
             <button
@@ -309,7 +347,7 @@ export default function MacroDeck({ inCombat, lifeState, deathSaves }: Props) {
               onClick={() => void handleAction(actionText)}
               aria-label={actionText}
               aria-busy={isThisLoading}
-              className="group relative flex min-h-[44px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-sm px-2 py-3 text-center motion-safe:transition-all motion-safe:duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+              className={`group relative flex min-h-[44px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-sm px-2 py-3 text-center motion-safe:transition-all motion-safe:duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-40 ${isLastSingle ? "col-span-2 sm:col-span-1" : ""}`}
               style={{
                 background: isThisLoading
                   ? "rgba(20,16,30,0.95)"
