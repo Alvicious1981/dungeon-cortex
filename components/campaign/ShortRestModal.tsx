@@ -88,7 +88,7 @@ export function ShortRestModal({
               Descanso corto
             </h2>
             <p id={descId} className="text-xs text-[var(--dc-text-muted)]">
-              {character.name} · Al menos 1 hora de reposo
+              {character.name} · Recuperación y reposo
             </p>
           </div>
         </div>

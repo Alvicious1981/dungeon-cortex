@@ -28,6 +28,8 @@ import ExhaustionIndicator from "@/components/character/ExhaustionIndicator";
 import { effectiveMaxHp } from "@/lib/rules/exhaustion";
 import TradeOverlayController from "@/components/trade/TradeOverlayController";
 import DialogueOverlayController from "@/components/social/DialogueOverlayController";
+import RestModalController from "@/components/campaign/RestModalController";
+import { hitDieForClass } from "@/lib/rules/progression";
 import { DungeonMapVTT } from "@/components/exploration/DungeonMapVTT";
 import CharacterSheetController from "@/components/character/CharacterSheetController";
 import CombatHUDController from "@/components/combat/CombatHUDController";
@@ -466,6 +468,22 @@ export default async function CampaignPage({ params }: CampaignPageProps) {
       <TradeOverlayController campaignId={campaign.id} initialGold={campaign.gold} playerInventory={character.inventory} />
       {/* Dialogue Overlay — self-wiring, listens for dungeon-npc-selected events */}
       <DialogueOverlayController campaignId={campaign.id} characterId={character.id} />
+      {/* Rest Modals — self-wiring, listens for dungeon-open-short-rest and dungeon-open-long-rest */}
+      <RestModalController
+        campaignId={campaign.id}
+        character={{
+          name: character.name,
+          hp: character.hp,
+          maxHp: currentMaxHp,
+          hitDiceRemaining: character.hitDiceRemaining ?? character.level,
+          hitDiceTotal: character.hitDiceTotal ?? character.level,
+          hitDie: `1d${hitDieForClass(character.class)}`,
+          className: character.class,
+          exhaustionLevel: character.exhaustionLevel,
+          spellSlots: character.spellSlots,
+        }}
+        inCombat={!!activeEncounter}
+      />
 
       {/* Ambient glow — purely decorative */}
       <div

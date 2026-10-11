@@ -67,3 +67,51 @@ describe("MacroDeck combat transport", () => {
     window.removeEventListener(DUNGEON_ACTION_REQUEST, requestListener);
   });
 });
+
+describe("MacroDeck exploration actions and rest wiring", () => {
+  it("renders exploration buttons including short and long rest", () => {
+    render(<MacroDeck inCombat={false} />);
+
+    expect(screen.getByRole("button", { name: "Buscar trampas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moverse con sigilo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Investigar la zona" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tomar descanso corto" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tomar descanso largo" })).toBeInTheDocument();
+  });
+
+  it("calls onOpenShortRest when provided and Tomar descanso corto is clicked", () => {
+    const onOpenShortRest = vi.fn();
+    render(<MacroDeck inCombat={false} onOpenShortRest={onOpenShortRest} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tomar descanso corto" }));
+    expect(onOpenShortRest).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches DUNGEON_OPEN_SHORT_REST event when onOpenShortRest is not provided", () => {
+    const listener = vi.fn();
+    window.addEventListener("dungeon-open-short-rest", listener);
+    render(<MacroDeck inCombat={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tomar descanso corto" }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener("dungeon-open-short-rest", listener);
+  });
+
+  it("calls onOpenLongRest when provided and Tomar descanso largo is clicked", () => {
+    const onOpenLongRest = vi.fn();
+    render(<MacroDeck inCombat={false} onOpenLongRest={onOpenLongRest} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tomar descanso largo" }));
+    expect(onOpenLongRest).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches DUNGEON_OPEN_LONG_REST event when onOpenLongRest is not provided", () => {
+    const listener = vi.fn();
+    window.addEventListener("dungeon-open-long-rest", listener);
+    render(<MacroDeck inCombat={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tomar descanso largo" }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener("dungeon-open-long-rest", listener);
+  });
+});
